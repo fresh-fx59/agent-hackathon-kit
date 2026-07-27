@@ -1,0 +1,85 @@
+// Jenkinsfile -- verify the kit, then gate on a case benchmark score.
+//
+// Create a "Pipeline" job, point it at this repo (Pipeline script from SCM,
+// script path: ci/Jenkinsfile).  The job is parameterized:
+//
+//   CASE_DIR   which case gates the build      (default cases/analytics-meeting)
+//   MIN_SCORE  minimal passing score, same scale as the case benchmark's
+//              --score-only output: 0-100 for the analytics rubric,
+//              0-1 for the F1/recall cases     (default "80")
+//   ARTIFACT   path to the agent-produced artifact to score; leave EMPTY to
+//              gate the harness only (benchmark --self-test) -- useful until
+//              the headless agent run below is wired up
+//
+// The real logic lives in ci/gate.sh so the same gate runs locally and in a
+// git hook; this file is only the Jenkins wrapper around it.
+
+pipeline {
+  agent any
+
+  parameters {
+    string(name: 'CASE_DIR', defaultValue: 'cases/analytics-meeting',
+           description: 'Case directory containing benchmark.py')
+    string(name: 'MIN_SCORE', defaultValue: '80',
+           description: 'Minimal passing score (same scale as the benchmark --score-only output)')
+    string(name: 'ARTIFACT', defaultValue: '',
+           description: 'Agent artifact to score; empty = harness-only gate (benchmark --self-test)')
+  }
+
+  stages {
+
+    stage('Verify') {
+      steps {
+        // Full kit self-check: python gate, all tests, mock boot, MCP smoke,
+        // benchmark self-tests.  A red Verify means the plumbing is broken --
+        // do not trust any Gate result until this is green.
+        sh 'bash scripts/verify.sh'
+      }
+    }
+
+    // stage('Run agent headless') {
+    //   // Wire in the corporate agent CLI here once its non-interactive mode
+    //   // is known (most have one: a -p/--prompt flag reading the task from
+    //   // argv or stdin -- adapt the binary name and flags).  The stage
+    //   // brings the mocks up, lets the agent produce the artifact under
+    //   // out/, and tears the mocks down; the Gate stage then scores it.
+    //   // Consistent with docs/integrations.md section 1.
+    //   steps {
+    //     sh '''
+    //       mkdir -p out
+    //       python3 mocks/run_all.py & MOCKS=$!
+    //       sleep 2
+    //       agent-cli --non-interactive \
+    //         --mcp-config mcp/configs/all-servers.json \
+    //         --prompt-file tracks/analytics/skill.md \
+    //         --input cases/analytics-meeting/transcript-ru.md \
+    //         --output out/br.md
+    //       kill $MOCKS
+    //     '''
+    //   }
+    //   // Then run the build with ARTIFACT=out/br.md so Gate scores it.
+    // }
+
+    stage('Gate') {
+      steps {
+        // Keep the gate separate from the run stage: a red Gate with a green
+        // Verify/run means the agent regressed, not the plumbing.
+        sh '''
+          if [ -n "${ARTIFACT}" ]; then
+            bash ci/gate.sh "${CASE_DIR}" "${MIN_SCORE}" "${ARTIFACT}"
+          else
+            bash ci/gate.sh "${CASE_DIR}" "${MIN_SCORE}"
+          fi
+        '''
+      }
+    }
+  }
+
+  post {
+    always {
+      // The agent writes artifacts under out/ (see the commented stage);
+      // archive whatever is there so every scored artifact is inspectable.
+      archiveArtifacts artifacts: 'out/**', allowEmptyArchive: true
+    }
+  }
+}

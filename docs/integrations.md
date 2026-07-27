@@ -9,6 +9,11 @@ Run the agent CLI in a pipeline stage, score its artifact with the case
 benchmark, and fail the build below a threshold. This turns "the agent got
 better/worse" into a red/green light — judges and reviewers love it.
 
+> Ready-made implementation of this sketch now ships in the repo:
+> `ci/Jenkinsfile` (parameterized pipeline) + `ci/gate.sh` (the score gate,
+> also usable locally or in a git hook) — rollout steps in
+> `docs/ci-setup-for-agent.md` (RU).
+
 ```groovy
 pipeline {
   agent any

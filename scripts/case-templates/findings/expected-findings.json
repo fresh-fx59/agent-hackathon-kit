@@ -1,0 +1,26 @@
+[
+  {
+    "file": "src/example.py",
+    "line": 10,
+    "category": "security",
+    "severity": "high",
+    "description": "PLACEHOLDER: replace with a real expected finding #1 (e.g. SQL built from raw input).",
+    "fix_hint": "PLACEHOLDER: how to fix it."
+  },
+  {
+    "file": "src/example.py",
+    "line": 42,
+    "category": "bug",
+    "severity": "medium",
+    "description": "PLACEHOLDER: replace with a real expected finding #2 (e.g. mutable default argument).",
+    "fix_hint": "PLACEHOLDER: how to fix it."
+  },
+  {
+    "file": "src/helpers.py",
+    "line": 7,
+    "category": "smell",
+    "severity": "low",
+    "description": "PLACEHOLDER: replace with a real expected finding #3 (e.g. dead branch / magic number).",
+    "fix_hint": "PLACEHOLDER: how to fix it."
+  }
+]
