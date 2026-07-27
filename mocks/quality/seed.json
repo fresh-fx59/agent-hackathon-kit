@@ -1,0 +1,166 @@
+{
+  "projects": {
+    "demo": {
+      "issues": [
+        {
+          "rule": "python:S3649",
+          "severity": "BLOCKER",
+          "type": "VULNERABILITY",
+          "component": "cases/dev-techdebt/src/db.py",
+          "line": 62,
+          "message": "Change this code to not construct SQL queries directly from user-controlled data.",
+          "effort_min": 30,
+          "tags": ["sql", "injection", "owasp-a3"]
+        },
+        {
+          "rule": "secrets:S6418",
+          "severity": "CRITICAL",
+          "type": "VULNERABILITY",
+          "component": "cases/dev-techdebt/src/config.py",
+          "line": 16,
+          "message": "\"BILLING_API_KEY\" looks like a hard-coded secret; review and store it outside the code.",
+          "effort_min": 20,
+          "tags": ["secrets", "cwe-798"]
+        },
+        {
+          "rule": "python:S5754",
+          "severity": "MAJOR",
+          "type": "BUG",
+          "component": "cases/dev-techdebt/src/handlers.py",
+          "line": 56,
+          "message": "Specify an exception class to catch or reraise the exception; bare \"except:\" also catches system-exiting exceptions.",
+          "effort_min": 10,
+          "tags": ["error-handling", "suspicious"]
+        },
+        {
+          "rule": "python:S5717",
+          "severity": "MAJOR",
+          "type": "BUG",
+          "component": "cases/dev-techdebt/src/handlers.py",
+          "line": 13,
+          "message": "Change this default value to \"None\" and initialize this parameter inside the function; mutable default values are shared between calls.",
+          "effort_min": 10,
+          "tags": ["pitfall"]
+        },
+        {
+          "rule": "python:S4830",
+          "severity": "MAJOR",
+          "type": "BUG",
+          "component": "cases/dev-techdebt/src/utils.py",
+          "line": 19,
+          "message": "Add a timeout to this \"urlopen\" call; without one the request can hang indefinitely.",
+          "effort_min": 5,
+          "tags": ["reliability", "network"]
+        },
+        {
+          "rule": "common-py:DuplicatedBlocks",
+          "severity": "MAJOR",
+          "type": "CODE_SMELL",
+          "component": "cases/dev-techdebt/src/billing.py",
+          "line": 24,
+          "message": "This block of 12 lines is duplicated in legacy_report.py; extract a shared function.",
+          "effort_min": 20,
+          "tags": ["duplication"]
+        },
+        {
+          "rule": "common-py:DuplicatedBlocks",
+          "severity": "MAJOR",
+          "type": "CODE_SMELL",
+          "component": "cases/dev-techdebt/src/legacy_report.py",
+          "line": 26,
+          "message": "This block of 12 lines is duplicated in billing.py; extract a shared function.",
+          "effort_min": 20,
+          "tags": ["duplication"]
+        },
+        {
+          "rule": "python:S109",
+          "severity": "MINOR",
+          "type": "CODE_SMELL",
+          "component": "cases/dev-techdebt/src/billing.py",
+          "line": 14,
+          "message": "Assign this magic number 22 to a well-named constant, and use the constant instead.",
+          "effort_min": 10,
+          "tags": ["readability", "magic-number"]
+        },
+        {
+          "rule": "python:S109",
+          "severity": "MINOR",
+          "type": "CODE_SMELL",
+          "component": "cases/dev-techdebt/src/billing.py",
+          "line": 17,
+          "message": "Assign this magic number 3500 to a well-named constant, and use the constant instead.",
+          "effort_min": 10,
+          "tags": ["readability", "magic-number"]
+        },
+        {
+          "rule": "python:S1763",
+          "severity": "MINOR",
+          "type": "CODE_SMELL",
+          "component": "cases/dev-techdebt/src/legacy_report.py",
+          "line": 44,
+          "message": "Refactor this code so that the statements after this \"return\" are reachable, or delete them.",
+          "effort_min": 15,
+          "tags": ["dead-code", "unused"]
+        },
+        {
+          "rule": "python:S2095",
+          "severity": "MINOR",
+          "type": "CODE_SMELL",
+          "component": "cases/dev-techdebt/src/legacy_report.py",
+          "line": 15,
+          "message": "Use a \"with\" statement, or close this file explicitly on every path.",
+          "effort_min": 5,
+          "tags": ["resource-leak"]
+        },
+        {
+          "rule": "python:S1135",
+          "severity": "INFO",
+          "type": "CODE_SMELL",
+          "component": "cases/dev-techdebt/src/legacy_report.py",
+          "line": 3,
+          "message": "Module keeps a legacy code path; track the decommissioning in the backlog.",
+          "effort_min": 5,
+          "tags": ["design"]
+        },
+        {
+          "rule": "python:S1542",
+          "severity": "INFO",
+          "type": "CODE_SMELL",
+          "component": "cases/dev-techdebt/src/db.py",
+          "line": 34,
+          "message": "Function \"insert_order\" is missing a docstring.",
+          "effort_min": 2,
+          "tags": ["convention", "documentation"]
+        },
+        {
+          "rule": "python:S1542",
+          "severity": "INFO",
+          "type": "CODE_SMELL",
+          "component": "cases/dev-techdebt/src/db.py",
+          "line": 41,
+          "message": "Function \"add_item\" is missing a docstring.",
+          "effort_min": 2,
+          "tags": ["convention", "documentation"]
+        },
+        {
+          "rule": "python:S125",
+          "severity": "INFO",
+          "type": "CODE_SMELL",
+          "component": "cases/dev-techdebt/src/config.py",
+          "line": 24,
+          "message": "Constant \"MAX_ITEMS_PER_ORDER\" duplicates a limit also enforced by the gateway; document the single source of truth.",
+          "effort_min": 5,
+          "tags": ["design"]
+        }
+      ],
+      "measures": {
+        "coverage": 41.5,
+        "duplicated_lines_density": 7.8,
+        "code_smells": 10,
+        "bugs": 3,
+        "vulnerabilities": 2,
+        "sqale_index": 169
+      }
+    }
+  }
+}

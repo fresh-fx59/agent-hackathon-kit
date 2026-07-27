@@ -1,0 +1,82 @@
+[
+  {
+    "file": "src/db.py",
+    "line": 62,
+    "category": "security",
+    "severity": "high",
+    "description": "SQL query is built with an f-string from the raw customer value; a crafted name injects arbitrary SQL (find_orders_by_customer).",
+    "fix_hint": "Use a parameterized query: conn.execute(\"SELECT * FROM orders WHERE customer LIKE ?\", (\"%\" + customer + \"%\",))."
+  },
+  {
+    "file": "src/config.py",
+    "line": 16,
+    "category": "security",
+    "severity": "high",
+    "description": "Billing API key is hardcoded in source (BILLING_API_KEY); credentials in code leak through VCS and builds.",
+    "fix_hint": "Read the key from an environment variable or a secret store; fail fast when it is missing."
+  },
+  {
+    "file": "src/handlers.py",
+    "line": 56,
+    "category": "bug",
+    "severity": "medium",
+    "description": "Bare `except:` in close_order swallows every error (including KeyboardInterrupt/SystemExit), hiding webhook failures.",
+    "fix_hint": "Catch the specific exceptions (e.g. urllib.error.URLError, OSError) and at minimum log the failure."
+  },
+  {
+    "file": "src/handlers.py",
+    "line": 13,
+    "category": "bug",
+    "severity": "medium",
+    "description": "Mutable default argument tags=[] in create_order is shared between calls; appended values leak into later orders.",
+    "fix_hint": "Use tags=None and `tags = list(tags) if tags else []` inside the function."
+  },
+  {
+    "file": "src/utils.py",
+    "line": 19,
+    "category": "bug",
+    "severity": "medium",
+    "description": "urllib.request.urlopen call in post_webhook has no timeout; a stalled webhook receiver hangs the caller forever.",
+    "fix_hint": "Pass an explicit timeout (e.g. urlopen(req, timeout=10)) and handle the timeout error."
+  },
+  {
+    "file": "src/billing.py",
+    "line": 24,
+    "category": "duplication",
+    "severity": "medium",
+    "description": "Discount-tier block in apply_discount is duplicated verbatim in legacy_report.report_discount; the two copies will drift.",
+    "fix_hint": "Keep one implementation in billing.py and import it from the report module."
+  },
+  {
+    "file": "src/legacy_report.py",
+    "line": 26,
+    "category": "duplication",
+    "severity": "medium",
+    "description": "report_discount repeats the discount-tier block from billing.apply_discount line for line.",
+    "fix_hint": "Delete the copy and call billing.apply_discount instead."
+  },
+  {
+    "file": "src/billing.py",
+    "line": 14,
+    "category": "style",
+    "severity": "low",
+    "description": "Magic numbers in tax logic (22, 1000000, 3500, 15000, 990) carry business meaning but have no names.",
+    "fix_hint": "Extract named module-level constants (TAX_RATE_PERCENT, LARGE_ORDER_THRESHOLD_CENTS, ...)."
+  },
+  {
+    "file": "src/legacy_report.py",
+    "line": 44,
+    "category": "dead-code",
+    "severity": "low",
+    "description": "export_orders_xml returns None on its first statement; the XML-building body below is unreachable dead code.",
+    "fix_hint": "Delete the function (and its callers, if any) or remove the early return if the export is still needed."
+  },
+  {
+    "file": "src/legacy_report.py",
+    "line": 15,
+    "category": "smell",
+    "severity": "low",
+    "description": "write_report opens the report file without a context manager and never closes it on the error path.",
+    "fix_hint": "Wrap the writes in `with open(path, \"w\", encoding=\"utf-8\") as fh:`."
+  }
+]

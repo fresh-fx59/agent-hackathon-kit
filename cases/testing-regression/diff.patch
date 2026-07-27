@@ -1,0 +1,78 @@
+diff --git a/app/cart.py b/app/cart.py
+--- a/app/cart.py
++++ b/app/cart.py
+@@ -1,13 +1,13 @@
+ """Shopping cart: line items with quantity validation.
+ 
+-Quantities are validated on every add; the catalog is consulted only for
+-product existence.  Stock is checked later, at checkout time.
++Quantities are validated on every add; the catalog is consulted for both
++product existence and available stock -- an add can no longer exceed stock.
+ """
+ 
+ from app import catalog
+ 
+ # A single order line may not exceed this many units.
+-MAX_QUANTITY_PER_LINE = 99
++MAX_QUANTITY_PER_LINE = 20
+ 
+ 
+ class CartError(ValueError):
+@@ -34,6 +34,9 @@
+         if new_quantity > MAX_QUANTITY_PER_LINE:
+             raise CartError("no more than %d units of %s per order"
+                             % (MAX_QUANTITY_PER_LINE, product.product_id))
++        if not catalog.in_stock(product_id, new_quantity):
++            raise CartError("not enough stock for %s (requested %d)"
++                            % (product.product_id, new_quantity))
+         self.items[product_id] = new_quantity
+         return new_quantity
+ 
+diff --git a/app/checkout.py b/app/checkout.py
+--- a/app/checkout.py
++++ b/app/checkout.py
+@@ -1,7 +1,8 @@
+ """Checkout: discount calculation and order creation.
+ 
+-Discount model: the promo-code discount and the loyalty discount stack
+-additively, and the sum is capped at MAX_DISCOUNT_PERCENT.
++Discount model: the customer gets the single BEST discount (promo code or
++loyalty) -- discounts no longer stack; the result is still capped at
++MAX_DISCOUNT_PERCENT.
+ """
+ 
+ from app import notifications
+@@ -10,10 +11,11 @@
+ PROMO_CODES = {
+     "WELCOME10": 10,
+     "VIP5": 5,
++    "SALE15": 15,
+ }
+ 
+ # Orders with a subtotal at or above this earn the loyalty discount.
+-LOYALTY_THRESHOLD = 5000.0
++LOYALTY_THRESHOLD = 3000.0
+ LOYALTY_DISCOUNT_PERCENT = 5
+ 
+ # Hard cap for the combined discount.
+@@ -35,16 +37,17 @@
+ def discount_percent(subtotal, promo_code=None):
+     """Return the total discount percent for an order subtotal.
+ 
+-    The promo-code and loyalty discounts stack additively; the sum is
++    Business change: only the single best of the promo-code and loyalty
++    discounts applies (they used to stack additively); the result is
+     capped at MAX_DISCOUNT_PERCENT.
+     """
+     percent = 0
+     if promo_code is not None:
+         if promo_code not in PROMO_CODES:
+             raise CheckoutError("unknown promo code: %s" % promo_code)
+-        percent += PROMO_CODES[promo_code]
++        percent = max(percent, PROMO_CODES[promo_code])
+     if subtotal >= LOYALTY_THRESHOLD:
+-        percent += LOYALTY_DISCOUNT_PERCENT
++        percent = max(percent, LOYALTY_DISCOUNT_PERCENT)
+     return min(percent, MAX_DISCOUNT_PERCENT)
+ 
+ 
