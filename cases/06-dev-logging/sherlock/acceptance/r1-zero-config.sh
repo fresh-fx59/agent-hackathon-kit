@@ -63,8 +63,11 @@ START=$(date +%s)
 # --approval-mode yolo: without it, run_shell_command is DENIED in headless -p mode
 # (verified 2026-07-28), so the model cannot grep/sed/zcat — the very tools the skill's
 # procedure is built on. An interactive engineer has shell; the test must match reality.
-( cd "$W" && timeout "$TIMEOUT" "$QWEN" --auth-type openai --model "$MODEL" \
-    --openai-base-url "$BASE_URL" --openai-api-key "$SHERLOCK_API_KEY" \
+# The key goes through the ENVIRONMENT, never argv: this box has a guest account
+# (hackmate), and `--openai-api-key <secret>` is readable in `ps` for the whole run.
+# Verified 2026-07-28 that qwen honours OPENAI_API_KEY/OPENAI_BASE_URL.
+( cd "$W" && OPENAI_API_KEY="$SHERLOCK_API_KEY" OPENAI_BASE_URL="$BASE_URL" \
+  timeout "$TIMEOUT" "$QWEN" --auth-type openai --model "$MODEL" \
     --approval-mode yolo \
     -p "$PROMPT" --output-format json </dev/null ) >"$W/out.json" 2>"$W/err.txt"
 ELAPSED=$(( $(date +%s) - START ))
