@@ -1,7 +1,7 @@
 import json, time
 from pathlib import Path
 from logalyzer.masking import Masker
-from logalyzer.ingest import read_all
+from logalyzer.ingest import read_all, read_all_with_stats
 from logalyzer.correlate import related
 from logalyzer.evidence import EvidenceBundle
 from logalyzer.rules_engine import load_rules, evaluate
@@ -45,13 +45,15 @@ def cmd_suggest(argv):
 def cmd_stats(argv):
     logs = _arg(argv, "--logs")
     if not logs: print("--logs required"); return 2
-    recs = read_all(Path(logs), Masker())
+    recs, stats = read_all_with_stats(Path(logs), Masker())
     by_service, unparsed = {}, 0
     for r in recs:
         by_service[r.service] = by_service.get(r.service, 0) + 1
         if r.parse_quality == "unparsed": unparsed += 1
     print(json.dumps({"records_total": len(recs), "unparsed": unparsed,
-                      "by_service": by_service}, ensure_ascii=False, indent=2))
+                      "by_service": by_service,
+                      "files": stats["files"], "skipped": stats["skipped"]},
+                     ensure_ascii=False, indent=2))
     return 0
 
 def cmd_investigate(argv):

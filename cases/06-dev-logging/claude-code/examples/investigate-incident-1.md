@@ -27,7 +27,7 @@ python3 -m logalyzer investigate \
 
 ```json
 {
-  "records_total": 77,
+  "records_total": 70,
   "unparsed": 0,
   "by_service": {
     "inventory-service": 9,
@@ -37,15 +37,23 @@ python3 -m logalyzer investigate \
     "notification-service": 5,
     "order-service": 20,
     "payment-service": 8,
-    "second_incident_notification": 8,
+    "second_incident_notification": 1,
     "api-gateway": 1
   }
 }
 ```
 
-77 записей из 9 источников, ни одной непарсированной строки — можно сразу
+70 записей из 9 источников, ни одной непарсированной строки — можно сразу
 запускать `investigate`, каталоги с кодом (`--repo`) уже переданы, поэтому
-уточнение (exit 3) в этом прогоне не потребовалось.
+уточнение (exit 3) в этом прогоне не потребовалось. (`second_incident_notification`
+даёт всего 1 запись, а не построчно: этот файл начинается с `#`-комментариев,
+из-за чего целиком распознаётся как plaintext, и универсальный парсер +
+сворачивание многострочных продолжений [universal-ingest] схлопывают все его
+непарсируемые строки в одну запись — на разбор инцидента `c-8f3a2b91` это не
+влияет, у этих строк другой `correlation_id`.) Полный ответ `stats` теперь
+также содержит ключи `files` (формат + ok/partial/unparsed на файл) и
+`skipped` (пропущенные файлы с причиной) — см. `docs/specs/2026-07-28-design.md`
+§«Universal ingest».
 
 ## Реальный вывод `investigate` (exit code 0)
 

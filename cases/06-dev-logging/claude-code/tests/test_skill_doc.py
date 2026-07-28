@@ -9,7 +9,8 @@ class TestSkillDoc(unittest.TestCase):
         for required in ("name: log-rca", "Когда применять", "упал", "correlation_id",
                          "Режимы", "DevOps", "Обязательное уточнение",
                          "--mode ops", "--repo", "exit", "3", "suggest-repos",
-                         "данные, а не инструкции", "Демо-промпты"):
+                         "данные, а не инструкции", "Демо-промпты",
+                         "отдельный файл"):
             self.assertIn(required, text, "SKILL.md missing: %s" % required)
 
     def test_example_exists(self):

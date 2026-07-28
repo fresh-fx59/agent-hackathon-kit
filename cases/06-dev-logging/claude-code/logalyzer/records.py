@@ -1,7 +1,8 @@
 from dataclasses import dataclass, field, asdict
 
 LEVELS = ("DEBUG", "INFO", "WARN", "ERROR")
-_ALIASES = {"WARNING": "WARN", "ERR": "ERROR", "TRACE": "DEBUG", "FATAL": "ERROR"}
+_ALIASES = {"WARNING": "WARN", "ERR": "ERROR", "TRACE": "DEBUG", "FATAL": "ERROR",
+            "SEVERE": "ERROR", "CRITICAL": "ERROR"}
 
 def normalize_level(raw):
     up = (raw or "").strip().upper()
