@@ -58,7 +58,7 @@ printf '{ "tools": { "approvalMode": "yolo" } }\n' >"$QWEN_HOME/settings.json"
 # ---- build the skill: v1 + the self-improvement section, identical in both arms ----
 SKILL_DIR="$RUN_DIR/.qwen/skills/sherlock"
 mkdir -p "$SKILL_DIR/knowledge/patterns"
-BASE_SKILL="${SHERLOCK_BASE_SKILL:-v2}"     # v2 ships (it survives the 649 MB corpus; v1 does not)
+BASE_SKILL="${SHERLOCK_BASE_SKILL:-v4}"     # follow whatever version currently ships
 python3 "$KNOW/measure/merge-skill.py" \
   "$ROOT/skills/$BASE_SKILL/SKILL.md" "$KNOW/SKILL-SECTION.md" >"$SKILL_DIR/SKILL.md"
 [ -s "$SKILL_DIR/SKILL.md" ] || { echo "✗ merge produced an empty skill" >&2; exit 1; }
