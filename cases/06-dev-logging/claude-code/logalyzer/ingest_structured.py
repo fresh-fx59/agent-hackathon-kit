@@ -10,7 +10,9 @@ def read_structured(fmt, lines, service_hint, ref, masker):
             if not raw.strip(): continue
             try:
                 obj = json.loads(raw)
-            except ValueError:
+                if not isinstance(obj, dict):
+                    raise ValueError("JSON must be an object, not a scalar or array")
+            except (ValueError, TypeError):
                 out.append(NormalizedRecord(timestamp="", service="kafka", level="UNKNOWN",
                                             body=masker.mask(raw), source_ref=ref, source_line=i,
                                             parse_quality="unparsed"))
@@ -38,7 +40,16 @@ def read_structured(fmt, lines, service_hint, ref, masker):
                 attrs={"reason": m.group("reason"), "object": m.group("obj")} if m else {}))
         return out
     if fmt == "trace":
-        doc = json.loads("\n".join(lines))
+        try:
+            doc = json.loads("\n".join(lines))
+            if not isinstance(doc, dict):
+                raise ValueError("Trace JSON must be an object, not a scalar or array")
+        except (ValueError, TypeError, json.JSONDecodeError):
+            # Malformed trace file: return one unparsed record
+            masked_body = masker.mask("\n".join(lines[:100]) if len(lines) > 100 else "\n".join(lines))
+            return [NormalizedRecord(timestamp="", service="trace", level="UNKNOWN",
+                                     body=masked_body, source_ref=ref, source_line=1,
+                                     parse_quality="unparsed")]
         out = []
         for i, span in enumerate(doc.get("spans", []), 1):
             attrs = dict(span.get("attrs") or {})

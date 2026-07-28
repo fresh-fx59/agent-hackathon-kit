@@ -1,4 +1,4 @@
-import json, re, tempfile, zipfile
+import json, re, tempfile, zipfile, stat
 from pathlib import Path
 from logalyzer.records import NormalizedRecord
 
@@ -117,6 +117,8 @@ def _safe_extract(zpath, dest):
             p = (Path(dest) / name).resolve()
             if not str(p).startswith(str(Path(dest).resolve())):
                 continue  # traversal/absolute entry: skip silently, count in caller stats
+            if stat.S_ISLNK(info.external_attr >> 16):
+                continue  # symlink entry: skip silently
             z.extract(info, dest)
 
 def read_all(root, masker):
@@ -130,5 +132,9 @@ def read_all(root, masker):
     out = []
     for p in sorted(root.rglob("*")):
         if p.is_file() and p.suffix in (".log", ".jsonl", ".txt", ".json"):
-            out.extend(read_source(p, masker))
+            try:
+                out.extend(read_source(p, masker))
+            except Exception:
+                # Skip files that can't be read; other files in the directory still get processed
+                pass
     return out

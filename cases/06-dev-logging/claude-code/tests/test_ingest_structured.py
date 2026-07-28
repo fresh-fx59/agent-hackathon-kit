@@ -1,4 +1,4 @@
-import unittest, tempfile, json, zipfile, io
+import unittest, tempfile, json, zipfile, io, stat
 from pathlib import Path
 from logalyzer.masking import Masker
 from logalyzer.ingest import read_all
@@ -51,6 +51,62 @@ class TestStructured(unittest.TestCase):
         recs = read_all(zpath, Masker())
         self.assertEqual(len([r for r in recs if r.service == "kafka"]), 2)
         self.assertFalse((self.root.parent / "evil.txt").exists())
+
+    def test_kafka_with_scalar_json_line(self):
+        """Kafka file with bare scalar line should not crash batch."""
+        kafka_mixed = """\
+{"ts":"2026-07-15T11:22:03.410Z","topic":"payments.events.v1","partition":1,"offset":45123,"type":"PaymentAuthorized","payload":{"order_id":"ord-a12f5d7e"}}
+42
+{"ts":"2026-07-15T11:22:05.435Z","topic":"orders.events.v1","partition":3,"offset":98421,"type":"OrderFailed","payload":{"order_id":"ord-a12f5d7e"}}
+"""
+        (self.root / "kafka_mixed.jsonl").write_text(kafka_mixed, encoding="utf-8")
+        recs = read_all(self.root, Masker())
+        kafka = [r for r in recs if r.service == "kafka" and r.source_ref == "kafka_mixed.jsonl"]
+        # kafka_mixed.jsonl should have 2 valid + 1 unparsed = 3 total
+        self.assertEqual(len(kafka), 3)
+        unparsed = [r for r in kafka if r.parse_quality == "unparsed"]
+        self.assertEqual(len(unparsed), 1)
+        valid = [r for r in kafka if r.parse_quality != "unparsed"]
+        self.assertEqual(len(valid), 2)
+
+    def test_trace_with_invalid_json(self):
+        """Malformed trace JSON should produce one unparsed record, not crash."""
+        (self.root / "trace_bad.json").write_text("{bad json}", encoding="utf-8")
+        recs = read_all(self.root, Masker())
+        trace_bad = [r for r in recs if r.source_ref == "trace_bad.json"]
+        self.assertEqual(len(trace_bad), 1)
+        self.assertEqual(trace_bad[0].parse_quality, "unparsed")
+        self.assertEqual(trace_bad[0].service, "trace")
+
+    def test_trace_as_json_list(self):
+        """Trace file that is a JSON list should produce one unparsed record, not crash."""
+        (self.root / "trace_list.json").write_text('[{"span_id": "s-1"}]', encoding="utf-8")
+        recs = read_all(self.root, Masker())
+        trace_list = [r for r in recs if r.source_ref == "trace_list.json"]
+        self.assertEqual(len(trace_list), 1)
+        self.assertEqual(trace_list[0].parse_quality, "unparsed")
+
+    def test_hostile_file_does_not_prevent_others(self):
+        """A hostile file should not prevent other files from being processed."""
+        (self.root / "kafka_mixed.jsonl").write_text("42\ninvalid\n[1,2,3]", encoding="utf-8")
+        (self.root / "kafka_valid.jsonl").write_text(KAFKA, encoding="utf-8")
+        recs = read_all(self.root, Masker())
+        kafka = [r for r in recs if r.service == "kafka"]
+        # Should have 2 from kafka_valid.jsonl
+        self.assertGreaterEqual(len(kafka), 2)
+
+    def test_zip_with_symlink_entry_skipped(self):
+        """ZIP with symlink entry should skip it safely."""
+        zpath = self.root / "pack_symlink.zip"
+        with zipfile.ZipFile(zpath, "w") as z:
+            z.writestr("logs/kafka_events.jsonl", KAFKA)
+            # Create a ZipInfo with symlink mode bit
+            symlink_info = zipfile.ZipInfo("link_to_evil")
+            symlink_info.external_attr = (stat.S_IFLNK | 0o777) << 16
+            z.writestr(symlink_info, "target")
+        recs = read_all(zpath, Masker())
+        kafka = [r for r in recs if r.service == "kafka"]
+        self.assertEqual(len(kafka), 2)
 
 if __name__ == "__main__":
     unittest.main()
