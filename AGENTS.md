@@ -51,6 +51,37 @@ One contract — `resolve(spec, window) -> local bytes + manifest`, implementati
 must not parse content. New backends (Elasticsearch, Loki, Grafana, Kubernetes)
 arrive as **existing MCP servers**, i.e. configuration, not code.
 
+**R5 — Self-improvement loop with a human in the loop.** The jury watches for
+this specifically, and the case statement demands it («Self-learning loop:
+фиксация инцидента → сохранение решения → повторное использование знаний»,
+acceptance TC-03 + the ≥30 % speed-up metric). The system must get better with
+use, and a person must stay in control of what it learns.
+
+The loop, in the order it runs:
+
+1. **Notice.** During an investigation, when the agent resolves something whose
+   *signature is recognisable* — a log shape, an error chain, a failure mode —
+   it drafts a **pattern card**: how to recognise it, what it turned out to mean,
+   the root cause, the recommended action, and the evidence it was learned from.
+2. **Confirm — the human gate.** The card is *proposed*, never saved silently.
+   The engineer confirms, edits or rejects it. Nothing enters the knowledge base
+   without that. This is the requirement, not a nicety: an agent that
+   auto-writes its own beliefs compounds its mistakes, and no engineer will
+   trust a knowledge base they did not agree to.
+3. **Reuse.** At the start of every later investigation the agent reads the
+   confirmed pattern cards first and checks whether the corpus matches one. A
+   known pattern must resolve in a fraction of the steps a cold investigation
+   takes — that is the measurable claim.
+4. **Measure.** The run ledger records steps and wall-clock per investigation,
+   so «incident #2 was N % faster than incident #1» is a number we can show,
+   not an assertion.
+
+Constraints that follow from R1: the knowledge base is **plain files inside the
+skill folder** (`knowledge/patterns/*.md`), so it travels with the skill, is
+diffable, reviewable and versionable in git, and needs no database and no
+configuration. A team shares learning by committing pattern cards. Nothing about
+this may require a service to be running.
+
 Authoritative spec: `cases/06-dev-logging/docs/specs/2026-07-28-sherlock-simplest-approach-design.md`
 (supersedes `claude-code/docs/specs/2026-07-28-design.md`, whose deterministic
 parsing spine is retired — see the spec's evidence section for why).
