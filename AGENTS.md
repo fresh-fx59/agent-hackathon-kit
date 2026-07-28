@@ -82,6 +82,25 @@ diffable, reviewable and versionable in git, and needs no database and no
 configuration. A team shares learning by committing pattern cards. Nothing about
 this may require a service to be running.
 
+**No scheduler — the loop is synchronous.** The fleet's other propose-only
+runners (drift-triage, catalog-triage, the corrections producer) are driven by
+systemd timers. **That mechanism is unavailable inside the corporate Qwen Coder
+CLI**, and a timer would violate R1 anyway. So the trigger is the investigation
+itself: the agent proposes the card at the end of the session, in prose, as a
+step of the procedure — no cron, no daemon, no background job. Verified on
+`@qwen-code/qwen-code@0.21.1`: the CLI supports `Stop`, `SessionStart`,
+`SessionEnd`, `PreToolUse`, `PostToolUse`, `SubagentStop`, `UserPromptSubmit`,
+`PreCompact`, and states that *"skills can define hooks and commands"* — so a
+`Stop` hook may ship inside the skill folder as an **optional** nudge. It must
+degrade gracefully: hooks disabled ⇒ nothing breaks and the prose path still
+works.
+
+This is not a workaround, it is the better design. A scheduled loop proposes a
+change that a human reviews days later, out of context. Proposing in-session
+asks for confirmation **at the moment of maximum context** — the engineer has
+just seen the incident and knows whether the pattern is real. Async review is
+the compromise you make when no human is present; here one always is.
+
 Authoritative spec: `cases/06-dev-logging/docs/specs/2026-07-28-sherlock-simplest-approach-design.md`
 (supersedes `claude-code/docs/specs/2026-07-28-design.md`, whose deterministic
 parsing spine is retired — see the spec's evidence section for why).
