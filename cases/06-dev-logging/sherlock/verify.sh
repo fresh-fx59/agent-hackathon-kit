@@ -33,13 +33,13 @@ green "qwen CLI: $("$QWEN" --version 2>&1 | tail -1)"
 NLINES=$(find "$LOGS" -type f -exec cat {} + 2>/dev/null | wc -l)
 green "corpus: $LOGS ($(du -sh "$LOGS" 2>/dev/null | cut -f1), $NLINES lines)"
 
-[ -f "$HERE/skill/SKILL.md" ] || fail "missing $HERE/skill/SKILL.md"
+[ -f "$HERE/skills/v1/SKILL.md" ] || fail "missing $HERE/skill/SKILL.md"
 
 # ------------------------------------------------- install skill where qwen looks
 # Qwen Code discovers skills from <project>/.qwen/skills/<name>/SKILL.md
 mkdir -p "$WORK/.qwen/skills"
 rm -rf "$WORK/.qwen/skills/sherlock"
-cp -r "$HERE/skill" "$WORK/.qwen/skills/sherlock" || fail "could not install skill"
+cp -r "$HERE/skills/v1" "$WORK/.qwen/skills/sherlock" || fail "could not install skill"
 green "skill installed: $WORK/.qwen/skills/sherlock/SKILL.md"
 
 # --------------------------------------------------------------------- auth
