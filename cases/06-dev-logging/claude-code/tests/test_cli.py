@@ -1,4 +1,6 @@
-import unittest, tempfile, json, sys, io
+import os, sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # for `logalyzer` when verify.sh runs this file standalone
+import unittest, tempfile, json, io
 from pathlib import Path
 from contextlib import redirect_stdout
 from logalyzer.__main__ import main

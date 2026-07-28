@@ -1,3 +1,5 @@
+import os, sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # for `logalyzer` when verify.sh runs this file standalone
 import unittest, tempfile
 from pathlib import Path
 from logalyzer.coderef import is_code_dir, suggest_repos, resolve_mode
