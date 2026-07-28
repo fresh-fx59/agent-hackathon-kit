@@ -1,16 +1,21 @@
 #!/usr/bin/env bash
-# Canary: prove SKILL.md actually reaches the model in headless `qwen -p`.
+# Canary: does SKILL.md actually reach the model in headless `qwen -p`?
 #
-# Exists because an agent reported "qwen -p denies the skill tool, so SKILL.md
-# never loads", which would have invalidated every A/B number we have. It does
-# load: skills are injected as context when their description matches, which is
-# independent of any explicit skill-invocation tool being available.
+# Runs BOTH configurations, because a guard that only exercises the passing case
+# cannot catch the regression it exists for — which is exactly the mistake that
+# made this file necessary. Expected outcome:
+#   with    --approval-mode yolo -> canary present
+#   without --approval-mode yolo -> canary ABSENT (qwen declines the "skill"
+#                                   permission, so SKILL.md never loads)
+# Any A/B measured without the flag therefore compares two skill-less arms, and
+# whatever difference it shows is variance.
 #
 #   with-secret.sh eval_linkapi_key --env SHERLOCK_API_KEY -- ./acceptance/skill-loads.sh
 set -uo pipefail
 QWEN="${QWEN_BIN:-$HOME/.local/bin/qwen}"
 : "${SHERLOCK_API_KEY:?set SHERLOCK_API_KEY}"
 W="$(mktemp -d "${TMPDIR:-/tmp}/canary-XXXXXX")"; trap 'rm -rf "$W"' EXIT
+
 mkdir -p "$W/home/skills/logcanary"
 cat > "$W/home/skills/logcanary/SKILL.md" <<'EOF'
 ---
@@ -23,19 +28,45 @@ description: Используй этот навык всегда, когда р�
 CANARY-TOKEN-7Q2X-LOADED
 EOF
 printf 'Jul 28 10:00:01 host app[1]: ERROR db timeout\nJul 28 10:00:02 host app[1]: ERROR retry failed\n' > "$W/test.log"
-( cd "$W" && QWEN_HOME="$W/home" OPENAI_API_KEY="$SHERLOCK_API_KEY" \
-  OPENAI_BASE_URL="${SHERLOCK_BASE_URL:-https://linkapi.ai/v1}" \
-  timeout "${SHERLOCK_TIMEOUT:-300}" "$QWEN" --auth-type openai \
-    --model "${SHERLOCK_MODEL:-[SP]deepseek-v4-flash}" --approval-mode yolo \
-    -p "Посмотри лог $W/test.log — что случилось?" --output-format json </dev/null \
-) > "$W/out.json" 2>"$W/err.txt"
-python3 - "$W/out.json" <<'PY'
+
+cat > "$W/check.py" <<'EOF'
 import json, sys
-d = json.load(open(sys.argv[1])); d = d if isinstance(d, list) else [d]
-f = next((r for r in d if r.get("type") == "result"), None)
-t = (f or {}).get("result") or ""
-if "CANARY-TOKEN-7Q2X-LOADED" in t:
-    print("\033[32m✓ SKILL.md loads in headless -p — A/B measurements are valid\033[0m"); sys.exit(0)
-print("\033[31m✗ canary ABSENT — SKILL.md did not reach the model; every A/B number is void\033[0m")
-print(t[-300:]); sys.exit(1)
-PY
+try:
+    d = json.load(open(sys.argv[1]))
+    d = d if isinstance(d, list) else [d]
+    t = "".join(str(r.get("result") or "") for r in d)
+except Exception:
+    t = ""
+print("yes" if "CANARY-TOKEN-7Q2X-LOADED" in t else "no")
+EOF
+
+run_canary() {                     # $1 = yolo | noyolo  -> echoes yes/no
+  local extra=()
+  [ "$1" = "yolo" ] && extra=(--approval-mode yolo)
+  ( cd "$W" && QWEN_HOME="$W/home" OPENAI_API_KEY="$SHERLOCK_API_KEY" \
+    OPENAI_BASE_URL="${SHERLOCK_BASE_URL:-https://linkapi.ai/v1}" \
+    timeout "${SHERLOCK_TIMEOUT:-300}" "$QWEN" --auth-type openai \
+      --model "${SHERLOCK_MODEL:-[SP]deepseek-v4-flash}" ${extra[@]+"${extra[@]}"} \
+      -p "Посмотри лог $W/test.log — что случилось?" --output-format json </dev/null \
+  ) > "$W/out-$1.json" 2>"$W/err-$1.txt"
+  python3 "$W/check.py" "$W/out-$1.json"
+}
+
+WITH=$(run_canary yolo)
+WITHOUT=$(run_canary noyolo)
+echo "  with    --approval-mode yolo : canary=$WITH  (expected yes)"
+echo "  without --approval-mode yolo : canary=$WITHOUT  (expected no)"
+
+if [ "$WITH" = "yes" ] && [ "$WITHOUT" = "no" ]; then
+  printf '\033[32m✓ confirmed: SKILL.md loads ONLY with --approval-mode yolo.\n'
+  printf '  Any A/B measured without the flag compares two skill-less arms.\033[0m\n'
+  exit 0
+fi
+if [ "$WITH" != "yes" ]; then
+  printf '\033[31m✗ canary absent even WITH yolo — SKILL.md is not reaching the model at all;\n'
+  printf '  every A/B number is void until this is fixed.\033[0m\n'
+  exit 1
+fi
+printf '\033[33m! canary present WITHOUT yolo too — the permission gate changed in this qwen\n'
+printf '  version. Good news, but re-read the docs before trusting old conclusions.\033[0m\n'
+exit 0
