@@ -287,9 +287,33 @@ def _looks_binary(p):
         return False
     return b"\x00" in chunk
 
+class _DecompressedTooLarge(Exception):
+    """Internal signal only: a .gz file's DEcompressed content exceeds the
+    size cap. Caught by _ingest_one_file and turned into a visible
+    "skipped" entry (same mechanism as the on-disk size cap), never an
+    unbounded read -- a small compressed file can otherwise expand to far
+    more than _MAX_FILE_BYTES (decompression-bomb risk), which checking
+    only the on-disk (compressed) size never catches."""
+
+_GZ_CHUNK_BYTES = 65536
+
 def _read_gz_lines(p):
-    with gzip.open(p, mode="rt", encoding="utf-8", errors="replace") as f:
-        return f.read().splitlines()
+    """Stream-decompress in bounded chunks with a running decompressed-byte
+    counter, aborting past _MAX_FILE_BYTES instead of reading unboundedly
+    (mirrors the rigor of _ZIP_MAX_UNCOMPRESSED for regular zips)."""
+    total = 0
+    chunks = []
+    with gzip.open(p, mode="rb") as f:
+        while True:
+            chunk = f.read(_GZ_CHUNK_BYTES)
+            if not chunk:
+                break
+            total += len(chunk)
+            if total > _MAX_FILE_BYTES:
+                raise _DecompressedTooLarge(
+                    "decompressed size exceeds %d byte cap" % _MAX_FILE_BYTES)
+            chunks.append(chunk)
+    return b"".join(chunks).decode("utf-8", errors="replace").splitlines()
 
 def _sniff_file_format(p):
     """Cheap format sniff for stats display: reads only the first few lines
@@ -334,6 +358,9 @@ def _ingest_one_file(p, masker, stats):
         else:
             fmt = _sniff_file_format(p)
             recs = read_source(p, masker)
+    except _DecompressedTooLarge as e:
+        stats["skipped"].append({"file": name, "reason": str(e)})
+        return []
     except Exception as e:
         # A file that can't be read/parsed must not vanish silently:
         # surface one visible unparsed record naming the failure
@@ -373,8 +400,15 @@ def read_all_with_stats(root, masker):
         return _ingest_one_file(root, masker, stats), stats
     out = []
     for p in sorted(root.rglob("*")):
-        if p.is_file():
-            out.extend(_ingest_one_file(p, masker, stats))
+        if not p.is_file():
+            continue
+        # Hidden path components (.git, .DS_Store, dotfiles) are never
+        # ingested and never even reach the visible skip-with-reason
+        # bookkeeping -- they are not "logs of an unknown format", they are
+        # not logs at all, same as `.gitignore`/`find` conventions treat them.
+        if any(part.startswith(".") for part in p.relative_to(root).parts):
+            continue
+        out.extend(_ingest_one_file(p, masker, stats))
     return out, stats
 
 def read_all(root, masker):

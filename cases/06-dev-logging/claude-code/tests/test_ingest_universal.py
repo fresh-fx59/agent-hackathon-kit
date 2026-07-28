@@ -1,6 +1,6 @@
 import os, sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # for `logalyzer` when verify.sh runs this file standalone
-import unittest, tempfile, json, gzip, io, os as _os, zipfile
+import unittest, unittest.mock, tempfile, json, gzip, io, os as _os, zipfile
 from datetime import datetime, timezone
 from pathlib import Path
 from contextlib import redirect_stdout
@@ -98,6 +98,40 @@ class TestSingleFileAndDirectoryWalk(unittest.TestCase):
         self.assertNotIn("huge.log", refs)
         reasons = {s["file"]: s["reason"] for s in stats["skipped"]}
         self.assertIn("huge.log", reasons)
+
+    def test_hidden_path_components_skipped_from_walk(self):
+        git_dir = self.root / ".git"
+        git_dir.mkdir()
+        (git_dir / "HEAD").write_text("ref: refs/heads/main\n", encoding="utf-8")
+        (git_dir / "config").write_text("[core]\n\trepositoryformatversion = 0\n", encoding="utf-8")
+        (self.root / "real.log").write_text(
+            "2026-07-28T10:00:00.000Z INFO svc.Logger - fine\n", encoding="utf-8")
+        recs, stats = read_all_with_stats(self.root, self.masker)
+        refs = {r.source_ref for r in recs}
+        self.assertEqual(refs, {"real.log"})
+        # not ingested AND not listed per-file (not even as a visible skip --
+        # hidden paths are not "logs of an unknown format", just not logs).
+        self.assertNotIn("HEAD", stats["files"])
+        self.assertNotIn("config", stats["files"])
+        self.assertFalse(any(s["file"] in ("HEAD", "config") for s in stats["skipped"]))
+
+    def test_gz_decompressed_size_cap_skips_with_reason(self):
+        import logalyzer.ingest as ingest_mod
+        # Highly repetitive payload: compresses to a tiny on-disk size but
+        # decompresses to well over a small patched cap -- proves the check
+        # is on decompressed bytes, not the compressed file size.
+        payload = "x" * 20000 + "\n"
+        gz_path = self.root / "bomb.jsonl.gz"
+        with gzip.open(gz_path, "wt", encoding="utf-8") as f:
+            f.write(payload)
+        self.assertLess(gz_path.stat().st_size, 1000)  # sanity: passes the on-disk pre-check
+        with unittest.mock.patch.object(ingest_mod, "_MAX_FILE_BYTES", 1000):
+            recs, stats = read_all_with_stats(self.root, self.masker)
+        refs = {r.source_ref for r in recs}
+        self.assertNotIn("bomb.jsonl.gz", refs)
+        reasons = {s["file"]: s["reason"] for s in stats["skipped"]}
+        self.assertIn("bomb.jsonl.gz", reasons)
+        self.assertIn("decompressed", reasons["bomb.jsonl.gz"].lower())
 
     def test_stats_dict_shape(self):
         (self.root / "a.log").write_text(
