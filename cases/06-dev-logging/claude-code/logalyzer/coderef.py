@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 
 _MARKERS_FILES = ("pom.xml", "build.gradle", "pyproject.toml", "requirements.txt")
@@ -67,3 +68,65 @@ def _clarification(suggestions):
         "suggestions": [str(s) for s in suggestions],
         "how_to_answer": "повторите команду с --repo <путь> или с --mode ops",
     }
+
+_METHOD_SIG = re.compile(
+    r"^\s*(?:public|private|protected)\s+[\w<>\[\],\s]+\s+(\w+)\s*\([^)]*\)\s*\{?\s*$")
+
+def extract_identifiers(bundle):
+    exceptions, loggers = [], []
+    for it in bundle.items:
+        r = it["record"]
+        exc = r.attrs.get("exception_type")
+        if exc and exc not in exceptions: exceptions.append(exc)
+        for m in re.finditer(r"\b([A-Z]\w+Exception)\b", r.body):
+            if m.group(1) not in exceptions: exceptions.append(m.group(1))
+        lg = r.attrs.get("logger")
+        if lg and lg not in loggers: loggers.append(lg)
+    return {"exceptions": exceptions, "loggers": loggers}
+
+def _enclosing_method(lines, catch_idx):
+    for i in range(catch_idx, -1, -1):
+        m = _METHOD_SIG.match(lines[i])
+        if m: return m.group(1)
+    return ""
+
+def locate(identifiers, repos):
+    refs = []
+    for repo in repos:
+        repo = Path(repo)
+        for java in sorted(repo.rglob("*.java")):
+            text = java.read_text(encoding="utf-8", errors="replace")
+            lines = text.splitlines()
+            for exc in identifiers["exceptions"]:
+                for i, ln in enumerate(lines):
+                    if re.search(r"catch\s*\(\s*%s\b" % re.escape(exc), ln):
+                        refs.append({
+                            "file": str(java.relative_to(repo.parent)),
+                            "method": _enclosing_method(lines, i),
+                            "line": i + 1,
+                            "reason": "catch(%s)" % exc,
+                            "confidence": "high"})
+            for lg in identifiers["loggers"]:
+                cls = lg.rsplit(".", 1)[-1]
+                if java.stem == cls and not any(r2["file"] == str(java.relative_to(repo.parent))
+                                                for r2 in refs):
+                    refs.append({"file": str(java.relative_to(repo.parent)),
+                                 "method": "", "line": 0,
+                                 "reason": "logger %s" % lg, "confidence": "medium"})
+    refs.sort(key=lambda r: 0 if r["confidence"] == "high" else 1)
+    return refs
+
+def gate(coderefs, repos):
+    kept, rejected = [], 0
+    for ref in coderefs:
+        ok = False
+        for repo in repos:
+            p = Path(repo).parent / ref["file"]
+            if p.is_file():
+                if not ref["method"] or ref["method"] in p.read_text(
+                        encoding="utf-8", errors="replace"):
+                    ok = True
+                break
+        if ok: kept.append(ref)
+        else: rejected += 1
+    return kept, rejected
