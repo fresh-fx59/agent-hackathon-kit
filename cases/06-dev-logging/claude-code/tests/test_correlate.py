@@ -33,5 +33,11 @@ class TestCorrelate(unittest.TestCase):
         self.assertEqual(b.by_id(hits[0]["id"])["record"].attrs["exception_type"],
                          "ReservationTimeoutException")
 
+    def test_empty_correlation_id_returns_empty(self):
+        tl = related(RECORDS, "")
+        self.assertEqual(len(tl), 0)
+        tl_none = related(RECORDS, None)
+        self.assertEqual(len(tl_none), 0)
+
 if __name__ == "__main__":
     unittest.main()

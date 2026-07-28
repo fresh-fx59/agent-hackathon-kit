@@ -1,4 +1,6 @@
 def related(records, correlation_id):
+    if not correlation_id:
+        return []
     seed = [r for r in records if r.correlation_id == correlation_id
             or r.trace_id == correlation_id]
     ids = set()
