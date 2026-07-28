@@ -1,0 +1,76 @@
+{
+  "version": "1.0.0",
+  "rules": [
+    {
+      "id": "R-ORD-001",
+      "name": "Оплата авторизована, но заказ переведён в FAILED (нарушение инварианта И-1)",
+      "status": "active",
+      "severity": "critical",
+      "owner": "team-case06",
+      "scope": {"services": ["order-service", "payment-service", "kafka"]},
+      "condition": {
+        "sequence": [
+          {"body_regex": "PaymentAuthorized|payment AUTHORIZED"},
+          {"service": "order-service", "level": "ERROR", "body_regex": "marking order as FAILED|order .*FAILED"}
+        ],
+        "within_ms": 30000
+      },
+      "hypothesis": "Таймаут резервирования склада обработан как терминальная ошибка: заказ помечен FAILED после успешной авторизации платежа, компенсация платежа не запущена.",
+      "invariant_ref": "И-1",
+      "suggested_fix_ref": "FIX-ORD-001",
+      "created_from_case": null
+    },
+    {
+      "id": "R-INV-001",
+      "name": "Резервирование завершилось после отключения клиента (orphaned reservation)",
+      "status": "active",
+      "severity": "major",
+      "owner": "team-case06",
+      "scope": {"services": ["inventory-service"]},
+      "condition": {
+        "all_of": [
+          {"service": "inventory-service", "attr": "client_disconnected"}
+        ]
+      },
+      "hypothesis": "inventory-service завершил резервирование после того, как клиент отключился по таймауту: резерв повисает без released/компенсации — утечка стока.",
+      "invariant_ref": "И-2",
+      "suggested_fix_ref": "FIX-INV-001",
+      "created_from_case": null
+    },
+    {
+      "id": "R-ORD-002",
+      "name": "Клиентский таймаут ниже фактической латентности зависимости",
+      "status": "active",
+      "severity": "major",
+      "owner": "team-case06",
+      "scope": {"services": ["order-service"]},
+      "condition": {
+        "all_of": [
+          {"service": "order-service", "body_regex": "(?i)read timed? ?out|SocketTimeoutException"}
+        ]
+      },
+      "hypothesis": "Таймаут вызова inventory (2000ms) ниже наблюдаемой латентности сервиса под нагрузкой; каждый вызов при деградации обречён на таймаут.",
+      "invariant_ref": null,
+      "suggested_fix_ref": "FIX-ORD-002",
+      "created_from_case": null
+    },
+    {
+      "id": "R-NOTIF-001",
+      "name": "SMTP-сбой: уведомление потеряно без ретрая (из стартового пакета организаторов)",
+      "status": "quarantined",
+      "severity": "major",
+      "owner": "organizers-starter-pack",
+      "scope": {"services": ["notification-service"]},
+      "condition": {
+        "all_of": [
+          {"service": "notification-service", "body_regex": "(?i)smtp.*timeout|delivery failed"}
+        ]
+      },
+      "hypothesis": "Уведомление потеряно: SMTP-таймаут, offset закоммичен, ретрая нет.",
+      "invariant_ref": null,
+      "suggested_fix_ref": "FIX-NOTIF-001",
+      "created_from_case": null,
+      "quarantine_note": "В карантине для честности TC-03: второй инцидент должен решаться через knowledge layer, а не готовым правилом (см. спек §Self-learning)."
+    }
+  ]
+}
