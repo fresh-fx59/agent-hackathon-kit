@@ -146,12 +146,36 @@ anything else.
 
 **Keep, rewritten format-agnostic** (≈ 400 LOC total):
 
-| Component | Job | Why it cannot be the model |
-|---|---|---|
-| **Reduction** (`sherlock/slice.py`) | Get the right few thousand lines in front of the model | 256k context vs GB corpora |
-| **Claim checker** (`sherlock/verify.py`) | Re-read every cited `file:line` and code symbol from disk before it is printed | A model cannot verify its own quote — re-reading is the same fallible channel |
-| **Run ledger** (`sherlock/ledger.py`) | Append-only record of every investigation | Code appends facts; a model narrating "that took 40 s" is guessing |
-| **Case memory** (`sherlock/cases.py`) | Save and retrieve past investigations | Storage is not a reasoning task |
+| Component | Job | Why it cannot be the model | Evidence |
+|---|---|---|---|
+| **`logcover`** | Enumerate every file (following into `.gz`, grouping rotated siblings into one logical stream); track what the session actually touched; **refuse to emit a report while any file is untouched** | The cost of *not* opening a file is invisible from inside the run — the model cannot know what it didn't see | recall 100 % → 73 % → 18 % on identical corpus+model, delta almost entirely explained by which files were opened |
+| **`logstat`** | Grouped distributions + changepoints, `--group-by auto`, reporting whether a shift is SHARED across groups or SPECIFIC to one — **and emitting the group-bys that showed no shift** | Arithmetic over millions of rows, and the negative result is the load-bearing part | the only absence that made a run *overturn a correct root cause* rather than merely miss one |
+| **`logts`** | Normalize timestamps to UTC with a confidence flag; declarative `--tz` / `--skew`; flag out-of-window records instead of silently including them | Seven encodings coexist (ISO, BSD syslog, epoch millis/float-secs/micros, dmesg monotonic, explicit offset); failures are silent and invert causality | naive fabricated a 2 h offset and simultaneously held two contradictory time models |
+| **`logjoin`** | Canonicalize id spellings into one key; **answer `absent X --expected-in Y`** | An absence across five id spellings in four formats is not answerable by grepping | D05's decisive evidence is an entity that *does not appear* where it must |
+| **Run ledger** | Append-only record of every investigation | Code appends facts; a model narrating "that took 40 s" is guessing | A2/A4 metrics are unmeasurable without it |
+| **Case memory** | Save and retrieve past investigations | Storage is not a reasoning task | TC-03 |
+
+**Explicitly NOT built — measured, not assumed:**
+
+- **A citation checker.** 79/79 cited `file:line:quote` assertions verified verbatim, across
+  Cyrillic, ANSI escapes, JSON-escaped Go frames and CRI-wrapped records. Zero hallucinated
+  lines, zero off-by-N. *(This reverses an earlier draft of this spec, which made the claim
+  checker the centrepiece. The evidence killed it.)*
+- **Per-format parsers and severity dictionaries.** 100 % recall on the bespoke pipe-delimited
+  format — including correctly ordering an invented severity vocabulary (`ALARM`/`FATALITY`
+  above `WARN`) with no schema — and 100 % on the Russian-language log.
+- **A rules/regex engine over log text.** Every planted decoy defeats it:
+  `grep -E 'ERROR|FATAL'` returns 1 substring hit in the promo log and 0 in the Russian log,
+  while `nginx/error.log` offers 15,132 "errors" of which 2 matter.
+- **Correlation by id equality.** Five spellings of one id did not stop either capable run.
+
+**What *is* fabricated — and the actual defense.** Not quotes: *relationships*. One run
+asserted "the surviving pods were exactly 10.42.12.31/.33"; grepping every non-gz file for any
+pod-name↔IP co-occurrence returns **zero hits corpus-wide** — the edge was invented to bridge
+two real citations. Hence `logentity` (rank 5): a relationship store that answers
+`EXISTS` / `DOES-NOT-EXIST-IN-CORPUS` with explicit nulls, so an unsupported join is refused
+rather than narrated. Build it if I3 lands early; it is the highest-value item after the top
+four.
 
 **Demoted to a checkbox, done last**: masking. It appears exactly twice in the requirements —
 `acceptance_criteria.md` A4 (1 of ~22) and `requirements.md` R3.5, which literally says
@@ -245,8 +269,8 @@ what exists still demos. Times are elapsed-from-now.
 |---|---|---|---|
 | **I0** | 0:00–0:45 | `qwen login`; `SKILL.md` → `.qwen/skills/sherlock/`; one headless run on one real dataset; `verify.sh` one-liner | Qwen Coder produces an RCA on a real log file. **Nothing else starts until this is green.** |
 | **I1** | 0:45–2:45 | **Sherlock skill, zero tools.** SKILL.md = the investigation procedure + output contract (RU). Eval: 6 datasets from the real testset, skill vs no-skill | Skill beats bare baseline on the A/B. **This is the pitch.** |
-| **I2** | 2:45–5:00 | `sherlock map` + `slice` (reduction) | Finds ≥1 defect in the 649 MB corpus that I1 missed; every answer under token budget |
-| **I3** | 5:00–6:30 | `sherlock verify` + run ledger | Hallucinated citations → 0 on the eval set; `runs.jsonl` populated |
+| **I2** | 2:45–5:00 | **`logcover`** — coverage ledger + report gate | Recall on the 649 MB corpus rises toward the 100 % ceiling; no report emitted with untouched files |
+| **I3** | 5:00–6:30 | **`logstat`** + run ledger | Reproduces the SHARED-vs-SPECIFIC discrimination that the fan-out run got wrong; `runs.jsonl` populated |
 | **I4** | 6:30–8:00 | `sherlock case save/find` — self-learning | Incident #2 resolves faster than #1, measured from the ledger (acceptance A2) |
 | **I5** | 8:00–9:30 | Checkbox sweep: MCP server exposing the 6 required tool names, mermaid workflows, README, report redaction, second adapter if time | `acceptance_criteria.md` A3/A4 boxes tick |
 | **I6** | 9:30–11:00 | Demo script, pitch, MTTR baseline, freeze | Demo runs twice, cold, without the operator touching a keyboard |
