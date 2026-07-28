@@ -134,7 +134,13 @@ def read_all(root, masker):
         if p.is_file() and p.suffix in (".log", ".jsonl", ".txt", ".json"):
             try:
                 out.extend(read_source(p, masker))
-            except Exception:
-                # Skip files that can't be read; other files in the directory still get processed
-                pass
+            except Exception as e:
+                # A file that can't be read must not vanish silently: surface
+                # one visible unparsed record naming the failure (exception
+                # class only, never the raw message, which could leak paths
+                # or content). Other files in the directory still get processed.
+                out.append(NormalizedRecord(
+                    timestamp="", service=_service_from_name(p), level="UNKNOWN",
+                    body="ingest error: %s" % type(e).__name__,
+                    source_ref=p.name, source_line=0, parse_quality="unparsed"))
     return out

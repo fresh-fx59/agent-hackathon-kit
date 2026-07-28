@@ -12,6 +12,22 @@ from logalyzer.runlog import RunLog
 
 _CASE_DIR = Path(__file__).resolve().parents[1]
 
+# A bare `.git` directory alone is enough for coderef.is_code_dir (used for
+# explicit --repo validation, whose semantics stay unchanged), but it is NOT
+# enough to silently auto-adopt cwd as the repo: that would bypass the
+# clarification handshake for any ordinary git clone with no code in it yet.
+# Auto-adopt requires an actual code marker.
+_AUTO_ADOPT_MARKER_FILES = ("pom.xml", "build.gradle", "pyproject.toml", "requirements.txt")
+_AUTO_ADOPT_MARKER_DIRS = ("src", "services")
+
+def _has_non_git_marker(p):
+    p = Path(p)
+    try:
+        return (any((p / f).is_file() for f in _AUTO_ADOPT_MARKER_FILES)
+                or any((p / d).is_dir() for d in _AUTO_ADOPT_MARKER_DIRS))
+    except OSError:
+        return False
+
 def _arg(argv, name, default=None):
     if name in argv:
         return argv[argv.index(name) + 1]
@@ -48,8 +64,9 @@ def cmd_investigate(argv):
     case_dir = Path(_arg(argv, "--case-dir", str(_CASE_DIR)))
     suggest_from = Path(_arg(argv, "--suggest-from", "."))
     repos = [Path(p) for p in _args_multi(argv, "--repo") if is_code_dir(Path(p))]
-    if not repos and mode_arg == "auto" and is_code_dir(Path.cwd()):
+    if not repos and mode_arg == "auto" and is_code_dir(Path.cwd()) and _has_non_git_marker(Path.cwd()):
         repos = [Path.cwd()]
+        print("auto-adopted repo: %s" % Path.cwd())
     mode, clar = resolve_mode(mode_arg, repos, suggest_repos(suggest_from))
     if mode == "ask":
         print(json.dumps(clar, ensure_ascii=False, indent=2))
