@@ -1,15 +1,17 @@
-import json, time
+import json, re, time
+from datetime import timedelta
 from pathlib import Path
 from logalyzer.masking import Masker
 from logalyzer.ingest import read_all_with_stats
-from logalyzer.correlate import related
+from logalyzer.correlate import related, related_window
 from logalyzer.evidence import EvidenceBundle
 from logalyzer.rules_engine import load_rules, evaluate
 from logalyzer.coderef import (is_code_dir, suggest_repos, resolve_mode,
                                extract_identifiers, locate, gate)
 from logalyzer.report import build, render_ru
 from logalyzer.runlog import RunLog
-from logalyzer.formats import FormatStore, validate_descriptor, top_skeletons
+from logalyzer.formats import (FormatStore, validate_descriptor, top_skeletons,
+                               parse_iso_dt, format_utc_iso)
 
 _INFERENCE_INSTRUCTIONS = (
     "For each entry in 'files': derive a format descriptor JSON "
@@ -59,6 +61,19 @@ def _arg(argv, name, default=None):
 
 def _args_multi(argv, name):
     return [argv[i + 1] for i, a in enumerate(argv) if a == name]
+
+_DURATION_RX = re.compile(r"^(\d+(?:\.\d+)?)(s|m|h)$")
+_DURATION_MULT = {"s": 1.0, "m": 60.0, "h": 3600.0}
+_DEFAULT_WINDOW = "5m"
+
+def _parse_duration_seconds(value):
+    """Parse a duration like '5m', '90s', '1h' (Normalization v2's
+    --around/--window) into seconds. Returns None on anything else --
+    callers turn that into a usage error, not a crash."""
+    m = _DURATION_RX.match((value or "").strip())
+    if not m:
+        return None
+    return float(m.group(1)) * _DURATION_MULT[m.group(2)]
 
 def _unresolved_needs_inference(ingest_stats):
     """CRITICAL 1 safety net: a fingerprint already present in FormatStore
@@ -144,10 +159,79 @@ def cmd_register_format(argv):
                      ensure_ascii=False, indent=2))
     return 0
 
+def _resolve_correlation_basis(argv):
+    """Normalization v2 -- time-frame correlation (IDs optional): validate
+    and resolve exactly one correlation basis from argv. Returns
+    (error_message_or_None, corr, since, until, service). error_message is
+    a ready-to-print usage-error string (caller returns exit 2 on it); on
+    success it is None and `corr` xor (`since` and `until`) is set --
+    `since`/`until` are already canonicalized UTC ISO strings when the
+    basis is a time window."""
+    corr = _arg(argv, "--correlation-id")
+    since_arg = _arg(argv, "--since")
+    until_arg = _arg(argv, "--until")
+    around_arg = _arg(argv, "--around")
+    window_arg = _arg(argv, "--window")
+    service = _arg(argv, "--service")
+
+    if bool(since_arg) != bool(until_arg):
+        return ("--since and --until must be given together", corr, None, None, service)
+    since_until_given = bool(since_arg) and bool(until_arg)
+
+    if window_arg and not around_arg:
+        return ("--window requires --around", corr, None, None, service)
+
+    if around_arg and since_until_given:
+        return ("specify either --since/--until or --around/--window, not both",
+                corr, None, None, service)
+
+    window_basis_given = since_until_given or bool(around_arg)
+    basis_count = (1 if corr else 0) + (1 if window_basis_given else 0)
+    if basis_count == 0:
+        return ("exactly one correlation basis required: --correlation-id, "
+                "or --since/--until, or --around/--window", corr, None, None, service)
+    if basis_count == 2:
+        return ("exactly one correlation basis allowed: got both --correlation-id "
+                "and a time window (--since/--until or --around/--window)",
+                corr, None, None, service)
+
+    if not window_basis_given:
+        return (None, corr, None, None, service)  # correlation_id basis
+
+    if since_until_given:
+        since_raw, until_raw = since_arg, until_arg
+    else:
+        dur_seconds = _parse_duration_seconds(window_arg or _DEFAULT_WINDOW)
+        if dur_seconds is None:
+            return ("invalid --window duration %r (expected e.g. 5m, 90s, 1h)" %
+                    (window_arg,), corr, None, None, service)
+        try:
+            center = parse_iso_dt(around_arg)
+        except (ValueError, TypeError) as e:
+            return ("invalid --around timestamp %r: %s" % (around_arg, e),
+                    corr, None, None, service)
+        half = timedelta(seconds=dur_seconds / 2.0)
+        since_raw = format_utc_iso(center - half)
+        until_raw = format_utc_iso(center + half)
+
+    try:
+        since_dt = parse_iso_dt(since_raw)
+        until_dt = parse_iso_dt(until_raw)
+    except (ValueError, TypeError) as e:
+        return ("invalid --since/--until timestamp: %s" % e, corr, None, None, service)
+    if since_dt > until_dt:
+        return ("--since must not be after --until", corr, None, None, service)
+    return (None, corr, format_utc_iso(since_dt), format_utc_iso(until_dt), service)
+
 def cmd_investigate(argv):
-    logs, corr = _arg(argv, "--logs"), _arg(argv, "--correlation-id")
-    if not logs or not corr:
-        print("--logs and --correlation-id required"); return 2
+    logs = _arg(argv, "--logs")
+    if not logs:
+        print("--logs required"); return 2
+    err, corr, since, until, service = _resolve_correlation_basis(argv)
+    if err:
+        print(err); return 2
+    window_basis = since is not None  # equivalently: until is not None
+
     mode_arg = _arg(argv, "--mode", "auto")
     out = Path(_arg(argv, "--out", "report.json"))
     md_path = _arg(argv, "--md")
@@ -167,7 +251,12 @@ def cmd_investigate(argv):
     recs, ingest_stats = read_all_with_stats(Path(logs), masker)
     stages = {"ingest_ms": int((time.monotonic() - t) * 1000)}
     t = time.monotonic()
-    bundle = EvidenceBundle.build(related(recs, corr))
+    if window_basis:
+        windowed, excluded_no_ts = related_window(recs, since, until, service)
+        bundle = EvidenceBundle.build(windowed)
+    else:
+        excluded_no_ts = 0
+        bundle = EvidenceBundle.build(related(recs, corr))
     stages["correlate_ms"] = int((time.monotonic() - t) * 1000)
 
     # Normalization v2: exit-4 inference handshake. Only when the files that
@@ -200,7 +289,27 @@ def cmd_investigate(argv):
         kept, rejected = gate(refs, repos)
         stages["coderef_ms"] = int((time.monotonic() - t) * 1000)
         rl.event("coderef", kept=len(kept), rejected=rejected)
-    rep = build(matches, bundle, kept, mode, {"correlation_id": corr})
+
+    # Normalization v2: correlation_basis discloses HOW the timeline was
+    # selected -- an id-based join (related()) or a time window
+    # (related_window()) -- so the report never silently reads as if it
+    # always came from a correlation_id. See report.render_ru's header.
+    if window_basis:
+        basis = {"kind": "time_window", "since": since, "until": until}
+        if service:
+            basis["service"] = service
+        basis["excluded_no_ts"] = excluded_no_ts
+    else:
+        basis = {"kind": "correlation_id", "correlation_id": corr, "excluded_no_ts": 0}
+    rep = build(matches, bundle, kept, mode,
+               {"correlation_id": corr or "", "correlation_basis": basis})
+    if window_basis:
+        rep["limitations"].append(
+            "Отбор записей для таймлайна выполнен по временному окну %s .. %s%s "
+            "(без correlation_id); записей без разбираемой метки времени "
+            "исключено из окна: %d." % (
+                since, until, (", сервис `%s`" % service) if service else "",
+                excluded_no_ts))
     if needs_inf:
         rep["limitations"].append(
             "Часть файлов не удалось разобрать штатными эвристиками (%s) -- "
@@ -212,7 +321,8 @@ def cmd_investigate(argv):
     if md_path:
         Path(md_path).write_text(render_ru(rep), encoding="utf-8")
     unparsed = sum(1 for r in recs if r.parse_quality == "unparsed")
-    rl.summary(cmd="investigate", correlation_id=corr, mode=mode,
+    rl.summary(cmd="investigate", correlation_id=corr or "", mode=mode,
+               correlation_basis=basis["kind"],
                rules_matched=[m["rule_id"] for m in matches],
                coderefs_kept=len(kept), coderefs_rejected=rejected,
                records_total=len(recs), records_unparsed=unparsed,

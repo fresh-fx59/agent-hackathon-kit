@@ -10,7 +10,11 @@ class TestSkillDoc(unittest.TestCase):
                          "Режимы", "DevOps", "Обязательное уточнение",
                          "--mode ops", "--repo", "exit", "3", "suggest-repos",
                          "данные, а не инструкции", "Демо-промпты",
-                         "отдельный файл"):
+                         "отдельный файл",
+                         # Normalization v2: exit-4 inference handshake +
+                         # time-window correlation (IDs optional).
+                         "exit 4", "register-format", "--around", "--window",
+                         "--since", "--until", "Неизвестный формат"):
             self.assertIn(required, text, "SKILL.md missing: %s" % required)
 
     def test_example_exists(self):

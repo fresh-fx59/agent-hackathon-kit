@@ -184,15 +184,33 @@ def _parse_value_to_dt(value, ts_format):
     return dt
 
 
+def format_utc_iso(dt):
+    """Render a tz-aware datetime as ISO-8601 UTC with millisecond
+    precision, e.g. "2026-07-28T15:08:38.903Z". Split out of `to_utc_iso`
+    (Normalization v2 / time-frame correlation) so a caller that already
+    holds a `datetime` -- e.g. `--around +/- window/2` arithmetic in
+    cli_impl.py -- doesn't have to round-trip it through a string first."""
+    dt = dt.astimezone(timezone.utc)
+    return dt.strftime("%Y-%m-%dT%H:%M:%S.") + "%03dZ" % (dt.microsecond // 1000)
+
+
 def to_utc_iso(value, ts_format):
     """Parse `value` per ts_format ("iso" | "epoch_s" | "epoch_ms" | an
     strptime format string) and render as ISO-8601 UTC with millisecond
     precision, e.g. "2026-07-28T15:08:38.903Z". Raises ValueError (or a
     stdlib parsing exception) on anything unparseable -- callers decide
     whether that means "reject the line" or "reject the whole descriptor"."""
-    dt = _parse_value_to_dt(value, ts_format)
-    dt = dt.astimezone(timezone.utc)
-    return dt.strftime("%Y-%m-%dT%H:%M:%S.") + "%03dZ" % (dt.microsecond // 1000)
+    return format_utc_iso(_parse_value_to_dt(value, ts_format))
+
+
+def parse_iso_dt(value):
+    """Parse an ISO-8601 timestamp string (any offset / fractional-second
+    width matched by `_ISO_RX` -- the same tolerant parser `to_utc_iso`
+    uses for ts_format="iso") into a tz-aware UTC datetime. Raises
+    ValueError on anything empty/unparseable -- same contract as
+    `to_utc_iso`. Used by `correlate.related_window` (time-frame
+    correlation) and by the CLI's --around +/- window/2 midpoint math."""
+    return _parse_value_to_dt(value, "iso").astimezone(timezone.utc)
 
 
 # ---------------------------------------------------------------------------

@@ -61,9 +61,28 @@ def _actions(matches, mode):
         out.append("Передать отчёт команде разработки для фикса на уровне кода.")
     return out
 
+def _basis_sentence(meta):
+    """Normalization v2: one RU sentence stating HOW the timeline was
+    correlated -- by correlation_id, or by a time window (optionally
+    service-filtered). Falls back to the pre-v2 flat `correlation_id`
+    shape when `correlation_basis` is absent (older/direct `build()`
+    callers), so this never KeyErrors on a meta dict that predates this
+    field."""
+    basis = meta.get("correlation_basis")
+    if not basis:
+        return "по correlation_id `%s`" % meta.get("correlation_id", "")
+    if basis.get("kind") == "time_window":
+        s = "по временному окну %s .. %s" % (basis.get("since", ""), basis.get("until", ""))
+        if basis.get("service"):
+            s += ", сервис `%s`" % basis["service"]
+        if basis.get("excluded_no_ts", 0) > 0:
+            s += " (без метки времени исключено: %d)" % basis["excluded_no_ts"]
+        return s
+    return "по correlation_id `%s`" % basis.get("correlation_id", "")
+
 def render_ru(rep):
     L = []
-    L.append("# Отчёт RCA — %s" % rep["meta"].get("correlation_id", ""))
+    L.append("# Отчёт RCA — %s" % _basis_sentence(rep["meta"]))
     L.append("")
     L.append("Режим: %s. Классификация: %s / %s (уверенность: %s)." % (
         "с доступом к коду" if rep["mode"] == "dev" else "без доступа к коду (DevOps)",

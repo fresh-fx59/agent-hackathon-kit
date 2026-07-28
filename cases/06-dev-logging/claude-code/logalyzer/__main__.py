@@ -8,10 +8,16 @@ commands:
                                                           blocked -- always inline,
                                                           exit 0)
   suggest-repos    [--from <path>]                       find candidate code dirs
-  investigate      --logs <dir|zip> --correlation-id <id>
-                   [--repo <path>]... [--mode auto|dev|ops]
+  investigate      --logs <dir|zip>
+                   (--correlation-id <id> | --since <ISO> --until <ISO> |
+                    --around <ISO> [--window <dur>])
+                   [--service <name>] [--repo <path>]... [--mode auto|dev|ops]
                    [--out report.json] [--md report.ru.md]
-                   exit codes: 0 ok, 2 bad args, 3 needs --mode/--repo (ask),
+                   correlation basis is exactly ONE of the three forms above;
+                   --window duration like 5m/90s/1h, default 5m; --service
+                   filters the time-window forms only (Normalization v2)
+                   exit codes: 0 ok, 2 bad args (incl. zero or 2+ correlation
+                               bases given), 3 needs --mode/--repo (ask),
                                4 an unrecognized log format left the timeline
                                  empty -- format_inference_needed JSON on
                                  stdout (fingerprint + masked sample lines +
