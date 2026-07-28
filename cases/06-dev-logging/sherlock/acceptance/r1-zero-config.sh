@@ -60,8 +60,12 @@ PROMPT="Слушай, у нас что-то странное творится с
 
 echo "  asking: «Слушай, у нас что-то странное творится с сервером… Глянешь?»"
 START=$(date +%s)
+# --approval-mode yolo: without it, run_shell_command is DENIED in headless -p mode
+# (verified 2026-07-28), so the model cannot grep/sed/zcat — the very tools the skill's
+# procedure is built on. An interactive engineer has shell; the test must match reality.
 ( cd "$W" && timeout "$TIMEOUT" "$QWEN" --auth-type openai --model "$MODEL" \
     --openai-base-url "$BASE_URL" --openai-api-key "$SHERLOCK_API_KEY" \
+    --approval-mode yolo \
     -p "$PROMPT" --output-format json </dev/null ) >"$W/out.json" 2>"$W/err.txt"
 ELAPSED=$(( $(date +%s) - START ))
 [ -s "$W/out.json" ] || { red "no output"; sed -n '1,10p' "$W/err.txt"; exit 1; }
@@ -78,6 +82,13 @@ if final is None or final.get("is_error"):
     print("\033[31m✗ run failed: %s\033[0m" % ((final or {}).get("error") or "no result record"))
     sys.exit(1)
 t = final.get("result") or ""
+
+# A provider failure is NOT a measurement. qwen reports some upstream errors as a
+# successful result whose text is "[API Error: 400 ...]" — recording those as data
+# poisoned our ledger once already.
+if t.lstrip().startswith("[API Error") or ("[API Error" in t and len(t) < 400):
+    print("\033[31m✗ provider error, not a result — re-run:\033[0m %s" % t[:200])
+    sys.exit(2)
 
 # THE GATE IS CORRECTNESS, NOT FORMATTING.
 # Measured 2026-07-28: with no skill this model looked at a genuinely compromised
