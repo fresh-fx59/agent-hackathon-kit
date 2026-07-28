@@ -1,83 +1,72 @@
-# agent-hackathon-kit
+# Sherlock — анализ логов и поиск причин инцидентов
 
-> **Кратко по-русски:** это набор для подготовки к 24-часовому корпоративному
-> хакатону по трекам PDLC (аналитика / разработка / тестирование). Внутри —
-> репетиционная среда: локальные моки корпоративных систем (трекер, анализатор
-> качества, git-платформа, TMS), MCP-серверы поверх них, шаблоны skill.md по
-> трекам, три прогонных кейса с бенчмарками и сжатый SDD-процесс на 24 часа.
-> Всё на чистом Python ≥3.9 без единой внешней зависимости — заводится в любой
-> закрытой корпоративной среде командой `python3`. Стратегия и планы — в
-> `docs/` (по-русски), инженерные справочники — по-английски.
+Навык для **Qwen Coder CLI**, который по логам находит корневую причину и
+предлагает решение. Работает с логами **любого формата, любого размера, на любом
+языке** — включая форматы, которые никто заранее не описывал.
 
-A rehearsal environment plus reusable primitives for **PDLC-track agent
-hackathons**: the kind where the organizers provide pre-built "core agents"
-(analytics / development / testing) and teams win by shipping the artifacts
-that make those agents useful on a real case — **MCP tools, skill.md files,
-supporting components, and worked examples** — judged against benchmarks.
+## Установка — один шаг
 
-All three known example cases share one pipeline shape:
-
-```
-unstructured input  →  skill-driven analysis  →  structured artifact
-                    →  MCP write into a corporate system
-                    →  benchmark vs a manual baseline
-```
-
-This kit ships that pipeline end-to-end per track, runnable against local
-mocks, so on case-announcement day only the case-specific edges change.
-
-## Quickstart (3 commands)
+Скопируй папку навыка туда, где Qwen Coder ищет навыки:
 
 ```bash
-git clone https://github.com/fresh-fx59/agent-hackathon-kit.git && cd agent-hackathon-kit
-bash scripts/verify.sh        # full self-check: tests, mock boot, MCP smoke, benchmark self-tests
-python3 mocks/run_all.py      # start all 4 corporate-system mocks (Ctrl-C to stop)
+cp -r cases/06-dev-logging/sherlock/skills/v1 ~/.qwen/skills/log-rca
 ```
 
-Requirements: Python ≥ 3.9. **Nothing else.** No pip, no venv, no Node.
+Всё. Больше ничего настраивать не нужно: ни переменных окружения, ни ключей, ни
+конфигов, ни MCP-серверов, ни установки пакетов.
 
-## Repo map
+Проверить:
 
-| Path | What it is |
-|------|------------|
-| `docs/` | Strategy, 24h playbook, case-intake worksheet, MCP cheatsheet, transfer & collaboration guides |
-| `tracks/` | Per-track `skill.md` prompts (RU): analytics (meeting→BR), development (tech-debt), testing (smart regression) |
-| `sdd/` | Compressed 24h spec-driven-development flow + RU templates (spec / plan / tasks) |
-| `mcp/` | `lib/minimcp.py` stdlib MCP stdio micro-framework + 4 servers (`tracker`, `quality`, `forge`, `tms`) + client config examples |
-| `mocks/` | Local stand-ins for corporate systems: tracker :8801 (Jira-like), quality :8802 (SonarQube-like), forge :8803 (GitLab-like), tms :8804 |
-| `cases/` | Three rehearsal cases with inputs, expected artifacts, and scoring `benchmark.py` (each has `--self-test`) |
-| `scripts/` | `verify.sh` (full self-check), `run_mocks.sh`, `bootstrap.sh` (env sanity) |
+```
+qwen
+> у меня упал сервис, логи в ./logs — разберись что случилось
+```
 
-## Where to read next
+## Как пользоваться
 
-- Hackathon facts & unknowns → [`docs/brief.md`](docs/brief.md) (RU)
-- How to pick a track and win on benchmarks → [`docs/strategy.md`](docs/strategy.md) (RU)
-- Official judging criteria (mentors + jury, sanitized) → [`docs/judging-criteria.md`](docs/judging-criteria.md) (RU)
-- Hour-by-hour plan for a team of 2 → [`docs/playbook-24h.md`](docs/playbook-24h.md) (RU)
-- First 60 minutes after the case drops → [`docs/case-intake.md`](docs/case-intake.md) (RU)
-- MCP on one page + debugging → [`docs/mcp-cheatsheet.md`](docs/mcp-cheatsheet.md) (EN)
-- Moving into the corporate environment → [`docs/transfer.md`](docs/transfer.md) (EN)
-- 2-person git flow → [`docs/collaboration.md`](docs/collaboration.md) (EN)
-- Jenkins / messenger-bot / design-export patterns → [`docs/integrations.md`](docs/integrations.md) (EN)
-- The technical contracts (ports, API shapes, schemas) → [`docs/design.md`](docs/design.md) (EN)
-- Full corporate SDD starter (commands, skills, slides, RU) — the companion
-  repo → [fresh-fx59/corp-sdd](https://github.com/fresh-fx59/corp-sdd)
+Навык срабатывает сам, когда речь заходит о логах или об инциденте. Примеры:
 
-## Transfer to a restricted corporate environment — checklist
+- «Заказ упал в FAILED, логи в `logs/` — найди причину и место в коде.»
+- «Вот дамп за ночь (`logs.tar.gz`) — почему деградировал прод?»
+- «Тут journald с хоста, кто-то ломится по SSH? Что делать?»
+- «Разбери инцидент по correlation_id `c-8f3a2b91`, код в `./repo`.»
 
-The target environment can **pull from public GitHub but never push**, and its
-package situation is unknown. The kit is built for exactly that:
+Он сам составит карту корпуса, сузит поиск, прочитает нужные строки, проверит
+гипотезы и выдаст отчёт с цитатами `файл:строка`.
 
-- [ ] `git clone` / `git pull` from this public repo inside the corporate env
-      (one-way sync by design — see [`docs/transfer.md`](docs/transfer.md)).
-- [ ] Run `bash scripts/bootstrap.sh` — confirms `python3 >= 3.9` and prints next steps.
-- [ ] Run `bash scripts/verify.sh` — if it passes, everything works: the kit is
-      **stdlib-only**, so there is nothing to install and nothing to break.
-- [ ] Point MCP servers at real systems via env vars (`TRACKER_URL`,
-      `QUALITY_URL`, `FORGE_URL`, `TMS_URL`) — no code changes needed.
-- [ ] Adapt auth: real systems need tokens/headers; the mocks need none.
-      Grep for `urllib` call sites and add the header in one place.
+## Почему это работает без парсеров
 
-## License
+Модель читает Envoy access log, BSD syslog без года, logcat, zap JSON, Java
+stacktrace и самописный формат чьей-то команды одинаково хорошо. Писать под
+каждый формат парсер — бесконечная работа, которая всё равно ломается на
+следующем незнакомом формате.
 
-MIT — see [LICENSE](LICENSE).
+Измерено на корпусе 649 МБ / 4,26 млн строк / 26 форматов: **100 % найденных
+дефектов** при чтении 0,09 % корпуса, включая самописный pipe-формат с
+выдуманным словарём уровней (`ALARM`/`FATALITY` выше `WARN`) и лог на русском
+языке — без единой строки парсера.
+
+Ограничение — не формат, а **покрытие**: на одном и том же корпусе и одной
+модели результат менялся 100 % → 73 % → 18 % только из-за того, какие файлы
+агент открыл. Поэтому в навыке есть отдельная дисциплина покрытия.
+
+## Что внутри
+
+```
+cases/06-dev-logging/
+├── 06-dev-logging.md         постановка задачи от организаторов
+├── petstore_input_pack.zip   их же входные данные
+├── docs/specs/               дизайн решения и доказательная база
+└── sherlock/
+    ├── skills/v1/SKILL.md    сам навык — это и есть продукт
+    ├── verify.sh             проверка, что навык работает в реальном Qwen Coder
+    └── eval/                 замеры: baseline vs версии навыка
+```
+
+## Замеры
+
+`eval/run.sh <каталог-логов> <none|v1|v2>` — один замер, дописывается в
+`eval/runs.jsonl` (arm, turns, время, токены, покрытие файлов, ссылки на строки).
+`arm=none` — та же модель без навыка, это baseline.
+
+`eval/batch.sh none v1` — матрица по датасетам.
