@@ -65,18 +65,39 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--key", required=True)
     ap.add_argument("--dataset")
+    ap.add_argument("--ledger", default=os.path.join(HERE, "runs.jsonl"),
+                    help="run ledger to score (default eval/runs.jsonl; the 649MB "
+                         "benchmark keeps its own at eval/bench/runs-bench.jsonl)")
     args = ap.parse_args()
 
     key = json.load(open(args.key, encoding="utf-8"))
     defects = key if isinstance(key, list) else key.get("defects", [])
+
+    # The key deliberately plants RED HERRINGS (D12, D13): things that look like the
+    # cause but are not. They must NOT be in the recall denominator — "missing" a red
+    # herring is correct behaviour — and reporting one is a false positive.
+    def is_herring(d):
+        blob = "%s %s" % (d.get("title", ""), d.get("description", ""))
+        return bool(d.get("red_herring")) or "RED HERRING" in blob.upper()
+
+    real     = [d for d in defects if not is_herring(d)]
+    herrings = [d for d in defects if is_herring(d)]
+    total = len(real)
+
     key_text = "\n".join(
         "- %s: %s | root cause: %s" % (d.get("id"), d.get("title", "")[:200],
                                        (d.get("root_cause") or d.get("description", ""))[:300])
-        for d in defects)
-    total = len(defects)
+        for d in real)
+    if herrings:
+        key_text += ("\n\nЛОВУШКИ (red herrings) — НЕ являются дефектами. Если отчёт "
+                     "называет любую из них причиной, это ложное срабатывание:\n" +
+                     "\n".join("- %s: %s" % (d.get("id"), d.get("title", "")[:160])
+                               for d in herrings))
+    print("answer key: %d real defects + %d red herrings (denominator = %d)"
+          % (total, len(herrings), total))
 
     latest = {}
-    for line in open(os.path.join(HERE, "runs.jsonl"), encoding="utf-8"):
+    for line in open(args.ledger, encoding="utf-8"):
         line = line.strip()
         if not line:
             continue

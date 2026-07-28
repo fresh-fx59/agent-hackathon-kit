@@ -44,12 +44,27 @@ trap 'rm -rf "$RUN_DIR"' EXIT
 export QWEN_HOME="$RUN_DIR/qwen-home"
 mkdir -p "$QWEN_HOME"
 
-ARGS=(--auth-type openai --model "$MODEL"
-      --openai-base-url "$BASE_URL" --openai-api-key "$SHERLOCK_API_KEY")
+# --approval-mode yolo is REQUIRED and applies to BOTH arms. Without it, headless
+# `-p` mode denies run_shell_command ("Matching deny rule: run_shell_command"), so
+# the model cannot run grep/sed/zcat/wc — the very tools SKILL.md's procedure is
+# built on — and every .gz dataset is unreadable for structural reasons that have
+# nothing to do with the skill. Verified 2026-07-28 against the real CLI:
+# with the flag, `zcat pg_vacuums.log.gz | wc -l` returns 32405; without it, refused.
+#
+# The API key and base URL are passed via the ENVIRONMENT, never on argv: argv is
+# world-readable in `ps` for the whole run, and this box has a provisioned guest
+# account. Verified: qwen honours OPENAI_API_KEY / OPENAI_BASE_URL.
+ARGS=(--auth-type openai --model "$MODEL" --approval-mode yolo)
+export QWEN_CODE_SUPPRESS_YOLO_WARNING=1
 
 if [ "$ARM" = "none" ]; then
   # BASELINE: no skill, no context files, no hooks, no MCP. Bare model + its own tools.
-  ARGS+=(--safe-mode)
+  # NOTE: --safe-mode was here until 2026-07-28 and made the A/B invalid — in
+  # qwen 0.21 it also blocks file reads outside the workspace, so every baseline
+  # run answered "нет доступа к каталогу" instead of analysing anything. That
+  # measured the sandbox, not the absence of the skill. Isolation is already
+  # provided by QWEN_HOME above; both arms must get identical tool permissions.
+  :
 else
   SRC="$HERE/skills/$ARM"
   [ -f "$SRC/SKILL.md" ] || { echo "✗ no skill at $SRC/SKILL.md" >&2; exit 1; }
@@ -64,7 +79,8 @@ PROMPT="Проанализируй логи в каталоге $DATASET. Най
 
 echo "▶ $DS_NAME / arm=$LABEL / $MODEL"
 START=$(date +%s)
-( cd "$RUN_DIR" && timeout "$TIMEOUT" "$QWEN" "${ARGS[@]}" \
+( cd "$RUN_DIR" && OPENAI_API_KEY="$SHERLOCK_API_KEY" OPENAI_BASE_URL="$BASE_URL" \
+    timeout "$TIMEOUT" "$QWEN" "${ARGS[@]}" \
     -p "$PROMPT" --output-format json </dev/null ) >"$RUN_DIR/out.json" 2>"$RUN_DIR/err.txt"
 RC=$?
 ELAPSED=$(( $(date +%s) - START ))
@@ -86,6 +102,16 @@ if final.get("is_error"):
 
 text = final.get("result") or ""
 u = final.get("usage") or {}
+
+# HARD GUARD: a failed run is NOT a measurement.
+# qwen reports some provider failures as a successful record whose "result" is the
+# error text, e.g. "[API Error: 400 Error from provider (Console Go): Upstream
+# request failed ...]" or a context-window abort. Two such rows landed in the
+# ledger on 2026-07-28 and polluted the aggregates. Refuse to record them; the
+# caller re-runs the cell instead.
+if re.match(r"^\s*\[API Error", text) or ("[API Error" in text and len(text) < 2000):
+    print("  ✗ RUN FAILED — provider/runtime error, NOT recorded: %s" % text[:200].replace("\n", " "))
+    sys.exit(1)
 
 # distinct source files actually cited — a coverage proxy, the dominant recall term
 corpus = {f for f in os.listdir(dataset)} if os.path.isdir(dataset) else set()
