@@ -157,10 +157,19 @@ anything else.
 
 **Explicitly NOT built — measured, not assumed:**
 
-- **A citation checker.** 79/79 cited `file:line:quote` assertions verified verbatim, across
-  Cyrillic, ANSI escapes, JSON-escaped Go frames and CRI-wrapped records. Zero hallucinated
-  lines, zero off-by-N. *(This reverses an earlier draft of this spec, which made the claim
-  checker the centrepiece. The evidence killed it.)*
+- ~~**A citation checker.**~~ **REINSTATED 2026-07-28 (late) — the kill was model-specific.**
+  The 79/79 verbatim-verified citations were measured on a *strong* model. On the corporate
+  model `[SP]deepseek-v4-flash`, citations are **misattributed**: a run cited
+  `Linux_2k.log:106` as evidence for a `session opened for user test` claim; line 106 is an
+  authentication-failure line, and the 36 real occurrences are at lines 92, 585, 586, 587…
+  (verified independently by re-reading the file). The line number is real, the file is real,
+  and the content is wrong — which is the most dangerous shape of all, because it survives
+  any range-check.
+  So a checker **is** required, and it must compare **content**, not just that the line
+  exists: re-read the cited line and substring-match the quoted text; drop or flag on
+  mismatch. Cheap (~40 LOC), format-agnostic, and it is the difference between evidence and
+  decoration. Lesson recorded: *do not generalise a capability finding across model tiers* —
+  the weaker the model, the more the deterministic guard earns its keep.
 - **Per-format parsers and severity dictionaries.** 100 % recall on the bespoke pipe-delimited
   format — including correctly ordering an invented severity vocabulary (`ALARM`/`FATALITY`
   above `WARN`) with no schema — and 100 % on the Russian-language log.
