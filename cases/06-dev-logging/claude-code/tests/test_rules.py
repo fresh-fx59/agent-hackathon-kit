@@ -44,5 +44,30 @@ class TestRules(unittest.TestCase):
         ])
         self.assertNotIn("R-NOTIF-001", [m["rule_id"] for m in evaluate(self.catalog, b)])
 
+    def test_windowed_rule_rejects_timestamps_beyond_window(self):
+        """Well-formed timestamps 40s apart exceed 30s window; R-ORD-001 must NOT fire."""
+        b = EvidenceBundle.build([
+            rec("2026-07-15T11:22:03.410Z", "kafka", "INFO", "PaymentAuthorized {...}"),
+            rec("2026-07-15T11:22:43.410Z", "order-service", "ERROR",
+                "reservation failed, marking order as FAILED"),
+        ])
+        self.assertNotIn("R-ORD-001", [m["rule_id"] for m in evaluate(self.catalog, b)])
+
+    def test_windowed_rule_rejects_unparseable_timestamp_in_sequence(self):
+        """Second element with empty/unparseable timestamp in windowed rule; R-ORD-001 must NOT fire."""
+        b = EvidenceBundle.build([
+            rec("2026-07-15T11:22:03.410Z", "kafka", "INFO", "PaymentAuthorized {...}"),
+            rec("", "order-service", "ERROR", "marking order as FAILED"),
+        ])
+        self.assertNotIn("R-ORD-001", [m["rule_id"] for m in evaluate(self.catalog, b)])
+
+    def test_unwindowed_rule_accepts_empty_timestamps(self):
+        """all_of rule (no window) with empty-timestamp items; R-INV-001 must fire."""
+        b = EvidenceBundle.build([
+            rec("", "inventory-service", "INFO", "processing", client_disconnected=True),
+        ])
+        ids = [m["rule_id"] for m in evaluate(self.catalog, b)]
+        self.assertIn("R-INV-001", ids)
+
 if __name__ == "__main__":
     unittest.main()

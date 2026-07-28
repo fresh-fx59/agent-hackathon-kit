@@ -62,6 +62,7 @@ def _eval_sequence(cond, bundle):
     """
     Evaluate sequence condition: matchers must match in order within time window.
     Returns list of evidence IDs if sequence matches, None otherwise.
+    Windowed rules (within_ms set) only fire on fully-timestamped chains.
     """
     seq = cond["sequence"]
     window_ms = cond.get("within_ms")
@@ -81,13 +82,24 @@ def _eval_sequence(cond, bundle):
 
             # For first match, record start time
             if idx == 0:
+                # If window_ms is set and this item's timestamp is unparseable,
+                # skip it and keep looking for a first element with valid timestamp
+                if window_ms is not None and t is None:
+                    continue
                 start_ts = t
             # For subsequent matches, check time window
-            elif window_ms is not None and start_ts and t:
-                elapsed_ms = (t - start_ts).total_seconds() * 1000
-                if elapsed_ms > window_ms:
-                    # Outside window, don't consume this item
+            else:
+                # If window_ms is set, the item must have a parseable timestamp
+                if window_ms is not None and t is None:
+                    # Unparseable timestamp in windowed rule: skip this item
                     continue
+
+                # Check time window (only if start_ts and t are both valid)
+                if window_ms is not None and start_ts is not None and t is not None:
+                    elapsed_ms = (t - start_ts).total_seconds() * 1000
+                    if elapsed_ms > window_ms:
+                        # Outside window, don't consume this item
+                        continue
 
             hits.append(item["id"])
             idx += 1
