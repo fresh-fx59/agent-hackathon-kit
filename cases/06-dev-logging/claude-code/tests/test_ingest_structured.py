@@ -96,17 +96,29 @@ class TestStructured(unittest.TestCase):
         self.assertGreaterEqual(len(kafka), 2)
 
     def test_zip_with_symlink_entry_skipped(self):
-        """ZIP with symlink entry should skip it safely."""
+        """ZIP with symlink entry (suffix-bearing name) should not be extracted."""
+        from logalyzer.ingest import _safe_extract
+
         zpath = self.root / "pack_symlink.zip"
         with zipfile.ZipFile(zpath, "w") as z:
-            z.writestr("logs/kafka_events.jsonl", KAFKA)
-            # Create a ZipInfo with symlink mode bit
-            symlink_info = zipfile.ZipInfo("link_to_evil")
+            z.writestr("logs/normal.jsonl", KAFKA)
+            # Create a ZipInfo with symlink mode bit and suffix-bearing name
+            symlink_info = zipfile.ZipInfo("evil-link.log")
             symlink_info.external_attr = (stat.S_IFLNK | 0o777) << 16
             z.writestr(symlink_info, "target")
-        recs = read_all(zpath, Masker())
-        kafka = [r for r in recs if r.service == "kafka"]
-        self.assertEqual(len(kafka), 2)
+
+        # Extract to a temp directory and verify filesystem state
+        extract_dir = tempfile.TemporaryDirectory()
+        try:
+            _safe_extract(zpath, extract_dir.name)
+            # Symlink should NOT be extracted
+            self.assertFalse((Path(extract_dir.name) / "evil-link.log").exists(),
+                           "Symlink entry should not be extracted")
+            # Normal file SHOULD be extracted
+            self.assertTrue((Path(extract_dir.name) / "logs" / "normal.jsonl").exists(),
+                          "Normal file should be extracted")
+        finally:
+            extract_dir.cleanup()
 
 if __name__ == "__main__":
     unittest.main()
