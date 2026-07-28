@@ -52,6 +52,7 @@ Requirements: Python ≥ 3.9. **Nothing else.** No pip, no venv, no Node.
 
 - Hackathon facts & unknowns → [`docs/brief.md`](docs/brief.md) (RU)
 - How to pick a track and win on benchmarks → [`docs/strategy.md`](docs/strategy.md) (RU)
+- Official judging criteria (mentors + jury, sanitized) → [`docs/judging-criteria.md`](docs/judging-criteria.md) (RU)
 - Hour-by-hour plan for a team of 2 → [`docs/playbook-24h.md`](docs/playbook-24h.md) (RU)
 - First 60 minutes after the case drops → [`docs/case-intake.md`](docs/case-intake.md) (RU)
 - MCP on one page + debugging → [`docs/mcp-cheatsheet.md`](docs/mcp-cheatsheet.md) (EN)
