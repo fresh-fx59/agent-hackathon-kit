@@ -136,16 +136,22 @@ class TestStructured(unittest.TestCase):
     def test_unreadable_file_yields_visible_unparsed_record(self):
         """Finding 2: a file that fails to ingest must not vanish silently —
         it surfaces as exactly one unparsed record naming the failure, and
-        other files in the directory still get processed."""
+        other files in the directory still get processed.
+
+        Patches `_parse_lines` (not `read_source`): Normalization v2 made
+        `_ingest_one_file` read a file's lines once and call `_parse_lines`
+        directly for both the gz and non-gz paths (previously non-gz files
+        went through `read_source`, which re-read the file a second time
+        internally) -- `_parse_lines` is the shared seam post-refactor."""
         (self.root / "broken.log").write_text("irrelevant", encoding="utf-8")
-        real_read_source = ingest_mod.read_source
+        real_parse_lines = ingest_mod._parse_lines
 
-        def flaky(path, masker, service_hint=""):
-            if path.name == "broken.log":
+        def flaky(lines, hint, ref, masker):
+            if ref == "broken.log":
                 raise OSError("simulated unreadable file")
-            return real_read_source(path, masker, service_hint)
+            return real_parse_lines(lines, hint, ref, masker)
 
-        with unittest.mock.patch.object(ingest_mod, "read_source", side_effect=flaky):
+        with unittest.mock.patch.object(ingest_mod, "_parse_lines", side_effect=flaky):
             recs = ingest_mod.read_all(self.root, Masker())
         broken = [r for r in recs if r.source_ref == "broken.log"]
         self.assertEqual(len(broken), 1)

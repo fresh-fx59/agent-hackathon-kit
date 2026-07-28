@@ -1,7 +1,7 @@
 import json, time
 from pathlib import Path
 from logalyzer.masking import Masker
-from logalyzer.ingest import read_all, read_all_with_stats
+from logalyzer.ingest import read_all_with_stats
 from logalyzer.correlate import related
 from logalyzer.evidence import EvidenceBundle
 from logalyzer.rules_engine import load_rules, evaluate
@@ -9,6 +9,14 @@ from logalyzer.coderef import (is_code_dir, suggest_repos, resolve_mode,
                                extract_identifiers, locate, gate)
 from logalyzer.report import build, render_ru
 from logalyzer.runlog import RunLog
+from logalyzer.formats import FormatStore, validate_descriptor, top_skeletons
+
+_INFERENCE_INSTRUCTIONS = (
+    "Derive a format descriptor JSON {line_regex (a Python regex with named "
+    "groups: 'ts' required, optional level/service/logger/msg/thread), "
+    "ts_format (an strptime format string, or \"iso\"/\"epoch_s\"/\"epoch_ms\")}, "
+    "save it to a file, then run: python3 -m logalyzer register-format "
+    "<descriptor.json> --fingerprint <fp> --sample <sample_file>")
 
 _CASE_DIR = Path(__file__).resolve().parents[1]
 
@@ -50,9 +58,58 @@ def cmd_stats(argv):
     for r in recs:
         by_service[r.service] = by_service.get(r.service, 0) + 1
         if r.parse_quality == "unparsed": unparsed += 1
+    # Normalization v2: needs_inference always prints inline here (stats
+    # never exits non-zero over it -- only `investigate` can exit 4, and
+    # only when the affected files would leave the timeline empty).
     print(json.dumps({"records_total": len(recs), "unparsed": unparsed,
                       "by_service": by_service,
-                      "files": stats["files"], "skipped": stats["skipped"]},
+                      "files": stats["files"], "skipped": stats["skipped"],
+                      "needs_inference": stats.get("needs_inference", [])},
+                     ensure_ascii=False, indent=2))
+    return 0
+
+def cmd_register_format(argv):
+    if not argv or argv[0].startswith("--"):
+        print("usage: register-format <descriptor.json> --fingerprint <fp> "
+             "(--sample <file> | --sample-from-stats <stats.json>)")
+        return 2
+    descriptor_path = Path(argv[0])
+    rest = argv[1:]
+    fp = _arg(rest, "--fingerprint")
+    sample_path = _arg(rest, "--sample")
+    sample_from_stats = _arg(rest, "--sample-from-stats")
+    if not fp:
+        print("--fingerprint required"); return 2
+    if not sample_path and not sample_from_stats:
+        print("--sample or --sample-from-stats required"); return 2
+    try:
+        descriptor = json.loads(descriptor_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as e:
+        print("cannot read descriptor %s: %s" % (descriptor_path, e)); return 1
+    if sample_path:
+        try:
+            sample_lines = Path(sample_path).read_text(encoding="utf-8").splitlines()
+        except OSError as e:
+            print("cannot read sample %s: %s" % (sample_path, e)); return 1
+    else:
+        try:
+            stats_doc = json.loads(Path(sample_from_stats).read_text(encoding="utf-8"))
+        except (OSError, ValueError) as e:
+            print("cannot read stats %s: %s" % (sample_from_stats, e)); return 1
+        entry = next((e for e in stats_doc.get("needs_inference", [])
+                     if e.get("fingerprint") == fp), None)
+        if not entry:
+            print("no needs_inference entry for fingerprint %s in %s" %
+                 (fp, sample_from_stats))
+            return 1
+        sample_lines = entry.get("sample_lines", [])
+    ok, hit_rates, reason = validate_descriptor(descriptor, sample_lines)
+    if not ok:
+        print(json.dumps({"ok": False, "fingerprint": fp, "reason": reason,
+                          "hit_rates": hit_rates}, ensure_ascii=False, indent=2))
+        return 1
+    FormatStore().save(fp, descriptor, hit_rates, top_skeletons(sample_lines))
+    print(json.dumps({"ok": True, "fingerprint": fp, "hit_rates": hit_rates},
                      ensure_ascii=False, indent=2))
     return 0
 
@@ -74,13 +131,31 @@ def cmd_investigate(argv):
         print(json.dumps(clar, ensure_ascii=False, indent=2))
         return 3
 
-    rl = RunLog(case_dir, argv)
-    stages = {}
-    t = time.monotonic(); masker = Masker()
-    recs = read_all(Path(logs), masker); stages["ingest_ms"] = int((time.monotonic() - t) * 1000)
+    masker = Masker()
+    t = time.monotonic()
+    recs, ingest_stats = read_all_with_stats(Path(logs), masker)
+    stages = {"ingest_ms": int((time.monotonic() - t) * 1000)}
     t = time.monotonic()
     bundle = EvidenceBundle.build(related(recs, corr))
     stages["correlate_ms"] = int((time.monotonic() - t) * 1000)
+
+    # Normalization v2: exit-4 inference handshake. Only when the files that
+    # need inference are the REASON the timeline is empty -- if other files
+    # already parsed cleanly and produced evidence for this correlation id,
+    # proceed normally (the needs_inference files just get a limitations
+    # note below) rather than blocking a perfectly good investigation.
+    needs_inf = ingest_stats.get("needs_inference", [])
+    if needs_inf and not bundle.items:
+        payload = {
+            "action": "format_inference_needed",
+            "files": [{"file": f["file"], "fingerprint": f["fingerprint"],
+                      "sample_lines": f["sample_lines"]} for f in needs_inf],
+            "instructions": _INFERENCE_INSTRUCTIONS,
+        }
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+        return 4
+
+    rl = RunLog(case_dir, argv)
     t = time.monotonic()
     catalog = load_rules(_CASE_DIR / "rules" / "rules.json")
     matches = evaluate(catalog, bundle)
@@ -95,6 +170,13 @@ def cmd_investigate(argv):
         stages["coderef_ms"] = int((time.monotonic() - t) * 1000)
         rl.event("coderef", kept=len(kept), rejected=rejected)
     rep = build(matches, bundle, kept, mode, {"correlation_id": corr})
+    if needs_inf:
+        rep["limitations"].append(
+            "Часть файлов не удалось разобрать штатными эвристиками (%s) -- "
+            "доказательная база по ним может быть неполной; обучите формат "
+            "через `register-format` (fingerprint: %s)." % (
+                ", ".join(f["file"] for f in needs_inf),
+                ", ".join(f["fingerprint"] for f in needs_inf)))
     out.write_text(json.dumps(rep, ensure_ascii=False, indent=2), encoding="utf-8")
     if md_path:
         Path(md_path).write_text(render_ru(rep), encoding="utf-8")

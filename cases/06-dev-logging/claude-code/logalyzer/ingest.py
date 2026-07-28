@@ -8,7 +8,40 @@ _DOMAIN_KEYS = ("order_id", "payment_id", "auth_id", "reservation_id", "sku", "u
 _PLAIN = re.compile(
     r"^(?P<date>\d{4}-\d{2}-\d{2})[ T](?P<time>\d{2}:\d{2}:\d{2}[.,]\d{3})"
     r"\s+\[(?P<thread>[^\]]+)\]\s+(?P<level>[A-Z]+)\s+(?P<logger>\S+)\s+[-—]\s+(?P<msg>.*)$")
+# Kept exactly as-is for the logback `_PLAIN` structured-reader path (byte-
+# identical on the pack). The newer generic-parser fallback below uses the
+# broader, key-name-agnostic `discover_domain_ids` instead (Normalization v2).
 _INLINE_ID = re.compile(r"\b(auth_id|order_id|reservation_id|sku|user_id)[=:]\s?([A-Za-z0-9._-]+)")
+
+# ---------------------------------------------------------------------------
+# Generic ID discovery (Normalization v2) -- replaces a hardcoded key list
+# for the generic-parser fallback: UUIDs, any `*_id[=:]value`/`Id:value`
+# style pair (key name kept as found), and bare hex runs >= 8 chars (must
+# contain an actual a-f letter, or a plain numeric id would get mislabeled
+# "hex"). Alternation order matters for finditer's per-position first-match:
+# UUID (most specific shape) before the generic key=value form, before the
+# bare-hex fallback.
+# ---------------------------------------------------------------------------
+_ID_UUID = r"(?P<uuid>[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})"
+_ID_KEYVAL = r"\b(?P<idkey>\w*_?[Ii]d)[=:]\s?(?P<idval>[\w-]+)"
+_ID_HEX = r"\b(?=[0-9a-fA-F]*[a-fA-F])(?P<hexid>[0-9a-fA-F]{8,})\b"
+_ID_DISCOVERY = re.compile("|".join([_ID_UUID, _ID_KEYVAL, _ID_HEX]))
+
+
+def discover_domain_ids(raw):
+    """Scan `raw` for UUIDs, `<key>_id=value`-style pairs, and bare hex runs
+    (>=8 chars, real hex -- at least one a-f letter). Key = the key name
+    found as-is (no hardcoded allow-list), or "uuid"/"hex" for the other two
+    shapes. First occurrence per key wins (deterministic, left-to-right)."""
+    out = {}
+    for m in _ID_DISCOVERY.finditer(raw):
+        if m.group("uuid"):
+            out.setdefault("uuid", m.group("uuid"))
+        elif m.group("idkey"):
+            out[m.group("idkey")] = m.group("idval")
+        elif m.group("hexid"):
+            out.setdefault("hex", m.group("hexid"))
+    return out
 
 def _service_from_name(path):
     stem = Path(path).name
@@ -72,41 +105,55 @@ def _read_jsonl(lines, service_hint, ref, masker):
 # log, not just the pack's logback dialect. Timestamp bank tried in order:
 # ISO 8601, epoch-millis (13 digits), epoch-seconds (10 digits), syslog
 # month-name (BSD syslog has no year on the wire).
+#
+# Normalization v2: no `^` anchor -- `_generic_parse` now `.search()`es
+# these anywhere in the line (position remembered via `m.end()`), not just
+# at line start. Digit-run patterns keep a `(?<!\d)`/`(?!\d)` boundary on
+# both sides so a 13-digit epoch match can't be a substring of a longer
+# number; the syslog month name keeps a `\b` for the same reason.
 # ---------------------------------------------------------------------------
 _TS_ISO = re.compile(
-    r"^(?P<date>\d{4}-\d{2}-\d{2})[ T](?P<time>\d{2}:\d{2}:\d{2})[.,](?P<ms>\d{3})"
+    r"(?<!\d)(?P<date>\d{4}-\d{2}-\d{2})[ T](?P<time>\d{2}:\d{2}:\d{2})[.,](?P<ms>\d{3})"
     r"(?P<tz>Z|[+-]\d{2}:?\d{2})?")
-_TS_EPOCH_MS = re.compile(r"^(?P<epoch>\d{13})(?!\d)")
-_TS_EPOCH_S = re.compile(r"^(?P<epoch>\d{10})(?!\d)")
+_TS_EPOCH_MS = re.compile(r"(?<!\d)(?P<epoch>\d{13})(?!\d)")
+_TS_EPOCH_S = re.compile(r"(?<!\d)(?P<epoch>\d{10})(?!\d)")
 _MONTHS = {"Jan": 1, "Feb": 2, "Mar": 3, "Apr": 4, "May": 5, "Jun": 6,
            "Jul": 7, "Aug": 8, "Sep": 9, "Oct": 10, "Nov": 11, "Dec": 12}
 _TS_SYSLOG = re.compile(
-    r"^(?P<mon>Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)"
+    r"\b(?P<mon>Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)"
     r"\s+(?P<day>\d{1,2})\s+(?P<time>\d{2}:\d{2}:\d{2})")
 _GEN_THREAD = re.compile(r"^\s*\[(?P<thread>[^\]]+)\]")
 _GEN_LEVEL = re.compile(r"\b(TRACE|DEBUG|INFO|WARN|WARNING|ERROR|ERR|FATAL|SEVERE|CRITICAL)\b")
 _GEN_SEP = re.compile(r"\s[-—]\s|:\s")
 
 def _generic_parse(raw):
-    """Generic timestamp-anchored line parser -- the universal-ingest
+    """Generic timestamp-anywhere-in-the-line parser -- the universal-ingest
     fallback for text formats with no dedicated reader. Tried only after
     the logback `_PLAIN` regex has already failed on the line (see
     `_read_plaintext`), so the pack's existing byte-identical behavior is
     untouched: this function only ever fires on lines `_PLAIN` rejects.
 
+    Normalization v2 upgrade: the timestamp bank is searched ANYWHERE in the
+    line, not just at line start (`.search` instead of `.match`), so a
+    leading `[thread]` prefix or other framing before the timestamp no
+    longer forces a line into continuation-folding. The match end position
+    is what downstream level/logger/msg extraction anchors on, same as
+    before; a "no timestamp found anywhere" line is now the only kind that
+    is a continuation.
+
     Returns a dict {timestamp, level, logger, msg, quality} on a recognized
-    leading timestamp, or None when the line has none -- the caller then
-    treats it as a continuation of the previous record (multi-line folding)
-    instead of a new one.
+    timestamp, or None when the line has none -- the caller then treats it
+    as a continuation of the previous record (multi-line folding) instead
+    of a new one.
     """
-    m = _TS_ISO.match(raw)
+    m = _TS_ISO.search(raw)
     if m:
         ms = m.group("ms")
         tz = m.group("tz") or "Z"
         ts = "%sT%s.%s%s" % (m.group("date"), m.group("time"), ms, tz)
         end, ts_kind = m.end(), "iso"
     else:
-        m = _TS_EPOCH_MS.match(raw)
+        m = _TS_EPOCH_MS.search(raw)
         if m:
             epoch_ms = int(m.group("epoch"))
             seconds, millis = divmod(epoch_ms, 1000)
@@ -114,14 +161,14 @@ def _generic_parse(raw):
             ts = dt.strftime("%Y-%m-%dT%H:%M:%S.") + "%03dZ" % millis
             end, ts_kind = m.end(), "epoch"
         else:
-            m = _TS_EPOCH_S.match(raw)
+            m = _TS_EPOCH_S.search(raw)
             if m:
                 epoch_s = int(m.group("epoch"))
                 dt = datetime.fromtimestamp(epoch_s, tz=timezone.utc)
                 ts = dt.strftime("%Y-%m-%dT%H:%M:%S.000Z")
                 end, ts_kind = m.end(), "epoch"
             else:
-                m = _TS_SYSLOG.match(raw)
+                m = _TS_SYSLOG.search(raw)
                 if not m:
                     return None
                 mon = _MONTHS[m.group("mon")]
@@ -165,10 +212,54 @@ def _generic_parse(raw):
 _FOLD_CAP = 20
 _FOLD_TRUNC_MARKER = "… [truncated]"
 
+def _fold_continuation(raw, prev, fold_count, masker, service_hint, ref, lineno):
+    """Shared "unmatched line" handling, used by both the plaintext
+    heuristic parser (`_read_plaintext`) and `formats.apply_descriptor`
+    (Normalization v2) so a learned/descriptor-driven dialect folds
+    continuation lines with the exact same cap/behavior as the built-in
+    heuristic path. A line with no recognized structure folds into the
+    previous record's body (capped at _FOLD_CAP appended lines, with a
+    truncation marker emitted once); with no previous record yet, it
+    becomes its own standalone partial record instead.
+
+    Returns (new_record_or_None, new_fold_count). new_record_or_None is the
+    record the caller should append to its output list (and make the new
+    `prev`); None means the line was folded into the existing `prev` in
+    place (already mutated)."""
+    if prev is not None and fold_count < _FOLD_CAP:
+        masked, applied = masker.mask_with_flag(raw)
+        fold_count += 1
+        if fold_count == _FOLD_CAP:
+            prev.body += "\n" + masked + "\n" + _FOLD_TRUNC_MARKER
+        else:
+            prev.body += "\n" + masked
+        if applied:
+            prev.redaction_applied = True
+        return None, fold_count
+    if prev is not None:
+        # past the fold cap: still a continuation, silently absorbed
+        # (the truncation marker was already emitted once, above)
+        return None, fold_count
+
+    body, applied = masker.mask_with_flag(raw)
+    corr = _CORR.search(raw)
+    rec = NormalizedRecord(
+        timestamp="", service=service_hint, level="UNKNOWN", body=body,
+        correlation_id=corr.group(1) if corr else "",
+        source_ref=ref, source_line=lineno, parse_quality="partial",
+        redaction_applied=applied)
+    return rec, 0
+
 def _read_plaintext(lines, service_hint, ref, masker):
+    """Returns (records, plain_hits, generic_hits) -- the hit counts drive
+    the "logback" vs "heuristic" dialect label one level up (Normalization
+    v2's `_parse_plaintext_dialected`); the per-line parsing behavior below
+    is otherwise unchanged from the pre-v2 universal-ingest implementation."""
     out = []
     prev = None
     fold_count = 0
+    plain_hits = 0
+    generic_hits = 0
     for i, raw in enumerate(lines, 1):
         raw = raw.rstrip("\n")
         if not raw.strip(): continue
@@ -186,6 +277,7 @@ def _read_plaintext(lines, service_hint, ref, masker):
                 parse_quality="ok", redaction_applied=applied,
                 attrs={"logger": m.group("logger")})
             out.append(rec); prev = rec; fold_count = 0
+            plain_hits += 1
             continue
 
         # Only reached once the existing logback regex has rejected the
@@ -195,7 +287,7 @@ def _read_plaintext(lines, service_hint, ref, masker):
         if g is not None:
             body, applied = masker.mask_with_flag(g["msg"] if g["msg"] else raw)
             corr = _CORR.search(raw)
-            domain = {k: v for k, v in _INLINE_ID.findall(raw)}
+            domain = discover_domain_ids(raw)
             rec = NormalizedRecord(
                 timestamp=g["timestamp"], service=service_hint,
                 level=g["level"] or "UNKNOWN", body=body,
@@ -204,50 +296,55 @@ def _read_plaintext(lines, service_hint, ref, masker):
                 parse_quality=g["quality"], redaction_applied=applied,
                 attrs={"logger": g["logger"]} if g["logger"] else {})
             out.append(rec); prev = rec; fold_count = 0
+            generic_hits += 1
             continue
 
-        # No recognized leading timestamp at all (neither _PLAIN nor the
-        # generic bank): a continuation line -- Java stack traces, wrapped
-        # messages -- folds into the previous record's body instead of
-        # becoming a standalone UNKNOWN singleton. Capped at _FOLD_CAP
-        # appended lines per record to bound memory on runaway traces; a
-        # truncation marker is appended once when the cap is hit. Only
-        # when there is no previous record (start of file) does the line
-        # become its own standalone partial record -- same as the
-        # pre-folding fallback behavior.
-        if prev is not None and fold_count < _FOLD_CAP:
-            masked, applied = masker.mask_with_flag(raw)
-            fold_count += 1
-            if fold_count == _FOLD_CAP:
-                prev.body += "\n" + masked + "\n" + _FOLD_TRUNC_MARKER
-            else:
-                prev.body += "\n" + masked
-            if applied:
-                prev.redaction_applied = True
-            continue
-        if prev is not None:
-            # past the fold cap: still a continuation, silently absorbed
-            # (the truncation marker was already emitted once, above)
-            continue
-
-        body, applied = masker.mask_with_flag(raw)
-        corr = _CORR.search(raw)
-        rec = NormalizedRecord(
-            timestamp="", service=service_hint, level="UNKNOWN", body=body,
-            correlation_id=corr.group(1) if corr else "",
-            source_ref=ref, source_line=i, parse_quality="partial",
-            redaction_applied=applied)
-        out.append(rec); prev = rec; fold_count = 0
-    return out
+        # No recognized timestamp anywhere in the line (neither _PLAIN nor
+        # the generic bank): a continuation line -- Java stack traces,
+        # wrapped messages -- folds into the previous record's body instead
+        # of becoming a standalone UNKNOWN singleton (see
+        # `_fold_continuation` for the cap/truncation behavior).
+        newrec, fold_count = _fold_continuation(raw, prev, fold_count, masker,
+                                                service_hint, ref, i)
+        if newrec is not None:
+            out.append(newrec); prev = newrec
+    return out, plain_hits, generic_hits
 
 def _parse_lines(lines, hint, ref, masker):
     fmt = sniff_format(lines[:5], ref)
     if fmt == "jsonl":
         return fmt, _read_jsonl(lines, hint, ref, masker)
     if fmt == "plaintext":
-        return fmt, _read_plaintext(lines, hint, ref, masker)
+        return _parse_plaintext_dialected(lines, hint, ref, masker)
     from logalyzer.ingest_structured import read_structured
     return fmt, read_structured(fmt, lines, hint, ref, masker)
+
+def _parse_plaintext_dialected(lines, hint, ref, masker):
+    """Normalization v2 ingest order for a plaintext-sniffed file:
+    (a) learned-format cache hit (FormatStore, keyed by a fingerprint of
+        the first <=50 lines) -> apply_descriptor, deterministic, zero-LLM;
+    (b)+(c) else the existing logback `_PLAIN` / generic-parser waterfall
+        (`_read_plaintext`, unchanged -- byte-identical on lines the pack
+        already exercises).
+    Returns (dialect, records) where dialect is "learned:<fp>", "logback"
+    (any line matched the logback `_PLAIN` regex), or "heuristic" (only the
+    generic parser/folding fired) -- consumed by stats["files"][name]
+    ["format"], and by the (d) needs_inference check one level up in
+    `_ingest_one_file`.
+    """
+    # Local import: formats.py imports ingest-side helpers (the fold cap,
+    # _CORR, discover_domain_ids) at call time from inside apply_descriptor,
+    # so this edge must stay deferred too, or the two modules would form a
+    # circular import at load time.
+    from logalyzer import formats as _formats
+    fp = _formats.fingerprint(lines[:50])
+    learned = _formats.FormatStore().get(fp)
+    if learned is not None:
+        recs = _formats.apply_descriptor(learned["descriptor"], lines, hint, ref, masker)
+        return "learned:%s" % fp, recs
+    recs, plain_hits, _generic_hits = _read_plaintext(lines, hint, ref, masker)
+    dialect = "logback" if plain_hits > 0 else "heuristic"
+    return dialect, recs
 
 def read_source(path, masker, service_hint=""):
     path = Path(path)
@@ -315,16 +412,11 @@ def _read_gz_lines(p):
             chunks.append(chunk)
     return b"".join(chunks).decode("utf-8", errors="replace").splitlines()
 
-def _sniff_file_format(p):
-    """Cheap format sniff for stats display: reads only the first few lines
-    (not the whole file) so the 200MB size cap doesn't force a second full
-    read of a huge file just to label it."""
-    try:
-        with open(p, "r", encoding="utf-8", errors="replace") as f:
-            first_lines = [next(f, "") for _ in range(5)]
-    except OSError:
-        return "plaintext"
-    return sniff_format(first_lines, p.name)
+def _is_plaintext_dialect(fmt):
+    """True for any dialect label `_parse_plaintext_dialected` can produce
+    (Normalization v2) -- gates the (d) needs_inference check to plaintext
+    files only, never jsonl/kafka/k8s/trace/metrics/error."""
+    return fmt in ("logback", "heuristic") or fmt.startswith("learned:")
 
 def _ingest_one_file(p, masker, stats):
     """Classify + ingest ONE regular file found while walking --logs (a
@@ -351,13 +443,13 @@ def _ingest_one_file(p, masker, stats):
     if not is_gz and _looks_binary(p):
         stats["skipped"].append({"file": name, "reason": "binary file (null byte in first 8KB)"})
         return []
+    lines = []
     try:
         if is_gz:
             lines = _read_gz_lines(p)
-            fmt, recs = _parse_lines(lines, hint, name, masker)
         else:
-            fmt = _sniff_file_format(p)
-            recs = read_source(p, masker)
+            lines = p.read_text(encoding="utf-8", errors="replace").splitlines()
+        fmt, recs = _parse_lines(lines, hint, name, masker)
     except _DecompressedTooLarge as e:
         stats["skipped"].append({"file": name, "reason": str(e)})
         return []
@@ -375,8 +467,26 @@ def _ingest_one_file(p, masker, stats):
     for r in recs:
         if r.parse_quality in counts:
             counts[r.parse_quality] += 1
-    stats["files"][name] = {"format": fmt, "ok": counts["ok"],
-                            "partial": counts["partial"], "unparsed": counts["unparsed"]}
+    entry = {"format": fmt, "ok": counts["ok"],
+             "partial": counts["partial"], "unparsed": counts["unparsed"]}
+    # Normalization v2 (d): a plaintext-dialect file that mostly failed to
+    # parse cleanly needs an LLM-derived format descriptor, not silent
+    # UNKNOWN/partial records -- flag it (with a fingerprint + a masked
+    # sample) so the CLI can hand the driving agent the exit-4 handshake.
+    # Scoped to plaintext dialects only: a malformed jsonl/kafka/k8s file is
+    # a different problem (bad data, not an unknown line format) and the
+    # line_regex-based descriptor mechanism doesn't apply to it anyway.
+    if _is_plaintext_dialect(fmt):
+        total = counts["ok"] + counts["partial"] + counts["unparsed"]
+        if total and (counts["ok"] / total) < 0.30 and len(lines) >= 20:
+            from logalyzer import formats as _formats
+            fp = _formats.fingerprint(lines[:50])
+            sample = [masker.mask(ln) for ln in lines if ln.strip()][:20]
+            entry["needs_inference"] = True
+            entry["fingerprint"] = fp
+            stats.setdefault("needs_inference", []).append(
+                {"file": name, "fingerprint": fp, "sample_lines": sample})
+    stats["files"][name] = entry
     return recs
 
 def read_all_with_stats(root, masker):

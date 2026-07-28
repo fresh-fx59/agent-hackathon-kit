@@ -333,5 +333,205 @@ class TestCliAndStats(unittest.TestCase):
         self.assertTrue(any(s["file"] == "bin.dat" for s in payload["skipped"]))
 
 
+# ---------------------------------------------------------------------------
+# Normalization v2: FormatStore learned-cache ingest path + the exit-4
+# inference handshake (CLI level, via __main__.main). "Alien" dialect =
+# same mid-line-timestamp shape as the design doc's example
+# (`level=W ts=[28/Jul/2026 15:08:38.903] svc=inventory :: message text`),
+# unrecognizable by the built-in heuristic timestamp bank.
+# ---------------------------------------------------------------------------
+ALIEN_DESCRIPTOR = {
+    "line_regex": (r"^level=(?P<level>\w+)\s+ts=\[(?P<ts>[^\]]+)\]\s+svc=(?P<service>\S+)"
+                   r"\s+::\s+(?P<msg>.*)$"),
+    "ts_format": "%d/%b/%Y %H:%M:%S.%f",
+    "notes": "mid-line-timestamp custom dialect (design-doc example)",
+}
+_ALIEN_LEVELS = ["INFO", "WARN", "ERROR", "INFO"]
+_ALIEN_MSGS = ["reservation queue backing up", "reservation completed successfully",
+              "reservation timed out", "compensating reserve released"]
+
+def _alien_lines(n=24):
+    out = []
+    for i in range(n):
+        lvl = _ALIEN_LEVELS[i % len(_ALIEN_LEVELS)]
+        msg = _ALIEN_MSGS[i % len(_ALIEN_MSGS)]
+        out.append("level=%s ts=[28/Jul/2026 15:%02d:%02d.%03d] svc=inventory :: %s" %
+                   (lvl, 8 + (i // 60), i % 60, (i * 7) % 1000, msg))
+    return out
+
+
+class TestLearnedFormatCache(unittest.TestCase):
+    """Ingest cache-hit path: a pre-learned descriptor makes a file of that
+    dialect parse via apply_descriptor (dialect label "learned:<fp>"),
+    never touching needs_inference."""
+
+    def setUp(self):
+        self.store_dir = tempfile.TemporaryDirectory()
+        self.env_patcher = unittest.mock.patch.dict(
+            os.environ, {"LOGALYZER_FORMATS_DIR": self.store_dir.name})
+        self.env_patcher.start()
+        self.dir = tempfile.TemporaryDirectory()
+        self.root = Path(self.dir.name)
+
+    def tearDown(self):
+        self.env_patcher.stop()
+        self.store_dir.cleanup()
+        self.dir.cleanup()
+
+    def test_cache_hit_parses_via_learned_descriptor_no_needs_inference(self):
+        from logalyzer.formats import fingerprint, FormatStore, validate_descriptor
+        lines = _alien_lines(24)
+        fp = fingerprint(lines[:50])
+        ok, hit_rates, reason = validate_descriptor(ALIEN_DESCRIPTOR, lines)
+        self.assertTrue(ok, reason)
+        FormatStore().save(fp, ALIEN_DESCRIPTOR, hit_rates, [])
+        (self.root / "weird.log").write_text("\n".join(lines) + "\n", encoding="utf-8")
+        recs, stats = read_all_with_stats(self.root, Masker())
+        self.assertEqual(stats["files"]["weird.log"]["format"], "learned:%s" % fp)
+        self.assertNotIn("needs_inference", stats["files"]["weird.log"])
+        self.assertEqual(stats.get("needs_inference", []), [])
+        self.assertEqual(stats["files"]["weird.log"]["ok"], 24)
+        self.assertEqual(recs[0].service, "inventory")
+
+
+class TestExitFourHandshake(unittest.TestCase):
+    """CLI-level exit-4 inference handshake + register-format round trip."""
+
+    def setUp(self):
+        self.store_dir = tempfile.TemporaryDirectory()
+        self.env_patcher = unittest.mock.patch.dict(
+            os.environ, {"LOGALYZER_FORMATS_DIR": self.store_dir.name})
+        self.env_patcher.start()
+        self.dir = tempfile.TemporaryDirectory()
+        self.root = Path(self.dir.name)
+
+    def tearDown(self):
+        self.env_patcher.stop()
+        self.store_dir.cleanup()
+        self.dir.cleanup()
+
+    def _run(self, argv):
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            code = main(argv)
+        return code, buf.getvalue()
+
+    def test_alien_only_dir_exits_4_then_register_format_then_proceeds(self):
+        logs = self.root / "logs"; logs.mkdir()
+        lines = _alien_lines(24)
+        (logs / "alien.log").write_text("\n".join(lines) + "\n", encoding="utf-8")
+        out = self.root / "report.json"
+
+        code, stdout = self._run(["investigate", "--logs", str(logs),
+                                  "--correlation-id", "c-does-not-exist",
+                                  "--mode", "ops", "--out", str(out),
+                                  "--case-dir", str(self.root)])
+        self.assertEqual(code, 4)
+        payload = json.loads(stdout)
+        self.assertEqual(payload["action"], "format_inference_needed")
+        self.assertIn("instructions", payload)
+        self.assertIn("register-format", payload["instructions"])
+        self.assertEqual(len(payload["files"]), 1)
+        entry = payload["files"][0]
+        self.assertEqual(entry["file"], "alien.log")
+        self.assertIn("fingerprint", entry)
+        self.assertGreater(len(entry["sample_lines"]), 0)
+        self.assertLessEqual(len(entry["sample_lines"]), 20)
+
+        descriptor_path = self.root / "descriptor.json"
+        descriptor_path.write_text(json.dumps(ALIEN_DESCRIPTOR), encoding="utf-8")
+        sample_path = self.root / "sample.txt"
+        sample_path.write_text("\n".join(entry["sample_lines"]) + "\n", encoding="utf-8")
+
+        code2, stdout2 = self._run(["register-format", str(descriptor_path),
+                                    "--fingerprint", entry["fingerprint"],
+                                    "--sample", str(sample_path)])
+        self.assertEqual(code2, 0, stdout2)
+        result = json.loads(stdout2)
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["fingerprint"], entry["fingerprint"])
+        self.assertIn("hit_rates", result)
+
+        code3, stdout3 = self._run(["investigate", "--logs", str(logs),
+                                    "--correlation-id", "c-does-not-exist",
+                                    "--mode", "ops", "--out", str(out),
+                                    "--case-dir", str(self.root)])
+        self.assertEqual(code3, 0, stdout3)
+
+    def test_register_format_bad_descriptor_exits_1(self):
+        lines = _alien_lines(24)
+        descriptor_path = self.root / "bad.json"
+        descriptor_path.write_text(json.dumps({"line_regex": r"^(?P<lvl>\w+)$",
+                                                "ts_format": "iso"}), encoding="utf-8")
+        sample_path = self.root / "sample.txt"
+        sample_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        code, stdout = self._run(["register-format", str(descriptor_path),
+                                  "--fingerprint", "deadbeef0000",
+                                  "--sample", str(sample_path)])
+        self.assertEqual(code, 1)
+        result = json.loads(stdout)
+        self.assertFalse(result["ok"])
+        self.assertIn("ts", result["reason"].lower())
+
+    def test_alien_plus_known_good_fixtures_exits_0_with_limitations_note(self):
+        import tests.test_ingest_lines as fixtures
+        logs = self.root / "logs"; logs.mkdir()
+        lines = _alien_lines(24)
+        (logs / "alien.log").write_text("\n".join(lines) + "\n", encoding="utf-8")
+        (logs / "order-service.log").write_text(fixtures.ORDER_JSONL, encoding="utf-8")
+        (logs / "payment-service.log").write_text(fixtures.PAYMENT_PLAIN, encoding="utf-8")
+        out = self.root / "report.json"
+        code, stdout = self._run(
+            ["investigate", "--logs", str(logs),
+             "--correlation-id", "c-8f3a2b91-4d7c-11ee-b962-0242ac120002",
+             "--mode", "ops", "--out", str(out), "--case-dir", str(self.root)])
+        self.assertEqual(code, 0, stdout)
+        rep = json.loads(out.read_text(encoding="utf-8"))
+        self.assertTrue(rep["evidence"])
+        joined = " ".join(rep["limitations"])
+        self.assertIn("alien.log", joined)
+
+
+class TestStatsDialectLabel(unittest.TestCase):
+    def setUp(self):
+        self.store_dir = tempfile.TemporaryDirectory()
+        self.env_patcher = unittest.mock.patch.dict(
+            os.environ, {"LOGALYZER_FORMATS_DIR": self.store_dir.name})
+        self.env_patcher.start()
+        self.dir = tempfile.TemporaryDirectory()
+        self.root = Path(self.dir.name)
+
+    def tearDown(self):
+        self.env_patcher.stop()
+        self.store_dir.cleanup()
+        self.dir.cleanup()
+
+    def test_logback_heuristic_learned_and_structured_labels(self):
+        from logalyzer.formats import fingerprint, FormatStore, validate_descriptor
+        (self.root / "payment-service.log").write_text(
+            "2026-07-15 11:22:03.402 [http-nio-1] INFO  c.p.p.svc.PaymentService "
+            "- payment AUTHORIZED\n", encoding="utf-8")
+        (self.root / "plain.log").write_text(
+            "2026-07-28T10:00:00.000Z INFO svc.Logger - heuristic path only\n",
+            encoding="utf-8")
+        (self.root / "kafka_events.jsonl").write_text(
+            '{"ts":"2026-07-28T10:00:00Z","type":"X","topic":"t","partition":0,'
+            '"offset":1,"payload":{}}\n', encoding="utf-8")
+
+        learned_lines = _alien_lines(24)
+        fp = fingerprint(learned_lines[:50])
+        ok, hit_rates, _r = validate_descriptor(ALIEN_DESCRIPTOR, learned_lines)
+        self.assertTrue(ok)
+        FormatStore().save(fp, ALIEN_DESCRIPTOR, hit_rates, [])
+        (self.root / "learned.log").write_text("\n".join(learned_lines) + "\n",
+                                                encoding="utf-8")
+
+        _recs, stats = read_all_with_stats(self.root, Masker())
+        self.assertEqual(stats["files"]["payment-service.log"]["format"], "logback")
+        self.assertEqual(stats["files"]["plain.log"]["format"], "heuristic")
+        self.assertEqual(stats["files"]["learned.log"]["format"], "learned:%s" % fp)
+        self.assertEqual(stats["files"]["kafka_events.jsonl"]["format"], "kafka")
+
+
 if __name__ == "__main__":
     unittest.main()
