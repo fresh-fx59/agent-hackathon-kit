@@ -27,7 +27,7 @@ import statistics as st
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-RAW = os.path.join(HERE, "raw")
+RAW = os.environ.get("SHERLOCK_RAW") or os.path.join(HERE, "raw")
 
 CHECKS = {
     "OpenSSH": {
@@ -125,7 +125,7 @@ def main():
     if not rows:
         sys.exit("нет транскриптов в %s" % RAW)
     ledger = []
-    lp = os.path.join(HERE, "runs.jsonl")
+    lp = os.environ.get("SHERLOCK_LEDGER") or os.path.join(HERE, "runs.jsonl")
     if os.path.exists(lp):
         ledger = [json.loads(l) for l in open(lp, encoding="utf-8") if l.strip()]
     for r in rows:

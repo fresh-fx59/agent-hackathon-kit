@@ -10,6 +10,10 @@
 # It passes only if the skill FIRES BY ITSELF and the answer shows the skill's
 # discipline. Anything else means R1 is not met, whatever the demo looks like.
 #
+# NOTE: --approval-mode yolo is MANDATORY for a valid A/B. Without it qwen declines
+#       the "skill" permission and SKILL.md never loads, so both arms run skill-less
+#       and any difference you measure is variance.
+#
 # Usage:
 #   with-secret.sh eval_linkapi_key --env SHERLOCK_API_KEY -- \
 #     ./acceptance/r1-zero-config.sh [skill-version]
@@ -94,11 +98,12 @@ if t.lstrip().startswith("[API Error") or ("[API Error" in t and len(t) < 400):
     sys.exit(2)
 
 # THE GATE IS CORRECTNESS, NOT FORMATTING.
-# Measured 2026-07-28: with no skill this model looked at a genuinely compromised
-# host and answered «ничего критичного, это стандартный шум интернета», missing the
-# successful login entirely. A report with perfect headings that misses the breach
-# is worthless; a plain one that catches it is the product. So substance gates,
-# and the SKILL.md report discipline is reported but advisory.
+# Measured 2026-07-28 with identical flags on both arms: with no skill this model
+# produced a careful, accurate summary of a genuinely compromised host — 520 failed
+# attempts, 85 BREAK-IN ATTEMPT, top attacker IPs — and never mentioned the one
+# SUCCESSFUL login. Everything counted correctly, the thing that mattered missed.
+# A report with perfect headings that misses the breach is worthless; a plain one
+# that catches it is the product. So substance gates; report discipline is advisory.
 found_it   = bool(re.search(must_find, t, re.I))
 reassured  = bool(re.search(must_not, t, re.I))
 

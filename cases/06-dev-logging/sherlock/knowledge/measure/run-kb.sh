@@ -14,6 +14,7 @@
 # That isolates the cards. Adding the section text to both arms is deliberate:
 # otherwise we would be measuring "more prose in the prompt", not "reused knowledge".
 #
+# Base skill is v2 by default (SHERLOCK_BASE_SKILL overrides).
 # Deliberately does NOT touch eval/run.sh, eval/batch.sh, eval/report.py or
 # skills/* — another session owns those. It only reads skills/v1.
 #
@@ -57,8 +58,9 @@ printf '{ "tools": { "approvalMode": "yolo" } }\n' >"$QWEN_HOME/settings.json"
 # ---- build the skill: v1 + the self-improvement section, identical in both arms ----
 SKILL_DIR="$RUN_DIR/.qwen/skills/sherlock"
 mkdir -p "$SKILL_DIR/knowledge/patterns"
+BASE_SKILL="${SHERLOCK_BASE_SKILL:-v2}"     # v2 ships (it survives the 649 MB corpus; v1 does not)
 python3 "$KNOW/measure/merge-skill.py" \
-  "$ROOT/skills/v1/SKILL.md" "$KNOW/SKILL-SECTION.md" >"$SKILL_DIR/SKILL.md"
+  "$ROOT/skills/$BASE_SKILL/SKILL.md" "$KNOW/SKILL-SECTION.md" >"$SKILL_DIR/SKILL.md"
 [ -s "$SKILL_DIR/SKILL.md" ] || { echo "✗ merge produced an empty skill" >&2; exit 1; }
 
 cp "$KNOW/README.md"   "$SKILL_DIR/knowledge/" 2>/dev/null
