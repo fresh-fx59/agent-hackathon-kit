@@ -72,6 +72,38 @@ def _clarification(suggestions):
 _METHOD_SIG = re.compile(
     r"^\s*(?:public|private|protected)\s+[\w<>\[\],\s]+\s+(\w+)\s*\([^)]*\)\s*\{?\s*$")
 
+def _strip_comments(text):
+    """Strip Java comments while preserving line numbers.
+    Replaces // and /* */ content with spaces, keeps newlines intact."""
+    result = []
+    in_block = False
+    i = 0
+    while i < len(text):
+        if in_block:
+            if i < len(text) - 1 and text[i:i+2] == '*/':
+                result.append('  ')
+                in_block = False
+                i += 2
+            else:
+                result.append(' ' if text[i] != '\n' else '\n')
+                i += 1
+        else:
+            if i < len(text) - 1 and text[i:i+2] == '/*':
+                result.append('  ')
+                in_block = True
+                i += 2
+            elif i < len(text) - 1 and text[i:i+2] == '//':
+                result.append(' ')
+                result.append(' ')
+                i += 2
+                while i < len(text) and text[i] != '\n':
+                    result.append(' ')
+                    i += 1
+            else:
+                result.append(text[i])
+                i += 1
+    return ''.join(result)
+
 def extract_identifiers(bundle):
     exceptions, loggers = [], []
     for it in bundle.items:
@@ -96,16 +128,19 @@ def locate(identifiers, repos):
         repo = Path(repo)
         for java in sorted(repo.rglob("*.java")):
             text = java.read_text(encoding="utf-8", errors="replace")
-            lines = text.splitlines()
+            stripped = _strip_comments(text)
+            lines = stripped.splitlines()
             for exc in identifiers["exceptions"]:
                 for i, ln in enumerate(lines):
                     if re.search(r"catch\s*\(\s*%s\b" % re.escape(exc), ln):
+                        method = _enclosing_method(lines, i)
+                        confidence = "high" if method else "medium"
                         refs.append({
                             "file": str(java.relative_to(repo.parent)),
-                            "method": _enclosing_method(lines, i),
+                            "method": method,
                             "line": i + 1,
                             "reason": "catch(%s)" % exc,
-                            "confidence": "high"})
+                            "confidence": confidence})
             for lg in identifiers["loggers"]:
                 cls = lg.rsplit(".", 1)[-1]
                 if java.stem == cls and not any(r2["file"] == str(java.relative_to(repo.parent))
@@ -119,6 +154,11 @@ def locate(identifiers, repos):
 def gate(coderefs, repos):
     kept, rejected = [], 0
     for ref in coderefs:
+        # Reject catch-derived refs with empty method (must have identified the method)
+        if ref["reason"].startswith("catch(") and not ref["method"]:
+            rejected += 1
+            continue
+
         ok = False
         for repo in repos:
             p = Path(repo).parent / ref["file"]
