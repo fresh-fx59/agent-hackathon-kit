@@ -1,10 +1,11 @@
 import os, sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # for `logalyzer` when verify.sh runs this file standalone
-import unittest, tempfile, json
+import unittest, tempfile, json, time
 from pathlib import Path
 from logalyzer.masking import Masker
 from logalyzer.formats import (fingerprint, FormatStore, validate_descriptor,
-                               apply_descriptor, top_skeletons)
+                               apply_descriptor, apply_descriptor_with_budget,
+                               top_skeletons, skeleton_line)
 
 # The "alien" fixture from the design doc: a dialect the built-in heuristic
 # timestamp bank cannot recognize (day/month-name/year order, timestamp
@@ -237,6 +238,112 @@ class TestFormatStore(unittest.TestCase):
     def test_shipped_learned_dir_has_gitkeep(self):
         case_root = Path(__file__).resolve().parents[1]
         self.assertTrue((case_root / "formats.d" / "learned" / ".gitkeep").is_file())
+
+
+# ---------------------------------------------------------------------------
+# CRITICAL 3: ReDoS containment. `(?P<ts>(\d+)+X)` against a long digit run
+# with no trailing X is classic catastrophic backtracking -- confirmed via a
+# throwaway timeout-guarded script that it hangs 5+ seconds with zero
+# progress (a bare `signal.alarm` cannot interrupt it: CPython's regex
+# engine is a tight C loop that never checks for pending signals mid-match).
+# validate_descriptor/apply_descriptor_with_budget must hard-kill a
+# runaway match via a child process instead.
+# ---------------------------------------------------------------------------
+_KILLER_DESCRIPTOR = {"line_regex": r"(?P<ts>(\d+)+X)", "ts_format": "iso"}
+_KILLER_SAMPLE = ["1234567890123456789012345"] * 3  # 25 digits, no trailing X
+
+
+class TestReDoSContainment(unittest.TestCase):
+    def test_catastrophic_backtracking_rejected_within_budget(self):
+        t0 = time.monotonic()
+        ok, hit_rates, reason = validate_descriptor(_KILLER_DESCRIPTOR, _KILLER_SAMPLE,
+                                                     timeout=2.0)
+        elapsed = time.monotonic() - t0
+        self.assertFalse(ok)
+        self.assertIn("time budget", reason.lower())
+        # generous margin over the 2s budget for process start/join overhead,
+        # but nowhere near the 5+ seconds an unguarded match would burn
+        self.assertLess(elapsed, 3.5, "took %.2fs -- budget not enforced" % elapsed)
+
+    def test_normal_regex_still_validates_fast(self):
+        t0 = time.monotonic()
+        ok, hit_rates, reason = validate_descriptor(ALIEN_DESCRIPTOR, ALIEN_LINES, timeout=2.0)
+        elapsed = time.monotonic() - t0
+        self.assertTrue(ok, reason)
+        self.assertLess(elapsed, 1.0)
+
+    def test_apply_descriptor_with_budget_falls_back_on_timeout(self):
+        recs, reason = apply_descriptor_with_budget(
+            _KILLER_DESCRIPTOR, _KILLER_SAMPLE, "svc", "killer.log", timeout=1.0)
+        self.assertIsNone(recs)
+        self.assertIsNotNone(reason)
+        self.assertIn("time budget", reason.lower())
+
+    def test_apply_descriptor_with_budget_succeeds_for_normal_descriptor(self):
+        recs, reason = apply_descriptor_with_budget(
+            ALIEN_DESCRIPTOR, ALIEN_LINES, "inventory-service", "ok.log", timeout=5.0)
+        self.assertIsNone(reason)
+        self.assertEqual(len(recs), len(ALIEN_LINES))
+
+
+# ---------------------------------------------------------------------------
+# IMPORTANT 7: epoch_s/epoch_ms plausibility bounds. `(?P<ts>\d+)` +
+# ts_format "epoch_s" matches a bare "28" and "successfully" parses it to
+# 1970-01-01T00:00:28Z -- the 90% ts hit-rate check alone can't catch this
+# (it never fails to parse), so the learned cache would get poisoned with a
+# descriptor that silently produces garbage 1970 timestamps forever.
+# ---------------------------------------------------------------------------
+class TestEpochPlausibilityBounds(unittest.TestCase):
+    def test_bare_small_number_epoch_s_rejected(self):
+        bad = {"line_regex": r"^(?P<ts>\d+)$", "ts_format": "epoch_s"}
+        sample = ["28", "29", "30", "31"]
+        ok, hit_rates, reason = validate_descriptor(bad, sample)
+        self.assertFalse(ok)
+        self.assertIn("plausible", reason.lower())
+
+    def test_genuine_epoch_ms_sample_accepted(self):
+        good = {"line_regex": r"^(?P<ts>\d{13})\s", "ts_format": "epoch_ms"}
+        base = 1753600000000  # ~2025, well within [2000, 2100]
+        sample = ["%d something happened" % (base + i * 1000) for i in range(5)]
+        ok, hit_rates, reason = validate_descriptor(good, sample)
+        self.assertTrue(ok, reason)
+
+    def test_sample_spanning_more_than_a_year_rejected(self):
+        wide = {"line_regex": r"^(?P<ts>\S+)\s", "ts_format": "iso"}
+        sample = ["2020-01-01T00:00:00.000Z x", "2023-06-15T00:00:00.000Z x"]
+        ok, hit_rates, reason = validate_descriptor(wide, sample)
+        self.assertFalse(ok)
+        self.assertIn("span", reason.lower())
+
+
+# ---------------------------------------------------------------------------
+# IMPORTANT 4: RU fingerprint stability. Cyrillic message text must mask to
+# the same skeleton shape as any other free-text run -- otherwise two files
+# of the SAME dialect with different Russian wording never converge on a
+# shared top-5 skeleton and the learned cache never hits.
+# ---------------------------------------------------------------------------
+class TestUnicodeSkeleton(unittest.TestCase):
+    def test_cyrillic_letters_collapse_like_ascii(self):
+        line = "уровень=W врем=[28/июл/2026 15:08:38.903] служба=inventory :: сообщение текст"
+        skel = skeleton_line(line)
+        self.assertNotIn("л", skel)
+        self.assertNotIn("е", skel)
+        self.assertIn("A", skel)
+
+    def test_ru_fingerprint_stable_across_same_dialect_different_wording(self):
+        sample_a = [
+            "level=W ts=[28/Jul/2026 15:08:38.903] svc=inventory :: очередь резервирования растёт",
+            "level=I ts=[28/Jul/2026 15:08:39.011] svc=inventory :: резервирование завершено успешно",
+            "level=E ts=[28/Jul/2026 15:08:41.230] svc=inventory :: резервирование истекло order_id=ord-9f1",
+            "level=I ts=[28/Jul/2026 15:08:41.500] svc=inventory :: компенсация резерва выполнена",
+        ]
+        sample_b = [
+            "level=W ts=[01/Jan/2026 00:00:00.001] svc=payment :: совершенно другие слова здесь",
+            "level=I ts=[02/Feb/2026 11:11:11.222] svc=payment :: ещё одно предложение текста",
+            "level=E ts=[03/Mar/2026 22:22:22.333] svc=payment :: платёж отклонён txn_id=tx-55c2",
+            "level=I ts=[04/Apr/2026 09:09:09.099] svc=payment :: повторная попытка платежа скоро",
+        ]
+        self.assertEqual(fingerprint(sample_a), fingerprint(sample_b))
 
 
 if __name__ == "__main__":

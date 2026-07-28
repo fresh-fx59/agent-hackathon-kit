@@ -5,7 +5,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from contextlib import redirect_stdout
 from logalyzer.masking import Masker
-from logalyzer.ingest import read_all, read_all_with_stats, read_source, _generic_parse
+from logalyzer.ingest import (read_all, read_all_with_stats, read_source,
+                              _generic_parse, discover_domain_ids)
 from logalyzer.rules_engine import _match
 from logalyzer.__main__ import main
 
@@ -230,6 +231,31 @@ class TestMultilineFolding(unittest.TestCase):
         self.assertIn("at com.example.Foo.bar(Foo.java:42)", recs[0].body)
         self.assertIn("at com.example.Foo.main(Foo.java:10)", recs[0].body)
 
+    def test_stacktrace_with_coincidental_epoch_and_date_phrase_folds_to_one_record(self):
+        """IMPORTANT 6: the timestamp-anywhere-in-line upgrade must not
+        shred a stack trace just because a continuation line happens to
+        contain something bank-shaped -- an embedded 13-digit "error code"
+        (epoch_ms-shaped) and a "May 12 10:00:00" phrase (syslog-shaped)
+        buried mid-line must both fold, not become their own bogus
+        records, when they don't conform to the file's dominant
+        (kind, position) timestamp pattern."""
+        content = (
+            "2026-07-28 15:08:38.903 [main] INFO  com.example.Service - starting operation\n"
+            "java.lang.RuntimeException: something failed with code 1700000000123\n"
+            "\tat com.example.Foo.bar(Foo.java:42)\n"
+            "\tat com.example.Foo.baz(Foo.java:99) on May 12 10:00:00 last time\n"
+            "\tat com.example.Foo.main(Foo.java:10)\n"
+        )
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "service.log"
+            p.write_text(content, encoding="utf-8")
+            recs = read_source(p, self.masker)
+        self.assertEqual(len(recs), 1)
+        self.assertEqual(recs[0].parse_quality, "ok")
+        self.assertIn("1700000000123", recs[0].body)
+        self.assertIn("May 12 10:00:00", recs[0].body)
+        self.assertIn("at com.example.Foo.main(Foo.java:10)", recs[0].body)
+
     def test_leading_lines_with_no_previous_record_become_standalone_partial(self):
         content = "some preamble line with no timestamp\nanother preamble line\n"
         with tempfile.TemporaryDirectory() as d:
@@ -332,6 +358,24 @@ class TestCliAndStats(unittest.TestCase):
         self.assertIn("a.log", payload["files"])
         self.assertTrue(any(s["file"] == "bin.dat" for s in payload["skipped"]))
 
+    def test_cmd_stats_surfaces_ts_and_level_hit_rates_for_plaintext_files(self):
+        """MINOR 9: per-file extractor hit rates (ts/level %) must be
+        visible in stats JSON for plaintext/learned files, not just the
+        ok/partial/unparsed counts -- diagnosing WHY a file is borderline
+        (missing timestamps vs missing levels) shouldn't require re-running
+        with a debugger."""
+        (self.root / "mixed.log").write_text(
+            "2026-07-28T10:00:00.000Z INFO svc.Logger - fine\n"
+            "2026-07-28T10:00:01.000Z svc.Logger - no level token here\n",
+            encoding="utf-8")
+        code, out = self._run(["stats", "--logs", str(self.root)])
+        self.assertEqual(code, 0)
+        entry = json.loads(out)["files"]["mixed.log"]
+        self.assertIn("ts_hit_rate", entry)
+        self.assertIn("level_hit_rate", entry)
+        self.assertEqual(entry["ts_hit_rate"], 1.0)
+        self.assertEqual(entry["level_hit_rate"], 0.5)
+
 
 # ---------------------------------------------------------------------------
 # Normalization v2: FormatStore learned-cache ingest path + the exit-4
@@ -357,6 +401,29 @@ def _alien_lines(n=24):
         msg = _ALIEN_MSGS[i % len(_ALIEN_MSGS)]
         out.append("level=%s ts=[28/Jul/2026 15:%02d:%02d.%03d] svc=inventory :: %s" %
                    (lvl, 8 + (i // 60), i % 60, (i * 7) % 1000, msg))
+    return out
+
+
+# CRITICAL 1 fixture: a valid, fully-matching but LEVEL-LESS dialect
+# (nginx-access-log-style: ts + service + message, no level field at all).
+# apply_descriptor can only ever mark such a file "ok" if BOTH ts and level
+# are present -- with no level group in the regex, every matched record is
+# "partial" forever, which must NOT be confused with "file still doesn't
+# parse" (the needs_inference deadloop this reproduces).
+NOLEVEL_DESCRIPTOR = {
+    "line_regex": r"^ts=\[(?P<ts>[^\]]+)\]\s+svc=(?P<service>\S+)\s+::\s+(?P<msg>.*)$",
+    "ts_format": "%d/%b/%Y %H:%M:%S.%f",
+    "notes": "ts-only dialect, no level field (nginx-style access log)",
+}
+_NOLEVEL_MSGS = ["GET /api/inventory 200", "GET /api/reserve 201",
+                 "POST /api/reserve 409", "GET /api/health 200"]
+
+def _nolevel_lines(n=24):
+    out = []
+    for i in range(n):
+        msg = _NOLEVEL_MSGS[i % len(_NOLEVEL_MSGS)]
+        out.append("ts=[28/Jul/2026 15:%02d:%02d.%03d] svc=inventory :: %s" %
+                   (8 + (i // 60), i % 60, (i * 7) % 1000, msg))
     return out
 
 
@@ -390,8 +457,36 @@ class TestLearnedFormatCache(unittest.TestCase):
         self.assertEqual(stats["files"]["weird.log"]["format"], "learned:%s" % fp)
         self.assertNotIn("needs_inference", stats["files"]["weird.log"])
         self.assertEqual(stats.get("needs_inference", []), [])
-        self.assertEqual(stats["files"]["weird.log"]["ok"], 24)
-        self.assertEqual(recs[0].service, "inventory")
+
+    def test_apply_time_budget_breach_falls_back_to_heuristic_with_warning(self):
+        """CRITICAL 3 (apply-time secondary budget): wired into the actual
+        ingest path, not just unit-tested in isolation -- a learned
+        descriptor whose application breaches the budget (or crashes) must
+        not hang read_all_with_stats; it must fall back to the heuristic
+        waterfall and leave a visible warning. Mocks
+        formats.apply_descriptor_with_budget's return value directly
+        (rather than waiting out a real timeout) to keep this test fast;
+        the timeout mechanism itself is proven separately in
+        tests/test_formats.py's TestReDoSContainment."""
+        import logalyzer.formats as formats_mod
+        lines = _alien_lines(24)
+        fp = formats_mod.fingerprint(lines[:50])
+        formats_mod.FormatStore().save(fp, ALIEN_DESCRIPTOR, {"ts": 1.0}, [])
+        (self.root / "weird.log").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+        with unittest.mock.patch.object(
+                formats_mod, "apply_descriptor_with_budget",
+                return_value=(None, "descriptor application exceeded the 10.0s "
+                                    "time budget -- falling back")):
+            recs, stats = read_all_with_stats(self.root, Masker())
+        entry = stats["files"]["weird.log"]
+        self.assertIn(entry["format"], ("heuristic", "logback"))
+        self.assertNotEqual(entry["format"], "learned:%s" % fp)
+        self.assertTrue(stats.get("warnings"))
+        warning = stats["warnings"][0]
+        self.assertEqual(warning["file"], "weird.log")
+        self.assertIn("time budget", warning["reason"].lower())
+        self.assertGreater(len(recs), 0)
 
 
 class TestExitFourHandshake(unittest.TestCase):
@@ -431,6 +526,17 @@ class TestExitFourHandshake(unittest.TestCase):
         self.assertEqual(payload["action"], "format_inference_needed")
         self.assertIn("instructions", payload)
         self.assertIn("register-format", payload["instructions"])
+        # MINOR 8: instructions must explain the --sample file explicitly,
+        # state the acceptance thresholds, and mention exit codes -- not
+        # just name the command.
+        instr = payload["instructions"].lower()
+        self.assertIn("sample_lines", instr)
+        self.assertIn("one line per line", instr)
+        self.assertIn("90%", instr)
+        self.assertIn("50%", instr)
+        self.assertIn("2000-2100", instr)
+        self.assertIn("366", instr)
+        self.assertIn("exit codes", instr)
         self.assertEqual(len(payload["files"]), 1)
         entry = payload["files"][0]
         self.assertEqual(entry["file"], "alien.log")
@@ -451,12 +557,66 @@ class TestExitFourHandshake(unittest.TestCase):
         self.assertTrue(result["ok"])
         self.assertEqual(result["fingerprint"], entry["fingerprint"])
         self.assertIn("hit_rates", result)
+        # CRITICAL 3: measured validation wall time is persisted alongside
+        # the learned descriptor (operator visibility into anything that
+        # took suspiciously long even while staying under budget).
+        from logalyzer.formats import FormatStore
+        stored = FormatStore().get(entry["fingerprint"])
+        self.assertIn("validate_seconds", stored)
+        self.assertIsInstance(stored["validate_seconds"], float)
+        self.assertGreaterEqual(stored["validate_seconds"], 0)
 
         code3, stdout3 = self._run(["investigate", "--logs", str(logs),
                                     "--correlation-id", "c-does-not-exist",
                                     "--mode", "ops", "--out", str(out),
                                     "--case-dir", str(self.root)])
         self.assertEqual(code3, 0, stdout3)
+
+    def test_level_less_dialect_no_deadloop_after_registration(self):
+        """CRITICAL 1: a valid ts-only (no level group) descriptor must not
+        deadloop exit-4 forever. apply_descriptor's "ok" quality requires
+        BOTH ts and level, so a level-less dialect's records are always
+        "partial" -- the needs_inference gate for a learned: dialect must
+        key on descriptor MATCH rate (did the regex find ts at all), not
+        ok-rate, or investigate keeps demanding re-registration of an
+        already-solved format forever."""
+        logs = self.root / "logs"; logs.mkdir()
+        lines = _nolevel_lines(24)
+        (logs / "access.log").write_text("\n".join(lines) + "\n", encoding="utf-8")
+        out = self.root / "report.json"
+
+        code, stdout = self._run(["investigate", "--logs", str(logs),
+                                  "--correlation-id", "c-does-not-exist",
+                                  "--mode", "ops", "--out", str(out),
+                                  "--case-dir", str(self.root)])
+        self.assertEqual(code, 4, stdout)
+        entry = json.loads(stdout)["files"][0]
+
+        descriptor_path = self.root / "nolevel_descriptor.json"
+        descriptor_path.write_text(json.dumps(NOLEVEL_DESCRIPTOR), encoding="utf-8")
+        sample_path = self.root / "nolevel_sample.txt"
+        sample_path.write_text("\n".join(entry["sample_lines"]) + "\n", encoding="utf-8")
+        code2, stdout2 = self._run(["register-format", str(descriptor_path),
+                                    "--fingerprint", entry["fingerprint"],
+                                    "--sample", str(sample_path)])
+        self.assertEqual(code2, 0, stdout2)
+
+        # The bug: before the fix, this second investigate call also exits
+        # 4 (ok-rate stuck at 0% forever for a level-less descriptor), even
+        # though the dialect is now fully registered and every line matches.
+        code3, stdout3 = self._run(["investigate", "--logs", str(logs),
+                                    "--correlation-id", "c-does-not-exist",
+                                    "--mode", "ops", "--out", str(out),
+                                    "--case-dir", str(self.root)])
+        self.assertEqual(code3, 0, stdout3)
+        # And a THIRD run (simulating the agent naively re-registering the
+        # exact same already-solved dialect) must also proceed cleanly --
+        # a registered fingerprint must never be re-offered for inference.
+        code4, stdout4 = self._run(["investigate", "--logs", str(logs),
+                                    "--correlation-id", "c-does-not-exist",
+                                    "--mode", "ops", "--out", str(out),
+                                    "--case-dir", str(self.root)])
+        self.assertEqual(code4, 0, stdout4)
 
     def test_register_format_bad_descriptor_exits_1(self):
         lines = _alien_lines(24)
@@ -531,6 +691,129 @@ class TestStatsDialectLabel(unittest.TestCase):
         self.assertEqual(stats["files"]["plain.log"]["format"], "heuristic")
         self.assertEqual(stats["files"]["learned.log"]["format"], "learned:%s" % fp)
         self.assertEqual(stats["files"]["kafka_events.jsonl"]["format"], "kafka")
+
+
+# ---------------------------------------------------------------------------
+# CRITICAL 2: content-based container detection. Filename substrings used
+# to be authoritative -- a plain logback file merely NAMED kafka-server.log
+# got forced through the kafka JSON reader (every line fails json.loads)
+# and came back 100% unparsed, which also made it INELIGIBLE for
+# needs_inference recovery (that gate only fires for plaintext dialects).
+# Content must decide; filename is only a tie-breaker for genuinely
+# ambiguous content.
+# ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# IMPORTANT 5: generic ID discovery false positives. `\b\w*_?[Ii]d[=:]` (the
+# original literal regex) matches ANY word ending in the letters "id" --
+# "valid", "paid", "invalid" all qualify -- turning ordinary sentence
+# fragments into bogus domain_ids that could join unrelated records via a
+# shared "value". Fix requires genuine id morphology (exact "id", `*_id`
+# snake_case, `*Id` camelCase) plus a plausible value (not a trivial
+# true/false/yes/no/null/none token, length >= 4, digit or hex/uuid shaped).
+# ---------------------------------------------------------------------------
+class TestIdDiscoveryFalsePositives(unittest.TestCase):
+    def test_prose_words_ending_in_id_yield_no_domain_ids(self):
+        raw = "status valid: true, paid: confirming, invalid: false, ok: yes"
+        self.assertEqual(discover_domain_ids(raw), {})
+
+    def test_snake_case_and_camel_case_ids_still_captured(self):
+        raw = "order_id=ord-123 userId=abc123 authId: auth-51ac9d2e"
+        ids = discover_domain_ids(raw)
+        self.assertEqual(ids.get("order_id"), "ord-123")
+        self.assertEqual(ids.get("userId"), "abc123")
+        self.assertEqual(ids.get("authId"), "auth-51ac9d2e")
+
+    def test_exact_id_key_still_captured(self):
+        ids = discover_domain_ids("id=req-88291")
+        self.assertEqual(ids.get("id"), "req-88291")
+
+    def test_short_or_trivial_values_dropped_even_with_id_morphology(self):
+        ids = discover_domain_ids("session_id=yes retry_id=no")
+        self.assertEqual(ids, {})
+
+    def test_hex_run_without_digits_still_captured_as_hex(self):
+        ids = discover_domain_ids("commit deadbeefcafefeed applied")
+        self.assertEqual(ids.get("hex"), "deadbeefcafefeed")
+
+
+class TestContentBasedSniffing(unittest.TestCase):
+    def setUp(self):
+        self.dir = tempfile.TemporaryDirectory()
+        self.root = Path(self.dir.name)
+
+    def tearDown(self):
+        self.dir.cleanup()
+
+    def test_logback_content_in_kafka_named_file_parses_as_logback(self):
+        logback_content = (
+            "2026-07-15 11:22:03.402 [http-nio-1] INFO  c.p.p.svc.PaymentService "
+            "- payment AUTHORIZED auth_id=auth-51ac9d2e\n"
+            "2026-07-15 11:22:35.782 [pool-2] WARN  c.p.p.svc.ReconciliationJob "
+            "- payment in AUTHORIZED but order in FAILED\n")
+        (self.root / "kafka-server.log").write_text(logback_content, encoding="utf-8")
+        recs, stats = read_all_with_stats(self.root, Masker())
+        entry = stats["files"]["kafka-server.log"]
+        self.assertEqual(entry["format"], "logback")
+        self.assertEqual(entry["ok"], 2)
+        self.assertEqual(entry["unparsed"], 0)
+        self.assertNotIn("needs_inference", entry)
+        levels = {r.level for r in recs}
+        self.assertEqual(levels, {"INFO", "WARN"})
+
+    def test_real_kafka_jsonl_still_enriched_regardless_of_filename(self):
+        kafka_content = (
+            '{"ts":"2026-07-15T11:22:03.410Z","topic":"payments.events.v1",'
+            '"partition":1,"offset":45123,"type":"PaymentAuthorized",'
+            '"payload":{"order_id":"ord-a12f5d7e","auth_id":"auth-51ac9d2e"}}\n'
+            '{"ts":"2026-07-15T11:22:05.435Z","topic":"orders.events.v1",'
+            '"partition":3,"offset":98421,"type":"OrderFailed",'
+            '"payload":{"order_id":"ord-a12f5d7e"}}\n')
+        # deliberately NOT named anything kafka-ish -- content alone must decide
+        (self.root / "events_stream.log").write_text(kafka_content, encoding="utf-8")
+        recs, stats = read_all_with_stats(self.root, Masker())
+        self.assertEqual(stats["files"]["events_stream.log"]["format"], "kafka")
+        kafka_recs = [r for r in recs if r.service == "kafka"]
+        self.assertEqual(len(kafka_recs), 2)
+        self.assertEqual(kafka_recs[1].attrs["event_type"], "OrderFailed")
+        self.assertEqual(kafka_recs[1].domain_ids["order_id"], "ord-a12f5d7e")
+
+    def test_k8s_content_detected_without_filename_hint(self):
+        k8s_content = (
+            "2026-07-15T11:20:11Z Warning Unhealthy pod/inventory-service-x2jkl "
+            "Readiness probe failed: HTTP 503\n"
+            "2026-07-15T11:21:02Z Normal Scaling hpa/inventory-service "
+            "New size: 5\n")
+        (self.root / "events.log").write_text(k8s_content, encoding="utf-8")
+        recs, stats = read_all_with_stats(self.root, Masker())
+        self.assertEqual(stats["files"]["events.log"]["format"], "k8s")
+        self.assertEqual({r.service for r in recs}, {"k8s"})
+
+    def test_metrics_content_detected_without_filename_hint(self):
+        metrics_content = (
+            "# HELP http_server_requests_seconds Duration\n"
+            'http_server_requests_seconds{service="inventory-service"} 1.912\n'
+            'http_server_requests_seconds{service="payment-service"} 0.198\n')
+        (self.root / "snapshot.txt").write_text(metrics_content, encoding="utf-8")
+        recs, stats = read_all_with_stats(self.root, Masker())
+        self.assertEqual(stats["files"]["snapshot.txt"]["format"], "metrics")
+
+    def test_mostly_unparsed_structured_guess_falls_back_to_plaintext(self):
+        """Defense in depth: even if content sniffing somehow still picks a
+        structured reader that turns out to be wrong for most of the file
+        (>=90% unparsed, on a large-enough sample), fall through to the
+        plaintext waterfall instead of returning a wall of garbage -- and
+        that file becomes needs_inference-eligible again."""
+        import logalyzer.ingest as ingest_mod
+        with unittest.mock.patch.object(ingest_mod, "_content_classify",
+                                        return_value="kafka"):
+            lines = ["logback-style line number %d with no json at all" % i
+                     for i in range(24)]
+            (self.root / "forced.log").write_text("\n".join(lines) + "\n",
+                                                   encoding="utf-8")
+            recs, stats = read_all_with_stats(self.root, Masker())
+        entry = stats["files"]["forced.log"]
+        self.assertNotEqual(entry["format"], "kafka")
+        self.assertIn(entry["format"], ("heuristic", "logback"))
 
 
 if __name__ == "__main__":

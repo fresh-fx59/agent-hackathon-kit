@@ -146,10 +146,10 @@ class TestStructured(unittest.TestCase):
         (self.root / "broken.log").write_text("irrelevant", encoding="utf-8")
         real_parse_lines = ingest_mod._parse_lines
 
-        def flaky(lines, hint, ref, masker):
+        def flaky(lines, hint, ref, masker, warnings=None):
             if ref == "broken.log":
                 raise OSError("simulated unreadable file")
-            return real_parse_lines(lines, hint, ref, masker)
+            return real_parse_lines(lines, hint, ref, masker, warnings=warnings)
 
         with unittest.mock.patch.object(ingest_mod, "_parse_lines", side_effect=flaky):
             recs = ingest_mod.read_all(self.root, Masker())

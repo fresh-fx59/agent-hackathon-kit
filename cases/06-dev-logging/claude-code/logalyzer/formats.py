@@ -15,7 +15,7 @@ continuation-folding cap, correlation-id regex, generic domain-id discovery)
 is a function-scope import, deferred until call time, so the two modules
 never form an import cycle at module-load time.
 """
-import hashlib, json, os, re
+import hashlib, json, multiprocessing, os, re
 from collections import Counter
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -43,7 +43,14 @@ from logalyzer.records import NormalizedRecord, normalize_level
 # ---------------------------------------------------------------------------
 _HEX_RUN = re.compile(r"\b(?=[0-9a-fA-F]*[a-fA-F])[0-9a-fA-F]{8,}\b")
 _DIGIT_RUN = re.compile(r"\d+")
-_LETTER_RUN = re.compile(r"[A-Za-z]+")
+# IMPORTANT 4: any Unicode letter run, not just ASCII a-z/A-Z. `[^\W\d_]`
+# means "a \w character that is neither a digit nor underscore" -- under
+# Python 3's default (Unicode) `re` matching that is exactly "a letter in
+# any script", so a Cyrillic (or Greek, CJK, etc.) message run collapses to
+# 'A' the same way an English one does. Without this, two files of the
+# SAME dialect with different Russian wording never converge on a shared
+# skeleton and the learned-format cache never hits for RU logs.
+_LETTER_RUN = re.compile(r"[^\W\d_]+", re.UNICODE)
 _PROSE_RUN = re.compile(r"\bA(?:[ \t]+A\b)+")
 
 
@@ -112,7 +119,7 @@ class FormatStore:
         except (OSError, ValueError):
             return None
 
-    def save(self, fp, descriptor, hit_rates, skeleton):
+    def save(self, fp, descriptor, hit_rates, skeleton, validate_seconds=None):
         self.dir_path.mkdir(parents=True, exist_ok=True)
         doc = {
             "fingerprint": fp,
@@ -121,6 +128,14 @@ class FormatStore:
             "sample_skeleton": skeleton,
             "created": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         }
+        # CRITICAL 3: the measured validate_descriptor wall time is stored
+        # for operator visibility -- a descriptor that took suspiciously
+        # long to validate (even if it stayed under the timeout budget) is
+        # worth a second look before it starts getting applied to every
+        # matching file forever. Optional/omitted for save() calls that
+        # don't have a timing to report (e.g. direct test usage).
+        if validate_seconds is not None:
+            doc["validate_seconds"] = round(validate_seconds, 4)
         self._path(fp).write_text(json.dumps(doc, ensure_ascii=False, indent=2) + "\n",
                                   encoding="utf-8")
         return doc
@@ -181,13 +196,118 @@ def to_utc_iso(value, ts_format):
 
 
 # ---------------------------------------------------------------------------
+# ReDoS containment (CRITICAL 3) -- ordinary in-process timeouts (signal
+# alarms, threading) CANNOT interrupt a catastrophically-backtracking C-level
+# regex match: CPython's `re` engine runs a tight native loop and does not
+# poll for pending signals or check a cooperative deadline mid-match, so a
+# pattern like `(?P<ts>(\d+)+X)` against a long non-matching digit run hangs
+# the calling thread/process indefinitely no matter what timer you arm.
+# Empirically confirmed (see the Task-A-follow-up report): a plain
+# `signal.alarm`-guarded call to that pattern still blocked for 5+ seconds
+# with zero interruption. The only reliable hard-kill mechanism in the
+# stdlib is a separate OS process, which the parent can `.terminate()`
+# unconditionally regardless of what the child is doing internally.
+# ---------------------------------------------------------------------------
+
+_VALIDATE_TIMEOUT_S = 2.0
+_APPLY_TIMEOUT_S = 10.0
+
+
+def _match_sample_worker(pattern_str, ts_format, declared, lines, q):
+    """Runs in a child process. Computes exactly the plain (picklable) data
+    validate_descriptor needs from matching `pattern_str` against `lines` --
+    re.Match objects never cross the process boundary (not picklable, and
+    not needed once the per-group values are pulled out here)."""
+    try:
+        compiled = re.compile(pattern_str)
+        matched_count = 0
+        ts_ok = 0
+        iso_values = []
+        level_values = []
+        group_present = {g: 0 for g in declared}
+        for ln in lines:
+            m = compiled.search(ln)
+            if not m:
+                continue
+            matched_count += 1
+            for g in declared:
+                if m.group(g):
+                    group_present[g] += 1
+            ts_val = m.group("ts") if "ts" in declared else None
+            if ts_val:
+                try:
+                    iso_values.append(to_utc_iso(ts_val, ts_format))
+                    ts_ok += 1
+                except Exception:
+                    pass
+            if "level" in declared:
+                lv = m.group("level")
+                if lv:
+                    level_values.append(lv)
+        q.put(("ok", {"matched_count": matched_count, "ts_ok": ts_ok,
+                      "iso_values": iso_values, "level_values": level_values,
+                      "group_present": group_present}))
+    except Exception as e:
+        q.put(("error", "%s: %s" % (type(e).__name__, e)))
+
+
+def _run_with_budget(target, args, timeout):
+    """Run `target(*args, q)` in a child process; hard-kill it if it is
+    still alive past `timeout` seconds. Returns ("ok", payload),
+    ("error", message), or ("timeout", message)."""
+    q = multiprocessing.Queue()
+    p = multiprocessing.Process(target=target, args=tuple(args) + (q,))
+    p.start()
+    p.join(timeout)
+    if p.is_alive():
+        p.terminate()
+        p.join()
+        return ("timeout", "exceeded the %.1fs time budget (possible catastrophic "
+                           "backtracking)" % timeout)
+    try:
+        status, payload = q.get_nowait()
+    except Exception:
+        return ("error", "worker process exited without a result "
+                         "(code %s)" % p.exitcode)
+    return (status, payload)
+
+
+# ---------------------------------------------------------------------------
 # validate_descriptor
 # ---------------------------------------------------------------------------
 _MAX_REGEX_LEN = 2000
 _OPTIONAL_GROUPS = ("level", "service", "logger", "msg", "thread")
+_PLAUSIBLE_YEAR_MIN = 2000
+_PLAUSIBLE_YEAR_MAX = 2100
+_PLAUSIBLE_SPAN_DAYS = 366
 
 
-def validate_descriptor(descriptor, sample_lines):
+def _implausible_timestamps_reason(iso_values):
+    """IMPORTANT 7: a descriptor can pass the 90% ts hit-rate bar on
+    garbage -- e.g. `(?P<ts>\\d+)` + ts_format "epoch_s" matches a bare "28"
+    and parses "successfully" to 1970-01-01T00:00:28Z. Hit-rate alone
+    can't catch that; plausibility bounds on the PARSED values can. Sample
+    years must fall in [2000, 2100] and the sample's own min/max span must
+    be under a year (one real dialect's sample shouldn't straddle more)."""
+    if not iso_values:
+        return None  # the ts hit-rate check already explains an empty sample
+    years = [int(v[:4]) for v in iso_values]
+    lo, hi = min(years), max(years)
+    if lo < _PLAUSIBLE_YEAR_MIN or hi > _PLAUSIBLE_YEAR_MAX:
+        return ("parsed sample timestamps fall outside the plausible range "
+                "[%d, %d] (saw year %d..%d) -- likely a garbage ts_format/regex "
+                "combination, not a real dialect" % (_PLAUSIBLE_YEAR_MIN,
+                _PLAUSIBLE_YEAR_MAX, lo, hi))
+    from datetime import date as _date
+    ordinals = [_date(int(v[0:4]), int(v[5:7]), int(v[8:10])).toordinal() for v in iso_values]
+    span = max(ordinals) - min(ordinals)
+    if span >= _PLAUSIBLE_SPAN_DAYS:
+        return ("parsed sample timestamps span %d days (>= %d) -- implausible "
+                "for a single sample of one dialect" % (span, _PLAUSIBLE_SPAN_DAYS))
+    return None
+
+
+def validate_descriptor(descriptor, sample_lines, timeout=_VALIDATE_TIMEOUT_S):
     """Validate a driving-agent-proposed format descriptor against a raw
     sample of lines from the file it was derived from.
 
@@ -204,6 +324,12 @@ def validate_descriptor(descriptor, sample_lines):
     primary-format lines (that's what the exit-4 handshake collects), so a
     handful of true continuation lines mixed in only mildly depresses the
     rate -- exactly the slack the 90% (not 100%) threshold exists for.
+
+    The actual per-line matching runs in a child process with a hard
+    wall-clock budget (`timeout`, default 2s) -- see the ReDoS containment
+    note above `_match_sample_worker`. `timeout` is overridable so tests
+    can exercise the real kill path without waiting on the production
+    budget.
     """
     if not isinstance(descriptor, dict):
         return False, {}, "descriptor must be a JSON object"
@@ -228,40 +354,37 @@ def validate_descriptor(descriptor, sample_lines):
     if not lines:
         return False, {}, "sample_lines is empty"
 
-    ts_ok = 0
-    matched = []
-    for ln in lines:
-        m = compiled.search(ln)
-        if not m:
-            continue
-        ts_val = m.group("ts")
-        if not ts_val:
-            continue
-        try:
-            to_utc_iso(ts_val, ts_format)
-        except Exception:
-            continue
-        ts_ok += 1
-        matched.append(m)
+    status, payload = _run_with_budget(
+        _match_sample_worker, (pattern_str, ts_format, declared, lines), timeout)
+    if status == "timeout":
+        return False, {}, "line_regex %s -- rejected" % payload
+    if status == "error":
+        return False, {}, "line_regex raised while matching the sample: %s" % payload
 
+    ts_ok = payload["ts_ok"]
+    matched_count = payload["matched_count"]
     hit_rates = {"ts": round(ts_ok / len(lines), 4)}
     reasons = []
     if hit_rates["ts"] < 0.90:
         reasons.append("ts hit-rate %.0f%% below 90%% threshold (%d/%d lines)" %
                        (hit_rates["ts"] * 100, ts_ok, len(lines)))
 
+    implausible = _implausible_timestamps_reason(payload["iso_values"])
+    if implausible:
+        reasons.append(implausible)
+
     if "level" in declared:
-        with_level = [m for m in matched if m.group("level")]
-        rate = (sum(1 for m in with_level if normalize_level(m.group("level")) != "UNKNOWN")
-                / len(with_level)) if with_level else 0.0
+        level_values = payload["level_values"]
+        rate = (sum(1 for lv in level_values if normalize_level(lv) != "UNKNOWN")
+                / len(level_values)) if level_values else 0.0
         hit_rates["level"] = round(rate, 4)
         if rate < 0.50:
             reasons.append("level hit-rate %.0f%% below 50%% threshold" % (rate * 100))
 
     for g in _OPTIONAL_GROUPS[1:]:  # "service", "logger", "msg", "thread" (level handled above)
         if g in declared:
-            hit_rates[g] = (round(sum(1 for m in matched if m.group(g)) / len(matched), 4)
-                            if matched else 0.0)
+            hit_rates[g] = (round(payload["group_present"][g] / matched_count, 4)
+                            if matched_count else 0.0)
 
     if reasons:
         return False, hit_rates, "; ".join(reasons)
@@ -326,3 +449,46 @@ def apply_descriptor(descriptor, lines, service_hint, ref, masker):
         prev = rec
         fold_count = 0
     return out
+
+
+def _apply_worker(descriptor, lines, service_hint, ref, q):
+    """Runs in a child process (see the ReDoS containment note above
+    `_match_sample_worker`): a descriptor that validated cleanly on a small
+    sample can still behave catastrophically on a real file's full content,
+    so the whole per-file application gets the same hard-kill treatment.
+    Uses its own fresh Masker (see apply_descriptor_with_budget's
+    docstring for the pseudonym-numbering trade-off that implies)."""
+    try:
+        from logalyzer.masking import Masker
+        recs = apply_descriptor(descriptor, lines, service_hint, ref, Masker())
+        q.put(("ok", recs))
+    except Exception as e:
+        q.put(("error", "%s: %s" % (type(e).__name__, e)))
+
+
+def apply_descriptor_with_budget(descriptor, lines, service_hint, ref, timeout=_APPLY_TIMEOUT_S):
+    """Same contract as apply_descriptor, but the whole per-file
+    application runs in a child process with a hard wall-clock budget
+    (CRITICAL 3's secondary/apply-time safety net -- default 10s, generous
+    since a real file is much bigger than a validation sample). On timeout
+    or a worker crash, returns (None, reason) so the caller can fall back
+    to the heuristic parser instead of hanging the whole ingest run.
+
+    Trade-off: the child uses a FRESH Masker rather than sharing the
+    caller's running instance across the process boundary -- redaction is
+    still fully applied to this file's content, but the pseudonym
+    *sequence number* (<EMAIL:e-01> etc.) is no longer guaranteed globally
+    continuous with pseudonyms assigned to other files in the same run.
+    Necessary because (a) Python cannot hard-interrupt a hanging regex any
+    other way, and (b) a stateful Masker isn't meaningfully shareable
+    across a process boundary regardless.
+
+    Returns (records_or_None, reason_or_None).
+    """
+    status, payload = _run_with_budget(
+        _apply_worker, (descriptor, lines, service_hint, ref), timeout)
+    if status == "timeout":
+        return None, "descriptor application %s -- falling back to the heuristic parser" % payload
+    if status == "error":
+        return None, "descriptor application failed (%s) -- falling back to the heuristic parser" % payload
+    return payload, None

@@ -12,11 +12,27 @@ from logalyzer.runlog import RunLog
 from logalyzer.formats import FormatStore, validate_descriptor, top_skeletons
 
 _INFERENCE_INSTRUCTIONS = (
-    "Derive a format descriptor JSON {line_regex (a Python regex with named "
-    "groups: 'ts' required, optional level/service/logger/msg/thread), "
-    "ts_format (an strptime format string, or \"iso\"/\"epoch_s\"/\"epoch_ms\")}, "
-    "save it to a file, then run: python3 -m logalyzer register-format "
-    "<descriptor.json> --fingerprint <fp> --sample <sample_file>")
+    "For each entry in 'files': derive a format descriptor JSON "
+    "{line_regex (a Python regex with named groups: 'ts' required, optional "
+    "level/service/logger/msg/thread), ts_format (an strptime format string, "
+    "or \"iso\"/\"epoch_s\"/\"epoch_ms\")}, save it to a file (e.g. "
+    "descriptor.json), then write that entry's own sample_lines to a second "
+    "file, one line per line, exactly as given (e.g. sample.txt), and run: "
+    "python3 -m logalyzer register-format descriptor.json "
+    "--fingerprint <fp from this entry> --sample sample.txt -- then re-run "
+    "the same investigate/stats command. Acceptance thresholds enforced by "
+    "register-format: the ts group must match and parse on >=90% of the "
+    "sample's non-blank lines; if a 'level' group is present, it must "
+    "normalize to a known level (DEBUG/INFO/WARN/ERROR) on >=50% of its own "
+    "matches; parsed sample timestamps must fall within calendar years "
+    "2000-2100 and span under 366 days (guards against a ts_format/regex "
+    "combination that 'matches' but parses to garbage, e.g. epoch math on "
+    "the wrong unit); line_regex is capped at 2000 characters and any "
+    "match is abandoned past a 2-second time budget (both guard against "
+    "catastrophic regex backtracking). Exit codes: 0 = saved, hit_rates "
+    "printed; 1 = validation failed, the JSON 'reason' explains which "
+    "threshold was missed -- fix the regex/ts_format and retry; "
+    "2 = malformed command-line arguments.")
 
 _CASE_DIR = Path(__file__).resolve().parents[1]
 
@@ -43,6 +59,18 @@ def _arg(argv, name, default=None):
 
 def _args_multi(argv, name):
     return [argv[i + 1] for i, a in enumerate(argv) if a == name]
+
+def _unresolved_needs_inference(ingest_stats):
+    """CRITICAL 1 safety net: a fingerprint already present in FormatStore
+    must never be re-offered by investigate's exit-4 payload -- once
+    registered, that dialect is solved; re-requesting it would deadloop
+    the handshake (an agent register-formatting the exact same descriptor
+    forever) if any edge case slips a "learned:" file past the ts-vs-ok
+    rate gate fix in ingest.py. Filters the raw ingest-stats list down to
+    fingerprints the store genuinely has no entry for."""
+    store = FormatStore()
+    return [f for f in ingest_stats.get("needs_inference", [])
+            if store.get(f["fingerprint"]) is None]
 
 def cmd_suggest(argv):
     start = Path(_arg(argv, "--from", "."))
@@ -103,12 +131,15 @@ def cmd_register_format(argv):
                  (fp, sample_from_stats))
             return 1
         sample_lines = entry.get("sample_lines", [])
+    t0 = time.monotonic()
     ok, hit_rates, reason = validate_descriptor(descriptor, sample_lines)
+    validate_seconds = time.monotonic() - t0
     if not ok:
         print(json.dumps({"ok": False, "fingerprint": fp, "reason": reason,
                           "hit_rates": hit_rates}, ensure_ascii=False, indent=2))
         return 1
-    FormatStore().save(fp, descriptor, hit_rates, top_skeletons(sample_lines))
+    FormatStore().save(fp, descriptor, hit_rates, top_skeletons(sample_lines),
+                       validate_seconds=validate_seconds)
     print(json.dumps({"ok": True, "fingerprint": fp, "hit_rates": hit_rates},
                      ensure_ascii=False, indent=2))
     return 0
@@ -144,7 +175,7 @@ def cmd_investigate(argv):
     # already parsed cleanly and produced evidence for this correlation id,
     # proceed normally (the needs_inference files just get a limitations
     # note below) rather than blocking a perfectly good investigation.
-    needs_inf = ingest_stats.get("needs_inference", [])
+    needs_inf = _unresolved_needs_inference(ingest_stats)
     if needs_inf and not bundle.items:
         payload = {
             "action": "format_inference_needed",
