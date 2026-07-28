@@ -6,3 +6,4 @@ logs/
 # raw intake docs (Confluence exports carry company branding) — sanitize to markdown, never commit
 *.pdf
 .worktrees/
+cases/06-dev-logging/sherlock/.verify-run/
