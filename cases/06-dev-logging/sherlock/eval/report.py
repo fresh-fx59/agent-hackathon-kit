@@ -33,7 +33,17 @@ def arms_of(rows):
     return [a for a in order if a in seen]
 
 def agg(rows, arm, field):
-    vals = [r[field] for (d, a), r in rows.items() if a == arm and r.get(field) is not None]
+    vals = []
+    for (d, a), r in rows.items():
+        if a != arm:
+            continue
+        v = r.get(field)
+        if v is None:
+            continue
+        try:                      # early rows stored duration_s as a string
+            vals.append(float(v))
+        except (TypeError, ValueError):
+            continue
     return st.mean(vals) if vals else None
 
 def fmt(v, spec="%.0f"):

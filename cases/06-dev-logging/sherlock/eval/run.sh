@@ -96,7 +96,7 @@ rec = {
     "dataset": ds, "arm": arm, "label": label,
     "model": sysrec.get("model"),
     "turns": final.get("num_turns"),
-    "duration_s": elapsed,
+    "duration_s": int(elapsed),
     "api_s": round((final.get("duration_api_ms") or 0) / 1000, 1),
     "input_tokens": u.get("input_tokens"), "output_tokens": u.get("output_tokens"),
     "answer_chars": len(text),

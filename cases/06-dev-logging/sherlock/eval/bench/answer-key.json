@@ -1,0 +1,1111 @@
+{
+  "generator": "/tmp/claude-1000/-home-claude-developer-personal-os/6247eb6b-45c7-4309-abd2-5e2043ec2fd0/scratchpad/gen_corpus.py",
+  "seed": 20260728,
+  "scale": 1.0,
+  "corpus_root": "/tmp/claude-1000/-home-claude-developer-personal-os/6247eb6b-45c7-4309-abd2-5e2043ec2fd0/scratchpad/hetero-corpus",
+  "scenario": "ACME Shop, Kubernetes cluster prod-eu-1, incident window 2026-07-28 09:00-16:00 UTC. A catalog-svc release at 11:00 introduces an un-indexed JSONB lookup; an unauthenticated cache flush at 12:59 removes the cache that was hiding it; postgres lock contention at 13:10 drains the inventory-svc connection pool; an unauthorized manual scale-down at 13:31 halves capacity; pods OOMKill at 13:40 and the mesh returns 503 until ~14:22. A separate manual kafka retention change at 13:52 silently drops 2867 order notifications. Three further defects (Go panic, Java NPE, discount stacking, stale FX rate) and two red herrings run concurrently.",
+  "totals": {
+    "files": 28,
+    "on_disk_bytes": 679368260,
+    "lines": 4259018
+  },
+  "line_numbering": "Proof line numbers are 1-based PHYSICAL line numbers in the file as written. For nginx/access.log.1.gz they are line numbers in the DECOMPRESSED stream. Files with a truncated tail (nginx/access.log, istio/ingressgateway-access.json.log, misc/inventory-svc-partial.log) end without a trailing newline, so `wc -l` reports one fewer line than the `lines` field below.",
+  "files": [
+    {
+      "path": "apps/catalog-svc/catalog-console-ansi.log",
+      "lines": 56471,
+      "uncompressed_bytes": 7340155,
+      "on_disk_bytes": 7340155
+    },
+    {
+      "path": "apps/catalog-svc/catalog-svc.log",
+      "lines": 169506,
+      "uncompressed_bytes": 29360139,
+      "on_disk_bytes": 29360139
+    },
+    {
+      "path": "apps/checkout-api/checkout-api.log",
+      "lines": 240540,
+      "uncompressed_bytes": 44040224,
+      "on_disk_bytes": 44040224
+    },
+    {
+      "path": "apps/inventory-svc/uvicorn.log",
+      "lines": 285715,
+      "uncompressed_bytes": 27263077,
+      "on_disk_bytes": 27263077
+    },
+    {
+      "path": "apps/notify-svc/notify.pino.json",
+      "lines": 160233,
+      "uncompressed_bytes": 37749289,
+      "on_disk_bytes": 37749289
+    },
+    {
+      "path": "apps/payments-worker/payments.zap.json",
+      "lines": 100083,
+      "uncompressed_bytes": 34603169,
+      "on_disk_bytes": 34603169
+    },
+    {
+      "path": "db/postgresql-2026-07-28.log",
+      "lines": 116816,
+      "uncompressed_bytes": 20971686,
+      "on_disk_bytes": 20971686
+    },
+    {
+      "path": "docker/payments-worker-3a7f2b1c9d8e4f5a6b7c8d9e0f1a2b3c-json.log",
+      "lines": 147711,
+      "uncompressed_bytes": 29360220,
+      "on_disk_bytes": 29360220
+    },
+    {
+      "path": "haproxy/haproxy.log",
+      "lines": 120033,
+      "uncompressed_bytes": 29360171,
+      "on_disk_bytes": 29360171
+    },
+    {
+      "path": "inhouse/billing-adapter-ru.log",
+      "lines": 43230,
+      "uncompressed_bytes": 6291602,
+      "on_disk_bytes": 9758417
+    },
+    {
+      "path": "inhouse/promo-engine.plog",
+      "lines": 70712,
+      "uncompressed_bytes": 11534491,
+      "on_disk_bytes": 11534491
+    },
+    {
+      "path": "istio/ingressgateway-access.json.log",
+      "lines": 114252,
+      "uncompressed_bytes": 100663433,
+      "on_disk_bytes": 100663433
+    },
+    {
+      "path": "istio/sidecar-catalog-svc-access.log",
+      "lines": 96964,
+      "uncompressed_bytes": 35651926,
+      "on_disk_bytes": 35651926
+    },
+    {
+      "path": "k8s/events-prod-eu-1.txt",
+      "lines": 14776,
+      "uncompressed_bytes": 2332426,
+      "on_disk_bytes": 2332426
+    },
+    {
+      "path": "k8s/pods/inventory-svc-7d9c4b8f6-2xq7z_prod_inventory-svc.log",
+      "lines": 51537,
+      "uncompressed_bytes": 9437245,
+      "on_disk_bytes": 9437245
+    },
+    {
+      "path": "k8s/pods/inventory-svc-7d9c4b8f6-2xq7z_prod_istio-proxy.log",
+      "lines": 17969,
+      "uncompressed_bytes": 7340454,
+      "on_disk_bytes": 7340454
+    },
+    {
+      "path": "k8s/pods/promo-engine-5b6c7d8e9-w4t2m_prod_promo-engine.log",
+      "lines": 30978,
+      "uncompressed_bytes": 6291614,
+      "on_disk_bytes": 6291614
+    },
+    {
+      "path": "kafka/server.log",
+      "lines": 129147,
+      "uncompressed_bytes": 20971601,
+      "on_disk_bytes": 20971601
+    },
+    {
+      "path": "misc/inventory-svc-partial.log",
+      "lines": 15753,
+      "uncompressed_bytes": 2097198,
+      "on_disk_bytes": 2097198
+    },
+    {
+      "path": "misc/ordersync-prod-2026-07-28",
+      "lines": 41563,
+      "uncompressed_bytes": 4194365,
+      "on_disk_bytes": 4194365
+    },
+    {
+      "path": "nginx/access.log",
+      "lines": 833874,
+      "uncompressed_bytes": 134217861,
+      "on_disk_bytes": 134217861
+    },
+    {
+      "path": "nginx/access.log.1.gz",
+      "lines": 378024,
+      "uncompressed_bytes": 60817494,
+      "on_disk_bytes": 4574207
+    },
+    {
+      "path": "nginx/error.log",
+      "lines": 33606,
+      "uncompressed_bytes": 11534348,
+      "on_disk_bytes": 11534348
+    },
+    {
+      "path": "syslog/node-a/auth.log",
+      "lines": 64953,
+      "uncompressed_bytes": 6291456,
+      "on_disk_bytes": 6291456
+    },
+    {
+      "path": "syslog/node-a/dmesg",
+      "lines": 42990,
+      "uncompressed_bytes": 3145767,
+      "on_disk_bytes": 3145767
+    },
+    {
+      "path": "syslog/node-a/syslog",
+      "lines": 90216,
+      "uncompressed_bytes": 12582982,
+      "on_disk_bytes": 12582982
+    },
+    {
+      "path": "syslog/node-b/syslog",
+      "lines": 65894,
+      "uncompressed_bytes": 9437307,
+      "on_disk_bytes": 9437307
+    },
+    {
+      "path": "systemd/journal-export-node-a.txt",
+      "lines": 725472,
+      "uncompressed_bytes": 27263032,
+      "on_disk_bytes": 27263032
+    }
+  ],
+  "defects": [
+    {
+      "id": "D01",
+      "title": "checkout-api NPE: PromoCode.normalized() returns null for lowercase promo codes",
+      "difficulty": "single-format read (+ multiline stitching under interleaving)",
+      "requires": "single-format read, multiline stitching",
+      "description": "Every checkout that carries a promo code containing lowercase characters throws NullPointerException inside PromoCodeResolver.resolve and the whole checkout request fails with HTTP 500.",
+      "root_cause": "PromoCode.normalized() validates against ^[A-Z0-9]{4,16}$ and returns null (instead of throwing or upper-casing first) when the code does not match; PromoCodeResolver.java:88 then calls .toUpperCase() on that null. The in-house promo-engine log shows the offending input: code=summer26.",
+      "formats": [
+        "Java logback multi-line stack trace",
+        "in-house pipe-delimited promo log"
+      ],
+      "trap": "In checkout-api.log the NPE stack trace is INTERLEAVED LINE BY LINE with a concurrent SocketTimeoutException trace from thread http-nio-8080-exec-12. Naive 'a stack trace is the lines following an exception header' stitching produces a chimeric trace and the wrong conclusion (network timeout instead of a null).",
+      "confused_with": "D03 (the 503 storm) -- the interleaved SocketTimeoutException frames belong to D03, not to the NPE.",
+      "proof_locations": [
+        {
+          "file": "apps/checkout-api/checkout-api.log",
+          "line_start": 178977,
+          "line_end": 178996,
+          "note": "NPE in PromoCodeResolver -- the trace is INTERLEAVED line-by-line with a concurrent SocketTimeoutException trace from thread exec-12"
+        },
+        {
+          "file": "apps/checkout-api/checkout-api.log",
+          "line_start": 179061,
+          "line_end": 179066,
+          "note": "second NPE occurrence, same call site, different lowercase promo code"
+        },
+        {
+          "file": "inhouse/promo-engine.plog",
+          "line_start": 52624,
+          "line_end": 52624,
+          "note": "the lowercase promo code that trips the Java NPE one second later"
+        }
+      ],
+      "proof_count": 3
+    },
+    {
+      "id": "D02",
+      "title": "payments-worker Go panic: index out of range in batch.Retrier.flush",
+      "difficulty": "single-format read (inside Docker json-file escaping)",
+      "requires": "single-format read, multiline stitching, JSON unescaping",
+      "description": "payments-worker crashes (exit status 2) and is restarted by the container runtime, losing the in-flight retry batch.",
+      "root_cause": "Retrier.flush (/src/internal/batch/retrier.go:118) indexes the PSP response slice by the REQUEST index; when the PSP returns a partial capture set (requested 4, returned 3 -- see payments.zap.json) the index runs off the end. The partial responses only happen while the PSP is being retried, i.e. only during the 503 storm, which is why the bug had never fired before.",
+      "formats": [
+        "Docker json-file driver log",
+        "Go zap JSON"
+      ],
+      "trap": "The panic is not 12 lines of one log record: the docker json-file driver writes ONE JSON OBJECT PER PHYSICAL LINE with the newline escaped inside the \"log\" field. Grepping for 'panic:' finds one line; the goroutine trace has to be reassembled from 12 separate JSON records.",
+      "confused_with": "D03 -- the panic is a CONSEQUENCE of the storm, not its cause; its timestamp is 24 minutes after the 503s start.",
+      "proof_locations": [
+        {
+          "file": "apps/payments-worker/payments.zap.json",
+          "line_start": 72646,
+          "line_end": 72646,
+          "note": "the retrier batch that is about to panic: PSP returned fewer results than requested"
+        },
+        {
+          "file": "docker/payments-worker-3a7f2b1c9d8e4f5a6b7c8d9e0f1a2b3c-json.log",
+          "line_start": 107327,
+          "line_end": 107327,
+          "note": "goroutine panic frame 1/12 (each physical line is one docker json record; the \\n is escaped)"
+        },
+        {
+          "file": "docker/payments-worker-3a7f2b1c9d8e4f5a6b7c8d9e0f1a2b3c-json.log",
+          "line_start": 107328,
+          "line_end": 107328,
+          "note": "goroutine panic frame 2/12 (each physical line is one docker json record; the \\n is escaped)"
+        },
+        {
+          "file": "docker/payments-worker-3a7f2b1c9d8e4f5a6b7c8d9e0f1a2b3c-json.log",
+          "line_start": 107329,
+          "line_end": 107329,
+          "note": "goroutine panic frame 3/12 (each physical line is one docker json record; the \\n is escaped)"
+        },
+        {
+          "file": "docker/payments-worker-3a7f2b1c9d8e4f5a6b7c8d9e0f1a2b3c-json.log",
+          "line_start": 107330,
+          "line_end": 107330,
+          "note": "goroutine panic frame 4/12 (each physical line is one docker json record; the \\n is escaped)"
+        },
+        {
+          "file": "docker/payments-worker-3a7f2b1c9d8e4f5a6b7c8d9e0f1a2b3c-json.log",
+          "line_start": 107331,
+          "line_end": 107331,
+          "note": "goroutine panic frame 5/12 (each physical line is one docker json record; the \\n is escaped)"
+        },
+        {
+          "file": "docker/payments-worker-3a7f2b1c9d8e4f5a6b7c8d9e0f1a2b3c-json.log",
+          "line_start": 107332,
+          "line_end": 107332,
+          "note": "goroutine panic frame 6/12 (each physical line is one docker json record; the \\n is escaped)"
+        },
+        {
+          "file": "docker/payments-worker-3a7f2b1c9d8e4f5a6b7c8d9e0f1a2b3c-json.log",
+          "line_start": 107333,
+          "line_end": 107333,
+          "note": "goroutine panic frame 7/12 (each physical line is one docker json record; the \\n is escaped)"
+        },
+        {
+          "file": "docker/payments-worker-3a7f2b1c9d8e4f5a6b7c8d9e0f1a2b3c-json.log",
+          "line_start": 107334,
+          "line_end": 107334,
+          "note": "goroutine panic frame 8/12 (each physical line is one docker json record; the \\n is escaped)"
+        },
+        {
+          "file": "docker/payments-worker-3a7f2b1c9d8e4f5a6b7c8d9e0f1a2b3c-json.log",
+          "line_start": 107335,
+          "line_end": 107335,
+          "note": "goroutine panic frame 9/12 (each physical line is one docker json record; the \\n is escaped)"
+        },
+        {
+          "file": "docker/payments-worker-3a7f2b1c9d8e4f5a6b7c8d9e0f1a2b3c-json.log",
+          "line_start": 107336,
+          "line_end": 107336,
+          "note": "goroutine panic frame 10/12 (each physical line is one docker json record; the \\n is escaped)"
+        },
+        {
+          "file": "docker/payments-worker-3a7f2b1c9d8e4f5a6b7c8d9e0f1a2b3c-json.log",
+          "line_start": 107337,
+          "line_end": 107337,
+          "note": "goroutine panic frame 11/12 (each physical line is one docker json record; the \\n is escaped)"
+        },
+        {
+          "file": "docker/payments-worker-3a7f2b1c9d8e4f5a6b7c8d9e0f1a2b3c-json.log",
+          "line_start": 107338,
+          "line_end": 107338,
+          "note": "goroutine panic frame 12/12 (each physical line is one docker json record; the \\n is escaped)"
+        },
+        {
+          "file": "docker/payments-worker-3a7f2b1c9d8e4f5a6b7c8d9e0f1a2b3c-json.log",
+          "line_start": 107342,
+          "line_end": 107342,
+          "note": "container restarted by the runtime after the panic"
+        }
+      ],
+      "proof_count": 14
+    },
+    {
+      "id": "D03",
+      "title": "Istio 503 storm = inventory-svc OOMKilled and CrashLooping",
+      "difficulty": "cross-format correlation",
+      "requires": "cross-format correlation",
+      "description": "From 13:41 to ~14:22 UTC the ingress gateway returns 503 (response_flags UF/UH) for inventory-svc and URX for checkout-api; nginx logs 'connect() failed (111)' and 'no live upstreams'; HAProxy marks the edge backend DOWN.",
+      "root_cause": "inventory-svc pods exceeded the 2Gi memory cgroup limit and were killed by the kernel OOM killer (dmesg + journald kubelet + k8s OOMKilling event), then entered restart back-off, leaving the Service with no ready endpoints. The memory growth itself is D04 (request queue) amplified by D06 (replicas halved).",
+      "formats": [
+        "Envoy JSON access log",
+        "Envoy text access log",
+        "nginx error log",
+        "HAProxy log",
+        "kubectl events",
+        "journald export",
+        "dmesg",
+        "syslog",
+        "CRI pod log",
+        "Python uvicorn log"
+      ],
+      "trap": "Timestamps do not line up: HAProxy is stamped in Europe/Moscow (UTC+3) so its lines read 16:41, dmesg is stamped in seconds-since-boot (boot 2026-07-25T04:11:03Z), and journald uses microsecond epoch in __REALTIME_TIMESTAMP.",
+      "confused_with": "D12 (SYN flood / conntrack table full on node-b) -- looks like a network-layer cause of the 503s but is 5.5 h earlier and on the wrong node.",
+      "proof_locations": [
+        {
+          "file": "nginx/error.log",
+          "line_start": 22486,
+          "line_end": 22486,
+          "note": "nginx sees inventory-svc upstream refusing connections right after the OOMKill"
+        },
+        {
+          "file": "nginx/error.log",
+          "line_start": 22488,
+          "line_end": 22488,
+          "note": "no live endpoints left for the inventory-svc upstream group"
+        },
+        {
+          "file": "istio/ingressgateway-access.json.log",
+          "line_start": 76591,
+          "line_end": 76591,
+          "note": "Envoy 503 UF against inventory-svc: upstream connection refused (pod gone)"
+        },
+        {
+          "file": "istio/ingressgateway-access.json.log",
+          "line_start": 76595,
+          "line_end": 76595,
+          "note": "Envoy 503 UF against inventory-svc: upstream connection refused (pod gone)"
+        },
+        {
+          "file": "istio/ingressgateway-access.json.log",
+          "line_start": 77373,
+          "line_end": 77373,
+          "note": "Envoy 503 UF against inventory-svc: upstream connection refused (pod gone)"
+        },
+        {
+          "file": "haproxy/haproxy.log",
+          "line_start": 80393,
+          "line_end": 80393,
+          "note": "HAProxy marks the edge backend DOWN (L7 check 503) -- 3h skewed clock: line stamp is 16:41 MSK"
+        },
+        {
+          "file": "haproxy/haproxy.log",
+          "line_start": 106504,
+          "line_end": 106504,
+          "note": "backend recovers after replicas are restored"
+        },
+        {
+          "file": "apps/checkout-api/checkout-api.log",
+          "line_start": 163670,
+          "line_end": 163675,
+          "note": "checkout-api read timeouts against inventory-svc during the 503 storm (multi-line stack trace)"
+        },
+        {
+          "file": "apps/inventory-svc/uvicorn.log",
+          "line_start": 189740,
+          "line_end": 189741,
+          "note": "RSS climbing towards the 2Gi container limit as the queue grows -- last words before the OOMKill"
+        },
+        {
+          "file": "systemd/journal-export-node-a.txt",
+          "line_start": 484219,
+          "line_end": 484236,
+          "note": "kubelet records the OOM kill of inventory-svc-...-2xq7z (journald export format, MESSAGE= field)"
+        },
+        {
+          "file": "systemd/journal-export-node-a.txt",
+          "line_start": 484255,
+          "line_end": 484272,
+          "note": "container runtime confirms exit code 137"
+        },
+        {
+          "file": "systemd/journal-export-node-a.txt",
+          "line_start": 485659,
+          "line_end": 485676,
+          "note": "kubelet backing off restarts -> that is why there are no healthy endpoints for ~40 minutes"
+        },
+        {
+          "file": "syslog/node-a/syslog",
+          "line_start": 60386,
+          "line_end": 60387,
+          "note": "readiness probes failing for every remaining inventory-svc pod"
+        },
+        {
+          "file": "syslog/node-a/dmesg",
+          "line_start": 28675,
+          "line_end": 28683,
+          "note": "kernel OOM killer terminates the inventory-svc python process (cgroup limit 2Gi). NOTE: dmesg stamps are seconds-since-boot, boot was 2026-07-25T04:11:03Z"
+        },
+        {
+          "file": "k8s/events-prod-eu-1.txt",
+          "line_start": 10049,
+          "line_end": 10049,
+          "note": "OOMKilling event for the inventory-svc pod (first snapshot containing it; it repeats in later snapshots)"
+        },
+        {
+          "file": "k8s/events-prod-eu-1.txt",
+          "line_start": 10050,
+          "line_end": 10050,
+          "note": "container exit 137 / restart (first snapshot containing it; it repeats in later snapshots)"
+        },
+        {
+          "file": "k8s/events-prod-eu-1.txt",
+          "line_start": 10051,
+          "line_end": 10051,
+          "note": "the service has no endpoints at all -> Envoy UH/no_healthy_upstream (first snapshot containing it; it repeats in later snapshots)"
+        },
+        {
+          "file": "k8s/pods/inventory-svc-7d9c4b8f6-2xq7z_prod_inventory-svc.log",
+          "line_start": 51473,
+          "line_end": 51474,
+          "note": "the pod's own last lines before exit 137 (CRI-prefixed)"
+        },
+        {
+          "file": "k8s/pods/inventory-svc-7d9c4b8f6-2xq7z_prod_istio-proxy.log",
+          "line_start": 12011,
+          "line_end": 12011,
+          "note": "sidecar reports the local app is gone (connection refused to 127.0.0.1:8080)"
+        }
+      ],
+      "proof_count": 19
+    },
+    {
+      "id": "D04",
+      "title": "The memory growth: catalog-svc 4.7.2 shipped an un-indexed JSONB vendor_ref lookup",
+      "difficulty": "cross-format correlation (deepest hop)",
+      "requires": "cross-format correlation",
+      "description": "From 13:10 the same statement takes 8.8 s, holds row locks on inventory_reservations, produces lock queues and two deadlocks; inventory-svc's asyncpg pool drains, requests queue in memory and RSS climbs to the 2Gi limit.",
+      "root_cause": "catalog-svc 4.7.2 (deployed 11:00:41) introduced SELECT ... WHERE c.attrs ->> 'vendor_ref' = $1 ORDER BY c.updated_at DESC (later joined FOR UPDATE) with NO expression index on (attrs ->> 'vendor_ref'). It seq-scans catalog_items while holding locks. The 12:59 cache flush (D07) removed the read-through cache that had been hiding it, so at 13:10 every request reached postgres. Fixed at 15:09 by CREATE INDEX CONCURRENTLY idx_catalog_items_vendor_ref.",
+      "formats": [
+        "PostgreSQL server log",
+        "Java logback (catalog-svc)",
+        "Python uvicorn (inventory-svc)",
+        "kubectl events",
+        "Java logback (checkout-api)"
+      ],
+      "trap": "postgres logs no service name -- only a pid and app_runtime@shopdb. The statement text is the only join key back to catalog-svc, and catalog-svc logs it with '?' placeholders while postgres logs it with '$1'.",
+      "confused_with": "D13 (CacheEvictionScheduler WARN spam) -- also cache-related, also loud, but runs at the same rate all day.",
+      "proof_locations": [
+        {
+          "file": "apps/checkout-api/checkout-api.log",
+          "line_start": 69461,
+          "line_end": 69461,
+          "note": "checkout-api notices the catalog dependency got slower right after the 4.7.2 rollout"
+        },
+        {
+          "file": "apps/catalog-svc/catalog-svc.log",
+          "line_start": 48710,
+          "line_end": 48712,
+          "note": "catalog-svc 4.7.2 starts -- this is the change that introduces the un-indexed vendor_ref lookup"
+        },
+        {
+          "file": "apps/catalog-svc/catalog-svc.log",
+          "line_start": 101736,
+          "line_end": 101736,
+          "note": "catalog-svc holding DB connections far beyond normal after the cache flush"
+        },
+        {
+          "file": "apps/catalog-svc/catalog-svc.log",
+          "line_start": 149204,
+          "line_end": 149204,
+          "note": "the actual fix: an expression index on attrs->>'vendor_ref' ends the incident"
+        },
+        {
+          "file": "apps/inventory-svc/uvicorn.log",
+          "line_start": 180830,
+          "line_end": 180842,
+          "note": "inventory-svc cannot get a postgres connection: the pool is drained by the lock waits"
+        },
+        {
+          "file": "apps/inventory-svc/uvicorn.log",
+          "line_start": 181192,
+          "line_end": 181192,
+          "note": "pool saturation + request queue growth -- the mechanism that turns lock waits into memory growth"
+        },
+        {
+          "file": "db/postgresql-2026-07-28.log",
+          "line_start": 69673,
+          "line_end": 69675,
+          "note": "the un-indexed JSONB lookup introduced by catalog-svc 4.7.2, 8.8 s per execution"
+        },
+        {
+          "file": "db/postgresql-2026-07-28.log",
+          "line_start": 71802,
+          "line_end": 71804,
+          "note": "lock waits pile up on inventory_reservations -- this is what drains the inventory-svc pool"
+        },
+        {
+          "file": "db/postgresql-2026-07-28.log",
+          "line_start": 73099,
+          "line_end": 73106,
+          "note": "deadlock between the catalog vendor_ref FOR UPDATE scan and the inventory decrement"
+        },
+        {
+          "file": "db/postgresql-2026-07-28.log",
+          "line_start": 76028,
+          "line_end": 76028,
+          "note": "second deadlock, same pair of statements"
+        },
+        {
+          "file": "db/postgresql-2026-07-28.log",
+          "line_start": 102862,
+          "line_end": 102863,
+          "note": "index build that resolves the lock contention"
+        },
+        {
+          "file": "k8s/events-prod-eu-1.txt",
+          "line_start": 4498,
+          "line_end": 4498,
+          "note": "the catalog-svc 4.7.2 rollout event (first snapshot containing it; it repeats in later snapshots)"
+        }
+      ],
+      "proof_count": 12
+    },
+    {
+      "id": "D05",
+      "title": "2867 paid orders never got a confirmation: kafka retention.ms lowered to 10 minutes",
+      "difficulty": "cross-format correlation + rare needle (correlation id renamed 5 times)",
+      "requires": "cross-format correlation, rare-event needle",
+      "description": "ORD-88231 was captured successfully (PSP-4471902, EUR 12999.00) and the payment.captured event was produced to orders.events partition 3 at offset 5512034, but no notification was ever sent. 2867 orders are affected.",
+      "root_cause": "At 13:52:03 a manual kafka-configs.sh push (same ssh session as D06) set retention.ms=600000 and segment.ms=300000 on topic orders.events. At 13:57 the broker deleted the segment holding offsets 5510000-5514900. notify-svc was simultaneously stuck in a consumer-group rebalance (14:02); when it resumed, its committed offset 5512034 was below logStartOffset 5514901, so auto.offset.reset=latest silently skipped 2867 records.",
+      "formats": [
+        "Kafka broker log",
+        "Node pino JSON",
+        "Go zap JSON",
+        "Java logback",
+        "Envoy JSON",
+        "nginx access",
+        "HAProxy",
+        "Python uvicorn",
+        "in-house promo log",
+        "no-extension ordersync log",
+        "auth.log"
+      ],
+      "trap": "The SAME logical request id is spelled five different ways: X-Request-ID/request_id '9f2c1d7e-4b6a-4c31-8e55-1a2b3c4d5e6f' (haproxy {} capture, nginx rid=, envoy request_id), traceId '9f2c1d7e4b6a4c318e551a2b3c4d5e6f' (Java MDC, dashes stripped), trace_id (Go zap, dash-less), correlation_id (Python, dashes kept), and RID~9f2c1d7e4b6a (in-house promo, truncated to 12 chars). notify-svc carries NO correlation id at all -- it can only be joined by order_id -- and the decisive evidence for ORD-88231 in notify-svc is an ABSENCE of any line.",
+      "confused_with": "D09 (notify-svc SMTP error ramp) -- also notify-svc, also 'notifications not arriving', but a completely different mechanism and it produces error lines, not silence.",
+      "proof_locations": [
+        {
+          "file": "nginx/access.log",
+          "line_start": 287092,
+          "line_end": 287092,
+          "note": "ORD-88231 checkout request at the edge, X-Request-ID spelling"
+        },
+        {
+          "file": "istio/ingressgateway-access.json.log",
+          "line_start": 82180,
+          "line_end": 82180,
+          "note": "ORD-88231 checkout succeeded at the mesh layer (request_id spelling #2)"
+        },
+        {
+          "file": "haproxy/haproxy.log",
+          "line_start": 86305,
+          "line_end": 86305,
+          "note": "ORD-88231 at the outermost hop; the id is captured as a {} header block, not a field"
+        },
+        {
+          "file": "apps/checkout-api/checkout-api.log",
+          "line_start": 173089,
+          "line_end": 173090,
+          "note": "ORD-88231 in the Java service: traceId is the edge X-Request-ID with the dashes stripped"
+        },
+        {
+          "file": "apps/payments-worker/payments.zap.json",
+          "line_start": 71959,
+          "line_end": 71959,
+          "note": "ORD-88231 money was actually captured -- id is now `trace_id`, dash-less spelling"
+        },
+        {
+          "file": "apps/payments-worker/payments.zap.json",
+          "line_start": 71962,
+          "line_end": 71962,
+          "note": "payments emitted the confirmation event to orders.events partition 3"
+        },
+        {
+          "file": "apps/inventory-svc/uvicorn.log",
+          "line_start": 205437,
+          "line_end": 205437,
+          "note": "ORD-88231 reservation: the id is now spelled `correlation_id` and keeps the dashes"
+        },
+        {
+          "file": "apps/notify-svc/notify.pino.json",
+          "line_start": 119295,
+          "line_end": 119295,
+          "note": "notify-svc leaves the consumer group (rebalance) -- it stops consuming for ~75s"
+        },
+        {
+          "file": "apps/notify-svc/notify.pino.json",
+          "line_start": 119741,
+          "line_end": 119742,
+          "note": "THE DROP: committed offset is below the log start offset, auto.offset.reset=latest skips 2867 records (5512034 is inside that hole)"
+        },
+        {
+          "file": "kafka/server.log",
+          "line_start": 89778,
+          "line_end": 89779,
+          "note": "ROOT CAUSE of the lost notification: a dynamic config push set orders.events retention.ms to 600000 (10 minutes)"
+        },
+        {
+          "file": "kafka/server.log",
+          "line_start": 91514,
+          "line_end": 91515,
+          "note": "segments containing offset 5512034 are deleted 5 minutes later because of the new retention"
+        },
+        {
+          "file": "kafka/server.log",
+          "line_start": 92893,
+          "line_end": 92894,
+          "note": "notify-svc consumer group rebalances while its committed offset is already below the log start offset"
+        },
+        {
+          "file": "kafka/server.log",
+          "line_start": 93281,
+          "line_end": 93281,
+          "note": "broker-side view of the out-of-range fetch that the consumer then resolves with reset-to-latest"
+        },
+        {
+          "file": "inhouse/promo-engine.plog",
+          "line_start": 50845,
+          "line_end": 50845,
+          "note": "ORD-88231 in the in-house format: the correlation id is TRUNCATED to 12 hex chars (RID~)"
+        },
+        {
+          "file": "misc/ordersync-prod-2026-07-28",
+          "line_start": 30289,
+          "line_end": 30290,
+          "note": "the only place that notices ORD-88231 was paid but never notified (file names the service; no line in the file does)"
+        },
+        {
+          "file": "misc/ordersync-prod-2026-07-28",
+          "line_start": 31872,
+          "line_end": 31873,
+          "note": "ordersync gives up; 2867 orders are in the same state"
+        }
+      ],
+      "proof_count": 16
+    },
+    {
+      "id": "D06",
+      "title": "Unauthorized interactive kubectl scale halved inventory-svc capacity mid-incident",
+      "difficulty": "rare needle (3 lines in ~6 MB of CRON noise) + cross-format",
+      "requires": "rare-event needle, cross-format correlation",
+      "description": "At 13:31:02 someone logged in as `deploy` and scaled deploy/inventory-svc from 6 replicas to 2 while the service was already saturated, which is what turned a slow-query incident into an OOM/CrashLoop outage. The same session pushed the kafka retention change (D05).",
+      "root_cause": "Human action, not code: an interactive ssh session (publickey, user deploy, from 10.42.7.9) running `kubectl -n prod scale deploy/inventory-svc --replicas=2` and, 21 minutes later, `kafka-configs.sh --alter --add-config retention.ms=600000`. No change ticket; k8s/deployment-notes.md still says replicas: 6.",
+      "formats": [
+        "auth.log",
+        "syslog",
+        "kubectl events",
+        "journald export"
+      ],
+      "trap": "auth.log is ~90% pam_unix CRON session open/close noise; the three meaningful lines are <0.001% of the file. The kubectl scale leaves NO application-level trace -- only the sudo line, one kubelet SyncLoop DELETE record, and a single ScalingReplicaSet event row that is repeated verbatim in every later kubectl-events snapshot.",
+      "confused_with": "Autoscaling. There is no HPA (deployment-notes.md says HPA disabled since 2026-05), so 'the HPA scaled it down' is wrong.",
+      "proof_locations": [
+        {
+          "file": "systemd/journal-export-node-a.txt",
+          "line_start": 468469,
+          "line_end": 468486,
+          "note": "the API-server side of the unauthorized scale: kubelet observes the replica set shrink"
+        },
+        {
+          "file": "syslog/node-a/syslog",
+          "line_start": 58217,
+          "line_end": 58217,
+          "note": "syslog copy of the sudo invocation that halved the inventory-svc replica count"
+        },
+        {
+          "file": "syslog/node-a/auth.log",
+          "line_start": 41716,
+          "line_end": 41717,
+          "note": "NEEDLE 1/3: interactive publickey login by `deploy` from a workstation subnet during the incident"
+        },
+        {
+          "file": "syslog/node-a/auth.log",
+          "line_start": 41917,
+          "line_end": 41917,
+          "note": "NEEDLE 2/3: the unauthorized `kubectl scale --replicas=2` (deployment was running 6)"
+        },
+        {
+          "file": "syslog/node-a/auth.log",
+          "line_start": 45266,
+          "line_end": 45267,
+          "note": "NEEDLE 3/3: same session also pushed the kafka topic config that causes D05"
+        },
+        {
+          "file": "k8s/events-prod-eu-1.txt",
+          "line_start": 9700,
+          "line_end": 9700,
+          "note": "the replica count drops 6 -> 2 in the middle of the incident (nobody announced it) (first snapshot containing it; it repeats in later snapshots)"
+        },
+        {
+          "file": "k8s/events-prod-eu-1.txt",
+          "line_start": 13035,
+          "line_end": 13035,
+          "note": "capacity restored by hand at 15:10 (first snapshot containing it; it repeats in later snapshots)"
+        }
+      ],
+      "proof_count": 7
+    },
+    {
+      "id": "D07",
+      "title": "Unscheduled POST /admin/config/reload flushed the catalog read-through cache",
+      "difficulty": "rare needle in ~186 MB of health-check spam, split across a .gz rotation boundary",
+      "requires": "rare-event needle, cross-format correlation, gz decompression",
+      "description": "Seven POST /admin/config/reload requests from 10.42.9.31 (curl/8.7.1) between 12:58:11 and 13:02:55 invalidated 184203 cache entries whose hit ratio was 0.976, so from 13:10 every catalog read reached postgres.",
+      "root_cause": "The admin endpoint is reachable without authentication from the pod network and performs a full cache invalidation as a side effect of a config reload. It converted D04 from a latent latency regression into a full outage.",
+      "formats": [
+        "nginx access (combined)",
+        "gzipped rotated nginx access",
+        "Java logback (catalog-svc)"
+      ],
+      "trap": "Four of the seven lines are in nginx/access.log.1.gz and only three in nginx/access.log -- an investigator who ignores rotated/compressed files finds three lines and mis-times the event. The surrounding file is ~90% kube-probe/Prometheus health-check spam.",
+      "confused_with": "D13 (cache eviction WARN spam) -- both mention cache; the eviction scheduler is routine and runs all day.",
+      "proof_locations": [
+        {
+          "file": "nginx/access.log.1.gz",
+          "line_start": 376391,
+          "line_end": 376391,
+          "note": "admin config-reload #1 of 7 (needle, rotated side)"
+        },
+        {
+          "file": "nginx/access.log.1.gz",
+          "line_start": 376816,
+          "line_end": 376816,
+          "note": "admin config-reload #2 of 7 (needle, rotated side)"
+        },
+        {
+          "file": "nginx/access.log.1.gz",
+          "line_start": 377307,
+          "line_end": 377307,
+          "note": "admin config-reload #3 of 7 (needle, rotated side)"
+        },
+        {
+          "file": "nginx/access.log.1.gz",
+          "line_start": 377789,
+          "line_end": 377789,
+          "note": "admin config-reload #4 of 7 (needle, rotated side)"
+        },
+        {
+          "file": "nginx/access.log",
+          "line_start": 4837,
+          "line_end": 4837,
+          "note": "admin config-reload #5 of 7 (needle, live side)"
+        },
+        {
+          "file": "nginx/access.log",
+          "line_start": 10632,
+          "line_end": 10632,
+          "note": "admin config-reload #6 of 7 (needle, live side)"
+        },
+        {
+          "file": "nginx/access.log",
+          "line_start": 13582,
+          "line_end": 13582,
+          "note": "admin config-reload #7 of 7 (needle, live side)"
+        },
+        {
+          "file": "apps/catalog-svc/catalog-svc.log",
+          "line_start": 96476,
+          "line_end": 96477,
+          "note": "the admin config reload invalidated the entire read-through cache -> thundering herd"
+        }
+      ],
+      "proof_count": 8
+    },
+    {
+      "id": "D08",
+      "title": "catalog-svc p99 latency shift at 11:05 with ZERO error lines",
+      "difficulty": "statistical / percentile reasoning",
+      "requires": "statistical/rate reasoning",
+      "description": "After the 4.7.2 rollout at 11:00:41, ~3.1% of catalog-svc requests take 640-1540 ms. MEASURED on istio/ingressgateway-access.json.log `duration` where upstream_cluster contains catalog-svc (n=11614 before, n=27105 after): p50 10 -> 10 ms, p75 36 -> 38 ms, p90 78 -> 88 ms, p99 120 -> 1251 ms, p99.9 125 -> 1512 ms, mean 26.5 -> 58.1 ms. Every one of these requests returns HTTP 200 with response_flags '-' (0 non-200 catalog-svc lines in the whole file).",
+      "root_cause": "Same code change as D04 (un-indexed attrs->>'vendor_ref' lookup), 2 h 05 min before it became visible as an outage. This is the earliest detectable signal in the entire corpus.",
+      "formats": [
+        "Envoy JSON access log (duration / upstream_service_time)",
+        "Envoy text access log",
+        "Java logback (catalog-svc)",
+        "nginx access (rt=)"
+      ],
+      "trap": "There is no ERROR, WARN or non-200 line to grep for. The defect exists only as a change in the distribution of the `duration` field, grouped by upstream_cluster, before vs after 11:05. Mean latency barely moves (~+35 ms) -- only the tail moves.",
+      "confused_with": "D03 -- the 503 storm is far louder and 2.5 h later; treating 13:41 as 'when it started' misses the real change window and therefore the causing deploy.",
+      "proof_locations": [
+        {
+          "file": "istio/ingressgateway-access.json.log",
+          "line_start": 34384,
+          "line_end": 34384,
+          "note": "catalog-svc slow request AFTER the 4.7.2 rollout, HTTP 200 (no error line exists)"
+        },
+        {
+          "file": "istio/ingressgateway-access.json.log",
+          "line_start": 52881,
+          "line_end": 52881,
+          "note": "catalog-svc slow request AFTER the 4.7.2 rollout, HTTP 200 (no error line exists)"
+        },
+        {
+          "file": "istio/ingressgateway-access.json.log",
+          "line_start": 109174,
+          "line_end": 109174,
+          "note": "catalog-svc slow request AFTER the 4.7.2 rollout, HTTP 200 (no error line exists)"
+        },
+        {
+          "file": "istio/sidecar-catalog-svc-access.log",
+          "line_start": 29049,
+          "line_end": 29049,
+          "note": "sidecar text-format view of the same catalog-svc latency shift (duration column, 200 OK)"
+        },
+        {
+          "file": "apps/catalog-svc/catalog-svc.log",
+          "line_start": 50539,
+          "line_end": 50539,
+          "note": "the new lookup runs a JSONB ->> comparison with no supporting index; latency, not errors"
+        }
+      ],
+      "proof_count": 5
+    },
+    {
+      "id": "D09",
+      "title": "notify-svc SMTP TLS handshake failure rate ramps ~32x (0.34% -> 10.8%) across the window",
+      "difficulty": "statistical / rate reasoning",
+      "requires": "statistical/rate reasoning",
+      "description": "level:50 records with EPROTO 'wrong version number' against smtp-relay.acme-internal.net grow smoothly across the whole 7-hour window. MEASURED share of level==50 per UTC hour in apps/notify-svc/notify.pino.json: 09:00 0.34%, 10:00 1.07%, 11:00 2.38%, 12:00 3.93%, 13:00 5.85%, 14:00 7.63%, 15:00 10.84%. queue_depth grows with them. The identical error line exists at 09:04 and at 15:5x -- only the RATE distinguishes normal from broken.",
+      "root_cause": "The SMTP relay's TLS configuration no longer accepts the legacy protocol version that notify-svc's pooled sockets negotiate; as long-lived pooled connections recycle, an ever-larger share of sends hits the new configuration. Every failure is retried successfully, so nothing user-visible happens until the retry queue backs up (15:30, queue_depth 911, oldest_age_s 1841).",
+      "formats": [
+        "Node pino JSON (level field, time field in EPOCH MILLIS)"
+      ],
+      "trap": "Point-in-time sampling is useless: any single window looks 'a bit noisy'. The answer requires bucketing level==50 vs total per unit time. pino's `time` is epoch milliseconds, not an ISO string, so naive text-based time bucketing fails.",
+      "confused_with": "D05 -- both end with 'notifications did not arrive'. D09 produces loud error lines and no data loss; D05 produces silence and 2867 lost notifications.",
+      "proof_locations": [
+        {
+          "file": "apps/notify-svc/notify.pino.json",
+          "line_start": 1749,
+          "line_end": 1749,
+          "note": "baseline: the same handshake error already exists at the start of the window, ~0.1% of sends"
+        },
+        {
+          "file": "apps/notify-svc/notify.pino.json",
+          "line_start": 1755,
+          "line_end": 1755,
+          "note": "the retry succeeds, which is why the ramp produces no user-visible failure until late"
+        },
+        {
+          "file": "apps/notify-svc/notify.pino.json",
+          "line_start": 150217,
+          "line_end": 150217,
+          "note": "late consequence of the ramp: retry queue depth is now an order of magnitude above baseline"
+        }
+      ],
+      "proof_count": 3
+    },
+    {
+      "id": "D10",
+      "title": "promo-engine stacks percentage discounts without a ceiling -> negative order totals",
+      "difficulty": "unanticipated custom format",
+      "requires": "single-format read of an unknown format",
+      "description": "11 orders (ORD-88240..ORD-88250) get discount_pct between 137.5 and 141.5 and a NEGATIVE final_minor (-486212 and below); the ledger refuses the negative charge and the orders are left in PENDING_MANUAL.",
+      "root_cause": "The SUMMER26_STACK rule composes SUMMER26 + LOYALTY10 + WELCOME15 by adding percentages with no 100% ceiling and no post-condition that final_minor >= 0.",
+      "formats": [
+        "in-house pipe-delimited .plog",
+        "CRI-wrapped copy of the same format in k8s/pods/"
+      ],
+      "trap": "No public parser knows this layout: fields are pipe-delimited, the timestamp is '20260728|173302.144|+0300' (three pipe-separated fields, non-ISO, local +0300 AND on a host whose clock is 47 s fast), and the severity vocabulary is TRACE/CHATTER/NOTE/WARN/ALARM/FATALITY -- so 'ERROR|FATAL|WARN' greps return nothing and 'WARN' is the third-lowest severity here. The actual failures are ALARM and FATALITY.",
+      "confused_with": "Nothing else in the corpus produces negative amounts; the risk here is a FALSE NEGATIVE (the file is skipped as unparseable), not a false positive.",
+      "proof_locations": [
+        {
+          "file": "inhouse/promo-engine.plog",
+          "line_start": 56073,
+          "line_end": 56073,
+          "note": "stacked-discount blow-up #1/11: discount_pct > 100 produces a NEGATIVE final_minor"
+        },
+        {
+          "file": "inhouse/promo-engine.plog",
+          "line_start": 56078,
+          "line_end": 56078,
+          "note": "the downstream effect: the negative total is passed on to the ledger as a credit"
+        },
+        {
+          "file": "inhouse/promo-engine.plog",
+          "line_start": 56456,
+          "line_end": 56456,
+          "note": "stacked-discount blow-up #2/11: discount_pct > 100 produces a NEGATIVE final_minor"
+        },
+        {
+          "file": "inhouse/promo-engine.plog",
+          "line_start": 56840,
+          "line_end": 56840,
+          "note": "stacked-discount blow-up #3/11: discount_pct > 100 produces a NEGATIVE final_minor"
+        },
+        {
+          "file": "inhouse/promo-engine.plog",
+          "line_start": 57225,
+          "line_end": 57225,
+          "note": "stacked-discount blow-up #4/11: discount_pct > 100 produces a NEGATIVE final_minor"
+        },
+        {
+          "file": "inhouse/promo-engine.plog",
+          "line_start": 57609,
+          "line_end": 57609,
+          "note": "stacked-discount blow-up #5/11: discount_pct > 100 produces a NEGATIVE final_minor"
+        },
+        {
+          "file": "inhouse/promo-engine.plog",
+          "line_start": 57993,
+          "line_end": 57993,
+          "note": "stacked-discount blow-up #6/11: discount_pct > 100 produces a NEGATIVE final_minor"
+        },
+        {
+          "file": "inhouse/promo-engine.plog",
+          "line_start": 58378,
+          "line_end": 58378,
+          "note": "stacked-discount blow-up #7/11: discount_pct > 100 produces a NEGATIVE final_minor"
+        },
+        {
+          "file": "inhouse/promo-engine.plog",
+          "line_start": 58762,
+          "line_end": 58762,
+          "note": "stacked-discount blow-up #8/11: discount_pct > 100 produces a NEGATIVE final_minor"
+        },
+        {
+          "file": "inhouse/promo-engine.plog",
+          "line_start": 59146,
+          "line_end": 59146,
+          "note": "stacked-discount blow-up #9/11: discount_pct > 100 produces a NEGATIVE final_minor"
+        },
+        {
+          "file": "inhouse/promo-engine.plog",
+          "line_start": 59530,
+          "line_end": 59530,
+          "note": "stacked-discount blow-up #10/11: discount_pct > 100 produces a NEGATIVE final_minor"
+        },
+        {
+          "file": "inhouse/promo-engine.plog",
+          "line_start": 59914,
+          "line_end": 59914,
+          "note": "stacked-discount blow-up #11/11: discount_pct > 100 produces a NEGATIVE final_minor"
+        },
+        {
+          "file": "k8s/pods/promo-engine-5b6c7d8e9-w4t2m_prod_promo-engine.log",
+          "line_start": 24564,
+          "line_end": 24564,
+          "note": "same blow-up seen through kubectl logs: bespoke format nested inside the CRI prefix"
+        }
+      ],
+      "proof_count": 13
+    },
+    {
+      "id": "D11",
+      "title": "billing-adapter silently converts EUR at a 7-day-old FX rate (Russian-language log)",
+      "difficulty": "non-English log + cross-format",
+      "requires": "single-format read (Russian), cross-format correlation",
+      "description": "Currency conversion for EUR orders uses the cached ЦБ РФ rate from 21.07.2026 (91.4412) instead of the current one (96.8871) -- a 5.62% under-charge; ORD-88231 alone is 70812 kopecks short.",
+      "root_cause": "The NetworkPolicy 'egress-default-deny' applied 2026-07-21 blocks egress to www.cbr.ru; the adapter's fetch times out after 5000 ms and falls back to cache. The fallback is logged at ПРЕДУПРЕЖДЕНИЕ, and it only escalates to ОШИБКА when cache age exceeds 7 days -- so the failure was invisible for a week.",
+      "formats": [
+        "Russian in-house log (non-ISO dd.mm.yyyy, comma decimals)",
+        "journald export (calico-node policy line)"
+      ],
+      "trap": "Severity words are Russian (ОШИБКА / ПРЕДУПРЕЖДЕНИЕ / ИНФО / ОТЛАДКА), so ERROR/WARN greps and English-keyword heuristics find nothing. The date format is dd.mm.yyyy with a comma millisecond separator and the timestamps are +0300.",
+      "confused_with": "D10 -- both are money-wrong-amount defects in in-house services; different services, different mechanisms.",
+      "proof_locations": [
+        {
+          "file": "systemd/journal-export-node-a.txt",
+          "line_start": 70813,
+          "line_end": 70830,
+          "note": "the NetworkPolicy that silently blocks egress to cbr.ru was applied on 2026-07-21 and is still active"
+        },
+        {
+          "file": "inhouse/billing-adapter-ru.log",
+          "line_start": 1550,
+          "line_end": 1550,
+          "note": "the FX fetch has been timing out since 2026-07-21 but is only logged at ПРЕДУПРЕЖДЕНИЕ level"
+        },
+        {
+          "file": "inhouse/billing-adapter-ru.log",
+          "line_start": 35020,
+          "line_end": 35021,
+          "note": "ROOT CAUSE (Russian): the cache is 7 days stale, so every EUR order is converted at the 21.07 rate"
+        },
+        {
+          "file": "inhouse/billing-adapter-ru.log",
+          "line_start": 37280,
+          "line_end": 37280,
+          "note": "the network cause, stated in Russian: egress to cbr.ru is refused by the cluster policy"
+        }
+      ],
+      "proof_count": 4
+    },
+    {
+      "id": "D12",
+      "title": "RED HERRING: SYN flood + nf_conntrack table full on node-b",
+      "difficulty": "red herring",
+      "requires": "cross-format correlation to REFUTE",
+      "description": "A loud kernel-level network alarm that looks like the obvious cause of a 503 storm.",
+      "root_cause": "NOT A CAUSE of anything in this corpus. It happens at 08:12:04 UTC -- 5 h 29 min BEFORE the 503 storm -- and on node-b, which runs promo-engine only; every affected pod (inventory-svc, checkout-api, catalog-svc) is on node-a. Additionally node-b's clock is 47 s fast and its syslog lines are therefore stamped 08:12:51, which makes naive time-alignment worse, not better.",
+      "formats": [
+        "syslog (node-b) with embedded kernel lines"
+      ],
+      "trap": "It is the single most alarming-sounding text in the corpus and it is in a kernel log, which investigators tend to trust. Refuting it requires (a) reading the timestamp against the storm window and (b) knowing which node the affected pods run on (k8s events / journald / CRI pod log paths).",
+      "confused_with": "D03 -- this is exactly what it is designed to be mistaken for.",
+      "proof_locations": [
+        {
+          "file": "syslog/node-b/syslog",
+          "line_start": 8792,
+          "line_end": 8794,
+          "note": "RED HERRING: SYN-flood / conntrack alarm on node-b, ~5.5 hours BEFORE the incident and on a node that runs neither inventory-svc nor checkout-api"
+        },
+        {
+          "file": "syslog/node-b/syslog",
+          "line_start": 14902,
+          "line_end": 14902,
+          "note": "node-b clock is 47 s ahead of node-a and chrony cannot fix it -- every node-b stamp is skewed"
+        }
+      ],
+      "proof_count": 2
+    },
+    {
+      "id": "D13",
+      "title": "RED HERRING: catalog-svc cache-eviction WARN spam and a TLS-expiry warning",
+      "difficulty": "red herring",
+      "requires": "statistical/rate reasoning to REFUTE",
+      "description": "The ANSI-coloured console capture is full of 'eviction pass took 1523ms (threshold 500ms)' WARNs plus a 'TLS certificate expires in 14 days' warning.",
+      "root_cause": "NOT A CAUSE. The eviction WARN fires at a constant ~25% of lines from 09:00 to 16:00 -- identical rate before and during the incident -- and the certificate has 14 days of runway (notAfter 2026-08-11). Both are chronic background noise.",
+      "formats": [
+        "ANSI-coloured console log"
+      ],
+      "trap": "The file is full of ANSI SGR escapes (\\x1b[33m etc.), so level extraction by regex on 'WARN' either fails or double-counts, and the rate argument that refutes it cannot be computed until the escapes are stripped.",
+      "confused_with": "D04 and D07 (both genuinely cache-related) -- this is the decoy for both.",
+      "proof_locations": [
+        {
+          "file": "apps/catalog-svc/catalog-console-ansi.log",
+          "line_start": 8495,
+          "line_end": 8495,
+          "note": "RED HERRING: alarming-looking TLS expiry warning, 14 days of runway, unrelated to the incident"
+        },
+        {
+          "file": "apps/catalog-svc/catalog-console-ansi.log",
+          "line_start": 38996,
+          "line_end": 38996,
+          "note": "RED HERRING: eviction-scheduler WARN spam runs at the same rate all day, before and after the incident"
+        }
+      ],
+      "proof_count": 2
+    }
+  ],
+  "dirtiness": [
+    "Clock skew: node-b runs 47 s ahead of node-a (chronyd cannot step it); every node-b line (syslog/node-b/syslog, inhouse/promo-engine.plog, k8s/pods/promo-engine-*) is shifted.",
+    "Mixed timezones: haproxy/haproxy.log and both in-house logs are stamped Europe/Moscow (+0300); everything else is UTC; nginx uses +0000 CLF; the answer key is in UTC.",
+    "Epoch timestamps in three different units: pino `time` = epoch MILLIS, zap `ts` = epoch SECONDS as a float, journald __REALTIME_TIMESTAMP = epoch MICROS, dmesg = seconds since boot (boot 2026-07-25T04:11:03Z).",
+    "Truncated final lines: nginx/access.log ends mid-request-path; istio/ingressgateway-access.json.log ends with an unterminated JSON object.",
+    "Partially-written file: misc/inventory-svc-partial.log stops mid-timestamp ('2026-07-28 13:40:12,88') because the process was OOM-killed while writing.",
+    "Interleaved multi-line traces: in apps/checkout-api/checkout-api.log the D01 NPE trace and a concurrent SocketTimeoutException trace from another thread are interleaved line by line.",
+    "Service name only in the filename: misc/ordersync-prod-2026-07-28 (no extension) never names 'ordersync' in any line.",
+    "ANSI colour escapes: apps/catalog-svc/catalog-console-ansi.log uses SGR codes around level and logger.",
+    "Low signal-to-noise: nginx/access.log + access.log.1.gz are ~90% kube-probe/Prometheus health checks; syslog/node-a/auth.log is ~90% pam_unix CRON open/close.",
+    "Inconsistent correlation-id propagation: X-Request-ID (haproxy capture block, nginx rid=), request_id (envoy), traceId dash-less (Java MDC), trace_id dash-less (Go zap), correlation_id with dashes (Python), RID~ truncated to 12 hex chars (in-house promo). notify-svc (pino) propagates NO id at all - join by order_id only. Kafka has none - join by topic/partition/offset.",
+    "Compressed rotation: nginx/access.log.1.gz must be decompressed; a 7-line needle is split 4/3 across the rotation boundary.",
+    "No-extension and unusual-extension files: misc/ordersync-prod-2026-07-28, inhouse/promo-engine.plog, syslog/node-a/dmesg, syslog/node-a/auth.log.",
+    "Non-log files inside the tree (ingest-discipline trap): README.md, k8s/deployment-notes.md, nginx/nginx.conf - a naive ingester will happily turn them into 'log records'.",
+    "Multi-line records that are not stack traces: journald export records are ~18 physical lines each with the payload in MESSAGE=; postgres DETAIL/CONTEXT/STATEMENT continuation lines start with a TAB.",
+    "Docker json-file escaping: every physical line is one JSON object and the real newline lives inside the \"log\" string, so a 12-frame Go panic is 12 separate JSON records.",
+    "CRI partial lines: k8s/pods/inventory-svc-*.log splits long lines into consecutive 'P' records terminated by an 'F' record.",
+    "Bespoke severity vocabularies: TRACE/CHATTER/NOTE/WARN/ALARM/FATALITY (promo-engine) and ОТЛАДКА/ИНФО/ПРЕДУПРЕЖДЕНИЕ/ОШИБКА (billing-adapter). Grepping ERROR/FATAL misses both.",
+    "Repeated snapshots: k8s/events-prod-eu-1.txt is 85 consecutive `kubectl get events` captures, so every event row appears many times with a different relative LAST SEEN age - naive counting inflates everything."
+  ],
+  "correlation_id_map": {
+    "logical_request": "ORD-88231 checkout",
+    "spellings": {
+      "haproxy/haproxy.log": "{9f2c1d7e-4b6a-4c31-8e55-1a2b3c4d5e6f} capture block",
+      "nginx/access.log": "rid=9f2c1d7e-4b6a-4c31-8e55-1a2b3c4d5e6f",
+      "istio/ingressgateway-access.json.log": "\"request_id\":\"9f2c1d7e-4b6a-4c31-8e55-1a2b3c4d5e6f\"",
+      "apps/checkout-api/checkout-api.log": "traceId=9f2c1d7e4b6a4c318e551a2b3c4d5e6f",
+      "apps/payments-worker/payments.zap.json": "\"trace_id\":\"9f2c1d7e4b6a4c318e551a2b3c4d5e6f\"",
+      "apps/inventory-svc/uvicorn.log": "correlation_id=9f2c1d7e-4b6a-4c31-8e55-1a2b3c4d5e6f",
+      "inhouse/promo-engine.plog": "RID~9f2c1d7e4b6a",
+      "apps/notify-svc/notify.pino.json": "NONE - no correlation id is propagated; join on order_id",
+      "kafka/server.log": "NONE - join on topic/partition/offset (orders.events-3 @ 5512034)",
+      "misc/ordersync-prod-2026-07-28": "no id, order id only (ORD-88231)"
+    }
+  }
+}
