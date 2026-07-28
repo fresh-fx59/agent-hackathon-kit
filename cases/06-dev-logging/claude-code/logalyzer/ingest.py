@@ -52,8 +52,10 @@ def _read_jsonl(lines, service_hint, ref, masker):
         if not raw.strip(): continue
         try:
             obj = json.loads(raw)
+            if not isinstance(obj, dict):
+                raise ValueError("JSON must be an object, not a scalar or array")
             out.append(_from_json_obj(obj, service_hint, ref, i, masker))
-        except (ValueError, TypeError):
+        except (ValueError, TypeError, AttributeError):
             body, applied = masker.mask_with_flag(raw)
             m = _CORR.search(raw)
             out.append(NormalizedRecord(
