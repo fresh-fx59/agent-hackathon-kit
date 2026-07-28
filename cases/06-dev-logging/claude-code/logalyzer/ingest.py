@@ -1,4 +1,4 @@
-import json, re
+import json, re, tempfile, zipfile
 from pathlib import Path
 from logalyzer.records import NormalizedRecord
 
@@ -100,3 +100,35 @@ def read_source(path, masker, service_hint=""):
     # kafka/k8s/trace/metrics readers arrive in Task 4
     from logalyzer.ingest_structured import read_structured
     return read_structured(fmt, lines, hint, ref, masker)
+
+_ZIP_MAX_ENTRIES = 500
+_ZIP_MAX_UNCOMPRESSED = 100 * 1024 * 1024
+
+def _safe_extract(zpath, dest):
+    with zipfile.ZipFile(zpath) as z:
+        infos = z.infolist()
+        if len(infos) > _ZIP_MAX_ENTRIES:
+            raise ValueError("zip refused: %d entries > %d" % (len(infos), _ZIP_MAX_ENTRIES))
+        total = sum(i.file_size for i in infos)
+        if total > _ZIP_MAX_UNCOMPRESSED:
+            raise ValueError("zip refused: %d uncompressed bytes" % total)
+        for info in infos:
+            name = info.filename
+            p = (Path(dest) / name).resolve()
+            if not str(p).startswith(str(Path(dest).resolve())):
+                continue  # traversal/absolute entry: skip silently, count in caller stats
+            z.extract(info, dest)
+
+def read_all(root, masker):
+    root = Path(root)
+    if root.suffix == ".zip":
+        tmp = tempfile.TemporaryDirectory()
+        _safe_extract(root, tmp.name)
+        recs = read_all(Path(tmp.name), masker)
+        tmp.cleanup()
+        return recs
+    out = []
+    for p in sorted(root.rglob("*")):
+        if p.is_file() and p.suffix in (".log", ".jsonl", ".txt", ".json"):
+            out.extend(read_source(p, masker))
+    return out
