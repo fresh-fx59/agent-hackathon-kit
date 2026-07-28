@@ -1,6 +1,15 @@
 #!/usr/bin/env python3
 """Comparison table over the run ledger: baseline vs each skill version.
 
+WARNING - `line_refs` in the ledger is MISLEADING and must not be quoted as
+"evidence citations". It counts any `:\d+`, so ordinary log TIMESTAMPS inflate it:
+an OpenSSH baseline run scored 114 "refs" while making zero real file:line
+citations. A strict `file.log:NNN` pattern is also wrong - it scores 0 for
+table-style citations that are perfectly good evidence. Treat the column as a
+rough signal only; real citation quality needs a style-agnostic count, and
+correctness needs re-reading the cited line (see the spec: the citation checker
+was reinstated after a run cited Linux_2k.log:106 for content that is not there).
+
     python3 eval/report.py            # markdown table, per dataset + aggregate
     python3 eval/report.py --json     # machine-readable, for the presentation
 
@@ -66,7 +75,7 @@ def main():
 
     # ---- per dataset ----
     print("## По датасетам\n")
-    hdr = "| датасет | арм | шагов | время, с | ответ, симв. | ссылок file:line | покрытие файлов |"
+    hdr = "| датасет | арм | шагов | время, с | ответ, симв. | «ссылок» (метрика завышена, см. report.py) | покрытие файлов |"
     print(hdr); print("|" + "---|" * 7)
     for d in datasets:
         for a in arms:
@@ -80,7 +89,7 @@ def main():
 
     # ---- aggregate ----
     print("## Сводно (среднее по датасетам)\n")
-    print("| арм | шагов | время, с | ответ, симв. | ссылок file:line |")
+    print("| арм | шагов | время, с | ответ, симв. | «ссылок» (метрика завышена, см. report.py) |")
     print("|---|---|---|---|---|")
     base = {}
     for a in arms:
