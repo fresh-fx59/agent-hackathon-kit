@@ -87,21 +87,6 @@ p{margin:0}
 .bleed::after{content:"";position:absolute;inset:0;
   background:linear-gradient(90deg,var(--ground) 0%,rgba(5,10,18,.72) 26%,rgba(5,10,18,0) 62%)}
 
-/* ------------------------------------------------------- список-проблем --- */
-.plist{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:16px}
-.plist li{position:relative;padding-left:30px;font-size:20px;line-height:1.35;color:var(--paper);font-weight:600}
-.plist li::before{content:"";position:absolute;left:0;top:.52em;width:14px;height:1px;background:var(--amber)}
-.plist li span{display:block;font-size:14.5px;font-weight:400;color:var(--muted);margin-top:5px;line-height:1.45}
-
-/* ------------------------------------------------------------- карточки --- */
-.cards{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
-.card{background:var(--panel);border:1px solid var(--rule);border-radius:10px;padding:18px 18px 16px;
-  display:flex;flex-direction:column;gap:8px;min-height:0}
-.card .h{font-size:15px;font-weight:700;color:var(--paper);letter-spacing:-.01em}
-.card .d{font-size:13.5px;color:var(--muted);line-height:1.45}
-.card.hi{border-color:var(--amber-edge);background:
-  linear-gradient(180deg,var(--amber-wash),transparent 70%),var(--panel)}
-
 /* ---------------------------------------------------------- числовой ряд --- */
 .stat{display:flex;flex-direction:column;gap:4px}
 .stat .n{font-family:var(--mono);font-size:52px;font-weight:700;color:var(--amber);
@@ -134,9 +119,59 @@ p{margin:0}
 .tbar.win .v{color:var(--amber);font-weight:600}
 .tbar .v em{font-style:normal;color:var(--muted-2);font-weight:400}
 
+/* ═══ полноэкранные раскладки ═══════════════════════════════════════════
+   Иллюстрация уходит фоном под весь слайд, а не отжимает текст в колонку:
+   контент читается с дальнего ряда, картинка остаётся атмосферой.        */
+.bgfull{position:absolute;left:0;right:0;bottom:0;height:var(--bh,46%);z-index:0;overflow:hidden}
+.bgfull img{width:100%;height:100%;object-fit:cover;object-position:center var(--bp,42%);opacity:.92}
+.bgfull::after{content:"";position:absolute;inset:0;background:
+  linear-gradient(180deg,var(--ground) 0%,rgba(5,10,18,.60) 20%,rgba(5,10,18,.26) 52%,rgba(5,10,18,.88) 100%)}
+
+/* параллельные пункты во всю ширину — без нумерации: это не последовательность */
+.trio{display:grid;grid-template-columns:repeat(var(--n,3),1fr);gap:38px;flex:0 0 auto}
+.trio.g2{--n:2}
+.trio .rule{width:36px;height:2px;background:var(--amber);margin-bottom:18px}
+.trio .t-h{font-size:25px;font-weight:800;letter-spacing:-.019em;line-height:1.16;
+  color:var(--paper);text-wrap:balance}
+.trio .t-d{font-size:16.5px;line-height:1.52;color:var(--muted);margin-top:14px}
+.trio .t-d strong{color:var(--paper);font-weight:600}
+
+/* пункты друг под другом во всю ширину */
+.rows2{display:flex;flex-direction:column;gap:18px}
+.rows2.fill{flex:1 1 auto;min-height:0}
+.rows2.fill .rowcard{flex:1 1 0;min-height:0}
+.rowcard{display:grid;grid-template-columns:250px 1fr;gap:32px;align-items:center;
+  background:var(--panel);border:1px solid var(--rule);border-radius:12px;padding:26px 32px}
+.rowcard.hi{border-color:var(--amber-edge);
+  background:linear-gradient(100deg,var(--amber-wash),transparent 46%),var(--panel)}
+.rowcard .r-h{font-size:32px;font-weight:800;color:var(--paper);letter-spacing:-.022em;line-height:1.05}
+.rowcard .r-k{font-family:var(--mono);font-size:11.5px;letter-spacing:.16em;text-transform:uppercase;
+  color:var(--amber);margin-top:9px}
+.rowcard .r-d{font-size:17.5px;line-height:1.5;color:var(--muted)}
+.rowcard .r-d strong{color:var(--paper);font-weight:600}
+
+/* сетка 2 сверху + 1 во всю ширину снизу, растянутая на всю высоту слайда:
+   так на слайде не остаётся ни дыры посередине, ни пустого низа */
+.grid21{flex:1 1 auto;min-height:0;display:grid;grid-template-columns:1fr 1fr;
+  grid-template-rows:1fr 1fr;gap:18px}
+.grid21 .span2{grid-column:1 / -1}
+.gcard{background:var(--panel);border:1px solid var(--rule);border-radius:12px;
+  padding:26px 30px;display:flex;flex-direction:column;justify-content:center;gap:12px;min-height:0}
+.gcard .g-h{font-size:24px;font-weight:800;color:var(--paper);letter-spacing:-.018em;line-height:1.15}
+.gcard .g-d{font-size:16.5px;line-height:1.5;color:var(--muted)}
+.gcard .g-d strong{color:var(--paper);font-weight:600}
+.gcard .rule{width:36px;height:2px;background:var(--amber)}
+
+/* широкая карточка-подвал под сеткой */
+.wide{background:var(--panel);border:1px solid var(--rule);border-radius:12px;padding:24px 30px;
+  display:grid;grid-template-columns:250px 1fr;gap:32px;align-items:center}
+.wide .w-h{font-size:22px;font-weight:800;color:var(--paper);letter-spacing:-.018em;line-height:1.14}
+.wide .w-d{font-size:16.5px;line-height:1.5;color:var(--muted)}
+.wide .w-d strong{color:var(--paper);font-weight:600}
+
 /* ------------------------------------------------------------ бейджики --- */
 .chips{display:flex;flex-wrap:wrap;gap:8px}
-.chip{font-family:var(--mono);font-size:11.5px;letter-spacing:.06em;padding:5px 10px;border-radius:5px;
+.chip{font-family:var(--mono);font-size:12.5px;letter-spacing:.06em;padding:6px 12px;border-radius:5px;
   border:1px solid var(--rule);color:var(--muted);background:var(--panel);white-space:nowrap}
 .chip-ok{border-color:rgba(47,155,131,.4);color:var(--good)}
 .chip-weak{border-color:rgba(217,69,106,.35);color:var(--bad)}
@@ -178,22 +213,65 @@ p{margin:0}
   </div>
 </section>
 
-<!-- ═══════════════════════════════════════ 02 · какие проблемы решает ═══ -->
-<section class="slide" data-sec="main" data-kicker="Проблема">
-  <div class="bleed" style="--bw:36%;--bp:50% 50%"><img src="img/p-problem.png" alt=""></div>
+<!-- ═════════════════════════════════════════ 02 · целевая аудитория ═════ -->
+<section class="slide" data-sec="main" data-kicker="Для кого <span class='plain'>· в рамках хакатона</span>">
   <div class="frame">
     <div class="topbar"><div class="kicker"></div><div class="counter"></div></div>
     <div class="body">
-      <h1 style="max-width:15em">Какие проблемы решает</h1>
-      <div style="height:26px"></div>
-      <ul class="plist" style="max-width:20em">
-        <li>Логи анализируются долго
-          <span>Разбор инцидента руками — это десятки минут grep, глаз и переключений между файлами.</span></li>
-        <li>Инструменты сложно ставить и использовать
-          <span>Стек сбора логов нужно развернуть, настроить и поддерживать — до первого ответа далеко.</span></li>
-        <li>Файлы большие, нагрузка на инференс высокая
-          <span>Наивная подача логов в модель упирается в окно контекста и стоит миллионы токенов.</span></li>
-      </ul>
+      <h1 style="font-size:42px">Целевая аудитория</h1>
+      <div style="height:30px"></div>
+      <div class="rows2 fill">
+        <div class="rowcard hi">
+          <div>
+            <div class="r-h">DevOps</div>
+            <div class="r-k">дежурство · прод</div>
+          </div>
+          <div class="r-d">Разбор инцидента на проде или в кластере: быстрый ответ на вопрос
+            <strong>«что случилось»</strong> по логам стенда — без разворачивания стека сбора логов.</div>
+        </div>
+        <div class="rowcard hi">
+          <div>
+            <div class="r-h">Разработчики</div>
+            <div class="r-k">CI · дев-стенд · локально</div>
+          </div>
+          <div class="r-d">Падение в CI или на стенде: от строки лога до <strong>файла и метода</strong>
+            в своём коде — с конкретным предложением исправления.</div>
+        </div>
+      </div>
+      <div style="height:22px"></div>
+      <div class="srctag">Обе роли уже работают в CLI-агенте — скилл не добавляет нового инструмента в их процесс</div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════ 03 · какие проблемы решает ═══ -->
+<section class="slide" data-sec="main" data-kicker="Проблема">
+  <div class="bgfull" style="--bp:88%"><img src="img/p-problem.png" alt=""></div>
+  <div class="frame">
+    <div class="topbar"><div class="kicker"></div><div class="counter"></div></div>
+    <div class="body">
+      <h1 style="font-size:42px">Какие проблемы решает</h1>
+      <div style="height:40px"></div>
+      <div class="trio">
+        <div>
+          <div class="rule"></div>
+          <div class="t-h">Логи анализируются долго</div>
+          <div class="t-d">Разбор инцидента руками — десятки минут <strong>grep</strong>, глаз
+            и переключений между файлами.</div>
+        </div>
+        <div>
+          <div class="rule"></div>
+          <div class="t-h">Инструменты сложно ставить и использовать</div>
+          <div class="t-d">Стек сбора логов нужно развернуть, настроить и поддерживать —
+            <strong>до первого ответа далеко</strong>.</div>
+        </div>
+        <div>
+          <div class="rule"></div>
+          <div class="t-h">Файлы большие, нагрузка на инференс высокая</div>
+          <div class="t-d">Наивная подача логов в модель упирается в окно контекста
+            и стоит <strong>миллионы токенов</strong>.</div>
+        </div>
+      </div>
       <div class="spacer"></div>
       <div class="srctag">Три проблемы, под которые дальше в деке приведены три измеренных числа</div>
     </div>
@@ -267,15 +345,15 @@ p{margin:0}
 
           <!-- ── источники ─────────────────────────────────────────────── -->
           <text class="sv-lbl" x="8" y="14">Источники</text>
-          <rect class="sv-box" x="8" y="26" width="150" height="30" rx="6"/>
-          <text class="sv-t" x="20" y="45">файлы · каталоги · архивы</text>
-          <rect class="sv-box" x="8" y="62" width="150" height="30" rx="6"/>
+          <rect class="sv-box" x="8" y="26" width="180" height="30" rx="6"/>
+          <text class="sv-t" x="20" y="45">файлы · каталоги</text>
+          <rect class="sv-box" x="8" y="62" width="180" height="30" rx="6"/>
           <text class="sv-t" x="20" y="81">stdout · journald · k8s</text>
-          <rect class="sv-box" x="8" y="98" width="150" height="30" rx="6"/>
+          <rect class="sv-box" x="8" y="98" width="180" height="30" rx="6"/>
           <text class="sv-t" x="20" y="117">любой MCP из CLI</text>
-          <path class="sv-ln" d="M158 77 H 196"/>
-          <path class="sv-ln" d="M196 41 V 113" />
-          <path class="sv-ln-am" d="M196 77 H 232"/>
+          <path class="sv-ln" d="M188 77 H 210"/>
+          <path class="sv-ln" d="M210 41 V 113" />
+          <path class="sv-ln-am" d="M210 77 H 232"/>
 
           <!-- ── шаг 0 : база знаний ───────────────────────────────────── -->
           <rect class="sv-box-hi" x="232" y="40" width="196" height="74" rx="8"/>
@@ -372,53 +450,42 @@ p{margin:0}
 
 <!-- ═══════════════════════════════════════════════ 05 · особенности ═════ -->
 <section class="slide" data-sec="main" data-kicker="Особенности">
-  <div class="bleed" style="--bw:34%;--bp:50% 50%"><img src="img/p-universal.png" alt=""></div>
+  <div class="bgfull" style="--bp:50%"><img src="img/p-universal.png" alt=""></div>
   <div class="frame">
     <div class="topbar"><div class="kicker"></div><div class="counter"></div></div>
     <div class="body">
-      <h1 style="max-width:13em">Особенности</h1>
-      <div style="height:24px"></div>
-      <ul class="plist" style="max-width:19em">
-        <li>Сопоставляет логи с кодом
-          <span>Доходит от строки лога до конкретного файла и метода и предлагает исправление,
-            а не только называет причину.</span></li>
-        <li>Решение универсальное
-          <span>Интегрируется с любой ИИ-системой, поддерживающей скиллы.</span></li>
-      </ul>
-      <div style="height:24px"></div>
-      <div class="chips" style="max-width:22em">
-        <span class="chip">удалённая машина</span>
-        <span class="chip">Dropapp</span>
-        <span class="chip">Kubernetes</span>
-        <span class="chip">результат → SberChat</span>
+      <h1 style="font-size:42px">Особенности</h1>
+      <div style="height:40px"></div>
+      <div class="trio g2">
+        <div>
+          <div class="rule"></div>
+          <div class="t-h">Сопоставляет логи с кодом</div>
+          <div class="t-d">Доходит от строки лога до конкретного <strong>файла и метода</strong>
+            и предлагает исправление, а не только называет причину.</div>
+        </div>
+        <div>
+          <div class="rule"></div>
+          <div class="t-h">Решение универсальное</div>
+          <div class="t-d">Интегрируется с <strong>любой ИИ-системой, поддерживающей скиллы</strong>.
+            Ядру всё равно, кто его вызывает.</div>
+        </div>
+      </div>
+      <div style="height:34px"></div>
+      <div class="wide">
+        <div class="w-h">Где разворачивается</div>
+        <div>
+          <div class="w-d" style="margin-bottom:14px">Скилл остаётся одной папкой — меняется
+            только контур вокруг него.</div>
+          <div class="chips">
+            <span class="chip">удалённая машина</span>
+            <span class="chip">Dropapp</span>
+            <span class="chip">Kubernetes</span>
+            <span class="chip">результат → SberChat</span>
+          </div>
+        </div>
       </div>
       <div class="spacer"></div>
       <div class="srctag">Развёртывание и доставка результата — контур вокруг скилла, сам скилл остаётся одной папкой</div>
-    </div>
-  </div>
-</section>
-
-<!-- ═════════════════════════════════════════ 06 · целевая аудитория ═════ -->
-<section class="slide" data-sec="main" data-kicker="Аудитория <span class='plain'>· в рамках хакатона</span>">
-  <div class="frame">
-    <div class="topbar"><div class="kicker"></div><div class="counter"></div></div>
-    <div class="body">
-      <h1 style="max-width:16em">Целевая аудитория</h1>
-      <div style="height:30px"></div>
-      <div class="cols c-6-6" style="flex:0 0 auto;gap:24px">
-        <div class="card hi">
-          <div class="h">DevOps</div>
-          <div class="d">Дежурство и разбор инцидентов на проде: быстрый ответ «что случилось»
-            по логам стенда или кластера, без разворачивания стека сбора логов.</div>
-        </div>
-        <div class="card hi">
-          <div class="h">Разработчики</div>
-          <div class="d">Падение в CI, на дев-стенде или локально: от строки лога до файла и метода
-            в своём коде — с конкретным предложением исправления.</div>
-        </div>
-      </div>
-      <div class="spacer"></div>
-      <div class="srctag">Обе роли уже работают в CLI-агенте — скилл не добавляет нового инструмента в их процесс</div>
     </div>
   </div>
 </section>
@@ -428,26 +495,30 @@ p{margin:0}
   <div class="frame">
     <div class="topbar"><div class="kicker"></div><div class="counter"></div></div>
     <div class="body">
-      <h1 style="max-width:17em">Расширяется без изменения ядра</h1>
+      <h1 style="font-size:40px">Расширяется без изменения ядра</h1>
       <div style="height:26px"></div>
-      <div class="cards">
-        <div class="card">
-          <div class="h">Любой MCP, подключённый к CLI</div>
-          <div class="d">Новый источник логов — это уже существующий MCP-сервер.
+      <div class="grid21">
+        <div class="gcard">
+          <div class="rule"></div>
+          <div class="g-h">Любой MCP, подключённый к CLI</div>
+          <div class="g-d">Новый источник логов — это <strong>уже существующий MCP-сервер</strong>.
             Для скилла это конфигурация, а не доработка: процедура его не знает и знать не должна.</div>
         </div>
-        <div class="card">
-          <div class="h">Python-скрипты рядом со скиллом</div>
-          <div class="d">Механические проверки живут кодом — например <span class="mono">citecheck.py</span>,
-            который сверяет процитированные строки с файлом.</div>
+        <div class="gcard">
+          <div class="rule"></div>
+          <div class="g-h">Python-скрипты рядом со скиллом</div>
+          <div class="g-d">Механические проверки живут кодом — например
+            <strong class="mono">citecheck.py</strong>, который сверяет процитированные строки с файлом.</div>
         </div>
-        <div class="card">
-          <div class="h">Правка текста скилла</div>
-          <div class="d">Поведение задаётся текстом процедуры. Например уведомления в SberChat
-            добавляются как шаг, а не как новый сервис.</div>
+        <div class="gcard span2">
+          <div class="rule"></div>
+          <div class="g-h">Правка текста скилла</div>
+          <div class="g-d">Поведение задаётся <strong>текстом процедуры</strong>, а не кодом.
+            Уведомления в SberChat добавляются как ещё один шаг в тексте — не как новый сервис,
+            не как правка ядра.</div>
         </div>
       </div>
-      <div class="spacer"></div>
+      <div style="height:20px"></div>
       <div class="srctag">Требование <b>R4</b>: расширяемость без правки ядра — новые бэкенды = существующие MCP = конфигурация</div>
     </div>
   </div>
@@ -458,24 +529,26 @@ p{margin:0}
   <div class="frame">
     <div class="topbar"><div class="kicker"></div><div class="counter"></div></div>
     <div class="body">
-      <h1 style="max-width:18em">Цикл самоулучшения</h1>
-      <div style="height:24px"></div>
-      <div class="cols c-6-6" style="gap:30px">
-        <div class="stack g14">
-          <p class="txt"><strong>Память в .md, а не в .json.</strong> Карточки паттернов лежат
-            текстом рядом со скиллом. Модель читает их как обычный текст — это дешевле
-            по контексту, чем разбирать структуру.</p>
-          <p class="txt"><strong>Человек в контуре.</strong> Карточка не появляется сама:
-            скилл предлагает её в конце расследования и спрашивает — синхронно, пока
-            инженер ещё в контексте задачи.</p>
+      <h1 style="font-size:40px">Цикл самоулучшения</h1>
+      <div style="height:26px"></div>
+      <div class="grid21">
+        <div class="gcard">
+          <div class="rule"></div>
+          <div class="g-h">Память в .md, а не в .json</div>
+          <div class="g-d">Карточки паттернов лежат текстом рядом со скиллом. Модель читает их
+            как обычный текст — это <strong>дешевле по контексту</strong>, чем разбирать структуру.</div>
         </div>
-        <div class="stack g14">
-          <div class="card" style="border-color:rgba(217,69,106,.35)">
-            <div class="h">Эффективность пока низкая</div>
-            <div class="d">Скилл находит паттерны самостоятельно быстрее, чем успевает
-              воспользоваться накопленной карточкой. Ускорение <b class="mono">≥30 %</b> в замерах
-              <b>не подтвердилось</b>: +25 % → +5 % при n=3, то есть шум.</div>
-          </div>
+        <div class="gcard">
+          <div class="rule"></div>
+          <div class="g-h">Человек в контуре</div>
+          <div class="g-d">Карточка не появляется сама: скилл предлагает её в конце расследования
+            и спрашивает — <strong>синхронно</strong>, пока инженер ещё в контексте задачи.</div>
+        </div>
+        <div class="gcard span2" style="border-color:rgba(217,69,106,.35)">
+          <div class="g-h">Эффективность пока низкая</div>
+          <div class="g-d">Скилл находит паттерны самостоятельно быстрее, чем успевает воспользоваться
+            накопленной карточкой. Ускорение <strong class="mono">≥30 %</strong> в замерах
+            <strong>не подтвердилось</strong>: +25 % → +5 % при n=3, то есть шум.</div>
           <div class="chips">
             <span class="chip chip-weak">ускорение не подтверждено</span>
             <span class="chip chip-weak">фолбэк надёжности отозван</span>
@@ -483,7 +556,7 @@ p{margin:0}
           </div>
         </div>
       </div>
-      <div class="spacer"></div>
+      <div style="height:20px"></div>
       <div class="srctag">Формулировка сверена с <b>REQUIREMENTS.md:141–150</b> — усиливать её замеры не позволяют</div>
     </div>
   </div>
@@ -491,26 +564,47 @@ p{margin:0}
 
 <!-- ════════════════════════════════════ 09 · технологическая зрелость ═══ -->
 <section class="slide" data-sec="main" data-kicker="Зрелость <span class='plain'>· как проверялось</span>">
+  <div class="bgfull" style="--bh:34%;--bp:52%"><img src="img/p-funnel.png" alt=""></div>
   <div class="frame">
     <div class="topbar"><div class="kicker"></div><div class="counter"></div></div>
     <div class="body">
-      <h1 style="max-width:18em">Технологическая зрелость</h1>
-      <div style="height:26px"></div>
-      <div class="statrow" style="grid-template-columns:repeat(2,1fr);max-width:34em">
-        <div class="stat">
-          <div class="n">26 <small>типов</small></div>
-          <div class="l">логов в корпусе контроля качества — разные форматы, языки и способы упаковки</div>
+      <h1 style="font-size:40px">Технологическая зрелость</h1>
+      <div style="height:36px"></div>
+      <div class="cols c-6-6" style="flex:0 0 auto;gap:44px;align-items:start">
+        <div class="statrow" style="grid-template-columns:repeat(3,1fr);gap:22px">
+          <div class="stat">
+            <div class="n">26 <small>типов</small></div>
+            <div class="l">логов в корпусе</div>
+          </div>
+          <div class="stat">
+            <div class="n">649 <small>МБ</small></div>
+            <div class="l">объём корпуса</div>
+          </div>
+          <div class="stat">
+            <div class="n">4,26 <small>млн</small></div>
+            <div class="l">строк в корпусе</div>
+          </div>
         </div>
-        <div class="stat">
-          <div class="n">649 <small>МБ</small></div>
-          <div class="l">общий объём корпуса. Корпус построен так, чтобы ломать наивный разбор</div>
+        <div>
+          <div class="eyebrow" style="margin-bottom:14px">Корпус построен так, чтобы ломать наивный разбор</div>
+          <div class="chips">
+            <span class="chip">разные форматы</span>
+            <span class="chip">разные языки</span>
+            <span class="chip">упаковка .gz</span>
+            <span class="chip">логи без ERROR</span>
+            <span class="chip">годы без века</span>
+            <span class="chip">многофайловая корреляция</span>
+          </div>
         </div>
       </div>
-      <div style="height:26px"></div>
-      <p class="txt" style="max-width:40em"><strong>Каждое улучшение подтверждено данными тестовых прогонов.</strong>
-        Версии скилла сравнивались на одном корпусе и одной модели; результат каждого прогона —
-        включая провалившиеся — попадает в реестр <span class="mono">eval/runs*.jsonl</span>.
-        Изменения, которые не дали измеримого эффекта, из скилла удалялись.</p>
+      <div style="height:34px"></div>
+      <div class="wide">
+        <div class="w-h">Каждое улучшение подтверждено прогонами</div>
+        <div class="w-d">Версии скилла сравнивались на одном корпусе и одной модели. Результат каждого
+          прогона — <strong>включая провалившиеся</strong> — попадает в реестр
+          <strong class="mono">eval/runs*.jsonl</strong>. Изменения, не давшие измеримого эффекта,
+          из скилла удалялись.</div>
+      </div>
       <div class="spacer"></div>
       <div class="srctag"><b>Не путать с прод-прогоном:</b> 26 файлов / 461 МБ — это боевые логи,
         26 типов / 649 МБ — синтетический корпус качества</div>
@@ -520,20 +614,33 @@ p{margin:0}
 
 <!-- ═══════════════════════════════════════════════════ 10 · AIOps ═══════ -->
 <section class="slide" data-sec="main" data-kicker="AIOps <span class='plain'>· наблюдение во времени</span>">
-  <div class="bleed" style="--bw:34%;--bp:50% 50%"><img src="img/p-aiops.png" alt=""></div>
+  <div class="bgfull" style="--bp:72%"><img src="img/p-aiops.png" alt=""></div>
   <div class="frame">
     <div class="topbar"><div class="kicker"></div><div class="counter"></div></div>
     <div class="body">
-      <h1 style="max-width:13em">AIOps</h1>
-      <div style="height:24px"></div>
-      <ul class="plist" style="max-width:19em">
-        <li>Забор логов по SSH с дев-стенда
-          <span>Скрипт снимает логи нашего приложения с удалённой машины — скилл работает
-            там же, где обычно работает инженер.</span></li>
-        <li>Повторение запроса по расписанию
-          <span>Настраивается периодичность: анализ поведения системы в ~реальном времени,
-            а не разовый разбор после падения.</span></li>
-      </ul>
+      <h1 style="font-size:42px">AIOps</h1>
+      <div style="height:38px"></div>
+      <div class="trio g2">
+        <div>
+          <div class="rule"></div>
+          <div class="t-h">Забор логов по SSH с дев-стенда</div>
+          <div class="t-d">Скрипт снимает логи нашего приложения с <strong>удалённой машины</strong> —
+            скилл работает там же, где обычно работает инженер.</div>
+        </div>
+        <div>
+          <div class="rule"></div>
+          <div class="t-h">Повторение запроса по расписанию</div>
+          <div class="t-d">Настраивается периодичность: анализ поведения системы
+            <strong>в ~реальном времени</strong>, а не разовый разбор после падения.</div>
+        </div>
+      </div>
+      <div style="height:32px"></div>
+      <div class="wide">
+        <div class="w-h">Тот же скилл, без изменений</div>
+        <div class="w-d">Меняется только <strong>источник логов</strong> и
+          <strong>периодичность запуска</strong>. Процедура расследования, отчёт и проверка улик —
+          те же, что при разовом разборе инцидента руками.</div>
+      </div>
       <div class="spacer"></div>
       <div class="srctag">Тот же скилл, без изменений: меняется только источник логов и периодичность запуска</div>
     </div>
