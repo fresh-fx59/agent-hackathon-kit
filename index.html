@@ -319,9 +319,9 @@ a{color:var(--amber)}
         <div class="rv">
           <div class="wordmark">Sherlock<span class="dot">.</span></div>
         </div>
-        <p class="lead rv">Навык для <strong>Qwen Coder CLI</strong>: читает логи любого формата,
-          находит корневую причину и показывает улику — <strong>файл и строку</strong>.</p>
-        <p class="small rv" style="max-width:32em">Ни одного парсера под формат. Установка — одна команда <span class="mono am">cp</span>, настраивать нечего.</p>
+        <p class="lead rv">Навык <strong>v5</strong> для <strong>Qwen Coder CLI</strong>. Читает логи любого формата.
+          Находит корневую причину. Показывает улику — <strong>файл и строку</strong> — и доводит её до строки кода.</p>
+        <p class="small rv" style="max-width:34em">Ни одного парсера под формат. Установка — одна команда <span class="mono am">cp</span>. Настраивать нечего.</p>
       </div>
       <div class="statrow rv" style="width:100%">
         <div class="st"><div class="v">649<span style="font-size:20px"> МБ</span></div><div class="k">корпус для стресс-теста</div></div>
@@ -344,7 +344,7 @@ a{color:var(--amber)}
         <div class="cols c-6-6 rv" style="gap:26px">
           <div class="stack g14">
             <div class="term" style="font-size:13px;line-height:1.62"><span class="cm"># свежий Qwen Coder: ни settings.json, ни .env, ни конфига</span>
-<span class="pr">$</span> cp -r sherlock/skills/v4.1 $QWEN_HOME/skills/log-rca
+<span class="pr">$</span> cp -r sherlock/skills/v5 $QWEN_HOME/skills/log-rca
 
 <span class="pr">&gt;</span> Слушай, у нас что-то странное творится с сервером.
 <span class="pr">&gt;</span> Логи лежат в ./OpenSSH. Глянешь, что там происходит?
@@ -374,12 +374,12 @@ a{color:var(--amber)}
         <div class="card accent rv" style="flex:0 0 auto;display:flex;align-items:center;gap:26px;padding:18px 24px">
           <div class="hero-n sm" style="font-size:46px">1</div>
           <p class="txt">Разница между этими двумя ответами — <strong>одна скопированная папка</strong>.
-            Это и есть требование R1: инженер, который впервые слышит о проекте, получает пользу
-            с первой попытки — <strong>без единой настройки</strong>.</p>
+            Это требование R1: инженер, который впервые слышит о проекте, получает пользу с первой
+            попытки и <strong>без единой настройки</strong>.</p>
         </div>
       </div>
     </div>
-    <div class="srctag">источник: <b>acceptance/r1-zero-config.sh</b> — приёмочный тест требования R1 · ответы целиком: <b>acceptance/last-r1-run.json</b> (контроль) и <b>last-r1-v1.json</b> (с навыком) · модель <span class="mono">[SP]deepseek-v4-flash</span>, датасет OpenSSH</div>
+    <div class="srctag">источник: <b>acceptance/r1-zero-config.sh</b> — приёмочный тест требования R1 · ответы целиком: <b>acceptance/last-r1-run.json</b> (контроль) и <b>last-r1-v1.json</b> (с навыком) · модель <span class="mono">[SP]deepseek-v4-flash</span>, датасет OpenSSH. <b style="color:var(--muted)">Атрибуция:</b> прогон справа сделан на арме <span class="mono">v1</span> — это <b>то же ядро</b>: правило самодостаточного отчёта и улики <span class="mono">файл:строка</span> одинаковы во всех версиях, v5 их наследует дословно</div>
   </div>
 </section>
 
@@ -394,9 +394,9 @@ a{color:var(--amber)}
           <div class="quotes rv">
             <div class="q">
               <div class="qt">«Логи разрознены и слабо структурированы»</div>
-              <div class="qs">В одном тестовом корпусе одновременно: JSON от zap и pino, BSD syslog без года,
-                docker json-file, обрезанные CRI-строки, journald-экспорт, dmesg с монотонными часами,
-                консоль с ANSI-кодами, самописный pipe-формат и лог на русском языке.</div>
+              <div class="qs">В одном корпусе сразу: JSON от zap и pino, BSD syslog без года, docker json-file,
+                обрезанные CRI-строки, journald, dmesg с монотонными часами, консоль с ANSI-кодами,
+                самописный pipe-формат и лог на русском.</div>
             </div>
             <div class="q">
               <div class="qt">«Нет замкнутого feedback loop»</div>
@@ -407,8 +407,8 @@ a{color:var(--amber)}
               <div class="qs">Сопровождение не может проанализировать логи и эскалирует их в разработку.</div>
             </div>
           </div>
-          <p class="small rv" style="max-width:36em">Ни один парсер не покрывает этот список целиком —
-            и завтра в нём появится ещё один формат, которого никто не предвидел.</p>
+          <p class="small rv" style="max-width:36em">Ни один парсер не покрывает этот список целиком.
+            А завтра в нём будет ещё один формат, которого никто не предвидел.</p>
         </div>
         <div class="stack">
           <div class="card rv" style="height:100%;display:flex;flex-direction:column;justify-content:center;gap:26px">
@@ -463,7 +463,7 @@ a{color:var(--amber)}
             <div class="code-evi" style="font-size:14px;line-height:1.9;padding:20px"><span class="f">ingest.py:305</span>   syslog без года   <b>→ проставляет год 1900</b>
 <span class="f">formats.py:298</span>  валидатор формата <b>→ год вне [2000,2100] отклонить</b></div>
             <p class="small">Инференс формата не сходится <strong style="color:var(--paper)">никогда</strong> —
-              на самом частом формате логов в Linux. Список исправлений открытый: BSD syslog,
+              на самом частом формате логов в Linux. И список исправлений открыт: BSD syslog,
               Android logcat <span class="mono">03-17</span>, Proxifier <span class="mono">10.30</span>, …</p>
             <div class="rows" style="margin-top:4px">
               <div class="r"><div class="m">и дальше</div><div class="t">жёстко зашитый язык (<span class="mono">rglob("*.java")</span>), регулярки с английскими строками внутри, корреляция по равенству одного id — каждый пункт ломается на первом же чужом сервисе</div></div>
@@ -475,8 +475,8 @@ a{color:var(--amber)}
           <div class="hero-n sm" style="font-size:62px">−5 100</div>
           <div>
             <div class="txt"><strong>Мы удалили эти строки вместе с тестами.</strong>
-              Смелым инженерным решением здесь было не написать движок, а построить стенд,
-              который доказал, что движок проигрывает, — и после этого его стереть.</div>
+              Смелое инженерное решение здесь — не написать движок, а построить стенд,
+              который доказал его проигрыш. И после этого движок стереть.</div>
           </div>
         </div>
       </div>
@@ -494,7 +494,7 @@ a{color:var(--amber)}
         <h1 class="rv" style="font-size:36px">Модель уже умеет читать любой формат.<br>Парсер ей не нужен.</h1>
         <div class="cols c-8-4 rv" style="flex:0 0 auto;gap:40px">
           <div class="rows">
-            <div class="r"><div class="m">100 %</div><div class="t">из 11 подброшенных дефектов найдено <b>при полном обходе</b> (на сильной модели; на корпоративной поставляемая линия даёт <b>9,1 %</b>, а 18,2 % — это арм v2, который не поставляется, см. приложение П5) корпуса 649 МБ / 4,26 млн строк / 26 форматов — прочитав <b>0,09 %</b> его объёма. Это <b>лучший</b> из трёх прогонов, остальные два — на следующем слайде</div></div>
+            <div class="r"><div class="m">100 %</div><div class="t">из 11 подброшенных дефектов найдено <b>при полном обходе</b> корпуса 649 МБ / 4,26 млн строк / 26 форматов — прочитав <b>0,09 %</b> его объёма. Это <b>лучший</b> из трёх прогонов на сильной модели; два других — на следующем слайде. На корпоративной модели ядро линии поставки даёт <b>9,1 %</b> (18,2 % — арм <span class="mono">v2</span>, он не поставляется; см. П5)</div></div>
             <div class="r"><div class="m">самописный</div><div class="t">pipe-формат с <b>выдуманным словарём уровней</b> — <span class="mono">ALARM</span> и <span class="mono">FATALITY</span> выше <span class="mono">WARN</span> — разобран и ранжирован верно, без схемы и словаря</div></div>
             <div class="r"><div class="m">русский</div><div class="t">лог с уровнями <span class="mono">ОШИБКА</span> / <span class="mono">ПРЕДУПРЕЖДЕНИЕ</span> разобран полностью. <b><span class="mono">grep -E 'ERROR|FATAL'</span> находит в нём 0 строк</b></div></div>
             <div class="r"><div class="m">79 / 79</div><div class="t">цитат <span class="mono">файл:строка</span> проверены дословно перечитыванием — <b>ни одной выдуманной улики</b>, включая кириллицу, ANSI-escape и Go-фреймы внутри JSON</div></div>
@@ -516,7 +516,7 @@ a{color:var(--amber)}
         </div>
       </div>
     </div>
-    <div class="srctag">источник: <b>eval/bench/</b> — синтетический корпус: 11 подброшенных дефектов, 2 ложных следа, ключ ответов. <b style="color:var(--muted)">Честно:</b> этот замер сделан на модели Claude; на корпоративной DeepSeek-V4-Flash измерен A/B со следующего слайда, перенос показателя ещё не подтверждён</div>
+    <div class="srctag">источник: <b>eval/bench/</b> — синтетический корпус: 11 подброшенных дефектов, 2 ложных следа, ключ ответов. <b style="color:var(--muted)">Честно:</b> замер сделан на модели Claude. На корпоративной DeepSeek-V4-Flash измерен A/B со следующего слайда; перенос показателя не подтверждён</div>
   </div>
 </section>
 
@@ -565,9 +565,9 @@ a{color:var(--amber)}
 <tr><th scope="row">без навыка (baseline)<span class="arm-code mono">none</span></th><td class="n hero-cell">7,8</td><td class="n dim">нет</td><td class="n">потерян · 157 симв.</td><td class="n">0 / 30</td><td class="n">3,63 млн</td></tr>
 <tr><th scope="row">Sherlock v1<span class="arm-code mono">v1</span></th><td class="n hero-cell">19,4</td><td class="n dim">нет</td><td class="n">потерян · 106 симв.</td><td class="n">0 / 30</td><td class="n">5,73 млн</td></tr>
 <tr><th scope="row">Sherlock v2 <span class="chip chip-fail">регресс — не поставляется</span><span class="arm-code mono">v2</span></th><td class="n hero-cell">4,6</td><td class="n">1 из 5</td><td class="n">доставлен · 12 872</td><td class="n">27 / 30</td><td class="n">1,96 млн</td></tr>
-<tr class="best"><th scope="row"><span class="tick" aria-hidden="true"></span>линия поставки v3 → v4.1<span class="arm-code mono">v3</span></th><td class="n hero-cell">18,4</td><td class="n dim">нет</td><td class="n">доставлен · 13 355</td><td class="n">25 / 30</td><td class="n">1,20 млн</td></tr>
+<tr class="best"><th scope="row"><span class="tick" aria-hidden="true"></span>ядро Sherlock: v3 → v4.1 → v5<span class="arm-code mono">замерено на v3</span></th><td class="n hero-cell">18,4</td><td class="n dim">нет</td><td class="n">доставлен · 13 355</td><td class="n">25 / 30</td><td class="n">1,20 млн</td></tr>
 </tbody></table>
-<p class="tbl-note">Модель <span class="mono">[SP]deepseek-v4-flash</span>, промпт во всех армах побайтно одинаковый. <b>Честно про колонку цитат:</b> на однофайловых корпусах v1 и линия поставки не различимы — 19,4 против 18,4 это шум на 5 датасетах; <b>v2 — измеренная регрессия</b>. Преимущество линии поставки в трёх правых колонках: <b>на 649 МБ baseline и v1 теряют отчёт целиком</b> (157 и 106 символов после 3,63 и 5,73 млн токенов), а v2 <b>схлопнулся по контексту</b> на слишком широком <span class="mono">grep</span> (<span class="mono">Context is too large 184305 &gt; 177000</span>). Строка 649 МБ измерена на арме <b>v3</b>; v4/v4.1 наследуют её по построению — прогон <span class="mono">bench649 × v4</span> ещё не сделан.</p>
+<p class="tbl-note">Модель <span class="mono">[SP]deepseek-v4-flash</span>, промпт побайтно одинаковый во всех армах. <b>Честно про колонку цитат:</b> на однофайловых корпусах v1 и ядро неразличимы — 19,4 против 18,4 это шум на 5 датасетах. <b>v2 — измеренная регрессия.</b> Преимущество ядра видно в трёх правых колонках. На 649 МБ baseline и v1 <b>теряют отчёт целиком</b>: 157 и 106 символов после 3,63 и 5,73 млн токенов. v2 <b>схлопнулся по контексту</b> на слишком широком <span class="mono">grep</span> (<span class="mono">Context is too large 184305 &gt; 177000</span>). <b>Атрибуция:</b> строка 649 МБ измерена на арме <b>v3</b>. v4.1 и v5 наследуют это ядро по построению — прогон <span class="mono">bench649 × v4</span> ещё не сделан.</p>
 <!-- MAIN-TABLE:END -->
         </div>
         <div class="spacer"></div>
@@ -595,8 +595,48 @@ a{color:var(--amber)}
   </div>
 </section>
 
-<!-- ═══════════════════════════ 8 — АРХИТЕКТУРА ═════════════════════════ -->
-<section class="slide" data-sec="main" data-kicker="07 <span class='sep'>·</span><span class='plain'>архитектура и внедрение</span>">
+<!-- ═══════════════════════ 8 — ЧТО УМЕЕТ v5 ════════════════════════════ -->
+<section class="slide" data-sec="main" data-kicker="07 <span class='sep'>·</span><span class='plain'>продукт — Sherlock v5</span>">
+  <div class="frame">
+    <div class="topbar"><div class="kicker"></div><div class="counter"></div></div>
+    <div class="body">
+      <div class="stack g14" style="min-height:0">
+        <h2 class="rv" style="font-size:26px">v5 — это то же ядро плюс четыре слоя: источники, код, спека, память.</h2>
+        <div class="cols rv" style="grid-template-columns:5fr 7fr;gap:32px;flex:1 1 auto;min-height:0">
+          <div class="stack g14" style="gap:10px">
+            <div class="eyebrow">ядро — то, что уже замерено</div>
+            <div class="rows tight">
+              <div class="r"><div class="m">формат</div><div class="t">Envoy, BSD syslog, logcat, JSON, Java-стектрейс, самописный формат — читаются одинаково. <b>Парсера нет ни одного</b></div></div>
+              <div class="r"><div class="m">покрытие</div><div class="t">Список всех файлов, каждый закрыт явно. Остался без пометки — <b>расследование не закончено</b></div></div>
+              <div class="r"><div class="m">доставка</div><div class="t">Финальное сообщение <b>и есть отчёт</b>. Одно расследование, один поток, без субагентов. Бюджет — 8–15 вызовов, чтение окнами</div></div>
+            </div>
+          </div>
+          <div class="stack g14" style="gap:10px">
+            <div class="eyebrow">слои v5 — реализованы, лежат в репозитории</div>
+            <div class="rows tight">
+              <div class="r"><div class="m">источники</div><div class="t"><b>Loki, Elasticsearch, Grafana, <span class="mono">kubectl</span>, journald.</b> Есть такой инструмент в сессии — идти через него. Единицей покрытия становится поток, адресом улики — <span class="mono">источник:время</span></div></div>
+              <div class="r"><div class="m">шаг 5б</div><div class="t"><b>Сверка со спекой.</b> По каждому инварианту: соблюдён / нарушен / проверить нечем — идентификатором из самой спеки, без перевода</div></div>
+              <div class="r"><div class="m">шаг 6</div><div class="t"><b>Проверка улик стала механической.</b> Вложенный <span class="mono">tools/citecheck.py</span> сверяет цитату с <b>содержимым</b> строки, а не с её номером</div></div>
+              <div class="r"><div class="m">шаг 6б</div><div class="t"><b>От улик к коду.</b> Проверенная улика → файл и метод в <span class="mono">repo/</span> → минимальный фикс конкретной правкой. Заявлять «тесты зелёные» без прогона <b>запрещено правилом</b></div></div>
+              <div class="r"><div class="m">шаги 0 и 7</div><div class="t"><b>Замкнутый цикл.</b> Карточки паттернов читаются до первого открытого файла; новая предлагается после отчёта. Пишет её <b>только человек</b>, отказ фиксируется в <span class="mono">REJECTED.md</span> и повторно не предлагается</div></div>
+              <div class="r"><div class="m">отчёт</div><div class="t"><b>PII маскируется пофрагментно</b> — <span class="mono">u***@mail.ru</span>, остальная строка дословно, поэтому проверка улик сходится. И перечислены <b>выполненные команды</b>: путь воспроизводим</div></div>
+            </div>
+          </div>
+        </div>
+        <div class="card accent rv" style="flex:0 0 auto;padding:14px 20px">
+          <p class="small"><strong>Статус, прямо.</strong> Всё перечисленное реализовано и лежит в репозитории.
+            Сегодняшняя <b>проверенная</b> поставка — <span class="mono">v4.1</span>: то же ядро без новых слоёв.
+            Все числа этого дека принадлежат <b>ядру</b> и замерены на армах <span class="mono">v3</span>/<span class="mono">v4</span>;
+            v5-специфика в замерах ещё не гонялась, раннеры под неё готовы.</p>
+        </div>
+      </div>
+    </div>
+    <div class="srctag">источник: <b>skills/v5/SKILL.md</b> (617 строк) · <b>skills/v5/tools/citecheck.py</b> · <b>skills/v5/knowledge/</b> — карточки, <span class="mono">patterns.py</span>, <span class="mono">REJECTED.md</span> · инструменты покрыты <b>53 тестами</b> (<span class="mono">citecheck</span> 18 + <span class="mono">logstat</span> 21 + <span class="mono">logjoin</span> 14, все зелёные); <span class="mono">citecheck</span> откалиброван на 18 сохранённых транскриптах — из 617 цитат он выделил 21 подозрение, <b>19 оказались реальными ошибками атрибуции</b></div>
+  </div>
+</section>
+
+<!-- ═══════════════════════════ 9 — АРХИТЕКТУРА ═════════════════════════ -->
+<section class="slide" data-sec="main" data-kicker="08 <span class='sep'>·</span><span class='plain'>архитектура и внедрение</span>">
   <div class="frame">
     <div class="topbar"><div class="kicker"></div><div class="counter"></div></div>
     <div class="body">
@@ -606,7 +646,7 @@ a{color:var(--amber)}
           <div class="arch rv">
             <div class="lyr">
               <div class="ln">Qwen Coder CLI</div>
-              <div class="lc"><b>навык sherlock</b> — процедура расследования · <b>субагенты</b> — разведка по источникам</div>
+              <div class="lc"><b>навык sherlock v5</b> — процедура расследования в одном потоке. Субагенты <b>запрещены правилом</b>: на них измерена потеря отчёта</div>
             </div>
             <div class="arrow"></div>
             <div class="lyr">
@@ -621,7 +661,7 @@ a{color:var(--amber)}
             <div class="arrow"></div>
             <div class="lyr">
               <div class="ln">хелперы</div>
-              <div class="lc">необязательные stdlib-скрипты внутри папки навыка. Не запустились — навык всё равно работает</div>
+              <div class="lc"><span class="mono">citecheck.py</span> и <span class="mono">patterns.py</span> — stdlib, внутри папки навыка. Не запустились — навык всё равно работает</div>
             </div>
             <div class="arrow"></div>
             <div class="lyr">
@@ -674,12 +714,14 @@ a{color:var(--amber)}
         <div class="eyebrow rv">основная часть закончена</div>
         <h1 class="big rv">Приложение</h1>
         <p class="lead rv">Методика замера, известные ограничения, состав корпуса,
-          что мы сознательно не строили, поведение на масштабе и дорожная карта.</p>
+          что мы сознательно не строили, поведение на масштабе, дорожная карта
+          и прогоны на паке организаторов.</p>
         <div class="chips rv">
           <span class="chip">П1 методика</span><span class="chip">П2 ограничения</span>
           <span class="chip">П3 корпус</span><span class="chip">П4 не построено намеренно</span>
           <span class="chip">П5 масштаб</span><span class="chip">П6 дорожная карта</span>
           <span class="chip">П7 критерии кейса</span><span class="chip">П8 приёмочный тест R1</span>
+          <span class="chip on">П9 пак организаторов</span>
         </div>
       </div>
     </div>
@@ -847,14 +889,14 @@ a{color:var(--amber)}
     <div class="topbar"><div class="kicker"></div><div class="counter"></div></div>
     <div class="body">
       <div class="stack g14" style="min-height:0">
-        <h2 class="rv">Каждый отказ — это результат замера, а не вкусовщина</h2>
+        <h2 class="rv">Каждый отказ — результат замера. Один из них замер потом отменил</h2>
         <div class="rows rv">
-          <div class="r"><div class="m">проверка<br>цитат</div><div class="t"><b>Не построена.</b> 79 из 79 цитат <span class="mono">файл:строка</span> подтвердились дословно — на кириллице, ANSI-escape, Go-фреймах в JSON и CRI-записях. Строить защиту от несуществующей проблемы дороже, чем не строить. <span style="color:var(--muted-2)">Ранняя версия спецификации делала эту проверку центром решения — замер её отменил.</span></div></div>
+          <div class="r"><div class="m">проверка<br>цитат</div><div class="t"><b>Была не построена — и замер её вернул.</b> На сильной модели 79 цитат из 79 подтвердились дословно, строить защиту было не от чего. Но корпоративная модель процитировала <span class="mono">Linux_2k.log:106</span> для утверждения, настоящие вхождения которого — в строках 92 и 585–587. Поэтому в <span class="mono">v5</span> вложен <span class="mono">citecheck.py</span>: он сверяет цитату с <b>содержимым</b> строки, а не с её номером</div></div>
           <div class="r"><div class="m">парсеры<br>под формат</div><div class="t"><b>Не построены.</b> 100 % на самописном pipe-формате с выдуманным словарём уровней и 100 % на русском логе — без схемы. Список форматов открыт и не закончится никогда</div></div>
           <div class="r"><div class="m">движок<br>правил</div><div class="t"><b>Не построен.</b> Каждый подброшенный ложный след его побеждает: <span class="mono">grep -E 'ERROR|FATAL'</span> даёт 1 совпадение в promo-логе и 0 в русском, тогда как в <span class="mono">nginx/error.log</span> 15 132 «ошибки», из которых важны 2</div></div>
           <div class="r"><div class="m">корреляция<br>по id</div><div class="t"><b>Не построена.</b> Пять разных написаний одного идентификатора не остановили ни один сильный прогон: модель переходит на совпадение по времени сама</div></div>
           <div class="r"><div class="m">map-reduce<br>саммари</div><div class="t"><b>Не построено.</b> Худший из измеренных обменов: <b>в 27–85 раз больше токенов</b> при том же качестве. Дешёвый <span class="mono">tail-200</span> даёт 0,614 против 0,670 у самой сложной стратегии</div></div>
-          <div class="r"><div class="m">маскирование<br>PII</div><div class="t"><b>Понижено до чекбокса.</b> Требование говорит «не логировать PII» — то есть про то, что мы <b>пишем</b>, а не про то, что читает модель. Модель внутренняя. Осталось редактирование отчёта перед отправкой — ~30 строк</div></div>
+          <div class="r"><div class="m">маскирование<br>PII</div><div class="t"><b>Не на входе, а в отчёте.</b> Требование говорит «не логировать PII» — это про то, что <b>пишем мы</b>, а не про то, что читает модель; модель внутренняя. Фильтровать входной поток регулярками провабельно неполно. В <span class="mono">v5</span> маскируется <b>только персональный фрагмент</b> цитаты (<span class="mono">u***@mail.ru</span>), остальная строка дословно — иначе проверка улик перестанет сходиться с исходником</div></div>
         </div>
       </div>
     </div>
@@ -898,31 +940,33 @@ a{color:var(--amber)}
                 <tr><th scope="row">без навыка</th><td class="n">нет · 157 симв.</td><td class="n">0/30</td><td class="n">3,63 млн</td></tr>
                 <tr><th scope="row">навык v1</th><td class="n">нет · 106 симв.</td><td class="n">0/30</td><td class="n">5,73 млн</td></tr>
                 <tr><th scope="row">навык v2 <span class="chip chip-fail">арм с регрессом цитирования — не поставляется</span></th><td class="n">да · 12 872 симв.</td><td class="n">27/30</td><td class="n">1,96 млн</td></tr>
-                <tr class="best"><th scope="row"><span class="tick"></span>линия поставки v3 → v4.1<span class="arm-code mono">v3</span></th><td class="n">да · 13 355 симв.</td><td class="n">25/30</td><td class="n">1,20 млн</td></tr>
+                <tr class="best"><th scope="row"><span class="tick"></span>ядро: v3 → v4.1 → v5<span class="arm-code mono">замерено на v3</span></th><td class="n">да · 13 355 симв.</td><td class="n">25/30</td><td class="n">1,20 млн</td></tr>
               </tbody>
             </table>
-            <p class="small" style="margin-top:8px">Без навыка и с v1 модель уходит в подагентов, и в headless-режиме
-              финальная запись — только мета-комментарий «отчёт выше». Разбор не доходит: <b>5,7 млн токенов → 106 символов.</b>
-              Навык требует самодостаточного финального отчёта — и это разница между полной потерей и разбором
-              25 файлов из 30 <b>втрое дешевле</b>. v2 доходит до 27/30, но по цитатам это регресс (4,6 против 18,4)
-              и он схлопнулся по контексту на слишком широком <span class="mono">grep</span>
+            <p class="small" style="margin-top:8px">Без навыка и с v1 модель уходит в субагентов. В headless-режиме
+              финальная запись тогда — только мета-комментарий «отчёт выше»: <b>5,7 млн токенов → 106 символов.</b>
+              Ядро требует самодостаточного финального отчёта — отсюда разница между полной потерей
+              и разбором 25 файлов из 30 <b>втрое дешевле</b>. v2 доходит до 27/30, но по цитатам это регресс
+              (4,6 против 18,4) и он схлопнулся по контексту на слишком широком <span class="mono">grep</span>
               (<span class="mono">Context is too large 184305 &gt; 177000</span>) — поэтому не поставляется.</p>
-            <p class="small" style="margin-top:6px;color:var(--muted-2)">Сноска: строка «линия поставки» измерена на арме <b>v3</b>
+            <p class="small" style="margin-top:6px;color:var(--muted-2)">Сноска: строка «ядро» измерена на арме <b>v3</b>
               (<span class="mono">eval/bench/runs-bench.jsonl</span>: армы <span class="mono">none, v1, v2, v3</span>).
-              <b>v4/v4.1 наследуют её по построению, а не по замеру</b> — прогон <span class="mono">bench649 × v4</span> ещё не сделан.</p>
+              <b>v4.1 и v5 наследуют её по построению, а не по замеру</b> — прогон <span class="mono">bench649 × v4</span> ещё не сделан.</p>
           </div>
           <div class="card rv" style="border-color:rgba(242,166,59,.4)">
             <div class="ct">чего мы не добрали</div>
-            <p class="small">Поставляемая линия (v3 → v4.1) нашла на этом корпусе <b>1 из 11 дефектов — 9,1 %</b>
-              при 3 ложных срабатываниях; порог кейса «≥ 50 %» <b>не достигнут</b>. Лучшее измеренное число,
-              <b>18,2 % (2 из 11)</b>, принадлежит <b>арму v2</b> — тому самому, что признан регрессом и не поставляется,
-              поэтому это <b>не показатель решения</b>. Судит другая модель, ловушки D12/D13 в знаменатель не идут.
-              Покрытие и доставку отчёта мы починили; <b>глубину многошаговой корреляции — нет</b>:
-              прошли широко и мелко. Тот же корпус на более сильной модели даёт 11 из 11, то есть
-              упирается в модель, а не в архитектуру. Отсюда следующий шаг уже сделан — не новые правила, а инструменты:
-              <span class="mono">citecheck</span> (сверка цитаты с содержимым строки), <span class="mono">logstat</span>
-              (сдвиги по группам, включая отрицательный результат) и <span class="mono">logjoin</span> (запрос отсутствия) —
-              <b>53 теста, 19 реальных ошибок атрибуции поймано на сохранённых транскриптах</b>.</p>
+            <p class="small">На этом корпусе ядро линии поставки нашло <b>1 дефект из 11 — 9,1 %</b>
+              при 3 ложных срабатываниях. Порог кейса «≥ 50 %» <b>не достигнут</b>. Лучшее измеренное число,
+              <b>18,2 % (2 из 11), принадлежит арму <span class="mono">v2</span></b> — тому самому, что признан
+              регрессом по цитатам и не поставляется, поэтому показателем решения оно не является.
+              Судит другая модель; ловушки D12/D13 в знаменатель не идут.</p>
+            <p class="small" style="margin-top:8px">Покрытие и доставку отчёта мы починили,
+              <b>глубину многошаговой корреляции — нет</b>: прошли широко и мелко. Тот же корпус
+              на более сильной модели даёт 11 из 11 — упирается в модель, а не в архитектуру.
+              Поэтому следующий шаг — не новые правила, а инструменты: <span class="mono">citecheck</span>
+              (сверка цитаты с содержимым строки, вложен в <span class="mono">v5</span>),
+              <span class="mono">logstat</span> (сдвиги по группам, включая отрицательный результат)
+              и <span class="mono">logjoin</span> (запрос отсутствия связи). Вместе — <b>53 теста</b>, все зелёные.</p>
           </div>
           <div class="card rv">
             <div class="ct">слабая модель</div>
@@ -950,19 +994,20 @@ a{color:var(--amber)}
     <div class="topbar"><div class="kicker"></div><div class="counter"></div></div>
     <div class="body">
       <div class="stack g14" style="min-height:0">
-        <h2 class="rv">Что достраивается — в порядке доказанной ценности</h2>
-        <p class="small rv" style="max-width:70em">Все четыре компонента объединяет одно: <strong style="color:var(--paper)">ни один из них не знает,
+        <h2 class="rv">Что уже построено — и что осталось</h2>
+        <p class="small rv" style="max-width:70em">Все компоненты объединяет одно: <strong style="color:var(--paper)">ни один из них не знает,
           как выглядит строка лога</strong>. Код делает только то, чего модель провабельно не может.</p>
-        <div class="rows rv">
-          <div class="r"><div class="m">1 · logcover</div><div class="t"><b>Гейт покрытия.</b> Перечислить все файлы (заходя внутрь <span class="mono">.gz</span> и склеивая ротацию в один поток), отследить, что сессия реально открыла, и <b>не выпускать отчёт, пока остаётся нетронутый файл</b>. Обоснование: ряд 100 → 73 → 18 %. Цена незаглянутого файла изнутри прогона не видна — модель не знает, чего она не видела</div></div>
-          <div class="r"><div class="m">2 · logstat</div><div class="t"><b>Распределения и сдвиги по группам</b> с ответом «сдвиг общий или в одной группе» — и с явной выдачей разбивок, где сдвига нет. Отрицательный результат здесь несущий: именно его отсутствие один раз <b>перевернуло верную корневую причину в неверную</b></div></div>
-          <div class="r"><div class="m">3 · память<br>по кейсам</div><div class="t"><b>Замкнутый feedback loop кейса:</b> сохранить расследование, найти похожее в следующий раз. Механизм построен — карточки, <span class="mono">patterns.py</span>, отпечатки отказов и <b>гейт человека</b>; в поставляемом <span class="mono">v4.1</span> шага работы с базой знаний ещё нет. <b>Заявленного ускорения ≥ 30 % мы не получили:</b> замер дал +5 % при разбросе 120/281/142 с — это шум. Гипотеза, помеченная как непроверенная: карточка окупается там, где надо <b>выбрать среди многих файлов</b>, а корпус замера был одним файлом</div></div>
-          <div class="r"><div class="m">4 · logentity</div><div class="t"><b>Ответ на единственную найденную выдумку.</b> Прогон утверждал «выжили ровно поды .31 и .33»; grep по всему корпусу на совместную встречаемость имени пода и IP даёт <b>ноль совпадений</b> — ребро было придумано, чтобы связать две настоящие улики. Хранилище связей отвечает <span class="mono">ЕСТЬ</span> / <span class="mono">НЕТ В КОРПУСЕ</span>, и неподтверждённая связь <b>отклоняется, а не пересказывается</b></div></div>
-          <div class="r"><div class="m">5 · источники</div><div class="t">Адаптеры <span class="mono">kubectl</span> и <span class="mono">journalctl</span> (~65 строк вместе) плюс подключение готовых MCP-серверов. Ядро при этом не меняется — в этом весь смысл контракта</div></div>
+        <div class="rows tight rv">
+          <div class="r"><div class="m">сделано ·<br>источники</div><div class="t">Раздел «если логи лежат не в файлах» в <span class="mono">v5</span>: Loki, ES, Grafana, <span class="mono">kubectl</span>, journald идут первым путём. Дисциплина покрытия и бюджет контекста переносятся на потоки. <b>Ядро при этом не менялось</b></div></div>
+          <div class="r"><div class="m">сделано ·<br>citecheck</div><div class="t">Сверка цитаты с <b>содержимым</b> строки, а не с её номером. Вложен в <span class="mono">v5</span>, 18 тестов. Откалиброван на 18 сохранённых транскриптах: из 617 цитат — 21 подозрение, <b>19 реальных ошибок атрибуции</b></div></div>
+          <div class="r"><div class="m">сделано ·<br>память</div><div class="t">Карточки, <span class="mono">patterns.py</span>, отпечатки отказов, <b>гейт человека</b> — шаги 0 и 7 в <span class="mono">v5</span>. <b>Заявленного ускорения ≥ 30 % мы не получили:</b> прокси-замер самого механизма карточек (<span class="mono">knowledge/measure/</span>, 6 прогонов, не арм <span class="mono">v5</span>) дал +5 % при разбросе 120/281/142 с — это шум. Непроверенная гипотеза: карточка окупается там, где надо <b>выбрать среди многих файлов</b>, а корпус замера был одним файлом</div></div>
+          <div class="r"><div class="m">готово,<br>не вложено</div><div class="t"><span class="mono">logstat</span> отвечает «сдвиг общий или в одной группе» и явно выдаёт разбивки <b>без</b> сдвига. <span class="mono">logjoin</span> отвечает <span class="mono">ЕСТЬ</span> / <span class="mono">НЕТ В КОРПУСЕ</span> на связь между сущностями — ответ на единственную найденную выдумку: прогон утверждал «выжили ровно поды .31 и .33», а grep на совместную встречаемость даёт ноль. 21 и 14 тестов; в папку навыка пока не вложены</div></div>
+          <div class="r"><div class="m">осталось ·<br>logcover</div><div class="t"><b>Гейт покрытия.</b> Перечислить все файлы, заходя внутрь <span class="mono">.gz</span> и склеивая ротацию, отследить открытые и <b>не выпускать отчёт, пока остаётся нетронутый</b>. Обоснование — ряд 100 → 73 → 18 %: цену незаглянутого файла изнутри прогона не видно</div></div>
+          <div class="r"><div class="m">осталось ·<br>замерить v5</div><div class="t">Матрица <span class="mono">{TC-01, TC-03, TC-05} × {none, v5}</span> на паке организаторов плюс <span class="mono">bench649 × v5</span>. Раннеры написаны: <span class="mono">eval/petstore/run-tc.sh</span> и <span class="mono">eval/bench/run-bench.sh</span></div></div>
         </div>
       </div>
     </div>
-    <div class="srctag">источник: спецификация §2 (таблица «Keep, rewritten format-agnostic») и §4 (инкременты I2–I5)</div>
+    <div class="srctag">источник: <b>skills/v5/</b> · <b>tools/</b> (<span class="mono">citecheck.py</span>, <span class="mono">logstat.py</span>, <span class="mono">logjoin.py</span>) · <b>tools/tests/</b> — 53 теста, все зелёные · <b>tools/README.md</b> (калибровка на транскриптах) · спецификация §2 и §4</div>
   </div>
 </section>
 
@@ -975,9 +1020,9 @@ a{color:var(--amber)}
         <div class="stack g14">
           <h2 class="rv">Что сдаём</h2>
           <div class="rows rv">
-            <div class="r"><div class="m">SKILL.md</div><div class="t">процедура анализа и диагностики на русском, с frontmatter в нативном для Qwen формате — это и есть продукт</div></div>
+            <div class="r"><div class="m">skills/v5/</div><div class="t"><b>SKILL.md</b> — процедура анализа и диагностики на русском, frontmatter в нативном для Qwen формате. Рядом <span class="mono">tools/citecheck.py</span> и <span class="mono">knowledge/</span> — карточки, <span class="mono">patterns.py</span>, <span class="mono">REJECTED.md</span>. Эта папка и есть продукт</div></div>
             <div class="r"><div class="m">MCP / tool</div><div class="t">контракт источника <span class="mono">resolve()</span> + готовые MCP-серверы логовых бэкендов подключением; файлы, zip и <span class="mono">.gz</span> читаются штатными инструментами CLI</div></div>
-            <div class="r"><div class="m">rules</div><div class="t">версионируются как <b>сохранённые параметризованные запросы</b>, которые навык читает как чеклист, а не как движок сопоставления — это единственная форма правил, которая не гниёт на незнакомом формате</div></div>
+            <div class="r"><div class="m">rules</div><div class="t">версионируются как <b>карточки паттернов</b> и сохранённые параметризованные запросы: навык читает их как чеклист, а не как движок сопоставления. Пишет карточку <b>только человек</b> — это единственная форма правил, которая не гниёт на незнакомом формате</div></div>
             <div class="r"><div class="m">примеры</div><div class="t">5 реальных датасетов в реестре прогонов + синтетический корпус с ключом ответов</div></div>
             <div class="r"><div class="m">данные</div><div class="t">синтетика детерминирована и воспроизводима: seed зафиксирован, реалистичность и «грязь» описаны в ключе — 18 отдельных пунктов</div></div>
           </div>
@@ -985,9 +1030,9 @@ a{color:var(--amber)}
         <div class="stack g14">
           <h2 class="rv">Метрики качества из постановки</h2>
           <div class="rows rv">
-            <div class="r"><div class="m">≥ 50 %<br>дефектов</div><div class="t">измеряется судьёй по ключу ответов; на большом корпусе лучший прогон дал 100 % из 11, худший — 18 %</div></div>
-            <div class="r"><div class="m">повторный<br>инцидент</div><div class="t">память по кейсам + реестр: ускорение считается разностью по реестру, а не декларируется</div></div>
-            <div class="r"><div class="m">feedback<br>loop</div><div class="t">кейс №1 сохраняется, кейс №2 стартует с найденного похожего — без ручной разметки</div></div>
+            <div class="r"><div class="m">≥ 50 %<br>дефектов</div><div class="t">измеряется судьёй по ключу ответов. На сильной модели лучший прогон дал 100 % из 11, худший — 18 %; на корпоративной ядро дало 9,1 % — <b>порог не достигнут</b>, см. П5</div></div>
+            <div class="r"><div class="m">повторный<br>инцидент</div><div class="t">память по кейсам (шаги 0 и 7 в <span class="mono">v5</span>) + реестр прогонов: ускорение считается разностью по реестру, а не декларируется. На сегодня <b>требуемых ≥ 30 % нет</b></div></div>
+            <div class="r"><div class="m">feedback<br>loop</div><div class="t">кейс №1 сохраняется карточкой, кейс №2 стартует с найденной похожей — без ручной разметки. Запись в базу идёт <b>только через явное «да» человека</b></div></div>
             <div class="r"><div class="m">MTTR</div><div class="t">базовая линия ручного разбора замеряется отдельно; сравнение честное только на одном и том же инциденте</div></div>
             <div class="r"><div class="m">AIOps</div><div class="t">та же процедура применима к потоку: плотность ошибок и редкость формы строки считаются на хвосте окна</div></div>
           </div>
@@ -1041,6 +1086,60 @@ a{color:var(--amber)}
       </div>
     </div>
     <div class="srctag">источник: <b>acceptance/r1-zero-config.sh</b> · <b>AGENTS.md</b> — требования R1–R4</div>
+  </div>
+</section>
+
+<!-- ═══════════════════════ П9 — ПАК ОРГАНИЗАТОРОВ ══════════════════════ -->
+<section class="slide" data-sec="app" data-kicker="П9 <span class='sep'>·</span><span class='plain'>прогоны на паке организаторов</span>">
+  <div class="frame">
+    <div class="topbar"><div class="kicker"></div><div class="counter"></div></div>
+    <div class="body">
+      <div class="cols c-7-5" style="gap:30px">
+        <div class="stack g14" style="min-height:0">
+          <h2 class="rv" style="font-size:25px">Данные кейса, а не наш корпус: три тест-кейса, 43 файла</h2>
+          <table class="tbl rv" style="font-size:13.5px">
+            <thead><tr>
+              <th scope="col">тест-кейс</th>
+              <th scope="col" class="n">без навыка<br><span class="dim">имён файлов · время · ответ</span></th>
+              <th scope="col" class="n">с ядром <span class="mono">v4</span><br><span class="dim">имён файлов · время · ответ</span></th>
+            </tr></thead>
+            <tbody>
+              <tr class="best"><th scope="row"><span class="tick"></span>TC-01 · RCA по <span class="mono">correlation_id</span>, код рядом</th>
+                <td class="n">2 · 303 с<br><span class="dim">940 симв. · <b>0 ссылок</b> <span class="mono">файл:строка</span></span></td>
+                <td class="n"><b>15 · 159 с</b><br><span class="dim">10 921 симв. — полный отчёт</span></td></tr>
+              <tr><th scope="row">TC-03 · повторный инцидент</th>
+                <td class="n">4 · 371 с<br><span class="dim">4 971 симв.</span></td>
+                <td class="n"><b>12 · 324 с</b><br><span class="dim">9 598 симв.</span></td></tr>
+              <tr><th scope="row">TC-05 · здоровый корпус <span class="chip chip-weak">негативный</span></th>
+                <td class="n">8 · 92 с<br><span class="dim">5 666 симв.</span></td>
+                <td class="n">11 · 148 с<br><span class="dim">9 088 симв.</span></td></tr>
+            </tbody>
+          </table>
+          <p class="tbl-note">Считается <b>охват и стоимость, а не доля верных дефектов</b>: ключа ответов к паку организаторов
+            нет, судью на нём не запускали. «Имён файлов» — сколько из 39 уникальных имён пака (43 файла) встретилось в тексте
+            отчёта. <b>n = 1 на ячейку.</b> Арм — <span class="mono">v4</span>, то же ядро без слоёв <span class="mono">v5</span>;
+            прогонов <span class="mono">v5</span> на паке пока нет.</p>
+        </div>
+        <div class="stack g14">
+          <div class="card rv" style="border-color:rgba(47,155,131,.5)">
+            <div class="ct">TC-01 — расследование доехало до кода</div>
+            <p class="small">Отчёт называет метод: <span class="mono">OrderCheckoutService.checkout()</span> обрабатывает
+              <span class="mono">ReservationTimeoutException</span> как <span class="mono">FAILED</span>. Сверено с паком:
+              <span class="mono">OrderCheckoutService.java:80</span> — <span class="mono">} catch (ReservationTimeoutException e) {</span>,
+              <span class="mono">:82</span> — <span class="mono">order.setStatus(OrderStatus.FAILED);</span>.
+              В <span class="mono">v5</span> это перестаёт быть удачей: <b>шаг 6б делает переход «улика → файл и метод → минимальный фикс» обязательным</b>.</p>
+          </div>
+          <div class="card rv" style="border-color:rgba(242,166,59,.4)">
+            <div class="ct">TC-05 — открытый пункт, не победа</div>
+            <p class="small">Негативный тест: на здоровом корпусе агент обязан уверенно сказать «штатная работа».
+              <b>Ни один арм этого пока не делает.</b> С ядром отчёт верно говорит «оснований заводить дефект на этот заказ нет» —
+              и тут же поднимает нарушение инварианта И-1. Находка настоящая, буква теста — нет.
+              В <span class="mono">v5</span> на это отвечает раздел «если инцидента нет»; замером это ещё не закрыто.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="srctag">источник: <b>eval/petstore/runs-petstore.jsonl</b> — 6 строк реестра · раннер <b>eval/petstore/run-tc.sh</b> · модель <span class="mono">[SP]deepseek-v4-flash</span> · пак организаторов <b>petstore_input_pack</b>: 43 файла, 39 уникальных имён · цитаты кода сверены с паком построчно</div>
   </div>
 </section>
 
