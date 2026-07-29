@@ -51,6 +51,11 @@ sherlock/eval/petstore/run-tc.sh tc01 none   # то же плечо baseline, д
 - `sherlock/eval/runs.jsonl` — A/B по датасетам (`sherlock/eval/run.sh`);
 - `sherlock/eval/bench/runs-bench.jsonl` — корпус 649 МБ, 26 форматов, answer-key.
 
+Сам корпус — скачать (67 МБ zst, с answer-key):
+https://github.com/fresh-fx59/agent-hackathon-kit/releases/tag/case06-corpus-seed20260728
+— либо сгенерировать бит-в-бит: `sherlock/eval/bench/gen_corpus.py` (SEED=20260728,
+`CORPUS_OUT`/`CORPUS_KEY` в env). sha256 архива — на странице релиза.
+
 Разбор: `sherlock/eval/GAP-ANALYSIS-2026-07-29.md` — сверка с критериями организаторов;
 `sherlock/eval/V5-ASSESSMENT-2026-07-29.md` — почему v5 не в поставке. **Правило: любая
 цифра прослеживается до строки реестра**, а не до чьего-то резюме. Пересчитать объём:

@@ -9,7 +9,9 @@
 Скопируй папку навыка туда, где Qwen Coder ищет навыки:
 
 ```bash
-cp -r cases/06-dev-logging/sherlock/skills/v1 ~/.qwen/skills/log-rca
+cp -r cases/06-dev-logging/sherlock/skills/v4.1 ~/.qwen/skills/log-rca   # проверенная поставка
+# или полная линия возможностей (self-learning + анализ кода; в замерах пока не гонялась):
+cp -r cases/06-dev-logging/sherlock/skills/v5 ~/.qwen/skills/log-rca
 ```
 
 Всё. Больше ничего настраивать не нужно: ни переменных окружения, ни ключей, ни
@@ -58,14 +60,15 @@ cases/06-dev-logging/
 ├── petstore_input_pack.zip   их же входные данные
 ├── docs/specs/               дизайн решения и доказательная база
 └── sherlock/
-    ├── skills/v1/SKILL.md    сам навык — это и есть продукт
+    ├── skills/               навык (v4.1 — поставка; v5 — полная линия; README внутри)
     ├── verify.sh             проверка, что навык работает в реальном Qwen Coder
     └── eval/                 замеры: baseline vs версии навыка
 ```
 
 ## Замеры
 
-`eval/run.sh <каталог-логов> <none|v1|v2>` — один замер, дописывается в
+`eval/run.sh <каталог-логов> <арм>` (арм = каталог в `sherlock/skills/`: `none`,
+`v1`…`v5`) — один замер, дописывается в
 `eval/runs.jsonl` (arm, turns, время, токены, покрытие файлов, ссылки на строки).
 `arm=none` — та же модель без навыка, это baseline.
 
