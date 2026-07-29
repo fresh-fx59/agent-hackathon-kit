@@ -344,7 +344,7 @@ a{color:var(--amber)}
         <div class="cols c-6-6 rv" style="gap:26px">
           <div class="stack g14">
             <div class="term" style="font-size:13px;line-height:1.62"><span class="cm"># свежий Qwen Coder: ни settings.json, ни .env, ни конфига</span>
-<span class="pr">$</span> cp -r sherlock/skills/v1 $QWEN_HOME/skills/log-rca
+<span class="pr">$</span> cp -r sherlock/skills/v4.1 $QWEN_HOME/skills/log-rca
 
 <span class="pr">&gt;</span> Слушай, у нас что-то странное творится с сервером.
 <span class="pr">&gt;</span> Логи лежат в ./OpenSSH. Глянешь, что там происходит?
@@ -494,7 +494,7 @@ a{color:var(--amber)}
         <h1 class="rv" style="font-size:36px">Модель уже умеет читать любой формат.<br>Парсер ей не нужен.</h1>
         <div class="cols c-8-4 rv" style="flex:0 0 auto;gap:40px">
           <div class="rows">
-            <div class="r"><div class="m">100 %</div><div class="t">из 11 подброшенных дефектов найдено <b>при полном обходе</b> (на сильной модели; на корпоративной — 18,2 %, см. приложение П5) корпуса 649 МБ / 4,26 млн строк / 26 форматов — прочитав <b>0,09 %</b> его объёма. Это <b>лучший</b> из трёх прогонов, остальные два — на следующем слайде</div></div>
+            <div class="r"><div class="m">100 %</div><div class="t">из 11 подброшенных дефектов найдено <b>при полном обходе</b> (на сильной модели; на корпоративной поставляемая линия даёт <b>9,1 %</b>, а 18,2 % — это арм v2, который не поставляется, см. приложение П5) корпуса 649 МБ / 4,26 млн строк / 26 форматов — прочитав <b>0,09 %</b> его объёма. Это <b>лучший</b> из трёх прогонов, остальные два — на следующем слайде</div></div>
             <div class="r"><div class="m">самописный</div><div class="t">pipe-формат с <b>выдуманным словарём уровней</b> — <span class="mono">ALARM</span> и <span class="mono">FATALITY</span> выше <span class="mono">WARN</span> — разобран и ранжирован верно, без схемы и словаря</div></div>
             <div class="r"><div class="m">русский</div><div class="t">лог с уровнями <span class="mono">ОШИБКА</span> / <span class="mono">ПРЕДУПРЕЖДЕНИЕ</span> разобран полностью. <b><span class="mono">grep -E 'ERROR|FATAL'</span> находит в нём 0 строк</b></div></div>
             <div class="r"><div class="m">79 / 79</div><div class="t">цитат <span class="mono">файл:строка</span> проверены дословно перечитыванием — <b>ни одной выдуманной улики</b>, включая кириллицу, ANSI-escape и Go-фреймы внутри JSON</div></div>
@@ -561,13 +561,13 @@ a{color:var(--amber)}
         <div class="rv">
 <!-- MAIN-TABLE:BEGIN -->
 <table class="tbl tbl-main">
-<thead><tr><th scope="col">арм</th><th scope="col" class="n">ссылок <span class="mono">файл:строка</span></th><th scope="col" class="n">объём отчёта, симв.</th><th scope="col" class="n">шагов агента</th><th scope="col" class="n">время, с</th><th scope="col" class="n">прогонов</th></tr></thead><tbody>
-<tr><th scope="row">без навыка (baseline)<span class="arm-code mono">none</span></th><td class="n hero-cell">17</td><td class="n">4 778</td><td class="n">14,7</td><td class="n">218</td><td class="n dim">3 / 5</td></tr>
-<tr><th scope="row">Sherlock v1<span class="arm-code mono">v1</span></th><td class="n hero-cell">52</td><td class="n">7 369</td><td class="n">10,2</td><td class="n">110</td><td class="n dim">4 / 5</td></tr>
-<tr class="best"><th scope="row"><span class="tick" aria-hidden="true"></span>Sherlock v2<span class="arm-code mono">v2</span></th><td class="n hero-cell">94</td><td class="n">9 176</td><td class="n">9,3</td><td class="n">94</td><td class="n dim">3 / 5</td></tr>
-<tr><th scope="row">Sherlock v3<span class="arm-code mono">v3</span></th><td class="n hero-cell">44</td><td class="n">7 430</td><td class="n">18,4</td><td class="n">248</td><td class="n dim">5 / 5</td></tr>
+<thead><tr><th scope="col">арм</th><th scope="col" class="n">цитат <span class="mono">файл:строка</span><br><span class="dim">5 корпусов, среднее</span></th><th scope="col" class="n">коллапс<br>контекста</th><th scope="col" class="n">649 МБ: отчёт</th><th scope="col" class="n">файлов<br>разобрано</th><th scope="col" class="n">вх. токенов</th></tr></thead><tbody>
+<tr><th scope="row">без навыка (baseline)<span class="arm-code mono">none</span></th><td class="n hero-cell">7,8</td><td class="n dim">нет</td><td class="n">потерян · 157 симв.</td><td class="n">0 / 30</td><td class="n">3,63 млн</td></tr>
+<tr><th scope="row">Sherlock v1<span class="arm-code mono">v1</span></th><td class="n hero-cell">19,4</td><td class="n dim">нет</td><td class="n">потерян · 106 симв.</td><td class="n">0 / 30</td><td class="n">5,73 млн</td></tr>
+<tr><th scope="row">Sherlock v2 <span class="chip chip-fail">регресс — не поставляется</span><span class="arm-code mono">v2</span></th><td class="n hero-cell">4,6</td><td class="n">1 из 5</td><td class="n">доставлен · 12 872</td><td class="n">27 / 30</td><td class="n">1,96 млн</td></tr>
+<tr class="best"><th scope="row"><span class="tick" aria-hidden="true"></span>линия поставки v3 → v4.1<span class="arm-code mono">v3</span></th><td class="n hero-cell">18,4</td><td class="n dim">нет</td><td class="n">доставлен · 13 355</td><td class="n">25 / 30</td><td class="n">1,20 млн</td></tr>
 </tbody></table>
-<p class="tbl-note">Модель <span class="mono">[SP]deepseek-v4-flash</span>, датасетов: 5. Средние — по состоявшимся прогонам; 5 не состоявшихся исключены и перечислены в приложении. Промпт во всех армах побайтно одинаковый, единственная переменная — навык.</p>
+<p class="tbl-note">Модель <span class="mono">[SP]deepseek-v4-flash</span>, промпт во всех армах побайтно одинаковый. <b>Честно про колонку цитат:</b> на однофайловых корпусах v1 и линия поставки не различимы — 19,4 против 18,4 это шум на 5 датасетах; <b>v2 — измеренная регрессия</b>. Преимущество линии поставки в трёх правых колонках: <b>на 649 МБ baseline и v1 теряют отчёт целиком</b> (157 и 106 символов после 3,63 и 5,73 млн токенов), а v2 <b>схлопнулся по контексту</b> на слишком широком <span class="mono">grep</span> (<span class="mono">Context is too large 184305 &gt; 177000</span>). Строка 649 МБ измерена на арме <b>v3</b>; v4/v4.1 наследуют её по построению — прогон <span class="mono">bench649 × v4</span> ещё не сделан.</p>
 <!-- MAIN-TABLE:END -->
         </div>
         <div class="spacer"></div>
@@ -776,7 +776,7 @@ a{color:var(--amber)}
 <td class="n cell st-weak"><span class="cn">0</span><span class="chip chip-weak">без ссылок</span></td>
 </tr>
 </tbody></table>
-<p class="tbl-note">Крупное число — сколько ссылок <span class="mono">файл:строка</span> оказалось в отчёте. Прогоны, помеченные «не состоялся», остаются в реестре и видны здесь, но не попадают в средние на слайде 7.</p>
+<p class="tbl-note">Крупное число — сырой счётчик <span class="mono">line_refs</span> из реестра: он засчитывает любое <span class="mono">:\d+</span>, поэтому таймстемпы лога его раздувают (<b>метрика признана негодной</b> — на слайде 7 стоят перепроверенные цитаты). Таблица оставлена ради того, что она показывает честно: какие прогоны не состоялись.</p>
 <!-- DETAIL-TABLE:END -->
           </div>
         </div>
@@ -897,24 +897,32 @@ a{color:var(--amber)}
               <tbody>
                 <tr><th scope="row">без навыка</th><td class="n">нет · 157 симв.</td><td class="n">0/30</td><td class="n">3,63 млн</td></tr>
                 <tr><th scope="row">навык v1</th><td class="n">нет · 106 симв.</td><td class="n">0/30</td><td class="n">5,73 млн</td></tr>
-                <tr class="best"><th scope="row"><span class="tick"></span>навык v2</th><td class="n">да · 12 872 симв.</td><td class="n">27/30</td><td class="n">1,96 млн</td></tr>
+                <tr><th scope="row">навык v2 <span class="chip chip-fail">арм с регрессом цитирования — не поставляется</span></th><td class="n">да · 12 872 симв.</td><td class="n">27/30</td><td class="n">1,96 млн</td></tr>
+                <tr class="best"><th scope="row"><span class="tick"></span>линия поставки v3 → v4.1<span class="arm-code mono">v3</span></th><td class="n">да · 13 355 симв.</td><td class="n">25/30</td><td class="n">1,20 млн</td></tr>
               </tbody>
             </table>
             <p class="small" style="margin-top:8px">Без навыка и с v1 модель уходит в подагентов, и в headless-режиме
               финальная запись — только мета-комментарий «отчёт выше». Разбор не доходит: <b>5,7 млн токенов → 106 символов.</b>
-              v2 требует самодостаточного финального отчёта — и это разница между полной потерей и разбором
-              27 файлов из 30 <b>втрое дешевле</b>.</p>
+              Навык требует самодостаточного финального отчёта — и это разница между полной потерей и разбором
+              25 файлов из 30 <b>втрое дешевле</b>. v2 доходит до 27/30, но по цитатам это регресс (4,6 против 18,4)
+              и он схлопнулся по контексту на слишком широком <span class="mono">grep</span>
+              (<span class="mono">Context is too large 184305 &gt; 177000</span>) — поэтому не поставляется.</p>
+            <p class="small" style="margin-top:6px;color:var(--muted-2)">Сноска: строка «линия поставки» измерена на арме <b>v3</b>
+              (<span class="mono">eval/bench/runs-bench.jsonl</span>: армы <span class="mono">none, v1, v2, v3</span>).
+              <b>v4/v4.1 наследуют её по построению, а не по замеру</b> — прогон <span class="mono">bench649 × v4</span> ещё не сделан.</p>
           </div>
           <div class="card rv" style="border-color:rgba(242,166,59,.4)">
             <div class="ct">чего мы не добрали</div>
-            <p class="small">На этом же корпусе <b>2 из 11 дефектов (18,2 %)</b> — порог кейса «≥ 50 %»
-              <b>не достигнут</b>. Судит другая модель, ловушки D12/D13 в знаменатель не идут.
+            <p class="small">Поставляемая линия (v3 → v4.1) нашла на этом корпусе <b>1 из 11 дефектов — 9,1 %</b>
+              при 3 ложных срабатываниях; порог кейса «≥ 50 %» <b>не достигнут</b>. Лучшее измеренное число,
+              <b>18,2 % (2 из 11)</b>, принадлежит <b>арму v2</b> — тому самому, что признан регрессом и не поставляется,
+              поэтому это <b>не показатель решения</b>. Судит другая модель, ловушки D12/D13 в знаменатель не идут.
               Покрытие и доставку отчёта мы починили; <b>глубину многошаговой корреляции — нет</b>:
               прошли широко и мелко. Тот же корпус на более сильной модели даёт 11 из 11, то есть
-              упирается в модель, а не в архитектуру. Отсюда следующий шаг — не новые правила, а
-              <span class="mono">logstat</span> (сдвиги по группам, включая отрицательный результат)
-              и <span class="mono">logjoin</span> (запрос отсутствия): отдать модели готовый вывод
-              вместо требования вывести его самой.</p>
+              упирается в модель, а не в архитектуру. Отсюда следующий шаг уже сделан — не новые правила, а инструменты:
+              <span class="mono">citecheck</span> (сверка цитаты с содержимым строки), <span class="mono">logstat</span>
+              (сдвиги по группам, включая отрицательный результат) и <span class="mono">logjoin</span> (запрос отсутствия) —
+              <b>53 теста, 19 реальных ошибок атрибуции поймано на сохранённых транскриптах</b>.</p>
           </div>
           <div class="card rv">
             <div class="ct">слабая модель</div>
@@ -948,7 +956,7 @@ a{color:var(--amber)}
         <div class="rows rv">
           <div class="r"><div class="m">1 · logcover</div><div class="t"><b>Гейт покрытия.</b> Перечислить все файлы (заходя внутрь <span class="mono">.gz</span> и склеивая ротацию в один поток), отследить, что сессия реально открыла, и <b>не выпускать отчёт, пока остаётся нетронутый файл</b>. Обоснование: ряд 100 → 73 → 18 %. Цена незаглянутого файла изнутри прогона не видна — модель не знает, чего она не видела</div></div>
           <div class="r"><div class="m">2 · logstat</div><div class="t"><b>Распределения и сдвиги по группам</b> с ответом «сдвиг общий или в одной группе» — и с явной выдачей разбивок, где сдвига нет. Отрицательный результат здесь несущий: именно его отсутствие один раз <b>перевернуло верную корневую причину в неверную</b></div></div>
-          <div class="r"><div class="m">3 · память<br>по кейсам</div><div class="t"><b>Замкнутый feedback loop кейса:</b> сохранить расследование, найти похожее в следующий раз. Инцидент №2 разбирается быстрее №1, и это измеряется по реестру, а не заявляется</div></div>
+          <div class="r"><div class="m">3 · память<br>по кейсам</div><div class="t"><b>Замкнутый feedback loop кейса:</b> сохранить расследование, найти похожее в следующий раз. Механизм построен — карточки, <span class="mono">patterns.py</span>, отпечатки отказов и <b>гейт человека</b>; в поставляемом <span class="mono">v4.1</span> шага работы с базой знаний ещё нет. <b>Заявленного ускорения ≥ 30 % мы не получили:</b> замер дал +5 % при разбросе 120/281/142 с — это шум. Гипотеза, помеченная как непроверенная: карточка окупается там, где надо <b>выбрать среди многих файлов</b>, а корпус замера был одним файлом</div></div>
           <div class="r"><div class="m">4 · logentity</div><div class="t"><b>Ответ на единственную найденную выдумку.</b> Прогон утверждал «выжили ровно поды .31 и .33»; grep по всему корпусу на совместную встречаемость имени пода и IP даёт <b>ноль совпадений</b> — ребро было придумано, чтобы связать две настоящие улики. Хранилище связей отвечает <span class="mono">ЕСТЬ</span> / <span class="mono">НЕТ В КОРПУСЕ</span>, и неподтверждённая связь <b>отклоняется, а не пересказывается</b></div></div>
           <div class="r"><div class="m">5 · источники</div><div class="t">Адаптеры <span class="mono">kubectl</span> и <span class="mono">journalctl</span> (~65 строк вместе) плюс подключение готовых MCP-серверов. Ядро при этом не меняется — в этом весь смысл контракта</div></div>
         </div>
