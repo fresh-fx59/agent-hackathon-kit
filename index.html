@@ -1,0 +1,1112 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sherlock — анализ логов и поиск причин инцидентов</title>
+<style>
+/* ============================================================================
+   Sherlock — защита кейса 06. Один файл, без сети, без внешних шрифтов.
+   Тёмная тема выбрана намеренно и единственная: дек проецируют в тёмном зале,
+   и иллюстрации сгенерированы в этой же палитре (тёмный индиго + янтарь).
+   ========================================================================== */
+:root{
+  /* палитра снята пипеткой с img/hero.png */
+  --ground:#050A12;
+  --panel:#0D1826;
+  --panel-2:#122237;
+  --rule:#1C3147;
+  --rule-soft:#132133;
+  --muted:#7B95AC;
+  --muted-2:#5A7288;
+  --paper:#E9F1F8;
+  --amber:#F2A63B;          /* акцент: волосяные линии, кикеры, ключевые числа */
+  --amber-mark:#D9932B;     /* заливка столбиков диаграммы */
+  --amber-wash:rgba(242,166,59,.10);
+  --amber-edge:rgba(242,166,59,.32);
+  --good:#2F9B83;
+  --bad:#D9456A;
+
+  --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue","Liberation Sans",Arial,sans-serif;
+  --mono:ui-monospace,"SF Mono",SFMono-Regular,Menlo,Consolas,"DejaVu Sans Mono","Liberation Mono",monospace;
+
+  --pad:44px;
+  color-scheme:dark;
+}
+
+*,*::before,*::after{box-sizing:border-box}
+html,body{height:100%}
+body{
+  margin:0;background:var(--ground);color:var(--paper);
+  font-family:var(--sans);font-size:16px;line-height:1.5;
+  -webkit-font-smoothing:antialiased;
+  overflow:hidden;
+}
+img{max-width:100%;display:block}
+
+/* --------------------------------------------------------------- сцена --- */
+#stage{
+  position:fixed;inset:0;display:grid;place-items:center;
+}
+#deck{
+  width:1280px;height:720px;position:relative;
+  transform:scale(var(--s,1));transform-origin:center center;
+}
+.slide{
+  position:absolute;inset:0;display:none;
+  background:var(--ground);
+  overflow:hidden;
+}
+.slide.is-active{display:block}
+
+/* ------------------------------------------------------- рамка каждого --- */
+.frame{position:absolute;inset:0;padding:var(--pad);display:flex;flex-direction:column;z-index:2}
+.topbar{
+  display:flex;align-items:baseline;justify-content:space-between;gap:24px;
+  padding-bottom:9px;border-bottom:1px solid var(--rule);
+  flex:0 0 auto;
+}
+.kicker{
+  font-family:var(--mono);font-size:12.5px;letter-spacing:.16em;text-transform:uppercase;
+  color:var(--amber);white-space:nowrap;
+}
+.kicker .sep{color:var(--muted-2);margin:0 .55em}
+.kicker .plain{color:var(--muted)}
+.counter{
+  font-family:var(--mono);font-size:12.5px;letter-spacing:.14em;color:var(--muted-2);
+  font-variant-numeric:tabular-nums;white-space:nowrap;
+}
+.body{flex:1 1 auto;min-height:0;padding-top:20px;display:flex;flex-direction:column;overflow:hidden}
+.srctag{
+  flex:0 0 auto;font-family:var(--mono);font-size:11px;line-height:1.4;letter-spacing:.04em;
+  color:var(--muted-2);padding-top:10px;border-top:1px solid var(--rule-soft);
+}
+.srctag b{color:var(--muted);font-weight:500}
+
+/* прогресс — тонкая янтарная нить внизу */
+#progress{position:absolute;left:0;bottom:0;height:2px;background:var(--amber);z-index:5;
+  transition:width .28s cubic-bezier(.22,.61,.36,1)}
+
+/* ------------------------------------------------------------ типографика */
+h1,h2,h3{margin:0;text-wrap:balance;font-weight:800;letter-spacing:-.021em;line-height:1.08}
+h1{font-size:38px}
+h1.big{font-size:54px}
+h2{font-size:27px;letter-spacing:-.016em}
+.lead{font-size:21px;line-height:1.45;color:var(--muted);max-width:26em;margin:0}
+.lead strong{color:var(--paper);font-weight:600}
+p{margin:0}
+.txt{font-size:16px;line-height:1.5;color:var(--muted)}
+.txt strong{color:var(--paper);font-weight:600}
+.mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
+.am{color:var(--amber)}
+.small{font-size:13.5px;line-height:1.5;color:var(--muted)}
+.eyebrow{font-family:var(--mono);font-size:11.5px;letter-spacing:.15em;text-transform:uppercase;color:var(--muted-2)}
+
+/* ------------------------------------------------------------- раскладки --- */
+.cols{display:grid;gap:30px;flex:1 1 auto;min-height:0}
+.c-7-5{grid-template-columns:7fr 5fr}
+.c-6-6{grid-template-columns:1fr 1fr}
+.c-8-4{grid-template-columns:8fr 4fr}
+.stack{display:flex;flex-direction:column;gap:18px;min-height:0}
+.stack.g28{gap:22px}
+.stack.g14{gap:14px}
+.spacer{flex:1 1 auto}
+
+/* полноразмерная картинка справа, уходящая под край */
+.bleed{
+  position:absolute;top:0;right:0;bottom:0;width:var(--bw,38%);z-index:0;overflow:hidden;
+}
+.bleed img{width:100%;height:100%;object-fit:cover;object-position:var(--bp,center)}
+.bleed::after{
+  content:"";position:absolute;inset:0;
+  background:linear-gradient(90deg,var(--ground) 0%,rgba(5,10,18,.86) 26%,rgba(5,10,18,.18) 68%,rgba(5,10,18,.45) 100%);
+}
+.bleed.soft::after{
+  background:linear-gradient(90deg,var(--ground) 0%,rgba(5,10,18,.72) 30%,rgba(5,10,18,.10) 72%,rgba(5,10,18,.36) 100%);
+}
+.band{position:relative;border-radius:3px;overflow:hidden;height:var(--bh,180px);flex:0 0 auto}
+.band img{width:100%;height:100%;object-fit:cover;object-position:center 46%}
+.band::after{content:"";position:absolute;inset:0;
+  background:linear-gradient(90deg,rgba(5,10,18,.92) 0%,rgba(5,10,18,.25) 45%,rgba(5,10,18,.62) 100%)}
+.band .cap{position:absolute;left:22px;top:50%;transform:translateY(-50%);z-index:2;max-width:56%}
+
+/* ---------------------------------------------------------------- числа --- */
+.statrow{display:grid;grid-auto-flow:column;grid-auto-columns:1fr;gap:0;border-top:1px solid var(--rule)}
+.statrow .st{padding:18px 22px 0;border-right:1px solid var(--rule-soft)}
+.statrow .st:last-child{border-right:0}
+.statrow .st:first-child{padding-left:0}
+.st .v{font-family:var(--mono);font-size:31px;font-weight:600;letter-spacing:-.03em;
+  color:var(--paper);line-height:1;font-variant-numeric:tabular-nums}
+.st .v.hl{color:var(--amber)}
+.st .k{font-size:13px;color:var(--muted-2);margin-top:8px;line-height:1.3}
+
+.hero-n{font-family:var(--mono);font-weight:600;letter-spacing:-.045em;line-height:.9;white-space:nowrap;
+  font-variant-numeric:tabular-nums;color:var(--amber);font-size:86px}
+.hero-n.sm{font-size:58px}
+.hero-n.neutral{color:var(--paper)}
+.hero-n.bad{color:var(--bad)}
+.hero-cap{font-size:13.5px;color:var(--muted);margin-top:9px;max-width:16em;line-height:1.35}
+
+.pair{display:flex;gap:44px;align-items:flex-start}
+
+/* ----------------------------------------------------------- перечисления */
+.rows{display:grid;grid-template-columns:auto 1fr;column-gap:18px;align-items:baseline}
+.rows .r{display:contents}
+.rows .r .m,.rows .r .t{padding:9px 0;border-top:1px solid var(--rule-soft)}
+.rows .r:first-child .m,.rows .r:first-child .t{border-top:0;padding-top:0}
+.rows .r .m{font-family:var(--mono);font-size:12px;color:var(--amber);letter-spacing:.09em;
+  line-height:1.3;white-space:nowrap}
+.rows .r .t{font-size:15px;line-height:1.4;color:var(--muted)}
+.rows.tight .r .m,.rows.tight .r .t{padding:6px 0}
+.rows.tight .r .t{font-size:13.5px;line-height:1.38}
+.rows .r .t b{color:var(--paper);font-weight:600}
+
+.quotes{display:flex;flex-direction:column;gap:13px}
+.quotes .q{border-left:2px solid var(--rule);padding-left:18px}
+.quotes .q .qt{font-size:16px;color:var(--paper);font-weight:600;line-height:1.3}
+.quotes .q .qs{font-size:13.5px;color:var(--muted);margin-top:5px;line-height:1.42}
+
+/* ------------------------------------------------------------- панельки --- */
+.card{background:var(--panel);border:1px solid var(--rule);border-radius:3px;padding:16px 20px}
+.card.accent{border-color:var(--amber-edge);background:linear-gradient(180deg,var(--amber-wash),transparent 70%),var(--panel)}
+.card .ct{font-family:var(--mono);font-size:11px;letter-spacing:.14em;text-transform:uppercase;
+  color:var(--muted-2);margin-bottom:9px}
+
+.chips{display:flex;flex-wrap:wrap;gap:8px}
+.chip{font-family:var(--mono);font-size:12px;letter-spacing:.03em;padding:5px 10px;
+  border:1px solid var(--rule);border-radius:2px;color:var(--muted);white-space:nowrap}
+.chip.on{border-color:var(--amber-edge);color:var(--amber);background:var(--amber-wash)}
+.chip-ok{border-color:rgba(47,155,131,.5);color:var(--good)}
+.chip-weak{border-color:rgba(242,166,59,.4);color:var(--amber)}
+.chip-fail{border-color:rgba(217,69,106,.5);color:var(--bad)}
+
+.no-list{display:grid;grid-template-columns:1fr 1fr;gap:10px 26px}
+.no-list div{font-size:14.5px;color:var(--muted);display:flex;gap:10px;align-items:baseline}
+.no-list div::before{content:"нет";font-family:var(--mono);font-size:11px;letter-spacing:.12em;
+  text-transform:uppercase;color:var(--bad);border:1px solid rgba(217,69,106,.45);
+  padding:2px 6px;border-radius:2px;flex:0 0 auto}
+
+/* --------------------------------------------------------------- код ----- */
+.term{background:#04080F;border:1px solid var(--rule);border-radius:3px;padding:17px 20px;
+  font-family:var(--mono);font-size:14.5px;line-height:1.7;color:var(--paper);
+  white-space:pre-wrap;overflow-x:auto}
+.term .pr{color:var(--amber);user-select:none}
+.term .cm{color:var(--muted-2)}
+.term .out{color:var(--muted)}
+.code-evi{font-family:var(--mono);font-size:13px;line-height:1.75;color:var(--muted);
+  background:#04080F;border:1px solid var(--rule);border-left:2px solid var(--bad);
+  border-radius:3px;padding:16px 20px;white-space:pre;overflow-x:auto}
+.code-evi b{color:var(--paper);font-weight:600}
+.code-evi .f{color:var(--amber)}
+
+/* ------------------------------------------------------------ диаграмма --- */
+.bars{display:flex;flex-direction:column;gap:11px}
+.bar{display:grid;grid-template-columns:15.5em 1fr auto;gap:16px;align-items:center}
+.bar .track{position:relative;height:38px;background:var(--panel);border-radius:2px;overflow:hidden}
+.bar .fill{position:absolute;left:0;top:0;bottom:0;background:var(--amber-mark);
+  border-radius:0 4px 4px 0;width:0;transition:width .7s cubic-bezier(.22,.61,.36,1)}
+.slide.is-active .bar .fill{width:var(--w)}
+.bar .val{font-family:var(--mono);font-size:26px;font-weight:600;letter-spacing:-.03em;
+  color:var(--paper);font-variant-numeric:tabular-nums;min-width:3.6em;text-align:right}
+.bar .lab{font-family:var(--mono);font-size:12.5px;letter-spacing:.03em;color:var(--muted);
+  text-align:right;line-height:1.3}
+.bar.worst .lab{color:var(--paper)}
+.bar.worst .fill{background:rgba(217,69,106,.62)}
+.bar.worst .val{color:var(--bad)}
+.barnote{font-size:13.5px;line-height:1.5;color:var(--muted);margin-top:12px;padding-left:17px;
+  position:relative;max-width:46em}
+.barnote::before{content:"";position:absolute;left:0;top:.5em;width:8px;height:8px;
+  border-radius:50%;background:var(--bad)}
+
+/* ------------------------------------------------------------- таблицы --- */
+.tbl{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}
+.tbl th,.tbl td{text-align:left;padding:9px 12px;border-bottom:1px solid var(--rule-soft)}
+.tbl thead th{font-family:var(--mono);font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;
+  color:var(--muted-2);font-weight:400;border-bottom:1px solid var(--rule);padding-bottom:7px;
+  vertical-align:bottom;line-height:1.35}
+.tbl .n{text-align:right;font-family:var(--mono);font-variant-numeric:tabular-nums}
+.tbl tbody th{font-size:15px;font-weight:600;color:var(--paper);white-space:nowrap}
+.tbl tbody td{font-size:15px;color:var(--muted)}
+.tbl .arm-code{font-family:var(--mono);font-size:11.5px;color:var(--muted-2);
+  letter-spacing:.08em;margin-left:9px;font-weight:400}
+.tbl .dim{color:var(--muted-2);font-size:14px}
+.tbl-main th,.tbl-main td{padding:7px 12px}
+.tbl-main tbody td.hero-cell{font-size:26px;font-weight:600;color:var(--paper);letter-spacing:-.02em}
+.tbl-main tr.best{background:linear-gradient(90deg,var(--amber-wash),rgba(242,166,59,.02))}
+.tbl-main tr.best th,.tbl-main tr.best td{border-bottom-color:var(--amber-edge)}
+.tbl-main tr.best td.hero-cell{color:var(--amber)}
+.tbl-main tr.best th{box-shadow:inset 2px 0 0 var(--amber)}
+.tick{display:inline-block;width:0;height:0;margin-right:9px;
+  border-left:6px solid var(--amber);border-top:4px solid transparent;border-bottom:4px solid transparent}
+.tbl-note{font-size:12px;color:var(--muted-2);line-height:1.42;margin-top:6px;max-width:74em}
+.tbl-detail th,.tbl-detail td{padding:7px 12px}
+.tbl-detail tbody th{font-size:14.5px}
+.tbl-detail td.cell{display:table-cell;white-space:nowrap}
+.tbl-detail .cn{font-family:var(--mono);font-size:22px;font-weight:600;color:var(--paper);
+  letter-spacing:-.02em;display:block;line-height:1.05}
+.tbl-detail .st-fail .cn{color:var(--muted-2)}
+.tbl-detail .st-ok .cn{color:var(--amber)}
+.tbl-detail .chip{font-size:10.5px;padding:2px 6px;margin-top:5px;display:inline-block}
+
+/* ------------------------------------------------------------ архитектура */
+.arch{display:flex;flex-direction:column;gap:7px}
+.lyr{border:1px solid var(--rule);border-radius:3px;background:var(--panel);padding:10px 16px;
+  display:grid;grid-template-columns:142px 1fr;gap:16px;align-items:center}
+.lyr .ln{font-family:var(--mono);font-size:11.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted-2)}
+.lyr .lc{font-size:14px;color:var(--muted);line-height:1.38}
+.lyr .lc b{color:var(--paper);font-weight:600}
+.lyr.hi{border-color:var(--amber-edge);background:linear-gradient(90deg,var(--amber-wash),transparent 60%),var(--panel)}
+.lyr.hi .ln{color:var(--amber)}
+.arrow{height:8px;position:relative;flex:0 0 auto}
+.arrow::before{content:"";position:absolute;left:87px;top:-1px;bottom:-1px;width:1px;
+  background:linear-gradient(180deg,var(--rule),var(--rule-soft))}
+
+/* ------------------------------------------------------- титул / раздел --- */
+.title-wrap{display:flex;flex-direction:column;flex:1 1 auto;min-height:0;justify-content:center;gap:20px}
+.wordmark{font-size:92px;font-weight:800;letter-spacing:-.045em;line-height:.94}
+.wordmark .dot{color:var(--amber)}
+.divider-slide{display:flex;flex-direction:column;justify-content:center;flex:1 1 auto;min-height:0;gap:18px}
+
+/* --------------------------------------------------------------- анимация */
+@media (prefers-reduced-motion:no-preference){
+  .slide.is-active .rv{animation:rise .44s cubic-bezier(.22,.61,.36,1) both}
+  .slide.is-active .rv:nth-child(1){animation-delay:.02s}
+  .slide.is-active .rv:nth-child(2){animation-delay:.08s}
+  .slide.is-active .rv:nth-child(3){animation-delay:.14s}
+  .slide.is-active .rv:nth-child(4){animation-delay:.20s}
+  .slide.is-active .rv:nth-child(5){animation-delay:.26s}
+  @keyframes rise{from{opacity:0;transform:translateY(11px)}to{opacity:1;transform:none}}
+}
+@media (prefers-reduced-motion:reduce){
+  .bar .fill{transition:none}
+  #progress{transition:none}
+}
+
+/* ------------------------------------------------------------- подсказка --- */
+#hint{position:fixed;right:14px;bottom:12px;z-index:9;font-family:var(--mono);font-size:11px;
+  letter-spacing:.1em;color:var(--muted-2);opacity:.75;transition:opacity .4s}
+#hint.gone{opacity:0}
+a{color:var(--amber)}
+:focus-visible{outline:2px solid var(--amber);outline-offset:3px}
+
+/* ------------------------------------------------------------------ печать */
+@media print{
+  @page{size:1280px 720px;margin:0}
+  html,body{overflow:visible;background:#050A12}
+  body{print-color-adjust:exact;-webkit-print-color-adjust:exact}
+  #stage{position:static;display:block}
+  #deck{width:1280px;height:auto;transform:none}
+  .slide{position:relative;display:block !important;width:1280px;height:720px;
+    page-break-after:always;break-after:page}
+  .slide .rv{animation:none !important;opacity:1 !important;transform:none !important}
+  .bar .fill{width:var(--w) !important;transition:none}
+  #hint,#progress{display:none}
+}
+</style>
+</head>
+<body>
+
+<div id="stage">
+<div id="deck">
+
+<!-- ═══════════════════════════ 1 — ТИТУЛ ═══════════════════════════════ -->
+<section class="slide" data-sec="main" data-kicker="КЕЙС 06 <span class='sep'>·</span><span class='plain'>анализ логов и поиск причин инцидентов</span>">
+  <div class="bleed soft" style="--bw:41%;--bp:52% center"><img src="img/hero.png" alt=""></div>
+  <div class="frame">
+    <div class="topbar"><div class="kicker"></div><div class="counter"></div></div>
+    <div class="body">
+      <div class="title-wrap" style="max-width:60%">
+        <div class="rv">
+          <div class="wordmark">Sherlock<span class="dot">.</span></div>
+        </div>
+        <p class="lead rv">Навык для <strong>Qwen Coder CLI</strong>: читает логи любого формата,
+          находит корневую причину и показывает улику — <strong>файл и строку</strong>.</p>
+        <p class="small rv" style="max-width:32em">Ни одного парсера под формат. Установка — одна команда <span class="mono am">cp</span>, настраивать нечего.</p>
+      </div>
+      <div class="statrow rv" style="width:100%">
+        <div class="st"><div class="v">649<span style="font-size:20px"> МБ</span></div><div class="k">корпус для стресс-теста</div></div>
+        <div class="st"><div class="v">26</div><div class="k">форматов логов в нём</div></div>
+        <div class="st"><div class="v hl">11 + 2</div><div class="k">подброшенных дефектов и ложных следов</div></div>
+        <div class="st"><div class="v">0,09 %</div><div class="k">корпуса прочитано при полном обходе</div></div>
+      </div>
+    </div>
+    <div class="srctag"><b>защита кейса 06</b> · все числа в деке воспроизводимы из репозитория — источник указан внизу каждого слайда</div>
+  </div>
+</section>
+
+<!-- ═══════════════════ 2 — R1: ЧТО МЕНЯЕТ ОДНА ПАПКА ═══════════════════ -->
+<section class="slide" data-sec="main" data-kicker="01 <span class='sep'>·</span><span class='plain'>что меняет одна папка</span>">
+  <div class="frame">
+    <div class="topbar"><div class="kicker"></div><div class="counter"></div></div>
+    <div class="body">
+      <div class="stack g28" style="min-height:0">
+        <h1 class="rv" style="font-size:33px">Чистое окружение. Одна команда <span class="mono am">cp</span>.<br>Вопрос обычными словами — и другой ответ.</h1>
+        <div class="cols c-6-6 rv" style="gap:26px">
+          <div class="stack g14">
+            <div class="term" style="font-size:13px;line-height:1.62"><span class="cm"># свежий Qwen Coder: ни settings.json, ни .env, ни конфига</span>
+<span class="pr">$</span> cp -r sherlock/skills/v1 $QWEN_HOME/skills/log-rca
+
+<span class="pr">&gt;</span> Слушай, у нас что-то странное творится с сервером.
+<span class="pr">&gt;</span> Логи лежат в ./OpenSSH. Глянешь, что там происходит?
+<span class="out">  # ни слова про навык, формат, цитаты и структуру отчёта</span></div>
+            <div class="no-list" style="grid-template-columns:1fr 1fr;gap:8px 20px">
+              <div>переменных окружения</div>
+              <div>ключей и base URL</div>
+              <div>MCP-сервера</div>
+              <div>pip install и сборки</div>
+            </div>
+          </div>
+          <div class="stack g14">
+            <div class="card" style="border-color:rgba(217,69,106,.45);padding:14px 18px">
+              <div class="ct" style="color:var(--bad);margin-bottom:7px">без навыка — та же модель, тот же лог, те же флаги</div>
+              <p style="font-size:18px;line-height:1.32;color:var(--paper);font-weight:600">Аккуратная сводка: 520 неудачных попыток, 85 <span class="mono">BREAK-IN ATTEMPT</span>, топ атакующих IP</p>
+              <p class="small" style="margin-top:7px">И <b>ни слова про успешный вход</b>. Всё посчитано верно —
+                и главное пропущено: атакующий уже внутри.</p>
+            </div>
+            <div class="card" style="border-color:rgba(47,155,131,.55);padding:14px 18px">
+              <div class="ct" style="color:var(--good);margin-bottom:7px">с навыком — единственная переменная</div>
+              <p class="mono" style="font-size:13px;line-height:1.5;color:var(--paper)">Accepted password for <b class="am">fztu</b> from <b class="am">119.137.62.142</b></p>
+              <p class="small" style="margin-top:7px">Сессия <b>13 минут</b>, вердикт — <b>компрометация</b>. Атакующий всё это время был внутри</p>
+            </div>
+          </div>
+        </div>
+        <div class="spacer"></div>
+        <div class="card accent rv" style="flex:0 0 auto;display:flex;align-items:center;gap:26px;padding:18px 24px">
+          <div class="hero-n sm" style="font-size:46px">1</div>
+          <p class="txt">Разница между этими двумя ответами — <strong>одна скопированная папка</strong>.
+            Это и есть требование R1: инженер, который впервые слышит о проекте, получает пользу
+            с первой попытки — <strong>без единой настройки</strong>.</p>
+        </div>
+      </div>
+    </div>
+    <div class="srctag">источник: <b>acceptance/r1-zero-config.sh</b> — приёмочный тест требования R1 · ответы целиком: <b>acceptance/last-r1-run.json</b> (контроль) и <b>last-r1-v1.json</b> (с навыком) · модель <span class="mono">[SP]deepseek-v4-flash</span>, датасет OpenSSH</div>
+  </div>
+</section>
+
+<!-- ═══════════════════════════ 2 — ПРОБЛЕМА ════════════════════════════ -->
+<section class="slide" data-sec="main" data-kicker="02 <span class='sep'>·</span><span class='plain'>проблема</span>">
+  <div class="frame">
+    <div class="topbar"><div class="kicker"></div><div class="counter"></div></div>
+    <div class="body">
+      <div class="cols c-7-5">
+        <div class="stack g28">
+          <h1 class="rv">Логи есть у всех.<br>Прочитать их может эксперт — и только он.</h1>
+          <div class="quotes rv">
+            <div class="q">
+              <div class="qt">«Логи разрознены и слабо структурированы»</div>
+              <div class="qs">В одном тестовом корпусе одновременно: JSON от zap и pino, BSD syslog без года,
+                docker json-file, обрезанные CRI-строки, journald-экспорт, dmesg с монотонными часами,
+                консоль с ANSI-кодами, самописный pipe-формат и лог на русском языке.</div>
+            </div>
+            <div class="q">
+              <div class="qt">«Нет замкнутого feedback loop»</div>
+              <div class="qs">Разбор инцидента №2 начинается с нуля: знание о причине первого нигде не осталось.</div>
+            </div>
+            <div class="q">
+              <div class="qt">«Диагностика зависит от экспертов и плохо масштабируется»</div>
+              <div class="qs">Сопровождение не может проанализировать логи и эскалирует их в разработку.</div>
+            </div>
+          </div>
+          <p class="small rv" style="max-width:36em">Ни один парсер не покрывает этот список целиком —
+            и завтра в нём появится ещё один формат, которого никто не предвидел.</p>
+        </div>
+        <div class="stack">
+          <div class="card rv" style="height:100%;display:flex;flex-direction:column;justify-content:center;gap:26px">
+            <div class="ct" style="margin:0">масштаб одного инцидента</div>
+            <div>
+              <div class="hero-n sm neutral">28</div>
+              <div class="hero-cap">файлов логов от 12 сервисов и 2 узлов</div>
+            </div>
+            <div>
+              <div class="hero-n sm neutral">4 259 018</div>
+              <div class="hero-cap">строк за 7 часов окна инцидента</div>
+            </div>
+            <div>
+              <div class="hero-n sm">11 + 2</div>
+              <div class="hero-cap">подброшенных дефектов и два ложных следа</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="srctag">источник: <b>06-dev-logging.md</b> (постановка кейса) · <b>eval/bench/answer-key.json</b> (ключ ответов корпуса)</div>
+  </div>
+</section>
+
+<!-- ═══════════════════════════ 3 — ПАРСЕРЫ ═════════════════════════════ -->
+<section class="slide" data-sec="main" data-kicker="03 <span class='sep'>·</span><span class='plain'>что пробуют все — и что мы измерили</span>">
+  <div class="frame">
+    <div class="topbar"><div class="kicker"></div><div class="counter"></div></div>
+    <div class="body">
+      <div class="stack g28" style="flex:1 1 auto;min-height:0">
+        <h1 class="rv" style="font-size:34px">Первая мысль — написать парсеры и правила под каждый формат.<br>Мы её проверили. На собственном коде.</h1>
+        <div class="cols c-6-6 rv" style="flex:0 0 auto">
+          <div class="stack g14">
+            <div class="pair">
+              <div>
+                <div class="hero-n sm neutral" style="font-size:70px">2 400</div>
+                <div class="hero-cap">строк Python в движке правил и парсеров</div>
+              </div>
+              <div>
+                <div class="hero-n sm neutral" style="font-size:70px">2 273</div>
+                <div class="hero-cap">строки тестов к нему</div>
+              </div>
+            </div>
+            <div class="card" style="border-color:rgba(217,69,106,.4);padding:16px 20px">
+              <div class="txt"><strong style="color:var(--bad)">0 правил сработало</strong> на реальном инциденте —
+                SSH-переборе паролей. Отчёт выродился в таймлайн без причинной связи.
+                Модель узнаёт такую атаку с одного взгляда.</div>
+            </div>
+          </div>
+          <div class="stack g14">
+            <div class="eyebrow">парсер против собственного валидатора</div>
+            <div class="code-evi" style="font-size:14px;line-height:1.9;padding:20px"><span class="f">ingest.py:305</span>   syslog без года   <b>→ проставляет год 1900</b>
+<span class="f">formats.py:298</span>  валидатор формата <b>→ год вне [2000,2100] отклонить</b></div>
+            <p class="small">Инференс формата не сходится <strong style="color:var(--paper)">никогда</strong> —
+              на самом частом формате логов в Linux. Список исправлений открытый: BSD syslog,
+              Android logcat <span class="mono">03-17</span>, Proxifier <span class="mono">10.30</span>, …</p>
+            <div class="rows" style="margin-top:4px">
+              <div class="r"><div class="m">и дальше</div><div class="t">жёстко зашитый язык (<span class="mono">rglob("*.java")</span>), регулярки с английскими строками внутри, корреляция по равенству одного id — каждый пункт ломается на первом же чужом сервисе</div></div>
+            </div>
+          </div>
+        </div>
+        <div class="spacer"></div>
+        <div class="card accent rv" style="flex:0 0 auto;display:flex;align-items:center;gap:30px;padding:24px 26px">
+          <div class="hero-n sm" style="font-size:62px">−5 100</div>
+          <div>
+            <div class="txt"><strong>Мы удалили эти строки вместе с тестами.</strong>
+              Смелым инженерным решением здесь было не написать движок, а построить стенд,
+              который доказал, что движок проигрывает, — и после этого его стереть.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="srctag">источник: <b>docs/specs/2026-07-28-sherlock-simplest-approach-design.md</b> §1.2 — собственный прогон на 21 реальном датасете (19 МБ)</div>
+  </div>
+</section>
+
+<!-- ═══════════════════════════ 4 — ИНСАЙТ ══════════════════════════════ -->
+<section class="slide" data-sec="main" data-kicker="04 <span class='sep'>·</span><span class='plain'>инсайт</span>">
+  <div class="frame">
+    <div class="topbar"><div class="kicker"></div><div class="counter"></div></div>
+    <div class="body">
+      <div class="stack g28" style="min-height:0">
+        <h1 class="rv" style="font-size:36px">Модель уже умеет читать любой формат.<br>Парсер ей не нужен.</h1>
+        <div class="cols c-8-4 rv" style="flex:0 0 auto;gap:40px">
+          <div class="rows">
+            <div class="r"><div class="m">100 %</div><div class="t">из 11 подброшенных дефектов найдено <b>при полном обходе</b> (на сильной модели; на корпоративной — 18,2 %, см. приложение П5) корпуса 649 МБ / 4,26 млн строк / 26 форматов — прочитав <b>0,09 %</b> его объёма. Это <b>лучший</b> из трёх прогонов, остальные два — на следующем слайде</div></div>
+            <div class="r"><div class="m">самописный</div><div class="t">pipe-формат с <b>выдуманным словарём уровней</b> — <span class="mono">ALARM</span> и <span class="mono">FATALITY</span> выше <span class="mono">WARN</span> — разобран и ранжирован верно, без схемы и словаря</div></div>
+            <div class="r"><div class="m">русский</div><div class="t">лог с уровнями <span class="mono">ОШИБКА</span> / <span class="mono">ПРЕДУПРЕЖДЕНИЕ</span> разобран полностью. <b><span class="mono">grep -E 'ERROR|FATAL'</span> находит в нём 0 строк</b></div></div>
+            <div class="r"><div class="m">79 / 79</div><div class="t">цитат <span class="mono">файл:строка</span> проверены дословно перечитыванием — <b>ни одной выдуманной улики</b>, включая кириллицу, ANSI-escape и Go-фреймы внутри JSON</div></div>
+          </div>
+          <div class="stack" style="justify-content:center">
+            <div class="hero-n">100<span style="font-size:36px"> %</span></div>
+            <div class="hero-cap" style="margin-top:4px">из 11 дефектов — при полном обходе</div>
+            <div class="hero-n sm neutral" style="margin-top:14px;font-size:42px">0,09 %</div>
+            <div class="hero-cap">прочитано</div>
+          </div>
+        </div>
+        <div class="spacer"></div>
+        <div class="band rv" style="--bh:112px">
+          <img src="img/formats.png" alt="">
+          <div class="cap">
+            <p class="txt"><strong>Код больше не пытается понимать строку лога.</strong>
+              Он только достаёт байты и проверяет цитаты.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="srctag">источник: <b>eval/bench/</b> — синтетический корпус: 11 подброшенных дефектов, 2 ложных следа, ключ ответов. <b style="color:var(--muted)">Честно:</b> этот замер сделан на модели Claude; на корпоративной DeepSeek-V4-Flash измерен A/B со следующего слайда, перенос показателя ещё не подтверждён</div>
+  </div>
+</section>
+
+<!-- ═══════════════════════════ 5 — ПОКРЫТИЕ ════════════════════════════ -->
+<section class="slide" data-sec="main" data-kicker="05 <span class='sep'>·</span><span class='plain'>настоящее ограничение</span>">
+  <div class="bleed" style="--bw:33%;--bp:58% center"><img src="img/coverage.png" alt=""></div>
+  <div class="frame">
+    <div class="topbar"><div class="kicker"></div><div class="counter"></div></div>
+    <div class="body">
+      <div class="stack g28" style="max-width:69%">
+        <h1 class="rv" style="font-size:34px">Ограничение — не формат и не окно контекста.<br>А то, <span class="am">какие файлы агент открыл</span>.</h1>
+        <div class="rv">
+          <div class="eyebrow" style="margin-bottom:14px">доля найденных дефектов · один корпус, одна модель, разная политика выборки</div>
+          <div class="bars">
+            <div class="bar"><div class="lab">полный обход всех 28 файлов</div><div class="track"><div class="fill" style="--w:100%"></div></div><div class="val">100 %</div></div>
+            <div class="bar"><div class="lab">обход с ранней гипотезой</div><div class="track"><div class="fill" style="--w:73%"></div></div><div class="val">73 %</div></div>
+            <div class="bar worst"><div class="lab">агрессивное сужение<br>после 5-го шага</div><div class="track"><div class="fill" style="--w:18%"></div></div><div class="val">18 %</div></div>
+          </div>
+          <div class="barnote">Худший прогон был <strong style="color:var(--paper)">самым аккуратным по каждому отдельному файлу</strong>.
+            Он просто не открыл 12 файлов из 28 — а в них лежали единственные улики к 9 дефектам.</div>
+        </div>
+        <div class="spacer"></div>
+        <div class="card accent rv" style="flex:0 0 auto">
+          <div class="ct">что из этого следует в навыке</div>
+          <p class="txt"><strong>Дисциплина покрытия.</strong> Агент ведёт список всех файлов и закрывает каждый явно:
+            «посмотрел, нашёл вот это» / «к делу не относится, потому что…» / «не смотрел, и вот почему это безопасно».
+            Остался файл без пометки — <strong>расследование не закончено</strong>.</p>
+        </div>
+      </div>
+    </div>
+    <div class="srctag">источник: <b>skills/v1/SKILL.md</b>, раздел «Дисциплина покрытия» — правило выведено прямо из этого замера и записано в навык</div>
+  </div>
+</section>
+
+<!-- ═══════════════════════════ 7 — ЗАМЕР ═══════════════════════════════ -->
+<section class="slide" data-sec="main" data-kicker="06 <span class='sep'>·</span><span class='plain'>замер</span>">
+  <div class="frame">
+    <div class="topbar"><div class="kicker"></div><div class="counter"></div></div>
+    <div class="body">
+      <div class="stack g28" style="min-height:0">
+        <h1 class="rv" style="font-size:31px">Та же модель, тот же промпт.<br>Единственная переменная — навык.</h1>
+        <div class="rv">
+<!-- MAIN-TABLE:BEGIN -->
+<table class="tbl tbl-main">
+<thead><tr><th scope="col">арм</th><th scope="col" class="n">ссылок <span class="mono">файл:строка</span></th><th scope="col" class="n">объём отчёта, симв.</th><th scope="col" class="n">шагов агента</th><th scope="col" class="n">время, с</th><th scope="col" class="n">прогонов</th></tr></thead><tbody>
+<tr><th scope="row">без навыка (baseline)<span class="arm-code mono">none</span></th><td class="n hero-cell">17</td><td class="n">4 778</td><td class="n">14,7</td><td class="n">218</td><td class="n dim">3 / 5</td></tr>
+<tr><th scope="row">Sherlock v1<span class="arm-code mono">v1</span></th><td class="n hero-cell">52</td><td class="n">7 369</td><td class="n">10,2</td><td class="n">110</td><td class="n dim">4 / 5</td></tr>
+<tr class="best"><th scope="row"><span class="tick" aria-hidden="true"></span>Sherlock v2<span class="arm-code mono">v2</span></th><td class="n hero-cell">94</td><td class="n">9 176</td><td class="n">9,3</td><td class="n">94</td><td class="n dim">3 / 5</td></tr>
+<tr><th scope="row">Sherlock v3<span class="arm-code mono">v3</span></th><td class="n hero-cell">44</td><td class="n">7 430</td><td class="n">18,4</td><td class="n">248</td><td class="n dim">5 / 5</td></tr>
+</tbody></table>
+<p class="tbl-note">Модель <span class="mono">[SP]deepseek-v4-flash</span>, датасетов: 5. Средние — по состоявшимся прогонам; 5 не состоявшихся исключены и перечислены в приложении. Промпт во всех армах побайтно одинаковый, единственная переменная — навык.</p>
+<!-- MAIN-TABLE:END -->
+        </div>
+        <div class="spacer"></div>
+        <div class="cols rv" style="grid-template-columns:1fr 1fr 1fr;gap:16px;flex:0 0 auto">
+          <div class="card" style="padding:13px 15px">
+            <div class="ct">корпус</div>
+            <p class="small">649 МБ, 26 форматов, 11 подброшенных дефектов, 2 ложных следа и ключ ответов.
+              Генератор детерминирован (seed <span class="mono">20260728</span>) — корпус воспроизводится побайтно.</p>
+          </div>
+          <div class="card" style="padding:13px 15px">
+            <div class="ct">стенд A/B</div>
+            <p class="small">Настоящий Qwen Coder CLI в headless-режиме, изолированный
+              <span class="mono">QWEN_HOME</span>, одинаковый промпт. Каждый прогон — строка
+              в append-only реестре.</p>
+          </div>
+          <div class="card" style="padding:13px 15px">
+            <div class="ct">судья</div>
+            <p class="small"><strong>Другая модель</strong> (<span class="mono">gpt-5.5</span>) сверяет отчёт
+              с ключом ответов. Решение никогда не оценивает само себя.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="srctag">источник: <b>eval/runs.jsonl</b> — реестр прогонов · таблица собрана скриптом <b>make-table.py</b> прямо из него</div>
+  </div>
+</section>
+
+<!-- ═══════════════════════════ 8 — АРХИТЕКТУРА ═════════════════════════ -->
+<section class="slide" data-sec="main" data-kicker="07 <span class='sep'>·</span><span class='plain'>архитектура и внедрение</span>">
+  <div class="frame">
+    <div class="topbar"><div class="kicker"></div><div class="counter"></div></div>
+    <div class="body">
+      <div class="cols c-7-5" style="gap:38px">
+        <div class="stack g14" style="min-height:0">
+          <h2 class="rv">Новый источник логов не трогает ядро.</h2>
+          <div class="arch rv">
+            <div class="lyr">
+              <div class="ln">Qwen Coder CLI</div>
+              <div class="lc"><b>навык sherlock</b> — процедура расследования · <b>субагенты</b> — разведка по источникам</div>
+            </div>
+            <div class="arrow"></div>
+            <div class="lyr">
+              <div class="ln">источники</div>
+              <div class="lc"><b>файлы, zip, .gz</b> — есть · <span class="mono">kubectl</span> ~40 строк · <span class="mono">journalctl</span> ~25 строк</div>
+            </div>
+            <div class="arrow a-l"></div>
+            <div class="lyr hi">
+              <div class="ln">MCP · 0 строк кода</div>
+              <div class="lc"><b>Elasticsearch · Loki · Grafana · Kubernetes</b> — готовые MCP-серверы, подключаются записью в <span class="mono">.qwen/settings.json</span></div>
+            </div>
+            <div class="arrow"></div>
+            <div class="lyr">
+              <div class="ln">хелперы</div>
+              <div class="lc">необязательные stdlib-скрипты внутри папки навыка. Не запустились — навык всё равно работает</div>
+            </div>
+            <div class="arrow"></div>
+            <div class="lyr">
+              <div class="ln">реестр прогонов</div>
+              <div class="lc">append-only: метрики, аудит вызовов инструментов, память по кейсам</div>
+            </div>
+          </div>
+          <div class="rv" style="margin-top:4px">
+            <div class="eyebrow" style="margin-bottom:9px">кто этим пользуется без доработки</div>
+            <div class="chips">
+              <span class="chip on">разработчик — дефект на стенде</span>
+              <span class="chip on">SRE — инцидент в проде</span>
+              <span class="chip on">сопровождение — первичный разбор</span>
+              <span class="chip">QA — падение в CI</span>
+            </div>
+          </div>
+        </div>
+        <div class="stack g14">
+          <div class="card rv">
+            <div class="ct">контракт источника</div>
+            <div class="code-evi" style="border-left-color:var(--amber);font-size:13px;line-height:1.7;white-space:pre-wrap">resolve(spec, window)
+  <b>→ локальные байты + манифест</b>
+  # реализация НЕ разбирает
+  # содержимое строк</div>
+            <p class="small" style="margin-top:12px">Всё, что ниже по потоку, видит только локальный каталог.
+              Поэтому добавление источника — это одна функция, а не правка ядра.</p>
+          </div>
+          <div class="card accent rv">
+            <div class="ct">чего это стоит и что даёт</div>
+            <div class="rows">
+              <div class="r"><div class="m">стоит</div><div class="t">одну команду <span class="mono">cp</span>. Ни одного согласования по доступам</div></div>
+              <div class="r"><div class="m">даёт</div><div class="t">RCA с проверяемыми цитатами <span class="mono">файл:строка</span> — на любом формате, любой команде</div></div>
+              <div class="r"><div class="m">дальше</div><div class="t">публикация навыка во внутреннем портале и гейт покрытия <span class="mono">logcover</span></div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="srctag">R4 — расширяемость закрывается конфигурацией, а не кодом: это единственный способ не строить собственный слой хранения и запросов</div>
+  </div>
+</section>
+
+<!-- ═════════════════════ РАЗДЕЛИТЕЛЬ ПРИЛОЖЕНИЯ ════════════════════════ -->
+<section class="slide" data-sec="div" data-kicker="ПРИЛОЖЕНИЕ <span class='sep'>·</span><span class='plain'>материалы для вопросов</span>">
+  <div class="bleed soft" style="--bw:34%;--bp:46% center"><img src="img/hero.png" alt=""></div>
+  <div class="frame">
+    <div class="topbar"><div class="kicker"></div><div class="counter"></div></div>
+    <div class="body">
+      <div class="divider-slide" style="max-width:62%">
+        <div class="eyebrow rv">основная часть закончена</div>
+        <h1 class="big rv">Приложение</h1>
+        <p class="lead rv">Методика замера, известные ограничения, состав корпуса,
+          что мы сознательно не строили, поведение на масштабе и дорожная карта.</p>
+        <div class="chips rv">
+          <span class="chip">П1 методика</span><span class="chip">П2 ограничения</span>
+          <span class="chip">П3 корпус</span><span class="chip">П4 не построено намеренно</span>
+          <span class="chip">П5 масштаб</span><span class="chip">П6 дорожная карта</span>
+          <span class="chip">П7 критерии кейса</span><span class="chip">П8 приёмочный тест R1</span>
+        </div>
+      </div>
+    </div>
+    <div class="srctag">навигация: <b>←</b> / <b>→</b> · <b>Home</b> — в начало · <b>F</b> — полный экран</div>
+  </div>
+</section>
+
+<!-- ═══════════════════════ П1 — МЕТОДИКА ═══════════════════════════════ -->
+<section class="slide" data-sec="app" data-kicker="П1 <span class='sep'>·</span><span class='plain'>методика замера</span>">
+  <div class="frame">
+    <div class="topbar"><div class="kicker"></div><div class="counter"></div></div>
+    <div class="body">
+      <div class="cols c-6-6">
+        <div class="stack g14">
+          <h2 class="rv">Как именно измерено</h2>
+          <div class="rows rv">
+            <div class="r"><div class="m">арм</div><div class="t"><b>none</b> — та же модель без навыка. <b>v1, v2…</b> — папка навыка скопирована в <span class="mono">.qwen/skills/</span>. Больше не отличается ничего</div></div>
+            <div class="r"><div class="m">промпт</div><div class="t">побайтно одинаковый во всех армах, включая требование ссылаться в формате <span class="mono">файл:строка</span></div></div>
+            <div class="r"><div class="m">изоляция</div><div class="t">свой <span class="mono">QWEN_HOME</span> и временный каталог на каждый прогон — пользовательский конфиг не протекает в замер</div></div>
+            <div class="r"><div class="m">реестр</div><div class="t"><span class="mono">eval/runs.jsonl</span>, append-only: шаги, время, токены, покрытие файлов, число ссылок на строки, полный текст ответа</div></div>
+            <div class="r"><div class="m">судья</div><div class="t"><span class="mono">eval/score.py</span> сверяет отчёт с ключом ответов <b>другой моделью</b> (<span class="mono">gpt-5.5</span>) — самооценки нет нигде</div></div>
+          </div>
+        </div>
+        <div class="stack g14">
+          <div class="card rv" style="border-color:rgba(217,69,106,.4)">
+            <div class="ct">найденная и исправленная ошибка стенда</div>
+            <p class="small">Первая версия <span class="mono">run.sh</span> запускала baseline с флагом
+              <span class="mono">--safe-mode</span>. В Qwen 0.21 он заодно запрещает чтение файлов вне рабочего каталога,
+              поэтому baseline отвечал «нет доступа к каталогу» вместо анализа — то есть измерял песочницу,
+              а не отсутствие навыка. Флаг снят, армы уравнены, baseline перезапущен.
+              <strong>Старые строки остались в реестре и видны как несостоявшиеся прогоны.</strong></p>
+          </div>
+          <div class="card rv">
+            <div class="ct">какой моделью что измерено</div>
+            <div class="rows">
+              <div class="r"><div class="m">Claude</div><div class="t">корпус 649 МБ: ряд покрытия 100 / 73 / 18 % (100 % — лучший прогон, при полном обходе), 0,09 % прочитано, 79/79 цитат</div></div>
+              <div class="r"><div class="m">DeepSeek-V4-Flash</div><div class="t">A/B «навык против baseline» на 5 реальных датасетах — та модель, что стоит в корпоративном CLI</div></div>
+            </div>
+            <p class="small" style="margin-top:12px">Перенос показателей с первой модели на вторую <strong style="color:var(--paper)">не подтверждён</strong> —
+              это главный открытый риск, и он записан в спецификации, а не спрятан.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="srctag">источник: <b>eval/run.sh</b> · <b>eval/batch.sh</b> · <b>eval/score.py</b> · спецификация §6</div>
+  </div>
+</section>
+
+<!-- ═══════════════════════ П2 — ОГРАНИЧЕНИЯ ════════════════════════════ -->
+<section class="slide" data-sec="app" data-kicker="П2 <span class='sep'>·</span><span class='plain'>что не работает — построчно</span>">
+  <div class="frame">
+    <div class="topbar"><div class="kicker"></div><div class="counter"></div></div>
+    <div class="body">
+      <div class="cols c-7-5" style="gap:30px">
+        <div class="stack g14" style="min-height:0">
+          <h2 class="rv" style="font-size:25px">Каждый прогон реестра, включая провалившиеся</h2>
+          <div class="rv" style="overflow-x:auto">
+<!-- DETAIL-TABLE:BEGIN -->
+<table class="tbl tbl-detail">
+<thead><tr><th scope="col">датасет</th>
+<th scope="col" class="n">без навыка (baseline)</th>
+<th scope="col" class="n">Sherlock v1</th>
+<th scope="col" class="n">Sherlock v2</th>
+<th scope="col" class="n">Sherlock v3</th>
+</tr></thead><tbody>
+<tr><th scope="row">Linux</th>
+<td class="n cell st-weak"><span class="cn">0</span><span class="chip chip-weak">без ссылок</span></td>
+<td class="n cell st-ok"><span class="cn">66</span><span class="chip chip-ok">ок</span></td>
+<td class="n cell st-ok"><span class="cn">37</span><span class="chip chip-ok">ок</span></td>
+<td class="n cell st-ok"><span class="cn">85</span><span class="chip chip-ok">ок</span></td>
+</tr>
+<tr><th scope="row">OpenSSH</th>
+<td class="n cell st-ok"><span class="cn">35</span><span class="chip chip-ok">ок</span></td>
+<td class="n cell st-ok"><span class="cn">50</span><span class="chip chip-ok">ок</span></td>
+<td class="n cell st-ok"><span class="cn">15</span><span class="chip chip-ok">ок</span></td>
+<td class="n cell st-ok"><span class="cn">23</span><span class="chip chip-ok">ок</span></td>
+</tr>
+<tr><th scope="row">Proxifier</th>
+<td class="n cell st-fail"><span class="cn">0</span><span class="chip chip-fail">не состоялся</span></td>
+<td class="n cell st-ok"><span class="cn">94</span><span class="chip chip-ok">ок</span></td>
+<td class="n cell st-ok"><span class="cn">231</span><span class="chip chip-ok">ок</span></td>
+<td class="n cell st-ok"><span class="cn">75</span><span class="chip chip-ok">ок</span></td>
+</tr>
+<tr><th scope="row">nginx</th>
+<td class="n cell st-ok"><span class="cn">16</span><span class="chip chip-ok">ок</span></td>
+<td class="n cell st-fail"><span class="cn">0</span><span class="chip chip-fail">не состоялся</span></td>
+<td class="n cell st-fail"><span class="cn">0</span><span class="chip chip-fail">не состоялся</span></td>
+<td class="n cell st-ok"><span class="cn">36</span><span class="chip chip-ok">ок</span></td>
+</tr>
+<tr><th scope="row">postgres-gz</th>
+<td class="n cell st-fail"><span class="cn">0</span><span class="chip chip-fail">не состоялся</span></td>
+<td class="n cell st-weak"><span class="cn">0</span><span class="chip chip-weak">без ссылок</span></td>
+<td class="n cell st-fail"><span class="cn">0</span><span class="chip chip-fail">не состоялся</span></td>
+<td class="n cell st-weak"><span class="cn">0</span><span class="chip chip-weak">без ссылок</span></td>
+</tr>
+</tbody></table>
+<p class="tbl-note">Крупное число — сколько ссылок <span class="mono">файл:строка</span> оказалось в отчёте. Прогоны, помеченные «не состоялся», остаются в реестре и видны здесь, но не попадают в средние на слайде 7.</p>
+<!-- DETAIL-TABLE:END -->
+          </div>
+        </div>
+        <div class="stack g14">
+          <div class="card rv" style="border-color:rgba(217,69,106,.4)">
+            <div class="ct">известный регресс: nginx, 51 тыс. строк</div>
+            <p class="small">Прогон v1: <b>17 шагов, 503 с, 2,6 млн входных токенов, ответ 181 символ.</b>
+              Один из субагентов упал с ошибкой провайдера — вместо отчёта осталась фраза
+              «анализ уже завершён выше».
+              <strong style="color:var(--paper)">Причина не в чтении логов, а в отсутствии защиты от падения субагента.</strong>
+              Лечение: не делегировать финальный отчёт, повторять шаг при ошибке.</p>
+          </div>
+          <div class="card rv">
+            <div class="ct">остальные честные дыры</div>
+            <div class="rows tight">
+              <div class="r"><div class="m">.gz</div><div class="t">на <span class="mono">postgres-gz</span> <b>ни один арм не дал ссылок</b>: архив никто не распаковал</div></div>
+              <div class="r"><div class="m">не везде<br>выигрыш</div><div class="t">на <b>OpenSSH и nginx</b> прогон <b>без навыка</b> дал столько же или больше ссылок, чем часть версий навыка. Навык выигрывает в среднем и по времени — но не на каждом датасете</div></div>
+              <div class="r"><div class="m">покрытие</div><div class="t">A/B идёт на однофайловых датасетах — <b>дисциплина покрытия на нём не проверяется</b>. 5 датасетов, один прогон на ячейку: разброс не измерен</div></div>
+              <div class="r"><div class="m">связи</div><div class="t">модель выдумывает не цитаты, а <b>связи между сущностями</b>. Запрет записан, механизма проверки нет</div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="srctag">источник: <b>eval/runs.jsonl</b> — таблица строится из реестра как есть, несостоявшиеся прогоны из него не удаляются</div>
+  </div>
+</section>
+
+<!-- ═══════════════════════ П3 — КОРПУС ═════════════════════════════════ -->
+<section class="slide" data-sec="app" data-kicker="П3 <span class='sep'>·</span><span class='plain'>корпус и его «грязь»</span>">
+  <div class="frame">
+    <div class="topbar"><div class="kicker"></div><div class="counter"></div></div>
+    <div class="body">
+      <div class="cols c-6-6">
+        <div class="stack g14">
+          <h2 class="rv">Корпус построен так, чтобы ломать наивный разбор</h2>
+          <div class="statrow rv" style="border-top:0">
+            <div class="st" style="padding-top:0"><div class="v">28</div><div class="k">файлов</div></div>
+            <div class="st" style="padding-top:0"><div class="v">4,26 млн</div><div class="k">строк</div></div>
+            <div class="st" style="padding-top:0"><div class="v">649 МБ</div><div class="k">на диске</div></div>
+            <div class="st" style="padding-top:0"><div class="v hl">11 + 2</div><div class="k">дефектов и ложных следов</div></div>
+          </div>
+          <p class="small rv">Сценарий: релиз каталога в 11:00 добавляет неиндексированный JSONB-поиск;
+            в 12:59 несанкционированный сброс кэша убирает то, что это прятало; в 13:10 блокировки в Postgres
+            выедают пул соединений; в 13:31 ручное уменьшение реплик вдвое; в 13:40 OOMKill и 503 до 14:22.
+            Параллельно — тихая потеря 2867 уведомлений из-за смены <span class="mono">retention.ms</span>.</p>
+        </div>
+        <div class="stack g14">
+          <div class="card rv" style="height:100%">
+            <div class="ct">чем корпус «грязный» — выборка из 18 пунктов</div>
+            <div class="rows">
+              <div class="r"><div class="m">часы</div><div class="t">узел B спешит на <b>47 секунд</b>; три разные единицы epoch (мс, дробные с, мкс) плюс монотонные часы dmesg</div></div>
+              <div class="r"><div class="m">форма</div><div class="t">CRI-строки, разрезанные на <span class="mono">P</span>/<span class="mono">F</span>-записи; docker json-file, где Go-паника из 12 фреймов — это 12 отдельных JSON</div></div>
+              <div class="r"><div class="m">шум</div><div class="t">nginx-логи на <b>90 % состоят из health-check</b>; в <span class="mono">error.log</span> 15 132 «ошибки», из которых важны две</div></div>
+              <div class="r"><div class="m">ловушки</div><div class="t">имя сервиса только в имени файла; игла разрезана границей ротации <span class="mono">.gz</span>; внутри дерева лежат <span class="mono">README.md</span> и <span class="mono">nginx.conf</span></div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="srctag">источник: <b>eval/bench/gen_corpus.py</b> (детерминированный генератор) · <b>eval/bench/answer-key.json</b> (ключ, разделы <span class="mono">dirtiness</span> и <span class="mono">defects</span>)</div>
+  </div>
+</section>
+
+<!-- ═══════════════════════ П4 — НЕ ПОСТРОЕНО ═══════════════════════════ -->
+<section class="slide" data-sec="app" data-kicker="П4 <span class='sep'>·</span><span class='plain'>что мы сознательно не строили</span>">
+  <div class="frame">
+    <div class="topbar"><div class="kicker"></div><div class="counter"></div></div>
+    <div class="body">
+      <div class="stack g14" style="min-height:0">
+        <h2 class="rv">Каждый отказ — это результат замера, а не вкусовщина</h2>
+        <div class="rows rv">
+          <div class="r"><div class="m">проверка<br>цитат</div><div class="t"><b>Не построена.</b> 79 из 79 цитат <span class="mono">файл:строка</span> подтвердились дословно — на кириллице, ANSI-escape, Go-фреймах в JSON и CRI-записях. Строить защиту от несуществующей проблемы дороже, чем не строить. <span style="color:var(--muted-2)">Ранняя версия спецификации делала эту проверку центром решения — замер её отменил.</span></div></div>
+          <div class="r"><div class="m">парсеры<br>под формат</div><div class="t"><b>Не построены.</b> 100 % на самописном pipe-формате с выдуманным словарём уровней и 100 % на русском логе — без схемы. Список форматов открыт и не закончится никогда</div></div>
+          <div class="r"><div class="m">движок<br>правил</div><div class="t"><b>Не построен.</b> Каждый подброшенный ложный след его побеждает: <span class="mono">grep -E 'ERROR|FATAL'</span> даёт 1 совпадение в promo-логе и 0 в русском, тогда как в <span class="mono">nginx/error.log</span> 15 132 «ошибки», из которых важны 2</div></div>
+          <div class="r"><div class="m">корреляция<br>по id</div><div class="t"><b>Не построена.</b> Пять разных написаний одного идентификатора не остановили ни один сильный прогон: модель переходит на совпадение по времени сама</div></div>
+          <div class="r"><div class="m">map-reduce<br>саммари</div><div class="t"><b>Не построено.</b> Худший из измеренных обменов: <b>в 27–85 раз больше токенов</b> при том же качестве. Дешёвый <span class="mono">tail-200</span> даёт 0,614 против 0,670 у самой сложной стратегии</div></div>
+          <div class="r"><div class="m">маскирование<br>PII</div><div class="t"><b>Понижено до чекбокса.</b> Требование говорит «не логировать PII» — то есть про то, что мы <b>пишем</b>, а не про то, что читает модель. Модель внутренняя. Осталось редактирование отчёта перед отправкой — ~30 строк</div></div>
+        </div>
+      </div>
+    </div>
+    <div class="srctag">источник: спецификация §2 «Explicitly NOT built — measured, not assumed» и §1.5 (таблица стоимости стратегий поиска)</div>
+  </div>
+</section>
+
+<!-- ═══════════════════════ П5 — МАСШТАБ ════════════════════════════════ -->
+<section class="slide" data-sec="app" data-kicker="П5 <span class='sep'>·</span><span class='plain'>масштаб и слабая модель</span>">
+  <div class="frame">
+    <div class="topbar"><div class="kicker"></div><div class="counter"></div></div>
+    <div class="body">
+      <div class="cols c-6-6">
+        <div class="stack g14">
+          <h2 class="rv">Пол качества задаёт процедура, потолок — модель</h2>
+          <table class="tbl rv" style="font-size:13.5px">
+            <thead><tr>
+              <th scope="col">стратегия поиска</th><th scope="col" class="n">качество</th>
+              <th scope="col" class="n">токенов</th><th scope="col" class="n">$/кейс</th>
+            </tr></thead>
+            <tbody>
+              <tr><th scope="row">сырые логи целиком</th><td class="n">0,353</td><td class="n">275 тыс.</td><td class="n dim">—</td></tr>
+              <tr class="best"><th scope="row"><span class="tick"></span>tail-200, без разбора</th><td class="n">0,614</td><td class="n">6,1 тыс.</td><td class="n">0,012</td></tr>
+              <tr><th scope="row">сужение через grep</th><td class="n">0,639</td><td class="n">88 тыс.</td><td class="n">0,129</td></tr>
+              <tr><th scope="row">гибрид grep → tail</th><td class="n">0,670</td><td class="n">19,8 тыс.</td><td class="n">0,031</td></tr>
+              <tr><th scope="row">map-reduce саммари</th><td class="n">0,664</td><td class="n">537 тыс.</td><td class="n">0,184</td></tr>
+            </tbody>
+          </table>
+          <p class="small rv">Самая примитивная стратегия набирает <strong style="color:var(--paper)">0,614 из 0,670</strong>.
+            Сложность покупает +0,056 — и вся она не в разборе формата, а в порядке действий.</p>
+        </div>
+        <div class="stack g14">
+          <div class="card rv">
+            <div class="ct">масштаб — замер на корпоративной модели</div>
+            <p class="small">649 МБ / 31 файл / 26 форматов, <span class="mono">[SP]deepseek-v4-flash</span>,
+              один и тот же вопрос; отличие — только наличие навыка:</p>
+            <table class="tbl" style="font-size:12.5px;margin-top:8px">
+              <thead><tr><th scope="col">арм</th><th scope="col" class="n">отчёт дошёл</th>
+                <th scope="col" class="n">файлов</th><th scope="col" class="n">токенов</th></tr></thead>
+              <tbody>
+                <tr><th scope="row">без навыка</th><td class="n">нет · 157 симв.</td><td class="n">0/30</td><td class="n">3,63 млн</td></tr>
+                <tr><th scope="row">навык v1</th><td class="n">нет · 106 симв.</td><td class="n">0/30</td><td class="n">5,73 млн</td></tr>
+                <tr class="best"><th scope="row"><span class="tick"></span>навык v2</th><td class="n">да · 12 872 симв.</td><td class="n">27/30</td><td class="n">1,96 млн</td></tr>
+              </tbody>
+            </table>
+            <p class="small" style="margin-top:8px">Без навыка и с v1 модель уходит в подагентов, и в headless-режиме
+              финальная запись — только мета-комментарий «отчёт выше». Разбор не доходит: <b>5,7 млн токенов → 106 символов.</b>
+              v2 требует самодостаточного финального отчёта — и это разница между полной потерей и разбором
+              27 файлов из 30 <b>втрое дешевле</b>.</p>
+          </div>
+          <div class="card rv" style="border-color:rgba(242,166,59,.4)">
+            <div class="ct">чего мы не добрали</div>
+            <p class="small">На этом же корпусе <b>2 из 11 дефектов (18,2 %)</b> — порог кейса «≥ 50 %»
+              <b>не достигнут</b>. Судит другая модель, ловушки D12/D13 в знаменатель не идут.
+              Покрытие и доставку отчёта мы починили; <b>глубину многошаговой корреляции — нет</b>:
+              прошли широко и мелко. Тот же корпус на более сильной модели даёт 11 из 11, то есть
+              упирается в модель, а не в архитектуру. Отсюда следующий шаг — не новые правила, а
+              <span class="mono">logstat</span> (сдвиги по группам, включая отрицательный результат)
+              и <span class="mono">logjoin</span> (запрос отсутствия): отдать модели готовый вывод
+              вместо требования вывести его самой.</p>
+          </div>
+          <div class="card rv">
+            <div class="ct">слабая модель</div>
+            <p class="small">Навык — это явные шаги, а не расчёт на сообразительность. Деградация плавная:
+              даже без единого умного хода <span class="mono">tail-200</span> даёт 0,614.
+              Слабая модель теряет глубину гипотез, но не способность прочитать формат.</p>
+          </div>
+          <div class="card rv">
+            <div class="ct">почему не Drain и не кластеризация шаблонов</div>
+            <p class="small">Честная поправка: Drain — не парсер под формат, он работает без семантики и живёт
+              в проде. Но на реальном масштабе (14 датасетов, в среднем 3,6 млн строк) его точность падает
+              с 0,75 до ~0,55, а <b>9 классических парсеров из 15 не заканчивают за 12 часов</b>.
+              Ранжирование по статистической редкости обходит майнинг шаблонов в 2,5 раза дешевле — это и стоит в <span class="mono">map</span>.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="srctag">источник: спецификация §1.5 (ablation LogDx-CI) и §6 · Loghub-2.0 — по обзору смежных работ</div>
+  </div>
+</section>
+
+<!-- ═══════════════════════ П6 — ДОРОЖНАЯ КАРТА ═════════════════════════ -->
+<section class="slide" data-sec="app" data-kicker="П6 <span class='sep'>·</span><span class='plain'>дорожная карта</span>">
+  <div class="frame">
+    <div class="topbar"><div class="kicker"></div><div class="counter"></div></div>
+    <div class="body">
+      <div class="stack g14" style="min-height:0">
+        <h2 class="rv">Что достраивается — в порядке доказанной ценности</h2>
+        <p class="small rv" style="max-width:70em">Все четыре компонента объединяет одно: <strong style="color:var(--paper)">ни один из них не знает,
+          как выглядит строка лога</strong>. Код делает только то, чего модель провабельно не может.</p>
+        <div class="rows rv">
+          <div class="r"><div class="m">1 · logcover</div><div class="t"><b>Гейт покрытия.</b> Перечислить все файлы (заходя внутрь <span class="mono">.gz</span> и склеивая ротацию в один поток), отследить, что сессия реально открыла, и <b>не выпускать отчёт, пока остаётся нетронутый файл</b>. Обоснование: ряд 100 → 73 → 18 %. Цена незаглянутого файла изнутри прогона не видна — модель не знает, чего она не видела</div></div>
+          <div class="r"><div class="m">2 · logstat</div><div class="t"><b>Распределения и сдвиги по группам</b> с ответом «сдвиг общий или в одной группе» — и с явной выдачей разбивок, где сдвига нет. Отрицательный результат здесь несущий: именно его отсутствие один раз <b>перевернуло верную корневую причину в неверную</b></div></div>
+          <div class="r"><div class="m">3 · память<br>по кейсам</div><div class="t"><b>Замкнутый feedback loop кейса:</b> сохранить расследование, найти похожее в следующий раз. Инцидент №2 разбирается быстрее №1, и это измеряется по реестру, а не заявляется</div></div>
+          <div class="r"><div class="m">4 · logentity</div><div class="t"><b>Ответ на единственную найденную выдумку.</b> Прогон утверждал «выжили ровно поды .31 и .33»; grep по всему корпусу на совместную встречаемость имени пода и IP даёт <b>ноль совпадений</b> — ребро было придумано, чтобы связать две настоящие улики. Хранилище связей отвечает <span class="mono">ЕСТЬ</span> / <span class="mono">НЕТ В КОРПУСЕ</span>, и неподтверждённая связь <b>отклоняется, а не пересказывается</b></div></div>
+          <div class="r"><div class="m">5 · источники</div><div class="t">Адаптеры <span class="mono">kubectl</span> и <span class="mono">journalctl</span> (~65 строк вместе) плюс подключение готовых MCP-серверов. Ядро при этом не меняется — в этом весь смысл контракта</div></div>
+        </div>
+      </div>
+    </div>
+    <div class="srctag">источник: спецификация §2 (таблица «Keep, rewritten format-agnostic») и §4 (инкременты I2–I5)</div>
+  </div>
+</section>
+
+<!-- ═══════════════════════ П7 — КРИТЕРИИ ═══════════════════════════════ -->
+<section class="slide" data-sec="app" data-kicker="П7 <span class='sep'>·</span><span class='plain'>соответствие требованиям кейса</span>">
+  <div class="frame">
+    <div class="topbar"><div class="kicker"></div><div class="counter"></div></div>
+    <div class="body">
+      <div class="cols c-6-6">
+        <div class="stack g14">
+          <h2 class="rv">Что сдаём</h2>
+          <div class="rows rv">
+            <div class="r"><div class="m">SKILL.md</div><div class="t">процедура анализа и диагностики на русском, с frontmatter в нативном для Qwen формате — это и есть продукт</div></div>
+            <div class="r"><div class="m">MCP / tool</div><div class="t">контракт источника <span class="mono">resolve()</span> + готовые MCP-серверы логовых бэкендов подключением; файлы, zip и <span class="mono">.gz</span> читаются штатными инструментами CLI</div></div>
+            <div class="r"><div class="m">rules</div><div class="t">версионируются как <b>сохранённые параметризованные запросы</b>, которые навык читает как чеклист, а не как движок сопоставления — это единственная форма правил, которая не гниёт на незнакомом формате</div></div>
+            <div class="r"><div class="m">примеры</div><div class="t">5 реальных датасетов в реестре прогонов + синтетический корпус с ключом ответов</div></div>
+            <div class="r"><div class="m">данные</div><div class="t">синтетика детерминирована и воспроизводима: seed зафиксирован, реалистичность и «грязь» описаны в ключе — 18 отдельных пунктов</div></div>
+          </div>
+        </div>
+        <div class="stack g14">
+          <h2 class="rv">Метрики качества из постановки</h2>
+          <div class="rows rv">
+            <div class="r"><div class="m">≥ 50 %<br>дефектов</div><div class="t">измеряется судьёй по ключу ответов; на большом корпусе лучший прогон дал 100 % из 11, худший — 18 %</div></div>
+            <div class="r"><div class="m">повторный<br>инцидент</div><div class="t">память по кейсам + реестр: ускорение считается разностью по реестру, а не декларируется</div></div>
+            <div class="r"><div class="m">feedback<br>loop</div><div class="t">кейс №1 сохраняется, кейс №2 стартует с найденного похожего — без ручной разметки</div></div>
+            <div class="r"><div class="m">MTTR</div><div class="t">базовая линия ручного разбора замеряется отдельно; сравнение честное только на одном и том же инциденте</div></div>
+            <div class="r"><div class="m">AIOps</div><div class="t">та же процедура применима к потоку: плотность ошибок и редкость формы строки считаются на хвосте окна</div></div>
+          </div>
+          <div class="card accent rv" style="padding:12px 16px">
+            <p class="small"><strong>Переиспользуемость.</strong> Навык — это папка с markdown. Забрать её может любая команда,
+              положить во внутренний портал — тоже. Ни привязки к проекту, ни к одному демо-примеру.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="srctag">источник: <b>06-dev-logging.md</b> (разделы «Что сдаёт команда» и «Как проверяем») · <b>AGENTS.md</b> (требования R1–R4)</div>
+  </div>
+</section>
+
+
+<!-- ═══════════════════════ П8 — ПРИЁМОЧНЫЙ ТЕСТ R1 ═════════════════════ -->
+<section class="slide" data-sec="app" data-kicker="П8 <span class='sep'>·</span><span class='plain'>приёмочный тест требования R1</span>">
+  <div class="frame">
+    <div class="topbar"><div class="kicker"></div><div class="counter"></div></div>
+    <div class="body">
+      <div class="cols c-6-6">
+        <div class="stack g14">
+          <h2 class="rv">Тест написан так, чтобы его нельзя было пройти обманом</h2>
+          <div class="rows rv">
+            <div class="r"><div class="m">окружение</div><div class="t">свежий <span class="mono">QWEN_HOME</span>. Тест <b>падает</b>, если после установки в нём обнаружится <span class="mono">settings.json</span>, <span class="mono">.env</span> или <span class="mono">config.yaml</span> — то есть если хоть что-то потребовало настройки</div></div>
+            <div class="r"><div class="m">установка</div><div class="t">ровно одна команда: копирование папки навыка. Больше ничего не выполняется</div></div>
+            <div class="r"><div class="m">вопрос</div><div class="t">фраза живого человека. В ней <b>нет</b> имени навыка, слова «навык», названия формата, требования цитат и описания структуры отчёта. Навык обязан сработать сам</div></div>
+            <div class="r"><div class="m">контроль</div><div class="t">арм <span class="mono">none</span> — не устанавливается ничего, чтобы отличить «навык не сработал» от «сработал, но формат отчёта не прижился»</div></div>
+            <div class="r"><div class="m">гейт</div><div class="t">по <b>сути</b>, а не по форме: отчёт с идеальными заголовками, пропустивший взлом, — брак; простой отчёт, который взлом поймал, — продукт. Дисциплина формата печатается справочно и ничего не блокирует</div></div>
+          </div>
+        </div>
+        <div class="stack g14">
+          <div class="card rv">
+            <div class="ct">четыре требования к продукту</div>
+            <div class="rows tight">
+              <div class="r"><div class="m">R1</div><div class="t"><b>Ноль конфигурации</b> — главное требование, и именно его проверяет этот тест</div></div>
+              <div class="r"><div class="m">R2</div><div class="t"><b>Любой формат</b> и любой язык, включая тот, которого никто не предвидел</div></div>
+              <div class="r"><div class="m">R3</div><div class="t"><b>Любой размер</b> — от вставленных 20 строк до многогигабайтных дампов</div></div>
+              <div class="r"><div class="m">R4</div><div class="t"><b>Расширяемость</b> — новый источник логов не трогает ядро</div></div>
+            </div>
+          </div>
+          <div class="card accent rv">
+            <div class="ct">мягкая деградация — следствие R1</div>
+            <p class="small">Вспомогательные скрипты лежат внутри папки навыка и написаны на голом
+              <span class="mono">python3</span>, без установки пакетов.
+              <strong style="color:var(--paper)">Если они не запустились — навык всё равно работает.</strong>
+              Жёстких зависимостей нет ни одной: MCP-сервер, стенд и хелперы — необязательные улучшения,
+              а не условие работы.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="srctag">источник: <b>acceptance/r1-zero-config.sh</b> · <b>AGENTS.md</b> — требования R1–R4</div>
+  </div>
+</section>
+
+</div>
+</div>
+
+<div id="progress"></div>
+<div id="hint">← → ПЕРЕЛИСТНУТЬ · F ПОЛНЫЙ ЭКРАН</div>
+
+<script>
+(function () {
+  var deck = document.getElementById('deck');
+  var slides = Array.prototype.slice.call(deck.querySelectorAll('.slide'));
+  var progress = document.getElementById('progress');
+  var hint = document.getElementById('hint');
+  var i = 0;
+
+  // ---- нумерация: основная часть считается отдельно от приложения -------
+  var mainTotal = slides.filter(function (s) { return s.dataset.sec === 'main'; }).length;
+  var appTotal = slides.filter(function (s) { return s.dataset.sec === 'app'; }).length;
+  var mainN = 0, appN = 0;
+  var pad = function (n) { return (n < 10 ? '0' : '') + n; };
+  slides.forEach(function (s) {
+    var label;
+    if (s.dataset.sec === 'main') { mainN++; label = pad(mainN) + ' / ' + pad(mainTotal); }
+    else if (s.dataset.sec === 'app') { appN++; label = 'ПРИЛОЖЕНИЕ ' + pad(appN) + ' / ' + pad(appTotal); }
+    else { label = 'ПРИЛОЖЕНИЕ'; }
+    s.querySelector('.counter').textContent = label;
+    s.querySelector('.kicker').innerHTML = s.dataset.kicker || '';
+  });
+
+  // ---- масштаб сцены под окно ------------------------------------------
+  function fit() {
+    var s = Math.min(window.innerWidth / 1280, window.innerHeight / 720);
+    deck.style.setProperty('--s', s);
+  }
+  window.addEventListener('resize', fit, { passive: true });
+  fit();
+
+  // ---- переключение ------------------------------------------------------
+  function show(n, push) {
+    i = Math.max(0, Math.min(slides.length - 1, n));
+    slides.forEach(function (s, k) { s.classList.toggle('is-active', k === i); });
+    progress.style.width = ((i + 1) / slides.length * 100) + '%';
+    if (push !== false) history.replaceState(null, '', '#' + (i + 1));
+  }
+  function go(d) { show(i + d); if (hint) hint.classList.add('gone'); }
+
+  document.addEventListener('keydown', function (e) {
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    switch (e.key) {
+      case 'ArrowRight': case 'ArrowDown': case ' ': case 'PageDown': case 'Enter':
+        e.preventDefault(); go(1); break;
+      case 'ArrowLeft': case 'ArrowUp': case 'PageUp': case 'Backspace':
+        e.preventDefault(); go(-1); break;
+      case 'Home': e.preventDefault(); show(0); break;
+      case 'End': e.preventDefault(); show(slides.length - 1); break;
+      case 'f': case 'F': case 'а': case 'А':
+        e.preventDefault();
+        if (document.fullscreenElement) document.exitFullscreen();
+        else document.documentElement.requestFullscreen();
+        break;
+    }
+  });
+
+  document.addEventListener('click', function (e) {
+    if (e.target.closest('a')) return;
+    go(e.clientX < window.innerWidth * 0.32 ? -1 : 1);
+  });
+
+  var start = parseInt((location.hash || '').replace('#', ''), 10);
+  show(isNaN(start) ? 0 : start - 1, false);
+  setTimeout(function () { if (hint) hint.classList.add('gone'); }, 6000);
+})();
+</script>
+</body>
+</html>
