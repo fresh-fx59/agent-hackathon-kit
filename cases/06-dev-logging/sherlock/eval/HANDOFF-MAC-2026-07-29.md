@@ -1,5 +1,10 @@
 # Mac handoff — case-06 measurement runs (2026-07-29)
 
+> **CANCELLED 2026-07-29 ~05:45 UTC** — operator: no Mac handoff. Runs execute
+> on contabo under the vault's `tools/memcap.sh`. The matrix below remains the
+> authoritative list of missing measurements; see also `V5-ASSESSMENT-2026-07-29.md`
+> for the v5 validation matrix that supersedes the P1 sketch.
+
 The 8 GB Linux box OOM-killed the session doing these runs; all **measurement
 runs move to the Mac** (M1 Max, 32 GB). Build/analysis work continues on the box —
 this file is only about runs. Results flow back through git: **the ledgers
