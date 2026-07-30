@@ -148,7 +148,11 @@ SECTIONS = ["Что произошло", "Корневая причина", "Ц�
 BANNED = ["отчёт выше", "как я уже показал", "результаты приведены ранее",
           "см. предыдущее сообщение", "отчёт уже готов выше"]
 
-MIN_REPORT_CHARS = 200
+# Measured basis: observed collapsed runs land at 106 and 157 chars (both were
+# literally "the report is above"); observed genuine reports land at 12,872,
+# 12,940, and 13,355 chars. Three orders of magnitude apart — 2000 sits safely
+# in the gap, nowhere near either cluster.
+MIN_REPORT_CHARS = 2000
 
 
 def report_checks(report_text):
@@ -175,6 +179,15 @@ def budget_profile(events):
 
 
 def verdict(case, stream_path, report_text, judge_found):
+    """Combine trajectory reach + report checks into one diagnosis.
+
+    Reachable in this increment: "collapse", "ok", "reasoning", "inconclusive",
+    "coverage" — exactly the branches below. "fabricated_evidence" (citing a
+    proof location that was never actually reached, or a location that doesn't
+    back the claim) is reserved for when citecheck.py is wired in a later
+    increment; nothing in this module computes citation integrity yet, so this
+    function can never return it.
+    """
     events = read_events(stream_path)
     reach = proof_reach(events, case.get("proof_locations", []))
     report = report_checks(report_text)
