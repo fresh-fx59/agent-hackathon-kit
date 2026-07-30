@@ -63,6 +63,9 @@ https://github.com/fresh-fx59/agent-hackathon-kit/releases/tag/case06-corpus-see
 цифра прослеживается до строки реестра**, а не до чьего-то резюме. Пересчитать объём:
 `wc -l sherlock/eval/runs.jsonl sherlock/eval/*/runs-*.jsonl`
 
+Измерительный стенд (per-defect слайсы, coverage/reasoning вердикт, three-tier gate) —
+`sherlock/measure/README.md`; тесты — `sherlock/measure/tests/run.sh`.
+
 ## Инструменты
 
 Три — по одному файлу на python3, четвёртый — на bash; только stdlib/coreutils,
