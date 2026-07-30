@@ -121,6 +121,37 @@ class GateHarness(unittest.TestCase):
             return [json.loads(l) for l in fh if l.strip()]
 
 
+class Tier0AllPass(GateHarness):
+    """Tier 0's loop and glob ("$CASES"/cap-*) mirror tier 2's exactly, just for
+    the micro-corpus id prefix — confirm the happy path dispatches the same way."""
+
+    def test_exit_zero_and_every_case_reported_when_all_pass(self):
+        self.make_cases("cap-multiline-stitching", "cap-gz-decompression")
+        r = self.run_gate("0", "v6")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertEqual(sorted(self.invoked()),
+                          ["cap-gz-decompression", "cap-multiline-stitching"])
+        self.assertEqual({row["case_id"] for row in self.results_rows()},
+                          {"cap-gz-decompression", "cap-multiline-stitching"})
+
+
+class Tier0ZeroCasesNegativeControl(GateHarness):
+    """THE negative control for tier 0, mirroring Tier2ZeroCasesNegativeControl:
+    the same nullglob + explicit count-check pattern must guard tier 0 too, or
+    a stale SHERLOCK_CASES / running gate.sh before micro.py has populated
+    cases/ would silently report PASS on zero capability corpora run."""
+
+    def test_zero_matching_cases_is_a_hard_failure_not_a_silent_pass(self):
+        os.makedirs(self.cases, exist_ok=True)  # exists, but has no cap-* subdirs
+        r = self.run_gate("0", "v6")
+        self.assertNotEqual(r.returncode, 0,
+                             "tier 0 reported success with ZERO cases run — "
+                             "stdout=%r stderr=%r" % (r.stdout, r.stderr))
+        self.assertIn("0 cases", r.stderr)
+        self.assertEqual(self.invoked(), [], "no case should have been invoked")
+        self.assertEqual(self.results_rows(), [], "no row should have been written")
+
+
 class Tier2AllPass(GateHarness):
     def test_exit_zero_and_every_case_reported_when_all_pass(self):
         self.make_cases("D01", "D02")

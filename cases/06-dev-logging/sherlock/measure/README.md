@@ -34,3 +34,21 @@ a benchmark result.
 Neutral to both the model under test and the skill's author, and it reproduces the
 historical `eval/scores.jsonl` column. Do not switch judges casually: the same v5
 report scored 3/11 and 5/11 under two different judges.
+
+## Tier 0 — the capability floor
+
+    python3 micro.py --out cases
+    with-secret.sh eval_linkapi_key --env SHERLOCK_API_KEY -- ./gate.sh 0 v6
+
+Nine hand-written corpora, one per capability in the answer key's `requires`
+vocabulary. Each is a few lines long and isolates a single skill: stitching an
+interleaved stack trace, unescaping a docker `log` field, joining two formats on
+time with no shared id, finding one success among 120 failures, seeing a RATE shift
+rather than a new error, reading invented severity words (`ALARM`, `FATALITY`),
+reading a Russian log where `grep ERROR` returns nothing, decompressing a `.gz`.
+
+**Green at tier 0 proves nothing about the corpus** — these are far easier than a
+slice, which is itself easier than the 649 MB corpus. RED at tier 0 is the valuable
+signal: it localises a capability gap for almost no money, and the failing
+capability maps directly onto the defects that need it (`cross-format correlation`
+alone gates 6 of the 11 real defects).
