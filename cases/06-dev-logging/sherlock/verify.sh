@@ -18,6 +18,10 @@ QWEN="${QWEN_BIN:-$HOME/.local/bin/qwen}"
 LOGS="${1:-$HOME/hack/logalyzer-real-world-testset/real-logs/OpenSSH}"
 WORK="${SHERLOCK_WORK:-$HERE/.verify-run}"
 TIMEOUT="${SHERLOCK_TIMEOUT:-300}"
+# Which skill version the gate measures. The default stays v1 ON PURPOSE: this is the
+# I0 gate, and silently repointing it at a newer, unmeasured version would change what
+# every past green result meant. Gate another arm explicitly: SHERLOCK_VER=v6 ./verify.sh
+VER="${SHERLOCK_VER:-v1}"
 
 red()   { printf '\033[31m✗ %s\033[0m\n' "$*"; }
 green() { printf '\033[32m✓ %s\033[0m\n' "$*"; }
@@ -33,25 +37,33 @@ green "qwen CLI: $("$QWEN" --version 2>&1 | tail -1)"
 NLINES=$(find "$LOGS" -type f -exec cat {} + 2>/dev/null | wc -l)
 green "corpus: $LOGS ($(du -sh "$LOGS" 2>/dev/null | cut -f1), $NLINES lines)"
 
-[ -f "$HERE/skills/v1/SKILL.md" ] || fail "missing $HERE/skill/SKILL.md"
+[ -f "$HERE/skills/$VER/SKILL.md" ] || fail "missing $HERE/skills/$VER/SKILL.md"
 
 # ------------------------------------------------- install skill where qwen looks
 # Qwen Code discovers skills from <project>/.qwen/skills/<name>/SKILL.md
 mkdir -p "$WORK/.qwen/skills"
 rm -rf "$WORK/.qwen/skills/sherlock"
-cp -r "$HERE/skills/v1" "$WORK/.qwen/skills/sherlock" || fail "could not install skill"
+cp -r "$HERE/skills/$VER" "$WORK/.qwen/skills/sherlock" || fail "could not install skill"
 green "skill installed: $WORK/.qwen/skills/sherlock/SKILL.md"
 
 # --------------------------------------------------------------------- auth
+# THE KEY AND THE BASE URL TRAVEL BY ENVIRONMENT, NEVER ON ARGV. argv is world-readable in `ps`
+# for the whole run (/proc/<pid>/cmdline is mode 444) and this box has a provisioned `hackmate`
+# guest account, so `--openai-api-key "$SHERLOCK_API_KEY"` published the live broker key for the
+# default 300 s. eval/run.sh:54-57 already proves qwen honours OPENAI_API_KEY / OPENAI_BASE_URL,
+# and tools/fetch-logs.sh enforces exactly this rule for the stand password.
+# `export` is a BUILTIN, so the value never becomes any process's argv. Note that `env KEY=val
+# cmd` would NOT do — that puts the key on `env`'s own argv — and neither does
+# `"${ARRAY[@]}" cmd`: bash recognises a command-prefix assignment syntactically, so an
+# expanded one is treated as a command name («OPENAI_API_KEY=…: command not found»).
 AUTH_ARGS=()
 case "${QWEN_AUTH:-oauth}" in
   openai)
     : "${SHERLOCK_BASE_URL:?set SHERLOCK_BASE_URL (e.g. http://127.0.0.1:8317/v1)}"
     : "${SHERLOCK_API_KEY:?set SHERLOCK_API_KEY}"
-    AUTH_ARGS=(--auth-type openai
-               --model "${SHERLOCK_MODEL:-gpt-5.5}"
-               --openai-base-url "$SHERLOCK_BASE_URL"
-               --openai-api-key "$SHERLOCK_API_KEY")
+    AUTH_ARGS=(--auth-type openai --model "${SHERLOCK_MODEL:-gpt-5.5}")
+    export OPENAI_API_KEY="$SHERLOCK_API_KEY"
+    export OPENAI_BASE_URL="$SHERLOCK_BASE_URL"
     info "auth: openai -> $SHERLOCK_BASE_URL (${SHERLOCK_MODEL:-gpt-5.5})"
     ;;
   *)
@@ -68,6 +80,8 @@ PROMPT="Проанализируй логи в каталоге $LOGS. Найд�
 OUT="$WORK/result.json"
 info "running (timeout ${TIMEOUT}s)..."
 START=$(date +%s)
+# The key is already exported above; it reaches qwen through /proc/<pid>/environ, mode 400 and
+# owner-only, and never appears in `ps`.
 ( cd "$WORK" && timeout "$TIMEOUT" "$QWEN" "${AUTH_ARGS[@]}" \
     -p "$PROMPT" --output-format json </dev/null ) >"$OUT" 2>"$WORK/stderr.txt"
 RC=$?

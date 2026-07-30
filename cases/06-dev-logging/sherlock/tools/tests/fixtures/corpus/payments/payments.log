@@ -1,0 +1,6 @@
+Jul 28 10:00:00 pay01 payd[8812]: batch 5512 opened, window 30s
+Jul 28 10:00:06 pay01 payd[8812]: charge captured for order ORD-77422, amount 1299900
+Jul 28 10:00:11 pay01 payd[8812]: charge captured for order ORD-77424, amount 849900
+Jul 28 10:00:17 pay01 payd[8812]: batch 5512 closed, 2 captures, 0 retries
+Jul 28 10:00:22 pay01 payd[8812]: batch 5513 opened, window 30s
+Jul 28 10:00:25 pay01 payd[8812]: reconciliation found no capture for order ORD-77425

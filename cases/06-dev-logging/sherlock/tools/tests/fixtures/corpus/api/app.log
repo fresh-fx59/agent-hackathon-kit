@@ -1,0 +1,15 @@
+2026-07-28T10:00:01.114Z INFO  api order ORD-77421 accepted from customer 4471
+2026-07-28T10:00:02.201Z DEBUG api cache lookup for shard 3 took 12 ms
+2026-07-28T10:00:03.310Z INFO  api order ORD-77422 accepted from customer 4472
+2026-07-28T10:00:04.005Z DEBUG api cache lookup for shard 7 took 9 ms
+2026-07-28T10:00:05.120Z INFO  api order ORD-77423 accepted from customer 4473
+2026-07-28T10:00:06.700Z DEBUG api cache lookup for shard 1 took 21 ms
+2026-07-28T10:00:07.402Z ERROR api payment for order ORD-77421 gave up after 3011 ms: PaymentTimeout
+2026-07-28T10:00:08.010Z ERROR api payment for order ORD-77421 gave up after 3005 ms: PaymentTimeout
+2026-07-28T10:00:09.111Z ERROR api payment for order ORD-77422 gave up after 3120 ms: PaymentTimeout
+2026-07-28T10:00:10.500Z INFO  api order ORD-77424 accepted from customer 4474
+2026-07-28T10:00:11.900Z INFO  api order ORD-77425 accepted from customer 4475
+2026-07-28T10:00:12.640Z DEBUG api cache lookup for shard 5 took 15 ms
+2026-07-28T10:00:15.200Z WARN  api circuit breaker open for upstream payments-svc
+2026-07-28T10:00:18.330Z ALARM api reconciliation queue depth 4711 above the operator ceiling
+2026-07-28T10:00:21.400Z FATALITY api ledger refused a negative charge, order left pending

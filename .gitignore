@@ -3,6 +3,9 @@ __pycache__/
 .DS_Store
 *.log
 logs/
+# `*.log` above silently swallowed every test fixture, so tools/tests/ went red with
+# a README describing files that were never committed. Fixtures are data, not output.
+!cases/06-dev-logging/sherlock/tools/tests/fixtures/**
 *.pdf
 .worktrees/
 cases/06-dev-logging/sherlock/.verify-run/
