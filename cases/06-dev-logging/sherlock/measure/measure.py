@@ -83,20 +83,36 @@ def read_events(stream_path):
     return events
 
 
-def _tail(path):
-    """Compare on the trailing path: an absolute tool path like /c/apps/api.log
-    carries a synthetic single-segment mount root ("/c") that the corpus-relative
-    proof path (e.g. "apps/api.log") never has, so drop just that one segment.
-    Relative paths (already corpus-relative) pass through unchanged."""
-    p = (path or "").replace("\\", "/")
-    if p.startswith("/"):
-        p = "/".join(p.split("/")[2:])
-    return p
+def _norm(path):
+    return (path or "").replace("\\", "/")
 
 
 def _same_file(event_path, proof_rel):
-    e, p = _tail(event_path), _tail(proof_rel)
-    return e.endswith(p) or p.endswith(os.path.basename(e)) and os.path.basename(e) == os.path.basename(p)
+    """Directory-qualified match: the event path must equal the proof-relative
+    path, or end with it at a path-separator boundary. A shared basename alone
+    (e.g. syslog/node-a/syslog vs syslog/node-b/syslog — two different hosts'
+    logs, one of them a red-herring proof) must NEVER count as the same file;
+    that would manufacture exactly the coverage error this module exists to
+    prevent."""
+    e, p = _norm(event_path), _norm(proof_rel)
+    if not e or not p:
+        return False
+    return e == p or e.endswith("/" + p)
+
+
+def _relative_name(file_path, proof_locations):
+    """Resolve an event's file to the exact corpus-relative string of whichever
+    proof location it matches, so files_opened and files_with_proofs are
+    directly comparable regardless of how deep the absolute sandbox path runs
+    (a real run nests proofs many directories under a case root, not just the
+    fixture's single-segment "/c/" mount). Files that match no proof location
+    are diagnostic-only and fall back to their bare basename."""
+    fp = _norm(file_path)
+    for pr in proof_locations:
+        pf = _norm(pr["file"])
+        if fp == pf or fp.endswith("/" + pf):
+            return pf
+    return os.path.basename(fp)
 
 
 def proof_reach(events, proof_locations):
@@ -115,8 +131,8 @@ def proof_reach(events, proof_locations):
         {"reached": reached, "not_reached": not_reached, "unknown": unknown}[state].append(
             "%s:%d-%d" % (pr["file"], pr["line_start"], pr["line_end"]))
 
-    files_opened = sorted({_tail(e["file"]) for e in events if e.get("file")})
-    files_with_proofs = sorted({os.path.basename(p["file"]) for p in proof_locations})
+    files_opened = sorted({_relative_name(e["file"], proof_locations) for e in events if e.get("file")})
+    files_with_proofs = sorted({_norm(p["file"]) for p in proof_locations})
     verdict = "reached" if reached else ("unknown" if unknown else "not_reached")
     return {"reached": reached, "not_reached": not_reached, "unknown": unknown,
             "files_opened": files_opened, "files_with_proofs": files_with_proofs,

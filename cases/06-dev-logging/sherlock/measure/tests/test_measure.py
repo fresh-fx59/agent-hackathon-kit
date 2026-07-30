@@ -101,6 +101,33 @@ class ProofReach(unittest.TestCase):
         r = measure.proof_reach(measure.read_events(p), PROOFS)
         self.assertEqual(r["verdict"], "not_reached")
 
+    def test_files_opened_matches_files_with_proofs_on_a_deep_absolute_path(self):
+        # Regression: a real captured run nests the proof file many directories
+        # deep under a sandbox root, unlike the fixture's single-segment "/c/"
+        # mount. files_opened must still land on the exact corpus-relative name
+        # so it is directly comparable to files_with_proofs.
+        proofs = [{"file": "apps/checkout-api/checkout-api.log",
+                   "line_start": 10, "line_end": 20, "note": "the NPE"}]
+        p = stream(tool_use("read_file", {
+            "file_path": "/home/claude-developer/hack/agent-hackathon-kit/cases/06-dev-logging"
+                         "/sherlock/measure/cases/D01/apps/checkout-api/checkout-api.log",
+            "offset": 5, "limit": 20}))
+        r = measure.proof_reach(measure.read_events(p), proofs)
+        self.assertEqual(r["verdict"], "reached")
+        self.assertEqual(r["files_opened"], r["files_with_proofs"])
+
+    def test_same_basename_in_different_directories_is_not_the_same_file(self):
+        # syslog/node-a/syslog and syslog/node-b/syslog are two different hosts'
+        # logs that happen to share a basename. A basename-only fallback would
+        # let reading node-a satisfy node-b's (red-herring) proof.
+        proofs = [{"file": "syslog/node-b/syslog", "line_start": 5, "line_end": 10,
+                   "note": "RED HERRING"}]
+        p = stream(tool_use("read_file", {"file_path": "/c/syslog/node-a/syslog",
+                                          "offset": 0, "limit": 20}))
+        r = measure.proof_reach(measure.read_events(p), proofs)
+        self.assertEqual(r["verdict"], "not_reached",
+                         "node-a/syslog must not satisfy node-b/syslog's proof by basename alone")
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
