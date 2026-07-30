@@ -93,18 +93,41 @@ class ProofsAreReal(unittest.TestCase):
 
 
 class MeasureCompatibility(unittest.TestCase):
-    def test_verdict_runs_on_a_micro_case(self):
+    """The old assertion here was `assertIn(diagnosis, {reasoning, coverage,
+    inconclusive})` — the entire set measure.verdict can reach when judge_found is
+    false. Sabotaging the proof left it green, so it proved nothing. These assert the
+    exact diagnosis, and the negative control proves the assertion can fail."""
+
+    def _stream(self, d, file_path, body):
+        """Shaped like the real capture: a whole-file read_file (no offset/limit)
+        paired to its result by tool_use_id."""
+        p = os.path.join(d, "s.jsonl")
+        with open(p, "w", encoding="utf-8") as fh:
+            fh.write(json.dumps({"type": "assistant", "message": {"content": [
+                {"type": "tool_use", "id": "call_1", "name": "read_file",
+                 "input": {"file_path": file_path}}]}}) + "\n")
+            fh.write(json.dumps({"type": "user", "message": {"content": [
+                {"type": "tool_result", "tool_use_id": "call_1", "is_error": False,
+                 "content": body}]}}) + "\n")
+        return p
+
+    def test_reading_the_proof_file_and_still_missing_it_is_a_reasoning_miss(self):
         import measure
         with tempfile.TemporaryDirectory() as d:
             case = micro.build_micro(d, "cap-rare-event-needle")
-            stream = os.path.join(d, "s.jsonl")
-            with open(stream, "w", encoding="utf-8") as fh:
-                fh.write(json.dumps({"type": "assistant", "message": {"content": [
-                    {"type": "tool_use", "name": "read_file",
-                     "input": {"file_path": "/x/" + case["files"][0],
-                               "offset": 0, "limit": 500}}]}}) + "\n")
-            v = measure.verdict(case, stream, "x" * 3000, judge_found=False)
-            self.assertIn(v["diagnosis"], {"reasoning", "coverage", "inconclusive"})
+            log = os.path.join(d, case["case_id"], micro.CORPUS_SUBDIR, case["files"][0])
+            s = self._stream(d, "/x/" + case["files"][0], open(log, encoding="utf-8").read())
+            v = measure.verdict(case, s, "x" * 3000, judge_found=False)
+            self.assertEqual(v["diagnosis"], "reasoning", v["reach"])
+            self.assertEqual(v["reach"]["not_reached"], [])
+
+    def test_negative_control_opening_a_different_file_is_a_coverage_miss(self):
+        import measure
+        with tempfile.TemporaryDirectory() as d:
+            case = micro.build_micro(d, "cap-rare-event-needle")
+            s = self._stream(d, "/x/unrelated.log", "nothing here\n")
+            v = measure.verdict(case, s, "x" * 3000, judge_found=False)
+            self.assertEqual(v["diagnosis"], "coverage", v["reach"])
 
 
 if __name__ == "__main__":

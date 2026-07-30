@@ -32,14 +32,23 @@ def stream(*records):
     return path
 
 
-def tool_use(name, inp):
-    return {"type": "assistant",
-            "message": {"content": [{"type": "tool_use", "name": name, "input": inp}]}}
+FIXTURE = os.path.join(HERE, "fixtures", "real-stream-excerpt.jsonl")
 
 
-def tool_result(text):
-    return {"type": "user",
-            "message": {"content": [{"type": "tool_result", "content": text}]}}
+def tool_use(name, inp, uid=None):
+    """Shaped like the real stream: the correlation id lives in `id` on the
+    tool_use block (see tests/fixtures/real-stream-excerpt.jsonl)."""
+    block = {"type": "tool_use", "name": name, "input": inp}
+    if uid:
+        block["id"] = uid
+    return {"type": "assistant", "message": {"content": [block]}}
+
+
+def tool_result(text, uid=None, is_error=False):
+    """Shaped like the real stream: `tool_use_id` + `is_error` + a `content` string."""
+    return {"type": "user", "message": {"content": [
+        {"type": "tool_result", "tool_use_id": uid, "is_error": is_error,
+         "content": text}]}}
 
 
 class ReadEvents(unittest.TestCase):
@@ -52,12 +61,29 @@ class ReadEvents(unittest.TestCase):
         self.assertEqual(ev[0]["line_start"], 178971)
         self.assertEqual(ev[0]["line_end"], 179010)
 
-    def test_tool_result_text_is_preferred_over_the_input(self):
-        p = stream(tool_use("read_file", {"file_path": "/c/apps/api.log",
-                                          "offset": 1, "limit": 2}),
-                   tool_result("Read lines 2-3 of 4 from /c/apps/api.log"))
+    def test_no_offset_no_limit_is_the_whole_file_not_an_unknown_range(self):
+        """CRITICAL-2a. The natural call on a small file passes neither offset nor
+        limit — and reading a whole file reads every line in it, so a proof inside it
+        is definitively REACHED. The old code required both to be ints and demoted
+        the commonest successful read to `unknown`."""
+        p = stream(tool_use("read_file", {"file_path": "/c/apps/api.log"}))
         ev = measure.read_events(p)
-        self.assertEqual((ev[0]["line_start"], ev[0]["line_end"]), (2, 3))
+        self.assertTrue(ev[0]["range_known"])
+        self.assertEqual(ev[0]["line_start"], 1)
+        self.assertEqual(ev[0]["line_end"], measure.OPEN_END)
+
+    def test_a_whole_file_result_body_pins_the_real_line_count(self):
+        p = stream(tool_use("read_file", {"file_path": "/c/apps/api.log"}, uid="call_x"),
+                   tool_result("l1\nl2\nl3\n", uid="call_x"))
+        ev = measure.read_events(p)
+        self.assertEqual((ev[0]["line_start"], ev[0]["line_end"]), (1, 3))
+
+    def test_a_failed_read_delivered_no_bytes_so_its_range_is_unknown(self):
+        p = stream(tool_use("read_file", {"file_path": "/c/apps/api.log"}, uid="call_x"),
+                   tool_result("File not found", uid="call_x", is_error=True))
+        ev = measure.read_events(p)
+        self.assertFalse(ev[0]["range_known"],
+                         "an errored read must not count as having read the file")
 
     def test_shell_read_records_the_file_but_leaves_the_range_unknown(self):
         p = stream(tool_use("run_shell_command",
@@ -127,6 +153,74 @@ class ProofReach(unittest.TestCase):
         r = measure.proof_reach(measure.read_events(p), proofs)
         self.assertEqual(r["verdict"], "not_reached",
                          "node-a/syslog must not satisfy node-b/syslog's proof by basename alone")
+
+
+class AgainstTheRealCapturedStream(unittest.TestCase):
+    """CRITICAL-2, built on tests/fixtures/real-stream-excerpt.jsonl — records 8,9,
+    11,12,13,15,16,25 copied VERBATIM out of the only real capture we have
+    (runs/20260730T195412Z-cap-multiline-stitching-v6/stream.jsonl). Every defect
+    fixed here existed because the original code was written against an assumed
+    stream format. Observed there and nowhere else:
+
+      * tool_use  -> {"type":"tool_use","id":"call_eb40…","name":…,"input":…}
+      * tool_result -> {"type":"tool_result","tool_use_id":"call_eb40…",
+                        "is_error":false,"content":"<the file's bytes>"}
+      * record 11 emits TWO tool_use blocks in ONE assistant message
+        (read_file + run_shell_command), answered by records 12 and 13.
+      * `grep -c "Read lines" stream.jsonl` == 0 — the range message the old code
+        parsed is not something this CLI emits.
+    """
+
+    PROOF = [{"file": "checkout-api.log", "line_start": 3, "line_end": 6,
+              "note": "the interleaved NPE trace"}]
+
+    def setUp(self):
+        self.events = measure.read_events(FIXTURE)
+
+    def test_parallel_tool_uses_pair_to_their_own_results_by_id(self):
+        by_id = {e["tool_use_id"]: e for e in self.events if e["tool_use_id"]}
+        # record 11's read_file was answered by record 12 (case.json, ~750 chars);
+        # its sibling run_shell_command by record 13 (`wc -l` output, ~130 chars).
+        # A "last pending" slot hands BOTH results to the second call.
+        self.assertEqual(by_id["call_eb402eb6d98b498d9ad60a31"]["tool"], "read_file")
+        self.assertEqual(by_id["call_1d52d317bf0c466db20246e0"]["tool"], "run_shell_command")
+        self.assertIn("case.json", by_id["call_eb402eb6d98b498d9ad60a31"]["file"])
+        self.assertGreater(by_id["call_eb402eb6d98b498d9ad60a31"]["result_chars"],
+                           by_id["call_1d52d317bf0c466db20246e0"]["result_chars"])
+
+    def test_the_whole_file_read_reaches_the_proof(self):
+        """Record 15 reads checkout-api.log with no offset/limit; record 16 returns
+        all 9 lines. The live row scored proofs_reached=0 on this exact run."""
+        r = measure.proof_reach(self.events, self.PROOF)
+        self.assertEqual(r["verdict"], "reached", r)
+        self.assertEqual(r["not_reached"], [])
+
+    def test_list_directory_is_a_dir_scan_not_a_file_read(self):
+        """CRITICAL-2c. Record 8 is list_directory on the case dir. The old code
+        pulled its `path` into `file`, _same_file never matched, and the proof came
+        back not_reached -> diagnosis `coverage`."""
+        dirs = [e for e in self.events if e["kind"] == "dir"]
+        self.assertEqual([e["tool"] for e in dirs], ["list_directory"])
+        self.assertTrue(dirs[0]["dir"].endswith("cap-multiline-stitching"))
+        self.assertIsNone(dirs[0]["file"])
+
+    def test_a_dir_scan_alone_yields_unknown_never_not_reached(self):
+        only_dir = [e for e in self.events if e["kind"] == "dir"]
+        r = measure.proof_reach(only_dir, self.PROOF)
+        self.assertEqual(r["verdict"], "unknown",
+                         "a directory-scoped search must never manufacture a coverage failure")
+        self.assertEqual(r["not_reached"], [])
+
+    def test_files_opened_counts_corpus_files_only(self):
+        """Important-8. The live row recorded files_opened=3 for a corpus holding ONE
+        log file: the directory, case.json, and the log."""
+        r = measure.proof_reach(self.events, self.PROOF)
+        self.assertEqual(r["files_opened"], ["checkout-api.log"], r["files_opened"])
+
+    def test_the_old_range_message_never_appears_in_a_real_stream(self):
+        body = open(FIXTURE, encoding="utf-8").read()
+        self.assertNotIn("Read lines", body,
+                         "if the CLI ever does emit this, the derivation can be revisited")
 
 
 REPORT_OK = """
@@ -254,6 +348,55 @@ class CombinedVerdict(unittest.TestCase):
                             {"command": "sed -n '178977,178996p' /c/apps/api.log"}))
         v = measure.verdict(self.CASE, p, REPORT_OK, judge_found=False)
         self.assertEqual(v["diagnosis"], "inconclusive")
+
+
+class CollapseThresholdScalesWithCaseKind(unittest.TestCase):
+    """Important-7. MIN_REPORT_CHARS=2000 was calibrated on full-corpus reports and
+    then applied to 4-line micro-corpora, so a SHORT CORRECT report on a micro case
+    was labelled `collapse`. That hit the `none` baseline arm hardest — its short
+    reports were scored as collapses rather than counted as misses, which flatters
+    the skill it exists to be compared against."""
+
+    SHORT_BUT_REAL = ("## Что произошло\nВ логе checkout-api видно исключение NPE. " * 12)
+
+    def test_a_short_correct_report_on_a_micro_corpus_is_not_a_collapse(self):
+        self.assertGreater(len(self.SHORT_BUT_REAL), 600)
+        self.assertLess(len(self.SHORT_BUT_REAL), 2000)
+        r = measure.report_checks(self.SHORT_BUT_REAL, "capability_micro")
+        self.assertFalse(r["collapsed"], r["collapse_reason"])
+        self.assertEqual(r["min_chars"], 600)
+
+    def test_the_same_length_on_a_full_defect_slice_is_still_a_collapse(self):
+        r = measure.report_checks(self.SHORT_BUT_REAL, "defect_slice")
+        self.assertTrue(r["collapsed"])
+        self.assertEqual(r["min_chars"], 2000)
+
+    def test_a_genuinely_collapsed_micro_report_is_still_caught(self):
+        r = measure.report_checks("Отчёт выше." * 3, "capability_micro")
+        self.assertTrue(r["collapsed"])
+
+    def test_the_verdict_uses_the_cases_own_kind(self):
+        p = stream(tool_use("read_file", {"file_path": "/c/apps/api.log",
+                                          "offset": 178970, "limit": 40}))
+        micro_case = {"case_id": "cap-x", "kind": "capability_micro",
+                      "proof_locations": PROOFS}
+        v = measure.verdict(micro_case, p, self.SHORT_BUT_REAL, judge_found=False)
+        self.assertEqual(v["diagnosis"], "reasoning",
+                         "a short micro report that read the proof is a reasoning miss, "
+                         "not a collapse")
+        slice_case = dict(micro_case, kind="defect_slice")
+        self.assertEqual(measure.verdict(slice_case, p, self.SHORT_BUT_REAL,
+                                         judge_found=False)["diagnosis"], "collapse")
+
+    def test_judge_found_outranks_collapse(self):
+        """If the judge read the whole report and says the defect was identified,
+        a report WAS delivered — `collapse` is a false label whatever its length."""
+        p = stream(tool_use("read_file", {"file_path": "/c/apps/api.log",
+                                          "offset": 178970, "limit": 40}))
+        v = measure.verdict(self.__class__.CASE_MICRO, p, "коротко", judge_found=True)
+        self.assertEqual(v["diagnosis"], "ok")
+
+    CASE_MICRO = {"case_id": "cap-x", "kind": "capability_micro", "proof_locations": PROOFS}
 
 
 if __name__ == "__main__":
