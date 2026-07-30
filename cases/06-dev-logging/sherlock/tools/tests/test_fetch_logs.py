@@ -932,8 +932,15 @@ class GuardsRefuseTheyDoNotWarn(unittest.TestCase):
         self.guard(self.GOOD + "password = x\n", 11)
 
     def test_zero_auth_keys_without_an_agent(self):
-        self.guard("[stand]\nhost = h.example\nuser = u\n", 11,
-                   env={"PATH": os.environ["PATH"]})
+        # Exit 14, not 11, SINCE the ask-for-credentials change: "no auth and no agent" is a
+        # missing CONNECTION DETAIL, not a malformed config. The guard still REFUSES (which is
+        # what this class is about) and now also names the missing field and hands back a
+        # paste-ready command. Asserting the field name keeps it from degrading into a
+        # generic "config not found", which was the defect the change fixed.
+        err = self.guard("[stand]\nhost = h.example\nuser = u\n", 14,
+                         env={"PATH": os.environ["PATH"]})
+        self.assertIn("auth", err)
+        self.assertNotIn("host", err.split("Не хватает:")[1].split("\n")[0])
 
     def test_password_env_naming_an_unset_variable(self):
         self.guard("""
@@ -2186,6 +2193,234 @@ class TheMultiplexOptInIsOptIn(unittest.TestCase):
             path = [a for a in argv if a.startswith("ControlPath=")][0]
             self.assertNotIn("/out/", path, path)
             self.assertLess(len(path.split("=", 1)[1]), 100, path)
+
+
+
+
+class ItAsksInsteadOfFailing(unittest.TestCase):
+    """The operator's ask: «the system should ask for those data explicitly so the user
+    could provide it right away» — folder, username, password.
+
+    Before this, a missing config was a dead end: exit 13 plus an INI template to
+    hand-author. Someone holding a host, a username and a password could not run the tool.
+
+    The load-bearing test in here is `test_headless_never_hangs`. The skill's real runtime
+    is a non-interactive `qwen -p` turn with nobody at the keyboard, so a prompt that reads
+    stdin there would block until the harness kills the turn and the user would get NOTHING
+    — the worst outcome SKILL.md defines. A hang must therefore FAIL this suite, never pass
+    it quietly, which is why every arm below carries a hard timeout.
+    """
+
+    def ask(self, *args, stdin=subprocess.DEVNULL, timeout=15, env=None, cwd=None):
+        """Run with stdin NOT a terminal. Returns (rc, stderr). A hang raises."""
+        e = dict(os.environ)
+        e.pop("SHERLOCK_STAND_CONFIG", None)
+        e.pop("SHERLOCK_WATCH_ROOT", None)
+        e.pop("SSH_AUTH_SOCK", None)          # else "auth" is satisfied by an agent
+        if env:
+            e.update(env)
+        p = subprocess.run(["bash", FETCH, *args], capture_output=True, text=True,
+                           env=e, cwd=cwd, stdin=stdin, timeout=timeout)
+        return p.returncode, p.stderr
+
+    # ---------------------------------------------------------------- headless
+    def test_headless_never_hangs(self):
+        """No TTY + nothing supplied ⇒ exits promptly. A timeout here is a real failure."""
+        with tempfile.TemporaryDirectory() as d:
+            try:
+                rc, _ = self.ask("--root", os.path.join(d, "out"),
+                                 env={"HOME": d}, timeout=15)
+            except subprocess.TimeoutExpired:
+                self.fail("BLOCKED on stdin with no TTY — this would hang a `qwen -p` turn "
+                          "and return nothing, which is worse than any error")
+            self.assertEqual(rc, 14)
+
+    def test_headless_with_stdin_closed_also_exits(self):
+        """Not just /dev/null: a CLOSED fd 0 must not wedge the read either."""
+        with tempfile.TemporaryDirectory() as d:
+            e = dict(os.environ); e["HOME"] = d
+            e.pop("SSH_AUTH_SOCK", None)
+            p = subprocess.run(["bash", "-c",
+                                'exec 0<&- ; bash "$1" --root "$2"', "_", FETCH,
+                                os.path.join(d, "out")],
+                               capture_output=True, text=True, env=e, timeout=15)
+            self.assertEqual(p.returncode, 14)
+
+    def test_it_names_exactly_which_fields_are_missing(self):
+        """A generic 'config not found' makes the operator guess. Name the fields."""
+        with tempfile.TemporaryDirectory() as d:
+            rc, err = self.ask("--root", os.path.join(d, "out"), env={"HOME": d})
+            self.assertEqual(rc, 14)
+            missing = err.split("Не хватает:")[1].split("\n")[0]
+            for field in ("host", "user", "auth"):
+                self.assertIn(field, missing)
+
+    def test_a_supplied_field_drops_out_of_the_missing_list(self):
+        """The ask must reflect what is ACTUALLY absent, not a canned list."""
+        with tempfile.TemporaryDirectory() as d:
+            rc, err = self.ask("--host", "h.example", "--user", "ops",
+                               "--root", os.path.join(d, "out"), env={"HOME": d})
+            self.assertEqual(rc, 14)
+            missing = err.split("Не хватает:")[1].split("\n")[0]
+            self.assertIn("auth", missing)
+            self.assertNotIn("host", missing)
+            self.assertNotIn("user", missing)
+
+    def test_the_ask_hands_back_a_usable_command(self):
+        with tempfile.TemporaryDirectory() as d:
+            _, err = self.ask("--root", os.path.join(d, "out"), env={"HOME": d})
+            self.assertIn("--host", err)
+            self.assertIn("--user", err)
+            self.assertIn("--log-dir", err)
+            # and it must point at the safe password routes, never at a --password value
+            self.assertIn("--password-stdin", err)
+            self.assertIn("--identity", err)
+
+    # ------------------------------------------------------------------- flags
+    def test_flags_alone_need_no_config_file_whatsoever(self):
+        with tempfile.TemporaryDirectory() as d:
+            s = Stand(d, auth="identity")
+            os.remove(s.cfg)                      # prove no config is involved at all
+            s.serve(11, "hello world")
+            rc, _, _, err = run("--host", "stand.example", "--user", "flink",
+                                "--identity", s.key, "--log-dir", "/opt/flink/current/log",
+                                "--glob", "flink-*-*.log", "--root", s.root,
+                                env=s.env(HOME=d))
+            self.assertEqual(rc, 0, err)
+            self.assertEqual(len(invocations(s.journal)), 2,
+                             "expected exactly listing + fetch")
+
+    def test_a_flag_beats_the_config(self):
+        with tempfile.TemporaryDirectory() as d:
+            s = Stand(d, auth="identity")
+            s.serve(11, "hello world")
+            rc, _, out, err = run("--config", s.cfg, "--host", "other.example",
+                                  "--user", "someone", "--root", s.root,
+                                  "--print-ssh-argv", env=s.env(HOME=d))
+            self.assertEqual(rc, 0, err)
+            argv = (out + err)
+            self.assertIn("other.example", argv)
+            self.assertIn("someone", argv)
+            self.assertNotIn("stand.example", argv)
+
+    # -------------------------------------------------------------- passwords
+    def test_password_as_a_flag_value_is_refused(self):
+        """It is visible in `ps` to every local user and lands in shell history."""
+        for form in (("--password", PASSWORD), ("--password=%s" % PASSWORD,)):
+            with tempfile.TemporaryDirectory() as d:
+                rc, err = self.ask("--host", "h", "--user", "u", *form,
+                                   "--root", os.path.join(d, "out"), env={"HOME": d})
+                self.assertEqual(rc, 1, "want a usage refusal for %r" % (form,))
+                self.assertIn("--password-stdin", err)
+                self.assertIn("--identity", err)
+
+    def test_password_via_stdin_works_and_never_reaches_ssh_argv(self):
+        with tempfile.TemporaryDirectory() as d:
+            s = Stand(d, auth="identity")
+            os.remove(s.cfg)
+            s.serve(11, "hello world")
+            e = dict(os.environ); e.update(s.env(HOME=d))
+            e.pop("SSH_AUTH_SOCK", None)
+            p = subprocess.run(["bash", FETCH, "--host", "stand.example", "--user", "flink",
+                                "--password-stdin", "--log-dir", "/opt/flink/current/log",
+                                "--glob", "flink-*-*.log", "--root", s.root],
+                               input=PASSWORD + "\n", capture_output=True, text=True,
+                               env=e, timeout=60)
+            self.assertEqual(p.returncode, 0, p.stderr)
+            for inv in invocations(s.journal):
+                self.assertNotIn(PASSWORD, inv,
+                                 "the password reached ssh argv — `ps` is world-readable")
+
+    def test_password_file_must_be_chmod_600(self):
+        with tempfile.TemporaryDirectory() as d:
+            pf = os.path.join(d, "pw")
+            with open(pf, "w", encoding="utf-8") as fh:
+                fh.write(PASSWORD + "\n")
+            os.chmod(pf, 0o644)
+            rc, err = self.ask("--host", "h", "--user", "u", "--password-file", pf,
+                               "--root", os.path.join(d, "out"), env={"HOME": d})
+            self.assertEqual(rc, 12, err)
+
+    def test_password_env_names_a_variable_not_a_value(self):
+        with tempfile.TemporaryDirectory() as d:
+            s = Stand(d, auth="identity")
+            os.remove(s.cfg)
+            s.serve(11, "hello world")
+            rc, _, _, err = run("--host", "stand.example", "--user", "flink",
+                                "--password-env", "SHERLOCK_STAND_PASSWORD",
+                                "--log-dir", "/opt/flink/current/log",
+                                "--glob", "flink-*-*.log", "--root", s.root,
+                                env=s.env(HOME=d))
+            self.assertEqual(rc, 0, err)
+            for inv in invocations(s.journal):
+                self.assertNotIn(PASSWORD, inv)
+
+    # ------------------------------------------------------------- TTY prompt
+    def _pty(self, script_args, answers, env, timeout=60):
+        """Drive the script through a real pty so `[ -t 0 ]` is TRUE, feeding answers."""
+        e = dict(os.environ); e.update(env)
+        e.pop("SSH_AUTH_SOCK", None)
+        cmd = "bash %s %s" % (FETCH, script_args)
+        # `-e` / --return is REQUIRED: without it `script` exits 0 no matter what the child
+        # did, so every `assertEqual(rc, ...)` below would pass vacuously and could never
+        # catch a regression. Found the hard way — the first version of this helper omitted it.
+        p = subprocess.run(["script", "-e", "-q", "-c", cmd, "/dev/null"],
+                           input=answers, capture_output=True, text=True,
+                           env=e, timeout=timeout)
+        return p.returncode, p.stdout + p.stderr
+
+    def test_a_terminal_run_asks_and_then_proceeds(self):
+        if shutil.which("script") is None:
+            self.skipTest("util-linux `script` not available to allocate a pty")
+        with tempfile.TemporaryDirectory() as d:
+            s = Stand(d, auth="identity")
+            os.remove(s.cfg)
+            s.serve(11, "hello world")
+            rc, out = self._pty(
+                "--root %s --glob 'flink-*-*.log' --quiet" % s.root,
+                # host, user, key-path (empty ⇒ password), password, log-dir
+                "stand.example\nflink\n\n%s\n/opt/flink/current/log\n" % PASSWORD,
+                s.env(HOME=d))
+            self.assertEqual(rc, 0, out)
+            self.assertIn("хост стенда", out)
+            self.assertIn("пароль", out)
+            self.assertEqual(len(invocations(s.journal)), 3,
+                             "password auth = -V preflight + listing + fetch")
+            for inv in invocations(s.journal):
+                self.assertNotIn(PASSWORD, inv)
+
+    def test_no_prompt_refuses_to_ask_even_on_a_terminal(self):
+        if shutil.which("script") is None:
+            self.skipTest("util-linux `script` not available to allocate a pty")
+        with tempfile.TemporaryDirectory() as d:
+            rc, out = self._pty("--no-prompt --root %s" % os.path.join(d, "out"),
+                                "should-never-be-read\n", {"HOME": d})
+            self.assertEqual(rc, 14, out)
+            self.assertIn("НУЖНЫ ДАННЫЕ", out)
+
+    # ------------------------------------------------------------ save-config
+    def test_save_config_records_the_env_var_name_and_never_the_password(self):
+        if shutil.which("script") is None:
+            self.skipTest("util-linux `script` not available to allocate a pty")
+        with tempfile.TemporaryDirectory() as d:
+            s = Stand(d, auth="identity")
+            os.remove(s.cfg)
+            s.serve(11, "hello world")
+            home = os.path.join(d, "newhome"); os.makedirs(home)
+            rc, out = self._pty(
+                "--save-config --root %s --glob 'flink-*-*.log' --quiet" % s.root,
+                "stand.example\nflink\n\n%s\n/opt/flink/current/log\n" % PASSWORD,
+                s.env(HOME=home))
+            self.assertEqual(rc, 0, out)
+            saved = os.path.join(home, ".sherlock", "stand.ini")
+            self.assertTrue(os.path.exists(saved), "config was not saved")
+            self.assertEqual(stat.S_IMODE(os.stat(saved).st_mode), 0o600)
+            body = open(saved, encoding="utf-8").read()
+            self.assertIn("password_env", body)
+            self.assertNotIn(PASSWORD, body,
+                             "the password was written to disk — only its VARIABLE NAME may be")
+            self.assertIn("host = stand.example", body)
+            self.assertIn("user = flink", body)
 
 
 if __name__ == "__main__":

@@ -34,6 +34,10 @@
 #   12  PERMISSION refusal: config or identity_file not mode 600/400, not owned by us, not a
 #       regular file, unreadable — or `stat` unavailable (FAIL CLOSED).
 #   13  config file not found at any resolution step (prints the paste-ready template).
+#       NOTE: no config is NOT itself fatal any more — flags can supply everything, and a
+#       TTY run asks. 13 now only fires for a config path that was named and is missing.
+#   14  connection details missing AND no TTY to ask on. Prints exactly which of
+#       host/user/auth is absent plus a paste-ready command. NEVER blocks on stdin.
 #   20  ssh exec failed (unreachable, auth rejected, host key refused, remote command failed).
 #   21  password auth selected but this client is OpenSSH < 8.4 (no SSH_ASKPASS_REQUIRE).
 #   22  ssh timed out. `timeout`'s own 124 is TRANSLATED to 22 so 124 never leaks.
@@ -48,7 +52,7 @@
 #   41  another instance holds the lock.
 #   42  this root already belongs to a DIFFERENT source. Two sources sharing one root
 #       interleave their bytes into one mirror the model then cites; see DEVIATION 7.
-#   2-9, 14-19, 26-29, 31-39, 43+  RESERVED. 124 and 130 are never used.
+#   2-9, 15-19, 26-29, 31-39, 43+  RESERVED. 124 and 130 are never used.
 #
 # ---------------------------------------------------------------------------
 # This script is a SOURCE implementation: resolve(spec, window) -> local bytes + manifest.
@@ -187,6 +191,18 @@ ANCHOR_BYTES="${SHERLOCK_ANCHOR_BYTES:-256}"
 GLOB_EXPLICIT=0             # set when --glob or a config file_glob asked for a specific mask
 STRICT_EXPLICIT=0           # set when the config actually wrote strict_host_key
 
+# --- connection overrides: a flag ALWAYS beats the config -----------------------
+# These exist so a first-time user holding only a host, a username and a password can
+# run the tool with NO config file at all. Before they existed, "no config" was a dead
+# end (exit 13 + a template to hand-author), which is the defect this block fixes.
+HOST_OVERRIDE=""; USER_OVERRIDE=""; PORT_OVERRIDE=""
+IDENTITY_OVERRIDE=""; LOGDIR_OVERRIDE=""
+PWENV_OVERRIDE=""; PWFILE_OVERRIDE=""; PW_STDIN=0
+c_password_file=""
+NO_PROMPT=0                 # --no-prompt: never ask, even on a TTY (for scripts)
+SAVE_CFG=0                  # --save-config: persist the answers (never the password)
+PROMPTED=0                  # 1 if any value came from an interactive prompt
+
 # [stand]
 c_host=""; c_port="22"; c_user=""
 c_identity_file=""; c_password_env=""; c_password=""
@@ -260,6 +276,21 @@ and writes a manifest; it never reads or interprets log content.
 
 FLAGS (a flag ALWAYS overrides the same-named config key)
   --config FILE        config path; overrides all resolution steps
+  --host HOST          stand hostname or IP        --user NAME    login name
+  --port N             ssh port (default 22)       --log-dir DIR  remote log directory
+  --identity FILE      ssh key — best option, no password anywhere
+  --password-stdin     read the password as one line from stdin
+  --password-env VAR   the NAME of an env var holding the password (never the value)
+  --password-file FILE a chmod-600 file holding the password
+  --no-prompt          never ask interactively, even on a TTY (for scripts)
+  --save-config        write the answers to ~/.sherlock/stand.ini (chmod 600, NO password)
+
+  There is deliberately NO `--password VALUE` flag: a password as a flag value is readable
+  by any local user via `ps` and is written to your shell history. With none of the flags
+  above, a TTY run simply ASKS — and the answer is read without echo.
+
+  With nothing supplied, a run on a terminal asks for host / user / password / log-dir and
+  continues immediately. With no terminal it exits 14 and prints exactly what is missing.
   --source SPEC        `ssh` (default) or `local:<DIR>` (never execs ssh, needs no config)
   --once               exactly one poll tick, then exit — THIS IS THE DEFAULT
   --watch              foreground poll loop; Ctrl-C stops it. No cron/systemd/launchd unit
@@ -294,6 +325,7 @@ EXIT CODES
   11 config semantic error                    23 listing unusable / wrong log_dir
   12 permission refusal (chmod 600)           24 too many failed ticks / every tick failed
   13 config not found                         25 `ssh` not on PATH (degrade gracefully)
+  14 connection info missing, no TTY to ask
                                               30 local source dir missing
                                               40 root or state not writable   41 lock held
                                               42 this root belongs to another source
@@ -337,6 +369,40 @@ while [ $# -gt 0 ]; do
     --dry-run)     DRY_RUN=1; shift ;;
     --json)        JSON_OUT=1; shift ;;
     --quiet)       QUIET=1; shift ;;
+    --host)        [ $# -ge 2 ] || fail 1 "--host needs a hostname"; HOST_OVERRIDE="$2"; shift 2 ;;
+    --host=*)      HOST_OVERRIDE="${1#--host=}"; shift ;;
+    --user)        [ $# -ge 2 ] || fail 1 "--user needs a username"; USER_OVERRIDE="$2"; shift 2 ;;
+    --user=*)      USER_OVERRIDE="${1#--user=}"; shift ;;
+    --port)        [ $# -ge 2 ] || fail 1 "--port needs a number"; PORT_OVERRIDE="$2"; shift 2 ;;
+    --port=*)      PORT_OVERRIDE="${1#--port=}"; shift ;;
+    --identity)    [ $# -ge 2 ] || fail 1 "--identity needs a path"; IDENTITY_OVERRIDE="$2"; shift 2 ;;
+    --identity=*)  IDENTITY_OVERRIDE="${1#--identity=}"; shift ;;
+    --log-dir)     [ $# -ge 2 ] || fail 1 "--log-dir needs a path"; LOGDIR_OVERRIDE="$2"; shift 2 ;;
+    --log-dir=*)   LOGDIR_OVERRIDE="${1#--log-dir=}"; shift ;;
+    --password-env)   [ $# -ge 2 ] || fail 1 "--password-env needs a variable NAME"
+                      PWENV_OVERRIDE="$2"; shift 2 ;;
+    --password-env=*) PWENV_OVERRIDE="${1#--password-env=}"; shift ;;
+    --password-file)   [ $# -ge 2 ] || fail 1 "--password-file needs a path"
+                       PWFILE_OVERRIDE="$2"; shift 2 ;;
+    --password-file=*) PWFILE_OVERRIDE="${1#--password-file=}"; shift ;;
+    --password-stdin)  PW_STDIN=1; shift ;;
+    # DELIBERATE REFUSAL, not an oversight. A password as a flag VALUE is readable by any
+    # local user via `ps` / /proc/<pid>/cmdline for the life of the process, and it lands in
+    # the shell history file. Neither is repairable afterwards — bash cannot rewrite its own
+    # /proc/self/cmdline. So the flag does not exist, and saying so beats accepting it.
+    --password|--password=*)
+      red "--password is not supported on purpose: a password on the command line is visible"
+      red "to every local user in \`ps\` and is written to your shell history."
+      printf '%s\n' \
+        "  Use one of these instead — each names a LOCATION, never the secret itself:" \
+        "    (nothing)                 just run it: you will be PROMPTED, with no echo" \
+        "    --password-stdin          read one line from a pipe" \
+        "    --password-env VAR        the NAME of an environment variable" \
+        "    --password-file FILE      a chmod-600 file" \
+        "    --identity ~/.ssh/id_ed25519   key auth — best of all, no password anywhere" >&2
+      exit 1 ;;
+    --no-prompt)   NO_PROMPT=1; shift ;;
+    --save-config) SAVE_CFG=1; shift ;;
     --version)     printf 'fetch-logs.sh %s\n' "$VERSION"; exit 0 ;;
     -h|--help)     usage; exit 0 ;;
     --)            shift; break ;;
@@ -397,6 +463,167 @@ resolve_config() {
   [ -f "./sherlock-stand.ini" ] && { CFG="./sherlock-stand.ini"; return 0; }
   [ -f "$HOME/.sherlock/stand.ini" ] && { CFG="$HOME/.sherlock/stand.ini"; return 0; }
   return 1
+}
+
+# ============================================ connection info: flags, then ASK
+# A flag ALWAYS beats the config. --identity / --password-* are mutually exclusive with
+# each other: whichever the user passed LAST on the command line wins, and it clears the
+# others so the auth arithmetic in validate_config still sees exactly one mode.
+#
+# --password-file and --password-stdin are both folded into `c_password` (mode "password")
+# on purpose: downstream (build_ssh_argv / ssh_preflight / ssh_exec) then needs no new
+# branch, and the askpass channel stays the single delivery path for every password source.
+apply_conn_overrides() {
+  [ -n "$HOST_OVERRIDE" ]   && c_host="$HOST_OVERRIDE"
+  [ -n "$USER_OVERRIDE" ]   && c_user="$USER_OVERRIDE"
+  [ -n "$PORT_OVERRIDE" ]   && c_port="$PORT_OVERRIDE"
+  [ -n "$LOGDIR_OVERRIDE" ] && c_log_dir="$LOGDIR_OVERRIDE"
+  if [ -n "$IDENTITY_OVERRIDE" ]; then
+    c_identity_file="$IDENTITY_OVERRIDE"; c_password_env=""; c_password=""
+  fi
+  if [ -n "$PWENV_OVERRIDE" ]; then
+    c_password_env="$PWENV_OVERRIDE"; c_identity_file=""; c_password=""
+  fi
+  if [ -n "$PWFILE_OVERRIDE" ]; then
+    [ -f "$PWFILE_OVERRIDE" ] || fail 11 "--password-file not found: $PWFILE_OVERRIDE"
+    check_perms "$PWFILE_OVERRIDE" "password-file"
+    IFS= read -r c_password < "$PWFILE_OVERRIDE" || true
+    [ -n "$c_password" ] || fail 11 "--password-file is empty: $PWFILE_OVERRIDE"
+    c_identity_file=""; c_password_env=""
+  fi
+  if [ "$PW_STDIN" -eq 1 ]; then
+    IFS= read -r c_password || true
+    [ -n "$c_password" ] || fail 11 "--password-stdin: stdin was empty"
+    c_identity_file=""; c_password_env=""
+  fi
+  return 0
+}
+
+# Which of the three things an ssh connection cannot be made without is still absent.
+conn_missing() {
+  local m=()
+  [ -n "$c_host" ] || m+=("host")
+  [ -n "$c_user" ] || m+=("user")
+  if [ -z "$c_identity_file" ] && [ -z "$c_password_env" ] && [ -z "$c_password" ] \
+     && [ -z "${SSH_AUTH_SOCK:-}" ]; then
+    m+=("auth")
+  fi
+  [ ${#m[@]} -eq 0 ] || printf '%s\n' "${m[@]}"
+}
+
+# A human is at the keyboard: ask, then continue in the SAME run.
+# The password is read with `read -s` — no echo — so it never appears on screen, never in
+# argv, never in `ps`, and never in the shell history file. That is why prompting is the
+# PREFERRED way to supply it, not a fallback.
+prompt_conn_info() {
+  PROMPTED=1
+  local ans dflt
+  printf '\n' >&2
+  green "нужны данные для подключения — ответьте, и я сразу продолжу"
+  if [ -z "$c_host" ]; then
+    printf '  хост стенда (или IP): ' >&2
+    IFS= read -r c_host || c_host=""
+    [ -n "$c_host" ] || fail 11 "хост не указан"
+  fi
+  if [ -z "$c_user" ]; then
+    dflt="${USER:-}"
+    printf '  имя пользователя%s: ' "${dflt:+ [$dflt]}" >&2
+    IFS= read -r ans || ans=""
+    c_user="${ans:-$dflt}"
+    [ -n "$c_user" ] || fail 11 "имя пользователя не указано"
+  fi
+  if [ -z "$c_identity_file" ] && [ -z "$c_password_env" ] && [ -z "$c_password" ] \
+     && [ -z "${SSH_AUTH_SOCK:-}" ]; then
+    printf '  путь к SSH-ключу (Enter — ввести пароль): ' >&2
+    IFS= read -r ans || ans=""
+    if [ -n "$ans" ]; then
+      c_identity_file="$ans"
+    else
+      printf '  пароль (не отображается, в историю не попадёт): ' >&2
+      IFS= read -r -s c_password || c_password=""
+      printf '\n' >&2
+      [ -n "$c_password" ] || fail 11 "пароль пустой"
+    fi
+  fi
+  dflt="$c_log_dir"
+  printf '  каталог с логами [%s]: ' "$dflt" >&2
+  IFS= read -r ans || ans=""
+  c_log_dir="${ans:-$dflt}"
+  return 0
+}
+
+# NO TTY. Prompting here would BLOCK the caller's whole turn and return nothing, which
+# SKILL.md rule 2 calls the worst possible outcome. So we never read stdin: we say exactly
+# what is missing, hand back a paste-ready command, and exit. Naming the missing fields is
+# the entire point — a bare "config not found" makes the operator guess.
+ask_block() {
+  local missing="$1"
+  {
+    printf '\n━━━━━━━━━━ НУЖНЫ ДАННЫЕ ДЛЯ ПОДКЛЮЧЕНИЯ ━━━━━━━━━━\n'
+    printf 'Не хватает: %s\n\n' "$missing"
+    printf 'Спросить интерактивно не могу: сессия неинтерактивная (нет TTY),\n'
+    printf 'а зависнуть на вопросе хуже, чем сразу сказать, чего не хватает.\n\n'
+    printf 'Заполните и запустите:\n\n'
+    printf '  %s \\\n' "$0"
+    [ -n "$c_host" ] || printf '    --host <хост-или-IP> \\\n'
+    [ -n "$c_user" ] || printf '    --user <имя-пользователя> \\\n'
+    case "$missing" in
+      *auth*)
+        printf '    --identity ~/.ssh/id_ed25519 \\\n'
+        printf '      # ключ — лучший вариант. Вместо него можно:\n'
+        printf '      #   --password-stdin        (пароль одной строкой из pipe)\n'
+        printf '      #   --password-env ИМЯ_ПЕР  (ИМЯ env-переменной, не значение)\n'
+        printf '      #   --password-file FILE    (файл с chmod 600)\n' ;;
+    esac
+    printf '    --log-dir %s\n' "$c_log_dir"
+    printf '\nПароль нельзя передать значением флага (--password): он был бы виден\n'
+    printf 'в `ps` всем локальным пользователям и попал бы в историю оболочки.\n'
+    printf 'На терминале достаточно запустить без флагов — спрошу и не покажу ввод.\n'
+    printf '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n'
+  } >&2
+}
+
+# Persist the answers so the next run needs no prompting. The PASSWORD IS NEVER WRITTEN —
+# we record the NAME of an env var to read it from instead.
+save_config() {
+  local d="$HOME/.sherlock" f="$HOME/.sherlock/stand.ini"
+  mkdir -p "$d" 2>/dev/null || { red "не смог создать $d — конфиг не сохранён"; return 0; }
+  ( umask 077
+    {
+      printf '[stand]\n'
+      printf 'host = %s\n' "$c_host"
+      printf 'port = %s\n' "$c_port"
+      printf 'user = %s\n' "$c_user"
+      if [ -n "$c_identity_file" ]; then
+        printf 'identity_file = %s\n' "$c_identity_file"
+      else
+        printf 'password_env = SHERLOCK_STAND_PASSWORD\n'
+      fi
+      printf 'log_dir = %s\n' "$c_log_dir"
+    } > "$f" ) || { red "не смог записать $f"; return 0; }
+  chmod 600 "$f" 2>/dev/null || true
+  green "сохранено: $f (chmod 600)"
+  [ -n "$c_identity_file" ] || \
+    info "пароль НЕ записан — задайте \$SHERLOCK_STAND_PASSWORD перед следующим запуском"
+  return 0
+}
+
+ensure_connection_info() {
+  local missing
+  missing="$(conn_missing | paste -sd, -)"
+  [ -z "$missing" ] && { [ "$SAVE_CFG" -eq 1 ] && save_config; return 0; }
+
+  # `-t 0` is the seam the tests drive: a pty makes this true, a pipe or </dev/null false.
+  if [ -t 0 ] && [ "$NO_PROMPT" -eq 0 ]; then
+    prompt_conn_info
+    missing="$(conn_missing | paste -sd, -)"
+    if [ -z "$missing" ]; then
+      [ "$SAVE_CFG" -eq 1 ] && save_config
+      return 0
+    fi
+  fi
+  ask_block "$missing"
+  exit 14
 }
 
 # Hard permission refusal. Regular file, owned by us, mode EXACTLY 600 or 400.
@@ -1560,9 +1787,14 @@ mint_invocation_id
 if resolve_config; then
   check_perms "$CFG" "config"
   parse_config "$CFG"
-elif [ "$SOURCE_KIND" = "ssh" ]; then
-  no_config "no config found. Looked at: --config, \$SHERLOCK_STAND_CONFIG, ./sherlock-stand.ini, ~/.sherlock/stand.ini"
 fi
+# NOTE: a missing config is NO LONGER fatal here. It used to be (exit 13 + a template to
+# hand-author), which meant a user holding a host, a username and a password could not run
+# the tool at all. Flags may supply everything, and ensure_connection_info() below either
+# ASKS for what is still missing (on a TTY) or prints an explicit, non-hanging request for
+# it (headless). Only if neither can produce the values do we exit.
+apply_conn_overrides
+[ "$SOURCE_KIND" = "ssh" ] && ensure_connection_info
 
 [ -n "$GLOB_OVERRIDE" ]     && { c_file_glob="$GLOB_OVERRIDE"; GLOB_EXPLICIT=1; }
 [ -n "$EXCLUDE_OVERRIDE" ]  && c_exclude_glob="$EXCLUDE_OVERRIDE"
