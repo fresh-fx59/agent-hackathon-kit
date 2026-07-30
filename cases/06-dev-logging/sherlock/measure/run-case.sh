@@ -31,13 +31,34 @@ CASE_DIR="$(cd "$CASE_DIR" && pwd)"
 CASE_ID="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["case_id"])' \
   "$CASE_DIR/case.json")" || { echo "✗ unreadable case.json" >&2; exit 1; }
 
+# CRITICAL-1. The model is pointed at the CORPUS, never at the case root: case.json
+# holds the title, the root cause and every proof_location. In the captured run
+# 20260730T195412Z the model's 12th record was a read_file on case.json and its 13th
+# returned the root cause — before it had opened a single log line. Every number that
+# layout produced measured "can the model read a JSON file".
+PROMPT_DIR="$CASE_DIR/corpus"
+[ -d "$PROMPT_DIR" ] || { echo "✗ no corpus dir: $PROMPT_DIR (rebuild with slice.py/micro.py)" >&2; exit 1; }
+# The guard, so this can never silently regress: whatever directory we are about to
+# name in the prompt must not contain the answer. Checked on the resolved path, not
+# on the variable, so a symlinked or re-pointed PROMPT_DIR is caught too.
+PROMPT_DIR="$(cd "$PROMPT_DIR" && pwd)"
+if [ -e "$PROMPT_DIR/case.json" ]; then
+  echo "✗ REFUSING: $PROMPT_DIR contains case.json — the prompt directory must never" >&2
+  echo "  hold the answer key (title/root_cause/proof_locations). See CRITICAL-1." >&2
+  exit 1
+fi
+
 # Validate the arm BEFORE creating the run dir: a missing skill must fail with no
 # trace, not leave behind an empty orphan run dir.
 if [ "$ARM" != "none" ]; then
   [ -f "$SKILLS/$ARM/SKILL.md" ] || { echo "✗ no skill at $SKILLS/$ARM/SKILL.md" >&2; exit 1; }
 fi
 
-STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
+# Second-resolution alone is not unique enough: two runs started in the same second
+# (a tier-2 loop over fast/refused cases) would share a run dir and the second would
+# overwrite the first — in a rig whose one promise is that the run dir is NEVER
+# deleted. A short random suffix makes each capture its own directory.
+STAMP="$(date -u +%Y%m%dT%H%M%SZ)-$(od -An -N3 -tx1 /dev/urandom | tr -d ' \n')"
 RUN_DIR="$RUNS/$STAMP-$CASE_ID-$ARM"
 mkdir -p "$RUN_DIR" || { echo "✗ cannot create $RUN_DIR" >&2; exit 1; }
 
@@ -50,7 +71,7 @@ if [ "$ARM" != "none" ]; then
   cp -r "$SKILLS/$ARM" "$W/.qwen/skills/log-rca" || exit 1
 fi
 
-PROMPT="Продакшн деградировал. Логи со всей платформы лежат в $CASE_DIR.
+PROMPT="Продакшн деградировал. Логи со всей платформы лежат в $PROMPT_DIR.
 Найди ВСЕ проблемы и инциденты, определи корневую причину каждой и предложи,
 что делать. Ссылайся на конкретные строки в формате файл:строка."
 
@@ -78,6 +99,13 @@ for line in open(os.path.join(run_dir, "stream.jsonl"), encoding="utf-8", errors
         continue
     if r.get("type") == "result":
         final = r
+# CRITICAL-4. A non-zero exit from qwen — including timeout's 124 — means the run did
+# not complete. Whatever partial text landed in the stream is not a measurement. This
+# was captured into meta.json as `exit_code` and then ignored, so a timed-out run was
+# recorded as a normal row.
+if int(rc) != 0:
+    print("  ✗ runner exited %s (timeout/crash), NOT recorded" % rc); sys.exit(4)
+
 if final is None:
     print("  ✗ no final result record — NOT recorded"); sys.exit(2)
 
@@ -85,10 +113,15 @@ text = final.get("result") or ""
 if not text.strip():
     print("  ✗ empty result — NOT recorded"); sys.exit(2)
 
-# Same guard as run-bench.sh: qwen reports some provider failures as a SUCCESSFUL
-# record whose result is the error text. Two such rows polluted a ledger on 2026-07-28.
-if text.lstrip().startswith("[API Error") or ("[API Error" in text and len(text) < 400):
-    print("  ✗ provider/run error, NOT recorded: %s" % text[:160].replace("\n", " "))
+# CRITICAL-4. Same guard as run-bench.sh:61, whose FIRST check is is_error — dropped
+# here, so a record with is_error true, >=400 chars and no leading "[API Error" was
+# refused there and recorded here. The provider's own flag outranks any text
+# heuristic: text matching is the fallback for providers that report a failure as a
+# successful record (two such rows polluted a ledger on 2026-07-28), not the primary.
+if final.get("is_error") or text.lstrip().startswith("[API Error") \
+        or ("[API Error" in text and len(text) < 400):
+    print("  ✗ provider/run error, NOT recorded: %s"
+          % str(final.get("error") or text)[:160].replace("\n", " "))
     sys.exit(3)
 
 with open(os.path.join(run_dir, "report.md"), "w", encoding="utf-8") as fh:

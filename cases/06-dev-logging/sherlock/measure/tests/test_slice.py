@@ -57,15 +57,31 @@ class BuildCase(unittest.TestCase):
             case = slicer.build_case(tiny_key(), corpus, out, "D01")
             self.assertEqual(sorted(case["files"]),
                              ["apps/api.log", "inhouse/promo.plog"])
-            self.assertFalse(os.path.exists(os.path.join(out, "D01", "unrelated/other.log")),
+            self.assertFalse(os.path.exists(os.path.join(out, "D01", "corpus/unrelated/other.log")),
                              "a file with no proof must not be copied into the slice")
+
+    def test_the_answer_is_not_inside_the_corpus_the_model_is_pointed_at(self):
+        """CRITICAL-1: case.json carries the title, the root cause and every proof
+        location. It sits at the case ROOT; corpus/ holds only log bytes. Sharing one
+        directory is how the captured run 20260730T195412Z read the answer (record 12)
+        before it read the log (record 15)."""
+        with tempfile.TemporaryDirectory() as d:
+            corpus = make_corpus(os.path.join(d, "corpus"))
+            out = os.path.join(d, "cases")
+            slicer.build_case(tiny_key(), corpus, out, "D01")
+            self.assertTrue(os.path.isfile(os.path.join(out, "D01", "case.json")))
+            self.assertFalse(os.path.exists(os.path.join(out, "D01", "corpus", "case.json")),
+                             "case.json must never be reachable from the prompt directory")
+            listed = os.listdir(os.path.join(out, "D01", "corpus"))
+            self.assertEqual(sorted(listed), ["apps", "inhouse"],
+                             "the corpus dir must hold nothing but log files")
 
     def test_whole_files_are_copied_so_line_numbers_still_resolve(self):
         with tempfile.TemporaryDirectory() as d:
             corpus = make_corpus(os.path.join(d, "corpus"))
             out = os.path.join(d, "cases")
             slicer.build_case(tiny_key(), corpus, out, "D01")
-            got = open(os.path.join(out, "D01", "apps/api.log"), encoding="utf-8").read()
+            got = open(os.path.join(out, "D01", "corpus/apps/api.log"), encoding="utf-8").read()
             self.assertEqual(got, open(os.path.join(corpus, "apps/api.log"),
                                        encoding="utf-8").read())
             line3 = got.splitlines()[2]

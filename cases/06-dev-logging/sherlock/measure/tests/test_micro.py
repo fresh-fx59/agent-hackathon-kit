@@ -58,7 +58,7 @@ class ProofsAreReal(unittest.TestCase):
             for cid in micro.build_all_micro(d):
                 case = json.load(open(os.path.join(d, cid, "case.json"), encoding="utf-8"))
                 for pr in case["proof_locations"]:
-                    path = os.path.join(d, cid, pr["file"])
+                    path = os.path.join(d, cid, micro.CORPUS_SUBDIR, pr["file"])
                     if path.endswith(".gz"):
                         with gzip.open(path, "rt", encoding="utf-8") as fh:
                             lines = fh.read().splitlines()
@@ -77,7 +77,7 @@ class ProofsAreReal(unittest.TestCase):
             case = micro.build_micro(d, "cap-gz-decompression")
             gz = [f for f in case["files"] if f.endswith(".gz")]
             self.assertEqual(len(gz), 1)
-            with gzip.open(os.path.join(d, case["case_id"], gz[0]), "rt",
+            with gzip.open(os.path.join(d, case["case_id"], micro.CORPUS_SUBDIR, gz[0]), "rt",
                            encoding="utf-8") as fh:
                 self.assertIn("cbr.ru", fh.read())
 
@@ -85,7 +85,7 @@ class ProofsAreReal(unittest.TestCase):
         # The point of this corpus is that grepping ERROR/FATAL finds nothing.
         with tempfile.TemporaryDirectory() as d:
             case = micro.build_micro(d, "cap-ru-severity")
-            body = open(os.path.join(d, case["case_id"], case["files"][0]),
+            body = open(os.path.join(d, case["case_id"], micro.CORPUS_SUBDIR, case["files"][0]),
                         encoding="utf-8").read()
             for word in ("ERROR", "FATAL", "WARN", "CRITICAL"):
                 self.assertNotIn(word, body,

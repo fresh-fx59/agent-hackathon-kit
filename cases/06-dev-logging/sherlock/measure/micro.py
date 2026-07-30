@@ -9,16 +9,23 @@ cannot stitch a stack trace across 12 hand-written lines, it will not do it acro
 240,000. Green here proves nothing about the corpus; RED here localises the gap for
 almost no money.
 
-`case.json` is shape-identical to slice.py's output, so run-case.sh, score_case.py
-and measure.verdict need no special case. Each proof carries an `expect` string, and
-tests assert the declared line range really contains it — a micro-corpus whose proof
-points at the wrong line would report a coverage failure forever.
+`case.json` is shape-identical to slice.py's output, and so is the on-disk layout
+(CRITICAL-1): `case.json` sits at the case root and every log file goes UNDER
+`corpus/`, which is the only directory the prompt names. The answer must not be
+reachable from the haystack — see slice.py's module docstring for the captured run
+where the model read case.json before it read the log.
+
+Each proof carries an `expect` string, and tests assert the declared line range
+really contains it — a micro-corpus whose proof points at the wrong line would
+report a coverage failure forever.
 """
 import argparse
 import gzip
 import json
 import os
 import shutil
+
+from slice import CORPUS_SUBDIR
 
 MICRO = {
     "cap-multiline-stitching": {
@@ -206,15 +213,16 @@ def build_micro(out_dir, cap_id):
     case_dir = os.path.join(out_dir, cap_id)
     if os.path.isdir(case_dir):
         shutil.rmtree(case_dir)
-    os.makedirs(case_dir, exist_ok=True)
+    corpus_out = os.path.join(case_dir, CORPUS_SUBDIR)
+    os.makedirs(corpus_out, exist_ok=True)
 
     written = []
     for name, lines in spec.get("files", {}).items():
-        with open(os.path.join(case_dir, name), "w", encoding="utf-8") as fh:
+        with open(os.path.join(corpus_out, name), "w", encoding="utf-8") as fh:
             fh.write("\n".join(lines) + "\n")
         written.append(name)
     for name, lines in spec.get("gz_files", {}).items():
-        with gzip.open(os.path.join(case_dir, name), "wt", encoding="utf-8") as fh:
+        with gzip.open(os.path.join(corpus_out, name), "wt", encoding="utf-8") as fh:
             fh.write("\n".join(lines) + "\n")
         written.append(name)
 

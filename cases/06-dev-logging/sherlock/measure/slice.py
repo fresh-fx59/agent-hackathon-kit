@@ -10,12 +10,28 @@ A line-window slice would be smaller and would quietly invalidate proof_reach.
 
 A slice is EASIER than the full corpus. Slice-green does not imply corpus-green;
 see measure/README.md and the three-tier gate.
+
+LAYOUT (CRITICAL-1). The case is TWO things that must never share a directory:
+
+    cases/<id>/case.json        the answer — title, root_cause, proof_locations
+    cases/<id>/corpus/<files>   the haystack the model is pointed at
+
+They used to sit side by side, and the model read case.json first: in the one
+captured run (20260730T195412Z), record 12 was a read_file on case.json and
+record 13 returned the root cause — BEFORE the log was ever opened. Every tier
+0/1/2 number that layout produced measured "can the model read a JSON file".
+run-case.sh now prompts with <case>/corpus and refuses outright if the directory
+it is about to name contains a case.json.
 """
 import argparse
 import json
 import os
 import shutil
 import sys
+
+# The subdirectory the model is pointed at. Anything OUTSIDE it (case.json) is
+# the answer key and must never be reachable from the prompt path.
+CORPUS_SUBDIR = "corpus"
 
 
 def is_herring(defect):
@@ -44,14 +60,15 @@ def build_case(key, corpus_dir, out_dir, defect_id):
     case_dir = os.path.join(out_dir, defect_id)
     if os.path.isdir(case_dir):
         shutil.rmtree(case_dir)
-    os.makedirs(case_dir, exist_ok=True)
+    corpus_out = os.path.join(case_dir, CORPUS_SUBDIR)
+    os.makedirs(corpus_out, exist_ok=True)
 
     files = proof_files(defect)
     for rel in files:
         src = os.path.join(corpus_dir, rel)
         if not os.path.isfile(src):
             raise FileNotFoundError("proof file missing from corpus: %s" % src)
-        dst = os.path.join(case_dir, rel)
+        dst = os.path.join(corpus_out, rel)
         os.makedirs(os.path.dirname(dst), exist_ok=True)
         shutil.copy2(src, dst)
 
@@ -61,7 +78,7 @@ def build_case(key, corpus_dir, out_dir, defect_id):
     for p in defect.get("proof_locations", []):
         if p["file"].endswith(".gz"):
             continue
-        n = _count_lines(os.path.join(case_dir, p["file"]))
+        n = _count_lines(os.path.join(corpus_out, p["file"]))
         if p["line_end"] > n + 1:      # +1 tolerates a truncated tail (no trailing newline)
             raise ValueError("proof %s:%d is past EOF (%d lines) — key/corpus drift"
                              % (p["file"], p["line_end"], n))
