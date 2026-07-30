@@ -34,6 +34,8 @@ All new files live under `cases/06-dev-logging/sherlock/measure/`.
 | `score_case.py` | one case's report → judge found/not-found (the one semantic call) |
 | `run-case.sh` | run an arm against a case, capture `stream.jsonl`, never delete the run dir |
 | `gate.sh` | three-tier promotion: one slice → all slices → full corpus |
+| `report-case.py` | glue `gate.sh` calls: judge + deterministic verdict → one `results.jsonl` row |
+| `micro.py` | hand-written capability micro-corpora (tier 0) |
 | `README.md` | how to run it, and what a slice-green result does NOT prove |
 | `tests/run.sh` | aggregator, mirrors `tools/tests/run.sh` |
 | `tests/test_slice.py`, `tests/test_measure.py`, `tests/test_run_case.py`, `tests/test_score_case.py` | suites |
@@ -1306,7 +1308,8 @@ git commit -m "case06 measure: score_case.py — per-defect judge on the broker"
 **Files:**
 - Create: `cases/06-dev-logging/sherlock/measure/gate.sh`
 - Create: `cases/06-dev-logging/sherlock/measure/README.md`
-- Modify: `cases/06-dev-logging/sherlock/tools/tests/run.sh` — no change needed; instead add a line to `cases/06-dev-logging/README.md` pointing at `measure/tests/run.sh`.
+- Create: `cases/06-dev-logging/sherlock/measure/report-case.py`
+- Modify: `cases/06-dev-logging/README.md` — add one line pointing at `measure/tests/run.sh`
 
 **Interfaces:**
 - Consumes: `run-case.sh` (Task 4), `score_case.py` (Task 5), `measure.py` (Tasks 2–3).
@@ -1498,7 +1501,6 @@ import unittest
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
 import micro  # noqa: E402
-import slice as slicer  # noqa: E402
 
 SLICE_KEYS = {"case_id", "kind", "defect_id", "title", "root_cause", "requires",
               "files", "proof_locations"}
