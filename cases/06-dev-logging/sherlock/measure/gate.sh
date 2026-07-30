@@ -10,6 +10,9 @@
 # IS ACCEPTED ON A TIER-1 PASS ALONE, and only a tier-3 number may be quoted as a
 # benchmark result — a slice is an easier task than the corpus.
 set -uo pipefail
+shopt -s nullglob   # an unmatched "$CASES"/D* must expand to NOTHING, not the
+                    # literal glob string — otherwise tier 2's loop "runs" once
+                    # over a non-directory and reports PASS on zero real cases.
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TIER="${1:?usage: gate.sh <1|2|3> <arm> [case_id]}"
 ARM="${2:?usage: gate.sh <1|2|3> <arm> [case_id]}"
@@ -39,9 +42,14 @@ run_one() {
 
 case "$TIER" in
   1) [ -n "$ONLY" ] || { echo "tier 1 needs a case id" >&2; exit 1; }
+     [ -d "$CASES/$ONLY" ] || { echo "gate.sh: tier 1 case not found: $CASES/$ONLY" >&2; exit 1; }
      run_one "$CASES/$ONLY" ;;
-  2) rc=0
-     for c in "$CASES"/D*; do [ -d "$c" ] || continue; run_one "$c" || rc=1; done
+  2) rc=0 n=0
+     for c in "$CASES"/D*; do [ -d "$c" ] || continue; n=$((n + 1)); run_one "$c" || rc=1; done
+     # A trustworthy MANDATORY gate must never report PASS on zero real cases: a
+     # stale SHERLOCK_CASES, or running tier 2 before slice.py has populated
+     # cases/, must fail loudly and distinctly from "all cases passed".
+     [ "$n" -gt 0 ] || { echo "gate.sh: tier 2 found 0 cases in $CASES" >&2; exit 1; }
      exit $rc ;;
   3) : "${SHERLOCK_CORPUS:?tier 3 needs SHERLOCK_CORPUS}"
      echo "tier 3: run eval/bench/run-bench.sh $ARM against the full corpus," \

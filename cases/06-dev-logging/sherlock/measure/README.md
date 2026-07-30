@@ -8,10 +8,18 @@ opened and not connected (reasoning)?** Deterministically, with no LLM call.
     SHERLOCK_CORPUS=~/hack/case06-measure/hetero-corpus \
     python3 slice.py --out cases
 
-    # tier 1 — iterate on one defect
-    with-secret.sh eval_linkapi_key --env SHERLOCK_API_KEY -- ./gate.sh 1 v6 D11
+    # tier 1 — iterate on one defect. gate.sh -> report-case.py -> score_case.score
+    # needs BOTH keys: the model under test (SHERLOCK_API_KEY) AND the judge
+    # (JUDGE_API_KEY). with-secret.sh injects one secret per invocation, so nest it —
+    # verified the nesting composes (both vars land in the innermost env) before
+    # documenting this; it is not just plausible-looking shell.
+    with-secret.sh eval_linkapi_key --env SHERLOCK_API_KEY -- \
+      with-secret.sh eval_broker_api_key --env JUDGE_API_KEY -- \
+        ./gate.sh 1 v6 D11
     # tier 2 — MANDATORY before accepting anything
-    with-secret.sh eval_linkapi_key --env SHERLOCK_API_KEY -- ./gate.sh 2 v6
+    with-secret.sh eval_linkapi_key --env SHERLOCK_API_KEY -- \
+      with-secret.sh eval_broker_api_key --env JUDGE_API_KEY -- \
+        ./gate.sh 2 v6
 
 ## What a green slice does NOT prove
 

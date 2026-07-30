@@ -1,0 +1,172 @@
+#!/usr/bin/env python3
+"""Tests for gate.sh — the three-tier promotion rule (shell orchestration).
+
+gate.sh resolves run-case.sh and report-case.py via "$HERE/..." (its OWN script
+directory), never PATH, so a stub on PATH cannot intercept them. These tests copy
+the real gate.sh into a scratch dir alongside stub run-case.sh / report-case.py —
+the same technique test_run_case.py uses for a stub qwen, one layer up the chain.
+No network, no SHERLOCK_API_KEY / JUDGE_API_KEY needed: the stubs never call out.
+
+The ZeroCasesNegativeControl class is the negative control for the bug this suite
+exists to catch: with no nullglob + zero-count guard, an unmatched "$CASES"/D*
+leaves `c` as the literal glob string, `[ -d "$c" ]` is false, the loop body never
+runs, `rc` stays its initial 0, and tier 2 — the MANDATORY accept/reject gate —
+reports PASS on zero real cases run.
+"""
+import json
+import os
+import shutil
+import stat
+import subprocess
+import tempfile
+import unittest
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+MEASURE = os.path.dirname(HERE)
+GATE_SRC = os.path.join(MEASURE, "gate.sh")
+
+# Mirrors run-case.sh's real contract: success prints ONE line ending
+# " -> <run_dir>" and creates that dir; failure prints an error line (no arrow)
+# to stdout+stderr and exits non-zero, creating NO run dir. Which case ids fail
+# is controlled by $FAIL_CASES (space-separated), so one test can make exactly
+# one case fail while the rest still run.
+RUN_CASE_STUB = r"""#!/usr/bin/env bash
+set -uo pipefail
+case_dir="$1"; arm="$2"
+case_id="$(basename "$case_dir")"
+echo "$case_id" >> "$STUB_LOG_DIR/invoked.log"
+for f in ${FAIL_CASES:-}; do
+  if [ "$f" = "$case_id" ]; then
+    echo "  FAIL stub-forced: $case_id" >&2
+    echo "  FAIL stub-forced: $case_id"
+    exit 1
+  fi
+done
+rd="$STUB_LOG_DIR/$case_id-run"
+mkdir -p "$rd"
+echo "  OK $case_id/$arm  1s  chars=2100  -> $rd"
+"""
+
+# Mirrors report-case.py's contract closely enough to test gate.sh's orchestration:
+# takes the same 4 flags, appends one row to --results, prints a summary line.
+REPORT_CASE_STUB = r"""#!/usr/bin/env python3
+import argparse, json, os
+ap = argparse.ArgumentParser()
+ap.add_argument("--case", required=True)
+ap.add_argument("--run", required=True)
+ap.add_argument("--tier", required=True)
+ap.add_argument("--results", required=True)
+a = ap.parse_args()
+case_id = os.path.basename(a.case.rstrip("/"))
+with open(a.results, "a", encoding="utf-8") as fh:
+    fh.write(json.dumps({"case_id": case_id, "run_dir": a.run, "tier": a.tier}) + "\n")
+print("  %s stub-reported -> %s" % (case_id, a.run))
+"""
+
+
+def _chmod_x(p):
+    os.chmod(p, os.stat(p).st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
+
+
+class GateHarness(unittest.TestCase):
+    """Common scaffold: a scratch gate dir with the REAL gate.sh + stubs, and a
+    scratch cases dir wired in via SHERLOCK_CASES (the same env-indirection
+    gate.sh already supports)."""
+
+    def setUp(self):
+        self.d = tempfile.mkdtemp(prefix="gate-test-")
+        self.addCleanup(shutil.rmtree, self.d, ignore_errors=True)
+
+        gate_dir = os.path.join(self.d, "gatedir")
+        os.makedirs(gate_dir)
+        shutil.copy(GATE_SRC, os.path.join(gate_dir, "gate.sh"))
+        _chmod_x(os.path.join(gate_dir, "gate.sh"))
+        with open(os.path.join(gate_dir, "run-case.sh"), "w", encoding="utf-8") as fh:
+            fh.write(RUN_CASE_STUB)
+        _chmod_x(os.path.join(gate_dir, "run-case.sh"))
+        with open(os.path.join(gate_dir, "report-case.py"), "w", encoding="utf-8") as fh:
+            fh.write(REPORT_CASE_STUB)
+        self.gate = os.path.join(gate_dir, "gate.sh")
+
+        self.cases = os.path.join(self.d, "cases")
+        self.results = os.path.join(self.d, "results.jsonl")
+        self.stub_log_dir = os.path.join(self.d, "stublog")
+        os.makedirs(self.stub_log_dir)
+
+    def make_cases(self, *ids):
+        os.makedirs(self.cases, exist_ok=True)
+        for cid in ids:
+            os.makedirs(os.path.join(self.cases, cid))
+
+    def run_gate(self, *args, fail_cases=""):
+        env = dict(os.environ)
+        env["SHERLOCK_CASES"] = self.cases
+        env["SHERLOCK_RESULTS"] = self.results
+        env["STUB_LOG_DIR"] = self.stub_log_dir
+        env["FAIL_CASES"] = fail_cases
+        return subprocess.run([self.gate, *args], env=env,
+                               capture_output=True, text=True, timeout=30)
+
+    def invoked(self):
+        p = os.path.join(self.stub_log_dir, "invoked.log")
+        if not os.path.exists(p):
+            return []
+        with open(p, encoding="utf-8") as fh:
+            return fh.read().split()
+
+    def results_rows(self):
+        if not os.path.exists(self.results):
+            return []
+        with open(self.results, encoding="utf-8") as fh:
+            return [json.loads(l) for l in fh if l.strip()]
+
+
+class Tier2AllPass(GateHarness):
+    def test_exit_zero_and_every_case_reported_when_all_pass(self):
+        self.make_cases("D01", "D02")
+        r = self.run_gate("2", "v6")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertEqual(sorted(self.invoked()), ["D01", "D02"])
+        self.assertEqual({row["case_id"] for row in self.results_rows()}, {"D01", "D02"})
+
+
+class Tier2OneFailsRestStillRun(GateHarness):
+    def test_continues_past_a_failure_and_exits_nonzero_overall(self):
+        self.make_cases("D01", "D02", "D03")
+        r = self.run_gate("2", "v6", fail_cases="D02")
+        # Overall gate must reflect the failure...
+        self.assertNotEqual(r.returncode, 0, r.stdout + r.stderr)
+        # ...but D02 failing must NOT stop D01/D03 from running (the whole point
+        # of tier 2 is to see every slice, not stop at the first miss).
+        self.assertEqual(sorted(self.invoked()), ["D01", "D02", "D03"])
+        # report-case.py is only reached for cases run-case.sh actually succeeded on.
+        self.assertEqual({row["case_id"] for row in self.results_rows()}, {"D01", "D03"})
+
+
+class Tier2ZeroCasesNegativeControl(GateHarness):
+    """THE negative control for Important-1: tier 2 must hard-fail, distinctly
+    from a real all-pass, when SHERLOCK_CASES matches nothing — e.g. a stale env
+    var, or running tier 2 before slice.py has populated cases/."""
+
+    def test_zero_matching_cases_is_a_hard_failure_not_a_silent_pass(self):
+        os.makedirs(self.cases, exist_ok=True)  # exists, but has no D* subdirs
+        r = self.run_gate("2", "v6")
+        self.assertNotEqual(r.returncode, 0,
+                             "tier 2 reported success with ZERO cases run — "
+                             "stdout=%r stderr=%r" % (r.stdout, r.stderr))
+        self.assertIn("0 cases", r.stderr)
+        self.assertEqual(self.invoked(), [], "no case should have been invoked")
+        self.assertEqual(self.results_rows(), [], "no row should have been written")
+
+
+class Tier1MissingCaseDir(GateHarness):
+    def test_named_case_not_found_is_a_hard_failure(self):
+        os.makedirs(self.cases, exist_ok=True)
+        r = self.run_gate("1", "v6", "D99")
+        self.assertNotEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("D99", r.stderr)
+        self.assertEqual(self.invoked(), [])
+
+
+if __name__ == "__main__":
+    unittest.main(verbosity=2)
