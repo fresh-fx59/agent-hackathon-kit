@@ -1322,7 +1322,7 @@ git commit -m "case06 measure: score_case.py — per-defect judge on the broker"
 #   gate.sh 2 v6         # regress: ALL slices — mandatory before acceptance
 #   gate.sh 3 v6         # accept:  the full 649MB corpus (metered)
 #
-# Tier 2 exists because partial runs miss interaction effects: fixing D11's coverage
+# Tier 0 is the capability floor (Task 7); tier 2 exists because partial runs miss interaction effects: fixing D11's coverage
 # by widening a search instruction can silently blow D03's context budget. NO CHANGE
 # IS ACCEPTED ON A TIER-1 PASS ALONE, and only a tier-3 number may be quoted as a
 # benchmark result — a slice is an easier task than the corpus.
@@ -1444,7 +1444,493 @@ git commit -m "case06 measure: three-tier gate + README stating what a slice doe
 
 ---
 
-### Task 7: Produce the v6 miss table
+### Task 7: `micro.py` — capability micro-corpora (tier 0)
+
+**Files:**
+- Create: `cases/06-dev-logging/sherlock/measure/micro.py`
+- Create: `cases/06-dev-logging/sherlock/measure/tests/test_micro.py`
+- Modify: `cases/06-dev-logging/sherlock/measure/gate.sh` — add tier 0
+- Modify: `cases/06-dev-logging/sherlock/measure/README.md` — document tier 0
+
+**Interfaces:**
+- Consumes: nothing from earlier tasks at build time; emits `case.json` in the
+  EXACT shape `slice.py` produces, so `run-case.sh`, `score_case.py` and
+  `measure.verdict` work on micro cases with no changes.
+- Produces: `MICRO` (dict of capability id → spec), `build_micro(out_dir, cap_id) -> dict`,
+  `build_all_micro(out_dir) -> list[str]`. `case.json` differs from a slice only in
+  `kind` (`"capability_micro"`) and an added `capability` field.
+
+**Why tier 0.** A micro-corpus is even easier than a defect slice: a handful of lines,
+one capability, no competing signal. It is a **floor test** — necessary, not
+sufficient. If the skill cannot stitch a multi-line stack trace in 12 hand-written
+lines, it certainly cannot do it in a 240,000-line file. A green tier 0 proves
+nothing about the corpus; a **red** tier 0 localises the gap precisely and for
+almost no money.
+
+Capabilities are taken from the answer key's own `requires` vocabulary (non-herring
+only), so failures classify against the same taxonomy the defect slices use:
+`cross-format correlation` (6 defects), `rare-event needle` (3),
+`single-format read` (2), `multiline stitching` (2), `statistical/rate reasoning` (2),
+`JSON unescaping` (1), `gz decompression` (1),
+`single-format read of an unknown format` (1), `single-format read (Russian)` (1).
+
+- [ ] **Step 1: Write the failing test**
+
+```python
+#!/usr/bin/env python3
+"""Tests for micro.py — hand-written capability corpora.
+
+Two things must hold or a micro-corpus is worse than useless:
+
+1. Its case.json must be shape-identical to a defect slice's, or the runner and the
+   scorer need special cases and the "one interface" promise dies.
+2. Every declared proof line must ACTUALLY contain the evidence. A micro-corpus with
+   a proof pointing at the wrong line would report a coverage failure forever and
+   send us chasing a bug that does not exist.
+"""
+import gzip
+import json
+import os
+import sys
+import tempfile
+import unittest
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.dirname(HERE))
+import micro  # noqa: E402
+import slice as slicer  # noqa: E402
+
+SLICE_KEYS = {"case_id", "kind", "defect_id", "title", "root_cause", "requires",
+              "files", "proof_locations"}
+
+
+class Shape(unittest.TestCase):
+    def test_every_capability_builds(self):
+        with tempfile.TemporaryDirectory() as d:
+            ids = micro.build_all_micro(d)
+            self.assertEqual(len(ids), len(micro.MICRO))
+            for cid in ids:
+                self.assertTrue(os.path.isfile(os.path.join(d, cid, "case.json")))
+
+    def test_case_json_is_shape_compatible_with_a_defect_slice(self):
+        with tempfile.TemporaryDirectory() as d:
+            case = micro.build_micro(d, "cap-multiline-stitching")
+            self.assertTrue(SLICE_KEYS.issubset(set(case)),
+                            "missing %r" % (SLICE_KEYS - set(case)))
+            self.assertEqual(case["kind"], "capability_micro")
+            self.assertIn("capability", case)
+
+    def test_capability_is_a_real_requires_value(self):
+        known = {
+            "cross-format correlation", "rare-event needle", "single-format read",
+            "multiline stitching", "statistical/rate reasoning", "JSON unescaping",
+            "gz decompression", "single-format read of an unknown format",
+            "single-format read (Russian)",
+        }
+        for cid, spec in micro.MICRO.items():
+            self.assertIn(spec["capability"], known,
+                          "%s uses a capability not in the answer key taxonomy" % cid)
+
+
+class ProofsAreReal(unittest.TestCase):
+    def test_every_proof_line_contains_its_expected_evidence(self):
+        with tempfile.TemporaryDirectory() as d:
+            for cid in micro.build_all_micro(d):
+                case = json.load(open(os.path.join(d, cid, "case.json"), encoding="utf-8"))
+                for pr in case["proof_locations"]:
+                    path = os.path.join(d, cid, pr["file"])
+                    if path.endswith(".gz"):
+                        with gzip.open(path, "rt", encoding="utf-8") as fh:
+                            lines = fh.read().splitlines()
+                    else:
+                        lines = open(path, encoding="utf-8").read().splitlines()
+                    self.assertLessEqual(pr["line_end"], len(lines),
+                                         "%s: proof past EOF" % cid)
+                    window = "\n".join(lines[pr["line_start"] - 1:pr["line_end"]])
+                    self.assertIn(pr["expect"], window,
+                                  "%s: %s:%d-%d does not contain %r"
+                                  % (cid, pr["file"], pr["line_start"],
+                                     pr["line_end"], pr["expect"]))
+
+    def test_gz_capability_really_ships_a_gzip_file(self):
+        with tempfile.TemporaryDirectory() as d:
+            case = micro.build_micro(d, "cap-gz-decompression")
+            gz = [f for f in case["files"] if f.endswith(".gz")]
+            self.assertEqual(len(gz), 1)
+            with gzip.open(os.path.join(d, case["case_id"], gz[0]), "rt",
+                           encoding="utf-8") as fh:
+                self.assertIn("cbr.ru", fh.read())
+
+    def test_ru_capability_uses_no_english_severity_words(self):
+        # The point of this corpus is that grepping ERROR/FATAL finds nothing.
+        with tempfile.TemporaryDirectory() as d:
+            case = micro.build_micro(d, "cap-ru-severity")
+            body = open(os.path.join(d, case["case_id"], case["files"][0]),
+                        encoding="utf-8").read()
+            for word in ("ERROR", "FATAL", "WARN", "CRITICAL"):
+                self.assertNotIn(word, body,
+                                 "%s would be findable by an English severity grep" % word)
+
+
+class MeasureCompatibility(unittest.TestCase):
+    def test_verdict_runs_on_a_micro_case(self):
+        import measure
+        with tempfile.TemporaryDirectory() as d:
+            case = micro.build_micro(d, "cap-rare-event-needle")
+            stream = os.path.join(d, "s.jsonl")
+            with open(stream, "w", encoding="utf-8") as fh:
+                fh.write(json.dumps({"type": "assistant", "message": {"content": [
+                    {"type": "tool_use", "name": "read_file",
+                     "input": {"file_path": "/x/" + case["files"][0],
+                               "offset": 0, "limit": 500}}]}}) + "\n")
+            v = measure.verdict(case, stream, "x" * 3000, judge_found=False)
+            self.assertIn(v["diagnosis"], {"reasoning", "coverage", "inconclusive"})
+
+
+if __name__ == "__main__":
+    unittest.main(verbosity=2)
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `cd cases/06-dev-logging/sherlock/measure && python3 tests/test_micro.py`
+Expected: FAIL — `ModuleNotFoundError: No module named 'micro'`
+
+- [ ] **Step 3: Write minimal implementation**
+
+```python
+#!/usr/bin/env python3
+"""micro.py — hand-written capability corpora. Tier 0: the capability FLOOR.
+
+    python3 micro.py --out cases
+
+Each corpus isolates ONE capability from the answer key's `requires` vocabulary and
+plants exactly one defect that needs it. They are deliberately tiny: if the skill
+cannot stitch a stack trace across 12 hand-written lines, it will not do it across
+240,000. Green here proves nothing about the corpus; RED here localises the gap for
+almost no money.
+
+`case.json` is shape-identical to slice.py's output, so run-case.sh, score_case.py
+and measure.verdict need no special case. Each proof carries an `expect` string, and
+tests assert the declared line range really contains it — a micro-corpus whose proof
+points at the wrong line would report a coverage failure forever.
+"""
+import argparse
+import gzip
+import json
+import os
+import shutil
+
+MICRO = {
+    "cap-multiline-stitching": {
+        "capability": "multiline stitching",
+        "title": "NPE hidden in a stack trace interleaved with another thread",
+        "root_cause": ("PromoCode.normalized() returns null for a lowercase code and "
+                       "PromoCodeResolver calls .toUpperCase() on it"),
+        "files": {
+            "checkout-api.log": [
+                "2026-07-28 13:44:01.100 [exec-7] INFO  c.a.c.Checkout - start order=ORD-1",
+                "2026-07-28 13:44:01.101 [exec-12] WARN  c.a.c.Inventory - slow lookup 1200ms",
+                "2026-07-28 13:44:01.102 [exec-7] ERROR c.a.c.Promo - Unhandled exception while applying promotion",
+                "java.lang.NullPointerException: Cannot invoke \"java.lang.String.toUpperCase()\" because the return value of \"com.acme.checkout.promo.PromoCode.normalized()\" is null",
+                "2026-07-28 13:44:01.102 [exec-12] ERROR c.a.c.Inventory - java.net.SocketTimeoutException: Read timed out",
+                "\tat com.acme.checkout.promo.PromoCodeResolver.resolve(PromoCodeResolver.java:88)",
+                "\tat com.acme.checkout.inventory.InventoryClient.get(InventoryClient.java:41)",
+                "\tat com.acme.checkout.CheckoutService.apply(CheckoutService.java:203)",
+                "2026-07-28 13:44:01.190 [exec-7] INFO  c.a.c.Checkout - order ORD-1 failed 500",
+            ],
+        },
+        "proofs": [
+            {"file": "checkout-api.log", "line_start": 3, "line_end": 6,
+             "expect": "PromoCodeResolver.resolve(PromoCodeResolver.java:88)",
+             "note": "the NPE trace is interleaved line-by-line with exec-12's timeout trace"},
+        ],
+    },
+    "cap-json-unescaping": {
+        "capability": "JSON unescaping",
+        "title": "Go panic buried inside a JSON-escaped docker log field",
+        "root_cause": "Retrier.flush indexes the PSP response slice by the request index",
+        "files": {
+            "payments-json.log": [
+                '{"log":"{\\"level\\":\\"info\\",\\"msg\\":\\"batch start\\",\\"n\\":4}\\n","stream":"stdout","time":"2026-07-28T14:05:10Z"}',
+                '{"log":"panic: runtime error: index out of range [3] with length 3\\n","stream":"stderr","time":"2026-07-28T14:05:12Z"}',
+                '{"log":"\\tgithub.com/acme/payments-worker/internal/batch.(*Retrier).flush /src/internal/batch/retrier.go:118 +0x2a4\\n","stream":"stderr","time":"2026-07-28T14:05:12Z"}',
+                '{"log":"{\\"level\\":\\"info\\",\\"msg\\":\\"payments-worker starting\\",\\"version\\":\\"1.19.4\\"}\\n","stream":"stdout","time":"2026-07-28T14:05:20Z"}',
+            ],
+        },
+        "proofs": [
+            {"file": "payments-json.log", "line_start": 2, "line_end": 3,
+             "expect": "retrier.go:118",
+             "note": "the panic is inside the escaped \"log\" field, not a bare line"},
+        ],
+    },
+    "cap-cross-format-correlation": {
+        "capability": "cross-format correlation",
+        "title": "503s explained only by joining two formats on time, with no shared id",
+        "root_cause": "inventory-svc was OOMKilled, so nginx upstreams had no ready endpoints",
+        "files": {
+            "nginx-error.log": [
+                "2026/07/28 13:25:40 [error] 8#8: *991 upstream timed out (110: Connection timed out) while reading response header from upstream, upstream: \"http://10.42.12.20:8080/api/v1/inventory\"",
+                "2026/07/28 13:25:41 [error] 8#8: *992 no live upstreams while connecting to upstream, client: 10.42.15.2",
+            ],
+            "k8s-events.txt": [
+                "LAST SEEN   TYPE      REASON        OBJECT                              MESSAGE",
+                "13:25:39    Warning   OOMKilling    pod/inventory-svc-7d9c4b8f6-2xq7z   Memory cgroup out of memory: Killed process 24417 (python3)",
+                "13:25:44    Warning   BackOff       pod/inventory-svc-7d9c4b8f6-2xq7z   Back-off restarting failed container",
+            ],
+        },
+        "proofs": [
+            {"file": "k8s-events.txt", "line_start": 2, "line_end": 2,
+             "expect": "OOMKilling", "note": "the cause, 1s BEFORE the nginx symptom"},
+            {"file": "nginx-error.log", "line_start": 2, "line_end": 2,
+             "expect": "no live upstreams", "note": "the symptom; no id links the two files"},
+        ],
+    },
+    "cap-rare-event-needle": {
+        "capability": "rare-event needle",
+        "title": "One successful login hidden in a wall of failures",
+        "root_cause": "a brute-force run succeeded once; the host is compromised",
+        "files": {
+            "auth.log": (
+                ["Jul 28 03:%02d:01 node-a sshd[%d]: Failed password for invalid user admin from 186.149.227.92 port %d ssh2"
+                 % (i % 60, 2000 + i, 40000 + i) for i in range(60)]
+                + ["Jul 28 04:00:07 node-a sshd[2401]: Accepted password for backup from 186.149.227.92 port 44112 ssh2"]
+                + ["Jul 28 04:%02d:01 node-a sshd[%d]: Failed password for invalid user oracle from 186.149.227.92 port %d ssh2"
+                   % (i % 60, 2500 + i, 45000 + i) for i in range(60)]
+            ),
+        },
+        "proofs": [
+            {"file": "auth.log", "line_start": 61, "line_end": 61,
+             "expect": "Accepted password for backup",
+             "note": "the single success among 120 failures — summarising counts misses it"},
+        ],
+    },
+    "cap-statistical-rate-reasoning": {
+        "capability": "statistical/rate reasoning",
+        "title": "TLS handshake failure rate ramps; no single line is damning",
+        "root_cause": "the relay stopped accepting the legacy TLS version as pooled sockets recycled",
+        "files": {
+            "notify.log": (
+                ["2026-07-28 09:%02d:00 INFO  smtp send ok relay=smtp-relay:587" % (i % 60)
+                 for i in range(40)]
+                + ["2026-07-28 10:00:00 WARN  smtp relay handshake failed: ssl3_get_record:wrong version number"]
+                + ["2026-07-28 12:%02d:00 INFO  smtp send ok relay=smtp-relay:587" % (i % 60)
+                   for i in range(20)]
+                + ["2026-07-28 12:%02d:30 WARN  smtp relay handshake failed: ssl3_get_record:wrong version number" % (i % 60)
+                   for i in range(18)]
+            ),
+        },
+        "proofs": [
+            {"file": "notify.log", "line_start": 41, "line_end": 41,
+             "expect": "wrong version number",
+             "note": "1 failure in 41 lines early..."},
+            {"file": "notify.log", "line_start": 61, "line_end": 79,
+             "expect": "wrong version number",
+             "note": "...against 18 in the last 38. The RATE is the finding, not any one line."},
+        ],
+    },
+    "cap-unknown-format": {
+        "capability": "single-format read of an unknown format",
+        "title": "Negative order total in a bespoke pipe-delimited log with invented severities",
+        "root_cause": "stacked percentage discounts with no 100% ceiling and no final_minor >= 0 check",
+        "files": {
+            "promo-engine.plog": [
+                "HEARTBEAT|RULE_EVAL|order=ORD-88101|rule=SUMMER26|discount_pct=5.0|ok",
+                "ALARM|RULE_APPLY|order=ORD-88240|rule=SUMMER26_STACK|msg=stacked SUMMER26+LOYALTY10+WELCOME15 multiplied, no ceiling applied",
+                "FATALITY|LEDGER_POST|order=ORD-88240|rule=SUMMER26_STACK|base_minor=1299900|discount_pct=137.5|final_minor=-486212|msg=ledger refused negative charge",
+                "HEARTBEAT|CACHE_LOAD|rules=42|ok",
+            ],
+        },
+        "proofs": [
+            {"file": "promo-engine.plog", "line_start": 2, "line_end": 3,
+             "expect": "final_minor=-486212",
+             "note": "severity words are ALARM/FATALITY — no dictionary has heard of them"},
+        ],
+    },
+    "cap-ru-severity": {
+        "capability": "single-format read (Russian)",
+        "title": "Stale FX rate reported only in Russian severity words",
+        "root_cause": "egress to the rate source is blocked, so the adapter silently falls back to a 7-day-old cached rate",
+        "files": {
+            "billing-adapter-ru.log": [
+                "2026-07-28 09:00:01 ИНФО  Загрузка курсов валют: источник=cbr.ru",
+                "2026-07-28 09:00:06 ПРЕДУПРЕЖДЕНИЕ  Таймаут запроса курса (5000 мс), используется кэш от 2026-07-21",
+                "2026-07-28 09:00:06 ИНФО  Конвертация EUR->RUB по курсу из кэша, возраст 7 дней",
+                "2026-07-28 12:00:06 ПРЕДУПРЕЖДЕНИЕ  Таймаут запроса курса (5000 мс), используется кэш от 2026-07-21",
+            ],
+        },
+        "proofs": [
+            {"file": "billing-adapter-ru.log", "line_start": 2, "line_end": 3,
+             "expect": "используется кэш",
+             "note": "grep for ERROR/FATAL/WARN returns NOTHING in this file"},
+        ],
+    },
+    "cap-gz-decompression": {
+        "capability": "gz decompression",
+        "title": "The only evidence sits inside a .gz",
+        "root_cause": "egress policy blocks the rate source; proof is in the rotated, compressed log",
+        "files": {},
+        "gz_files": {
+            "adapter.log.1.gz": [
+                "2026-07-21 09:00:01 ИНФО  Загрузка курсов валют: источник=cbr.ru",
+                "2026-07-21 09:00:06 ПРЕДУПРЕЖДЕНИЕ  Сетевая политика отклонила соединение с cbr.ru",
+            ],
+        },
+        "proofs": [
+            {"file": "adapter.log.1.gz", "line_start": 2, "line_end": 2,
+             "expect": "cbr.ru",
+             "note": "line numbers refer to the DECOMPRESSED stream, as in the answer key"},
+        ],
+    },
+    "cap-single-format-read": {
+        "capability": "single-format read",
+        "title": "A plain slow-query log naming the un-indexed lookup",
+        "root_cause": "a JSONB expression lookup with no supporting index seq-scans the table",
+        "files": {
+            "postgresql.log": [
+                "2026-07-28 11:05:01 UTC LOG:  duration: 12.004 ms  statement: SELECT 1",
+                "2026-07-28 11:05:41 UTC LOG:  duration: 4211.882 ms  statement: SELECT c.* FROM catalog_items c WHERE c.attrs ->> 'vendor_ref' = $1 ORDER BY c.updated_at DESC",
+                "2026-07-28 11:06:02 UTC LOG:  duration: 5100.678 ms  statement: SELECT c.* FROM catalog_items c WHERE c.attrs ->> 'vendor_ref' = $1 ORDER BY c.updated_at DESC",
+            ],
+        },
+        "proofs": [
+            {"file": "postgresql.log", "line_start": 2, "line_end": 3,
+             "expect": "attrs ->> 'vendor_ref'",
+             "note": "the same statement shape repeating slowly IS the finding"},
+        ],
+    },
+}
+
+
+def build_micro(out_dir, cap_id):
+    spec = MICRO[cap_id]
+    case_dir = os.path.join(out_dir, cap_id)
+    if os.path.isdir(case_dir):
+        shutil.rmtree(case_dir)
+    os.makedirs(case_dir, exist_ok=True)
+
+    written = []
+    for name, lines in spec.get("files", {}).items():
+        with open(os.path.join(case_dir, name), "w", encoding="utf-8") as fh:
+            fh.write("\n".join(lines) + "\n")
+        written.append(name)
+    for name, lines in spec.get("gz_files", {}).items():
+        with gzip.open(os.path.join(case_dir, name), "wt", encoding="utf-8") as fh:
+            fh.write("\n".join(lines) + "\n")
+        written.append(name)
+
+    case = {
+        "case_id": cap_id,
+        "kind": "capability_micro",
+        "capability": spec["capability"],
+        "defect_id": cap_id,
+        "title": spec["title"],
+        "root_cause": spec["root_cause"],
+        "requires": spec["capability"],
+        "files": sorted(written),
+        "proof_locations": spec["proofs"],
+    }
+    with open(os.path.join(case_dir, "case.json"), "w", encoding="utf-8") as fh:
+        json.dump(case, fh, ensure_ascii=False, indent=2)
+    return case
+
+
+def build_all_micro(out_dir):
+    return [build_micro(out_dir, cid) and cid for cid in sorted(MICRO)]
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--out", required=True)
+    a = ap.parse_args()
+    for cid in build_all_micro(a.out):
+        c = json.load(open(os.path.join(a.out, cid, "case.json"), encoding="utf-8"))
+        print("%-34s %s" % (cid, c["capability"]))
+
+
+if __name__ == "__main__":
+    main()
+```
+
+- [ ] **Step 4: Run test to verify it passes**
+
+Run: `cd cases/06-dev-logging/sherlock/measure && python3 tests/test_micro.py`
+Expected: PASS — `Ran 7 tests`, `OK`
+
+- [ ] **Step 5: Negative control — a wrong proof line must fail the suite**
+
+Run:
+```bash
+cd cases/06-dev-logging/sherlock/measure
+cp micro.py /tmp/micro.bak
+python3 - <<'PY'
+s = open("micro.py").read()
+s = s.replace('"file": "checkout-api.log", "line_start": 3, "line_end": 6',
+              '"file": "checkout-api.log", "line_start": 1, "line_end": 2', 1)
+open("micro.py", "w").write(s)
+PY
+python3 tests/test_micro.py 2>&1 | tail -3
+cp /tmp/micro.bak micro.py && rm /tmp/micro.bak
+python3 tests/test_micro.py 2>&1 | tail -3
+```
+Expected: sabotaged run FAILS on `test_every_proof_line_contains_its_expected_evidence`
+naming `cap-multiline-stitching`; restored run reports `OK`. Paste both into the commit.
+
+- [ ] **Step 6: Add tier 0 to `gate.sh`**
+
+Replace the `case "$TIER" in` block's opening so tier 0 runs the micro corpora:
+
+```bash
+case "$TIER" in
+  0) rc=0
+     for c in "$CASES"/cap-*; do [ -d "$c" ] || continue; run_one "$c" || rc=1; done
+     exit $rc ;;
+  1) [ -n "$ONLY" ] || { echo "tier 1 needs a case id" >&2; exit 1; }
+     run_one "$CASES/$ONLY" ;;
+```
+
+And extend the usage comment:
+
+```bash
+#   gate.sh 0 v6         # floor:   capability micro-corpora, tiny and cheap
+```
+
+- [ ] **Step 7: Document tier 0 in `README.md`**
+
+Append:
+
+```markdown
+## Tier 0 — the capability floor
+
+    python3 micro.py --out cases
+    with-secret.sh eval_linkapi_key --env SHERLOCK_API_KEY -- ./gate.sh 0 v6
+
+Nine hand-written corpora, one per capability in the answer key's `requires`
+vocabulary. Each is a few lines long and isolates a single skill: stitching an
+interleaved stack trace, unescaping a docker `log` field, joining two formats on
+time with no shared id, finding one success among 120 failures, seeing a RATE shift
+rather than a new error, reading invented severity words (`ALARM`, `FATALITY`),
+reading a Russian log where `grep ERROR` returns nothing, decompressing a `.gz`.
+
+**Green at tier 0 proves nothing about the corpus** — these are far easier than a
+slice, which is itself easier than the 649 MB corpus. RED at tier 0 is the valuable
+signal: it localises a capability gap for almost no money, and the failing
+capability maps directly onto the defects that need it (`cross-format correlation`
+alone gates 6 of the 11 real defects).
+```
+
+- [ ] **Step 8: Run the whole suite and commit**
+
+```bash
+cd cases/06-dev-logging/sherlock/measure && tests/run.sh
+git add micro.py tests/test_micro.py gate.sh README.md
+git commit -m "case06 measure: tier-0 capability micro-corpora (9 capabilities)"
+```
+Expected: `✓ measure: all suites green` — 5 suites.
+
+---
+
+### Task 8: Produce the v6 miss table
 
 **Files:**
 - Create: `cases/06-dev-logging/docs/2026-07-30-v6-miss-diagnosis.md`
@@ -1517,10 +2003,11 @@ git commit -m "case06 measure: v6 miss diagnosis — coverage vs reasoning per d
 
 ## Self-Review
 
-**Spec coverage.** Layer 1 cases → Task 1 (defect slices). Capability micro-corpora
-(`cases/cap-*`) are **deliberately not implemented** — the spec's open question
-resolves them as deferred until the real failure distribution says which are worth
-writing; `slice.py`'s `kind` field already distinguishes them. Layer 2 capture →
+**Spec coverage.** Layer 1 cases → Task 1 (defect slices) and Task 7 (capability
+micro-corpora, added at the operator's request 2026-07-30, overriding the spec's
+"deferred" open question). Task 7 uses the answer key's REAL non-herring `requires`
+vocabulary — nine capabilities, not the five the spec guessed — so a tier-0 failure
+maps straight onto the defects that need it. Layer 2 capture →
 Task 4. Layer 3 deterministic → Tasks 2–3; judge → Task 5; three-tier gate →
 Task 6; the analysis *skill* is **not** in increment 1 (it consumes `results.jsonl`,
 which does not exist until Task 7 runs) and is the first task of increment 2.
