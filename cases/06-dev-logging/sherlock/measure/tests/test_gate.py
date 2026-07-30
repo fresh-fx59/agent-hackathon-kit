@@ -190,6 +190,29 @@ class Tier2ZeroCasesNegativeControl(GateHarness):
         self.assertEqual(self.results_rows(), [], "no row should have been written")
 
 
+class Tier3MeasuresNothing(GateHarness):
+    """Important-6: tier 3 is a hand-driven run of run-bench.sh, not something this
+    script performs — so it must exit NON-ZERO. Exiting 0 having measured nothing is
+    the same silent-PASS class already fixed for tiers 0/1/2, and tier 3 is the ONLY
+    tier whose number may be quoted as a benchmark result."""
+
+    def test_tier_three_exits_nonzero_and_says_nothing_was_measured(self):
+        os.makedirs(self.cases, exist_ok=True)
+        env_corpus = os.path.join(self.d, "corpus")
+        os.makedirs(env_corpus, exist_ok=True)
+        env = dict(os.environ)
+        env.update({"SHERLOCK_CASES": self.cases, "SHERLOCK_RESULTS": self.results,
+                    "STUB_LOG_DIR": self.stub_log_dir, "FAIL_CASES": "",
+                    "SHERLOCK_CORPUS": env_corpus})
+        r = subprocess.run([self.gate, "3", "v6"], env=env, capture_output=True,
+                           text=True, timeout=30)
+        self.assertNotEqual(r.returncode, 0,
+                            "tier 3 reported success having measured nothing")
+        self.assertIn("NOTHING was measured", r.stderr)
+        self.assertEqual(self.invoked(), [])
+        self.assertEqual(self.results_rows(), [])
+
+
 class Tier1MissingCaseDir(GateHarness):
     def test_named_case_not_found_is_a_hard_failure(self):
         os.makedirs(self.cases, exist_ok=True)

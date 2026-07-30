@@ -64,8 +64,15 @@ case "$TIER" in
      [ "$n" -gt 0 ] || { echo "gate.sh: tier 2 found 0 cases in $CASES" >&2; exit 1; }
      exit $rc ;;
   3) : "${SHERLOCK_CORPUS:?tier 3 needs SHERLOCK_CORPUS}"
-     echo "tier 3: run eval/bench/run-bench.sh $ARM against the full corpus," \
-          "then score with eval/score.py. Only this number is quotable." >&2
-     exit 0 ;;
+     # Tier 3 is not implemented here — it is a hand-driven run of
+     # eval/bench/run-bench.sh against the full corpus. It must therefore exit
+     # NON-ZERO: the same silent-PASS class already fixed for tiers 0/1/2. A gate
+     # that measured nothing and returned success is indistinguishable, to any
+     # caller or CI step, from a gate that ran the whole 649MB corpus and passed —
+     # and tier 3 is the ONLY tier whose number may be quoted as a benchmark result.
+     echo "gate.sh: tier 3 is NOT run by this script and NOTHING was measured." >&2
+     echo "  run: eval/bench/run-bench.sh $ARM against \$SHERLOCK_CORPUS," \
+          "then score with eval/score.py. Only that number is quotable." >&2
+     exit 2 ;;
   *) echo "bad tier: $TIER" >&2; exit 1 ;;
 esac
