@@ -129,5 +129,92 @@ class ProofReach(unittest.TestCase):
                          "node-a/syslog must not satisfy node-b/syslog's proof by basename alone")
 
 
+REPORT_OK = """
+## 1. Что произошло
+Каскад.
+## 2. Корневая причина
+Не хватало индекса.
+## 3. Цепочка причин
+шаг
+## 4. Улики
+apps/api.log:178977
+## 5. Немедленные действия
+поднять
+## 6. Исправление в коде
+файл
+## 7. Чего я не знаю
+многого
+## 8. ЗНАНИЯ
+ЗНАНИЯ: база пуста — обычное расследование
+"""
+
+REPORT_COLLAPSED = "Все агенты завершили работу. Отчёт выше уже содержит все находки."
+
+
+class ReportChecks(unittest.TestCase):
+    def test_all_eight_sections_detected(self):
+        r = measure.report_checks(REPORT_OK)
+        self.assertEqual(r["sections_missing"], [])
+        self.assertTrue(r["has_knowledge_line"])
+        self.assertFalse(r["collapsed"])
+
+    def test_missing_root_cause_and_unknowns_are_named(self):
+        text = REPORT_OK.replace("## 2. Корневая причина", "").replace("## 7. Чего я не знаю", "")
+        r = measure.report_checks(text)
+        self.assertIn("Корневая причина", r["sections_missing"])
+        self.assertIn("Чего я не знаю", r["sections_missing"])
+
+    def test_collapse_detected_by_banned_phrase(self):
+        r = measure.report_checks(REPORT_COLLAPSED)
+        self.assertTrue(r["collapsed"])
+        self.assertIn("отчёт выше", r["collapse_reason"].lower())
+
+    def test_collapse_detected_by_length(self):
+        r = measure.report_checks("слишком коротко")
+        self.assertTrue(r["collapsed"])
+
+
+class BudgetProfile(unittest.TestCase):
+    def test_counts_calls_by_tool(self):
+        p = stream(tool_use("read_file", {"file_path": "/c/a.log", "offset": 0, "limit": 5}),
+                   tool_use("read_file", {"file_path": "/c/b.log", "offset": 0, "limit": 5}),
+                   tool_use("run_shell_command", {"command": "ls /c"}))
+        b = measure.budget_profile(measure.read_events(p))
+        self.assertEqual(b["tool_calls"], 3)
+        self.assertEqual(b["by_tool"]["read_file"], 2)
+
+
+class CombinedVerdict(unittest.TestCase):
+    CASE = {"case_id": "D01", "proof_locations": PROOFS}
+
+    def test_missed_and_never_read_is_coverage(self):
+        p = stream(tool_use("read_file", {"file_path": "/c/other.log", "offset": 0, "limit": 5}))
+        v = measure.verdict(self.CASE, p, REPORT_OK, judge_found=False)
+        self.assertEqual(v["diagnosis"], "coverage")
+
+    def test_missed_but_did_read_is_reasoning(self):
+        p = stream(tool_use("read_file", {"file_path": "/c/apps/api.log",
+                                          "offset": 178970, "limit": 40}))
+        v = measure.verdict(self.CASE, p, REPORT_OK, judge_found=False)
+        self.assertEqual(v["diagnosis"], "reasoning")
+
+    def test_collapse_outranks_everything(self):
+        p = stream()
+        v = measure.verdict(self.CASE, p, REPORT_COLLAPSED, judge_found=False)
+        self.assertEqual(v["diagnosis"], "collapse")
+
+    def test_found_is_ok(self):
+        p = stream(tool_use("read_file", {"file_path": "/c/apps/api.log",
+                                          "offset": 178970, "limit": 40}))
+        v = measure.verdict(self.CASE, p, REPORT_OK, judge_found=True)
+        self.assertEqual(v["diagnosis"], "ok")
+
+    def test_unknown_reach_is_inconclusive_not_coverage(self):
+        p = stream(tool_use("run_shell_command",
+                            {"command": "sed -n '178977,178996p' /c/apps/api.log"}))
+        v = measure.verdict(self.CASE, p, REPORT_OK, judge_found=False)
+        self.assertEqual(v["diagnosis"], "inconclusive")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

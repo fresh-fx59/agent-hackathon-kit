@@ -137,3 +137,62 @@ def proof_reach(events, proof_locations):
     return {"reached": reached, "not_reached": not_reached, "unknown": unknown,
             "files_opened": files_opened, "files_with_proofs": files_with_proofs,
             "verdict": verdict}
+
+
+# --------------------------------------------------------------- report layer
+SECTIONS = ["Что произошло", "Корневая причина", "Цепочка причин", "Улики",
+            "Немедленные действия", "Исправление в коде", "Чего я не знаю", "ЗНАНИЯ"]
+
+# SKILL.md forbids these outright: the user sees ONLY the final message, so a
+# reference to an earlier one means no report was delivered at all.
+BANNED = ["отчёт выше", "как я уже показал", "результаты приведены ранее",
+          "см. предыдущее сообщение", "отчёт уже готов выше"]
+
+MIN_REPORT_CHARS = 200
+
+
+def report_checks(report_text):
+    text = report_text or ""
+    low = text.lower()
+    present = [s for s in SECTIONS if s.lower() in low]
+    missing = [s for s in SECTIONS if s.lower() not in low]
+    banned_hit = next((b for b in BANNED if b in low), None)
+    collapsed, reason = False, None
+    if banned_hit:
+        collapsed, reason = True, "banned phrase: %s" % banned_hit
+    elif len(text) < MIN_REPORT_CHARS:
+        collapsed, reason = True, "report is %d chars (< %d)" % (len(text), MIN_REPORT_CHARS)
+    return {"sections_present": present, "sections_missing": missing,
+            "has_knowledge_line": "знания:" in low,
+            "collapsed": collapsed, "collapse_reason": reason, "chars": len(text)}
+
+
+def budget_profile(events):
+    by_tool = {}
+    for e in events:
+        by_tool[e["tool"]] = by_tool.get(e["tool"], 0) + 1
+    return {"tool_calls": len(events), "by_tool": by_tool}
+
+
+def verdict(case, stream_path, report_text, judge_found):
+    events = read_events(stream_path)
+    reach = proof_reach(events, case.get("proof_locations", []))
+    report = report_checks(report_text)
+    budget = budget_profile(events)
+
+    # Order matters. A collapsed report means no investigation was delivered at all,
+    # so neither "coverage" nor "reasoning" describes what happened.
+    if report["collapsed"]:
+        diagnosis = "collapse"
+    elif judge_found:
+        diagnosis = "ok"
+    elif reach["verdict"] == "reached":
+        diagnosis = "reasoning"
+    elif reach["verdict"] == "unknown":
+        diagnosis = "inconclusive"
+    else:
+        diagnosis = "coverage"
+
+    return {"case_id": case.get("case_id"), "diagnosis": diagnosis,
+            "judge_found": bool(judge_found), "requires": case.get("requires", ""),
+            "reach": reach, "report": report, "budget": budget}
