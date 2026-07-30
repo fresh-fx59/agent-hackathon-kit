@@ -1,12 +1,15 @@
 #!/usr/bin/env bash
-# gate.sh — promote a change through three tiers, cheapest first.
+# gate.sh — promote a change through four tiers, cheapest first.
 #
 #   gate.sh 0 v6         # floor:   capability micro-corpora, tiny and cheap
 #   gate.sh 1 v6 D11     # iterate: the one slice being fixed
 #   gate.sh 2 v6         # regress: ALL slices — mandatory before acceptance
 #   gate.sh 3 v6         # accept:  the full 649MB corpus (metered)
 #
-# Tier 0 is the capability floor (Task 7); tier 2 exists because partial runs miss interaction effects: fixing D11's coverage
+# Tier 0 is the capability floor (Task 7): green at tier 0 proves nothing about the
+# corpus — these hand-written corpora are even easier than a slice, which is itself
+# easier than the full 649MB corpus. RED at tier 0 is the useful signal. Tier 2 exists
+# because partial runs miss interaction effects: fixing D11's coverage
 # by widening a search instruction can silently blow D03's context budget. NO CHANGE
 # IS ACCEPTED ON A TIER-1 PASS ALONE, and only a tier-3 number may be quoted as a
 # benchmark result — a slice is an easier task than the corpus.

@@ -123,7 +123,7 @@ MICRO = {
             {"file": "notify.log", "line_start": 41, "line_end": 41,
              "expect": "wrong version number",
              "note": "1 failure in 41 lines early..."},
-            {"file": "notify.log", "line_start": 61, "line_end": 79,
+            {"file": "notify.log", "line_start": 62, "line_end": 79,
              "expect": "wrong version number",
              "note": "...against 18 in the last 38. The RATE is the finding, not any one line."},
         ],

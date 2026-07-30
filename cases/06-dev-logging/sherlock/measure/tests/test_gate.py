@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tests for gate.sh — the three-tier promotion rule (shell orchestration).
+"""Tests for gate.sh — the four-tier promotion rule (shell orchestration).
 
 gate.sh resolves run-case.sh and report-case.py via "$HERE/..." (its OWN script
 directory), never PATH, so a stub on PATH cannot intercept them. These tests copy
