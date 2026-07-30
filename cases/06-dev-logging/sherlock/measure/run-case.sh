@@ -22,8 +22,20 @@ TIMEOUT="${SHERLOCK_TIMEOUT:-2700}"
 : "${SHERLOCK_API_KEY:?set SHERLOCK_API_KEY (use with-secret.sh eval_linkapi_key --env SHERLOCK_API_KEY -- ...)}"
 
 [ -d "$CASE_DIR" ] || { echo "✗ no such case: $CASE_DIR" >&2; exit 1; }
+# Canonicalize BEFORE it goes into the prompt: qwen runs after `cd "$W"` into the
+# scratch dir, so a relative CASE_DIR would describe a path relative to the wrong
+# cwd. The model then answers plausibly about nothing, the guard below never fires
+# (it's a normal success record), and a wrong-but-recorded measurement lands in the
+# ledger — the exact failure class the guard exists to prevent, by a route it can't see.
+CASE_DIR="$(cd "$CASE_DIR" && pwd)"
 CASE_ID="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["case_id"])' \
   "$CASE_DIR/case.json")" || { echo "✗ unreadable case.json" >&2; exit 1; }
+
+# Validate the arm BEFORE creating the run dir: a missing skill must fail with no
+# trace, not leave behind an empty orphan run dir.
+if [ "$ARM" != "none" ]; then
+  [ -f "$SKILLS/$ARM/SKILL.md" ] || { echo "✗ no skill at $SKILLS/$ARM/SKILL.md" >&2; exit 1; }
+fi
 
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 RUN_DIR="$RUNS/$STAMP-$CASE_ID-$ARM"
@@ -34,7 +46,6 @@ trap 'rm -rf "$W"' EXIT        # the SCRATCH dir goes; the RUN dir stays.
 export QWEN_HOME="$W/home"; mkdir -p "$QWEN_HOME"
 
 if [ "$ARM" != "none" ]; then
-  [ -f "$SKILLS/$ARM/SKILL.md" ] || { echo "✗ no skill at $SKILLS/$ARM/SKILL.md" >&2; exit 1; }
   mkdir -p "$W/.qwen/skills"
   cp -r "$SKILLS/$ARM" "$W/.qwen/skills/log-rca" || exit 1
 fi
@@ -71,6 +82,9 @@ if final is None:
     print("  ✗ no final result record — NOT recorded"); sys.exit(2)
 
 text = final.get("result") or ""
+if not text.strip():
+    print("  ✗ empty result — NOT recorded"); sys.exit(2)
+
 # Same guard as run-bench.sh: qwen reports some provider failures as a SUCCESSFUL
 # record whose result is the error text. Two such rows polluted a ledger on 2026-07-28.
 if text.lstrip().startswith("[API Error") or ("[API Error" in text and len(text) < 400):
