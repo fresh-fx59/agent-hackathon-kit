@@ -80,9 +80,29 @@ drawn from the answer key's own `requires` vocabulary:
 `cap-json-unescaping`, `cap-ru-severity`, `cap-no-error-lines`.
 
 > **A slice is an easier task than the corpus** — smaller haystack, less noise.
-> Slice-green does **not** imply corpus-green. The slice is the iteration
-> signal; the full corpus remains the acceptance signal. Stated here so nobody
-> later reads a green slice suite as a passing benchmark.
+> Slice-green does **not** imply corpus-green.
+
+### The three-tier gate (interaction effects)
+
+Iterating on a single slice has a documented failure mode: *"a partial run can
+see a narrow task slice, reach a confident pairwise conclusion within that
+slice, and miss groups that would change the completed-benchmark decision"*, and
+*"partial runs miss interaction effects where a change to one component breaks
+another"* ([Braintrust](https://www.braintrust.dev/articles/ai-agent-evaluation-framework),
+[arXiv 2607.12338](https://arxiv.org/html/2607.12338v1)). Fixing D11's coverage
+by widening a search instruction can silently blow D03's context budget.
+
+So a change is promoted through three tiers, cheapest first:
+
+| tier | what runs | cost | proves |
+|---|---|---|---|
+| 1 — iterate | the one slice being fixed | seconds | the fix does anything at all |
+| 2 — regress | **all 11 slices** | minutes | the fix broke nothing else |
+| 3 — accept | the full 649 MB corpus | ~12 min, metered | it survives real noise and scale |
+
+Tier 2 is the answer to interaction effects and is cheap enough to be
+non-negotiable: **no change is accepted on a tier-1 pass alone.** Tier 3 remains
+the only result quotable as a benchmark number.
 
 ### Layer 2 — Capture
 
@@ -101,6 +121,19 @@ Verified 2026-07-30 that `stream-json` carries what the analysis needs:
 `tool_use` records include `file_path` / `offset` / `limit`, and `tool_result`
 records report `"Read lines 2-3 of 4 from <path>"`. Combined with the key's exact
 proof line ranges, **whether the run ever looked at the evidence is computable**.
+
+**On OpenTelemetry.** The OTel GenAI semantic conventions now cover agent
+orchestration and tool calls — fixed span names `invoke_agent` / `chat` /
+`execute_tool`, standard attributes for model, tokens and tool arguments; client
+spans left experimental in early 2026, agent spans still experimental but stable
+in practice ([OpenTelemetry](https://opentelemetry.io/blog/2026/genai-observability/),
+[Greptime](https://greptime.com/blogs/2026-05-09-opentelemetry-genai-semantic-conventions)).
+We do **not** adopt the SDK: it is a pip dependency, and AGENTS.md R1 requires
+stdlib-only. But the captured `stream.jsonl` maps cleanly onto that vocabulary,
+so `measure.py` **names its derived fields after the OTel GenAI attributes**
+where they correspond. Cost today: nothing. Benefit: we do not invent private
+terminology, and exporting to any OTel-native backend later is a mapping, not a
+redesign.
 
 The existing hard guard is preserved: a provider/runtime error is **never**
 recorded as a measurement. (Two such rows polluted the ledger on 2026-07-28;
@@ -138,6 +171,34 @@ economy in the vault.
 | not found | never read proof lines | **coverage** failure | ship `logstat`, file-selection guidance |
 | not found | did read proof lines | **reasoning** failure | synthesis guidance, or a correlating tool |
 | found | citecheck: wrong-content | **fabricated evidence** | the most dangerous outcome; currently invisible |
+
+This is the standard three-level split — *final response tells you **what** went
+wrong, trajectory tells you **where**, single-step tells you **why*** — with the
+industry-standard division of labour: **deterministic checks for tool selection,
+argument construction and format compliance; LLM-as-judge only for response
+quality and goal alignment**
+([Braintrust](https://www.braintrust.dev/articles/ai-agent-evaluation-framework),
+[Arize](https://arize.com/blog/what-is-an-evaluation-harness/)).
+
+### Classifying the fix: harness layer, not just "the prompt"
+
+Misses are attributed with the **ETCLOVG** taxonomy from *HarnessFix*
+([arXiv 2606.06324](https://arxiv.org/html/2606.06324v2)), which separates
+*harness* flaws — the editable runtime around the model: prompts, tool specs,
+orchestration — from model reasoning limits. Its empirical finding matters here:
+across 30 repos, **harness flaws span all seven layers rather than being confined
+to prompts**. Our own evidence already agrees:
+
+| ETCLOVG layer | observed in this case |
+|---|---|
+| **T**ool interface | `logstat.py` / `logjoin.py` were built for the coverage and multi-hop gaps and **never shipped into the skill bundle** — SKILL.md mentions them zero times |
+| **C**ontext / memory | v6's SKILL.md grew 54 KB → 62 KB; the skill's own doctrine names context budget as the top cause of total failure |
+| **L**ifecycle / orchestration | the `none`/v1 collapses (157 and 106 chars) are subagent fan-out losing the report, not a reasoning failure |
+| **V**erification | `citecheck.py` exists but nothing enforces it, so fabricated citations are currently unmeasured |
+
+The point of the taxonomy is to stop the reflex of answering every miss by
+editing SKILL.md. Three of the four rows above are fixed by shipping or wiring
+code, not by writing more prose.
 
 This turns "3/11" into "3/11, of which N misses never opened the file and M read
 it and failed to connect it" — which names the next fix instead of guessing it.
@@ -222,8 +283,16 @@ synthesis guidance (reasoning).
 
 ## Known risks
 
-- **Slices are easier than the corpus.** Mitigated by keeping the full-corpus run
-  as the acceptance gate and stating the limitation wherever slice results appear.
+- **Slices are easier than the corpus, and partial runs hide interaction
+  effects.** Mitigated by the three-tier gate: no change is accepted on a
+  single-slice pass; tier 2 (all 11 slices) is mandatory, and only a tier-3
+  full-corpus run may be quoted as a benchmark number.
+- **n=1 is below the decision threshold.** Benchmark-replay work finds a partial
+  score can sit close to the final score yet still miss the task group that flips
+  the pairwise conclusion ([arXiv 2607.12338](https://arxiv.org/html/2607.12338v1)).
+  Per-defect pass/fail is far less noisy than an 11-way aggregate, which is the
+  main reason slices are worth building — but a *corpus* number still needs
+  replication before any "vN beats vN-1" claim.
 - **Judge strictness may be wrong.** gpt-5.5 refused D02 and D05 credit where a
   second reader granted it, because v5 named the defect but got the *mechanism*
   wrong. One data point. Watch it; do not switch judges on it — switching
@@ -240,3 +309,22 @@ synthesis guidance (reasoning).
   spec assumes **deferred** — the `requires` taxonomy is free from the key, so
   the real failure distribution should drive which micro-corpora are worth
   writing.
+
+## External sources consulted (2026-07-30)
+
+- [HarnessFix: Diagnosing and Repairing Agent Harness Flaws](https://arxiv.org/html/2606.06324v2) —
+  ETCLOVG taxonomy; harness flaws span all seven layers, not just prompts;
+  85.0% step-level fault localisation; 6.3–18.4% gains from harness repair alone.
+- [Braintrust — AI agent evaluation framework](https://www.braintrust.dev/articles/ai-agent-evaluation-framework) —
+  deterministic checks for tool selection/arguments/format, LLM-judge for quality;
+  partial runs miss interaction effects.
+- [Arize — What is an evaluation harness?](https://arize.com/blog/what-is-an-evaluation-harness/) —
+  span / trace / trajectory / session levels; failed trajectories become the next
+  regression cases.
+- [LangChain — trajectories vs outputs](https://www.langchain.com/resources/llm-evaluation-framework) —
+  response = what, trajectory = where, single step = why.
+- [OpenTelemetry — GenAI observability](https://opentelemetry.io/blog/2026/genai-observability/)
+  and [Greptime on the GenAI semconv](https://greptime.com/blogs/2026-05-09-opentelemetry-genai-semantic-conventions) —
+  `invoke_agent` / `chat` / `execute_tool` span names and attribute vocabulary.
+- [How Many Tasks Are Enough for Agent Benchmark Decisions?](https://arxiv.org/html/2607.12338v1) —
+  a partial score can be close to the final score and still flip the conclusion.
