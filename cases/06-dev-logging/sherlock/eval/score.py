@@ -68,6 +68,12 @@ def main():
     ap.add_argument("--ledger", default=os.path.join(HERE, "runs.jsonl"),
                     help="run ledger to score (default eval/runs.jsonl; the 649MB "
                          "benchmark keeps its own at eval/bench/runs-bench.jsonl)")
+    ap.add_argument("--all-rows", action="store_true",
+                    help="score EVERY row, not just the latest per (dataset, arm). "
+                         "Required for repetitions: this corpus produced 100/73/18 %% "
+                         "on ONE arm, so a single run per arm cannot separate a real "
+                         "improvement from run-to-run spread. Each score carries its "
+                         "source line number so the number traces back to raw data.")
     args = ap.parse_args()
 
     key = json.load(open(args.key, encoding="utf-8"))
@@ -96,21 +102,34 @@ def main():
     print("answer key: %d real defects + %d red herrings (denominator = %d)"
           % (total, len(herrings), total))
 
-    latest = {}
-    for line in open(args.ledger, encoding="utf-8"):
+    latest, rows = {}, []
+    for lineno, line in enumerate(open(args.ledger, encoding="utf-8"), 1):
         line = line.strip()
         if not line:
             continue
         r = json.loads(line)
         if args.dataset and r.get("dataset") != args.dataset:
             continue
+        r["_line"] = lineno
         latest[(r["dataset"], r["arm"])] = r
+        rows.append(r)
 
+    if args.all_rows:
+        selected = [((r["dataset"], r["arm"]), r) for r in rows]
+    else:
+        selected = sorted(latest.items())
+
+    # rep index per (dataset, arm), in ledger order — so three v7 rows read r1/r2/r3
+    # instead of three indistinguishable lines.
+    seen = {}
     out_path = os.path.join(HERE, "scores.jsonl")
-    for (ds, arm), r in sorted(latest.items()):
+    for (ds, arm), r in selected:
+        seen[(ds, arm)] = seen.get((ds, arm), 0) + 1
         v = judge(r.get("answer", ""), key_text)
         found = v.get("found_ids", [])
         rec = {"dataset": ds, "arm": arm, "model": r.get("model"),
+               "rep": seen[(ds, arm)], "ledger": os.path.basename(args.ledger),
+               "ledger_line": r["_line"], "judge_model": JUDGE_MODEL,
                "found_ids": found, "missed_ids": v.get("missed_ids", []),
                "recall_pct": round(100.0 * len(found) / total, 1) if total else None,
                "false_positives": v.get("false_positives"),
