@@ -29,7 +29,14 @@ BUNDLES = {
     "v6": ["citecheck.py", "fetch-logs.sh", "fetch-logs.conf.example"],
     "v7": ["citecheck.py", "fetch-logs.sh", "fetch-logs.conf.example",
            "logstat.py", "logjoin.py"],
+    "v8": ["citecheck.py", "fetch-logs.sh", "fetch-logs.conf.example",
+           "logstat.py", "logjoin.py"],
 }
+
+# Arms whose SKILL.md must invoke tools by a path that RESOLVES at runtime. v6/v7 are
+# frozen with the broken form and are deliberately exempt — v7 is kept precisely as
+# the arm that shipped the tools and never ran them.
+RESOLVABLE_PATHS_REQUIRED = ["v8"]
 EXECUTABLE = {"citecheck.py", "fetch-logs.sh", "logstat.py", "logjoin.py"}
 
 # Not invoked by the model — it accompanies fetch-logs.sh as a config template, so
@@ -101,6 +108,65 @@ class ShippedAndDocumentedAgreeBothWays(unittest.TestCase):
                 self.assertIn(name, named,
                               "%s ships tools/%s but its SKILL.md never mentions it — "
                               "the model will never run it" % (ver, name))
+
+
+class DocumentedToolCommandsMustActuallyResolve(unittest.TestCase):
+    """Shipped + named in SKILL.md is NOT enough — the command has to run.
+
+    Measured 2026-07-31 across six v7 runs and every run ever recorded: `logstat.py`,
+    `logjoin.py` and `citecheck.py` were invoked **zero** times. The bundle carried
+    them and SKILL.md named them, so the existing tests were green. But the model's
+    cwd is the WORKING directory while `tools/` lives inside the SKILL directory, so
+    the documented `python3 tools/logstat.py` resolved to a file that does not exist.
+    citecheck.py had shipped that way since v5 and nobody noticed.
+
+    ShippedAndDocumentedAgreeBothWays cannot catch this: it matches the *name*, not
+    the *path*. This asserts the path."""
+
+    # Any interpreter, any bundled asset. Checking only `python3` missed
+    # `bash tools/fetch-logs.sh`, which has exactly the same defect, and checking only
+    # `tools/` missed `python3 patterns.py` under knowledge/.
+    INTERPRETERS = ("python3 ", "bash ", "sh ")
+    ASSET_SUFFIXES = (".py", ".sh")
+
+    def _invocation_lines(self, ver):
+        body = open(os.path.join(SHERLOCK, "skills", ver, "SKILL.md"),
+                    encoding="utf-8").read()
+        for line in body.splitlines():
+            if not any(i in line for i in self.INTERPRETERS):
+                continue
+            if not any(s in line for s in self.ASSET_SUFFIXES):
+                continue
+            yield line
+
+    def test_no_documented_command_uses_a_cwd_relative_asset_path(self):
+        for ver in RESOLVABLE_PATHS_REQUIRED:
+            bad = [l.strip() for l in self._invocation_lines(ver)
+                   if "skills/log-rca/" not in l]
+            self.assertEqual(bad, [],
+                             "%s/SKILL.md invokes a bundled asset by a path relative "
+                             "to the model's CWD; the asset lives in the SKILL "
+                             "directory, so the command never runs: %s" % (ver, bad))
+
+    def test_it_documents_at_least_one_runnable_command(self):
+        """Guard against the check passing vacuously if the examples ever vanish."""
+        for ver in RESOLVABLE_PATHS_REQUIRED:
+            lines = list(self._invocation_lines(ver))
+            self.assertTrue(lines, "%s/SKILL.md invokes no bundled asset at all" % ver)
+
+    def test_the_command_resolves_in_both_documented_layouts(self):
+        """The two real layouts: project-local `.qwen/skills/…` (what run-case.sh
+        builds) and home-installed `~/.qwen/skills/…` (what the README tells an
+        operator to do). A command naming only one of them breaks in the other."""
+        for ver in RESOLVABLE_PATHS_REQUIRED:
+            body = open(os.path.join(SHERLOCK, "skills", ver, "SKILL.md"),
+                        encoding="utf-8").read()
+            for line in body.splitlines():
+                if not any(i in line for i in self.INTERPRETERS) or "skills/log-rca/" not in line:
+                    continue
+                self.assertIn(".qwen/skills/log-rca/", line)
+                self.assertIn("~/.qwen/skills/log-rca/", line,
+                              "%s: no home-install fallback in: %s" % (ver, line.strip()))
 
 
 class TheFrozenArmsAreUntouched(unittest.TestCase):
