@@ -32,7 +32,7 @@ SHERLOCK = os.path.dirname(TOOLS)
 
 # Arms required to have runnable documented commands. v6/v7 are frozen with the broken
 # form; v7 is deliberately preserved as "the arm that shipped tools it could never run".
-ARMS = ["v8"]
+ARMS = ["v8", "v9"]
 
 # The two layouts that exist in reality:
 #   project-local  — what measure/run-case.sh builds ($W/.qwen/skills/log-rca)

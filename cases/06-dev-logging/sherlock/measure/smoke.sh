@@ -116,9 +116,13 @@ if calls and errs == len(calls):
 blob = open(os.path.join(run, "stream.jsonl"), encoding="utf-8").read()
 hits = sum(blob.count(t) for t in ("logstat.py", "logjoin.py", "citecheck.py"))
 if expect_tools and hits == 0:
-    bad("arm %s ships analysis tools and NONE were invoked — shipped and documented, "
-        "but the documented path does not resolve from the model's cwd, so a green "
-        "report here measures the arm WITHOUT its headline feature" % arm)
+    bad("arm %s ships analysis tools and NONE were invoked, so a green report here "
+        "would measure the arm WITHOUT its headline feature. Two known causes, and "
+        "they need different fixes: (a) the documented path does not resolve from the "
+        "model's cwd — check with tools/tests/test_documented_commands_run.py, which "
+        "is free; (b) the path resolves fine but the model chooses not to run it, "
+        "which is what v9 showed — it took the manual ls/wc block sitting adjacent in "
+        "step 1 instead. Read the trajectory before changing anything." % arm)
 
 print("   \033[32m· row ok: diagnosis=%s judge_found=%s model=%s\033[0m"
       % (r["diagnosis"], r["judge_found"], r["model"]))
