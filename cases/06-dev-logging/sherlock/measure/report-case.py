@@ -50,11 +50,37 @@ else:
 # so it is known exactly and must never be inferred from the stream.
 v = measure.verdict(case, stream, report, judged["found"],
                     corpus_root=os.path.join(a.case, "corpus"))
-meta = json.load(open(os.path.join(a.run, "meta.json"), encoding="utf-8"))
+# meta.json is written LAST by run-case.sh, after the report, so a run that died in
+# between has a report and no meta. The verdict comes from the case, the stream and the
+# report — none of it from meta — so an unreadable meta must degrade to "unmeasured"
+# and still emit the row, loudly. Dropping the row instead would lose a real judged
+# result over a missing cost record.
+try:
+    meta = json.load(open(os.path.join(a.run, "meta.json"), encoding="utf-8"))
+    if not isinstance(meta, dict):
+        raise ValueError("meta.json is not an object")
+except (OSError, ValueError) as e:
+    print("  ⚠ unreadable meta.json (%s) — arm/model/cost recorded as null" % e)
+    meta = {}
+
+
+def cost(key):
+    """One cost field from meta.json, or None if it was not measured.
+
+    A cost that could not be measured is null, NEVER 0 — they mean opposite things
+    here. `output_tokens: 0` is a real measurement (a provider that answered with
+    nothing); "the final record carried no `usage` block" is an absence. Averaged
+    together, the absence invents a free arm, which is exactly the comparison this
+    column exists to make honest.
+    """
+    v = meta.get(key)
+    return v if isinstance(v, (int, float)) and not isinstance(v, bool) else None
+
+
 # `model` is load-bearing, not decoration: the provider under test changed mid-project
 # (linkapi 400s -> the same deepseek-v4-flash reached via CloseRouter), and a row that
 # does not name its engine can be silently averaged with one from another engine.
-row = {"case_id": v["case_id"], "arm": meta["arm"], "model": meta.get("model"),
+row = {"case_id": v["case_id"], "arm": meta.get("arm"), "model": meta.get("model"),
        "tier": a.tier, "diagnosis": v["diagnosis"], "judge_found": v["judge_found"],
        "why": judged["why"], "requires": v["requires"],
        "files_opened": len(v["reach"]["files_opened"]),
@@ -67,6 +93,13 @@ row = {"case_id": v["case_id"], "arm": meta["arm"], "model": meta.get("model"),
        "collapse_reason": v["report"]["collapse_reason"],
        "report_chars": v["report"]["chars"],
        "tool_calls": v["budget"]["tool_calls"], "run_dir": a.run,
+       # Cost is the other half of the comparison: an arm that scores the same for 3×
+       # the tokens and 7× the wall clock is not an improvement, it is a regression
+       # nobody priced. run-case.sh has captured all four into meta.json from the
+       # start, but they stopped at the run dir — so every A/B in this ledger so far
+       # compared quality against no cost at all.
+       "duration_s": cost("duration_s"), "input_tokens": cost("input_tokens"),
+       "output_tokens": cost("output_tokens"), "turns": cost("turns"),
        "judge_stub": bool(stub)}
 with open(a.results, "a", encoding="utf-8") as fh:
     fh.write(json.dumps(row, ensure_ascii=False) + "\n")

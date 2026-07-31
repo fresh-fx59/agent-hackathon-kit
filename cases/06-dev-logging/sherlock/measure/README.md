@@ -38,6 +38,27 @@ and the corpus, and this repo is public.
       with-secret.sh eval_broker_api_key --env JUDGE_API_KEY -- \
         ./gate.sh 2 v6
 
+## Cost columns — quality is only half a comparison
+
+Every row in `results.jsonl` carries what the run cost, copied by `report-case.py`
+from the run dir's own `meta.json`: **`duration_s`, `input_tokens`, `output_tokens`,
+`turns`**. `run-case.sh` had captured all four from the start, but they stopped at
+the run dir, so the first nine scored rows compared arms with no price attached —
+including a v5 run that spent **6.0M input tokens and 20 minutes** to produce a
+530-char report and still scored as a peer of a 332-second one.
+
+**An unmeasured cost is `null`, never `0`.** `output_tokens: 0` is an observation (a
+provider that answered with nothing); a final record with no `usage` block is an
+absence. Once they are the same value, no average can separate them again — so a
+missing, malformed or non-numeric `meta.json` field yields `null` and a loud warning,
+and never blocks the row: the judged verdict is expensive, the cost record is not.
+
+`backfill-cost-fields.py` retrofits rows scored before this existed. It reads each
+row's own `run_dir`, writes only keys that are ABSENT (so re-running is a no-op and a
+measured value is never overwritten), refuses to rewrite a ledger containing a line it
+cannot parse, and preserves the file's `0600` mode. `--dry-run` reports and touches
+nothing.
+
 ## What a green slice does NOT prove
 
 A slice is a smaller, quieter haystack than the 649 MB corpus. **Slice-green does

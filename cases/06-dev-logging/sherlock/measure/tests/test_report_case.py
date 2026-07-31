@@ -36,6 +36,11 @@ REPORT_BODY = ("## Что произошло\nNPE в PromoCodeResolver, checkout
 CAPTURED_ROOT = ("/home/claude-developer/hack/agent-hackathon-kit/cases/06-dev-logging"
                  "/sherlock/measure/cases/cap-multiline-stitching")
 
+# `meta=NORMAL` builds the meta.json a completed run leaves behind. Anything else is a
+# way for a test to say what went wrong with it, and `None` is a real option (no file
+# at all), so the default cannot be None.
+NORMAL = object()
+
 
 class Harness(unittest.TestCase):
     def setUp(self):
@@ -43,7 +48,7 @@ class Harness(unittest.TestCase):
 
     def build(self, report=REPORT_BODY, kind="capability_micro", stream=None,
               judge='{"found": true, "why": "identifies the NPE"}',
-              model="[SP]deepseek-v4-flash"):
+              model="[SP]deepseek-v4-flash", meta=NORMAL):
         case_dir = os.path.join(self.d, "cases", "cap-multiline-stitching")
         os.makedirs(os.path.join(case_dir, "corpus"), exist_ok=True)
         with open(os.path.join(case_dir, "case.json"), "w", encoding="utf-8") as fh:
@@ -56,9 +61,26 @@ class Harness(unittest.TestCase):
         os.makedirs(run_dir, exist_ok=True)
         with open(os.path.join(run_dir, "report.md"), "w", encoding="utf-8") as fh:
             fh.write(report)
-        with open(os.path.join(run_dir, "meta.json"), "w", encoding="utf-8") as fh:
-            json.dump({"case_id": "cap-multiline-stitching", "arm": "v6",
-                       "model": model, "duration_s": 78, "exit_code": 0}, fh)
+        # The full shape run-case.sh actually writes, cost fields included — a fixture
+        # that omits them cannot catch a reporter that drops them.
+        normal = {"case_id": "cap-multiline-stitching", "arm": "v6", "model": model,
+                  "started_at": "20260731T073237Z", "duration_s": 78, "exit_code": 0,
+                  "input_tokens": 129801, "output_tokens": 2261,
+                  "answer_chars": len(report), "turns": 4}
+        # meta=NORMAL -> that record; a dict is merged over it (a key set to None
+        # models a provider whose final record carried no usage); a str is written
+        # verbatim (malformed JSON); None writes no meta.json at all.
+        if meta is None:
+            body_meta = None
+        elif meta is NORMAL:
+            body_meta = json.dumps(normal, ensure_ascii=False)
+        elif isinstance(meta, str):
+            body_meta = meta
+        else:
+            body_meta = json.dumps(dict(normal, **meta), ensure_ascii=False)
+        if body_meta is not None:
+            with open(os.path.join(run_dir, "meta.json"), "w", encoding="utf-8") as fh:
+                fh.write(body_meta)
         # The stream is the REAL captured one unless a test supplies its own. Either
         # way it is rebased onto THIS case's corpus, so containment is asked of the
         # case actually under measurement. Tests that build a stream from scratch
@@ -185,6 +207,78 @@ class TheRowNamesTheModelThatProducedIt(Harness):
         self.assertEqual(p.returncode, 0, p.stderr)
         self.assertEqual(rows[0]["model"], "closerouter/cr-deepseek-v4-flash",
                          "two providers in one ledger must never look identical")
+
+
+class TheRowCarriesWhatTheRunCost(Harness):
+    """Quality with no price attached is half a measurement.
+
+    run-case.sh has captured duration_s / input_tokens / output_tokens / turns into
+    meta.json since the rig was built, but the four numbers stopped at the run dir and
+    never reached results.jsonl — so nine scored rows compared arms with no idea that
+    one of them spent 6.0M input tokens and 20 minutes to produce a 530-char report.
+
+    The rule these tests exist to hold: an unmeasured cost is null, NEVER 0. `0`
+    tokens is a real observation, "no usage block in the final record" is not, and
+    once they are the same value no average can tell them apart again.
+    """
+
+    COST = ("duration_s", "input_tokens", "output_tokens", "turns")
+
+    def test_the_row_carries_the_cost_from_meta(self):
+        p, rows = self.run_reporter(*self.build())
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertEqual(rows[0]["duration_s"], 78)
+        self.assertEqual(rows[0]["input_tokens"], 129801)
+        self.assertEqual(rows[0]["output_tokens"], 2261)
+        self.assertEqual(rows[0]["turns"], 4)
+
+    def test_a_missing_meta_nulls_the_cost_and_still_writes_the_row(self):
+        """meta.json is written LAST by run-case.sh. A run that died after the report
+        has one and not the other, and the judged verdict is still real — losing that
+        row to a KeyError would throw away the expensive half over the cheap half."""
+        p, rows = self.run_reporter(*self.build(meta=None))
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertEqual(len(rows), 1, "the row must survive a missing meta.json")
+        self.assertEqual(rows[0]["diagnosis"], "ok")
+        for k in self.COST:
+            self.assertIsNone(rows[0][k], k)
+        self.assertIn("unreadable meta.json", p.stdout, "silence would hide the gap")
+
+    def test_a_malformed_meta_nulls_the_cost_and_still_writes_the_row(self):
+        p, rows = self.run_reporter(*self.build(meta="{oops, not JSON"))
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertEqual(len(rows), 1)
+        for k in self.COST:
+            self.assertIsNone(rows[0][k], k)
+        self.assertIn("unreadable meta.json", p.stdout)
+
+    def test_a_null_token_field_stays_null_and_never_becomes_zero(self):
+        """Some providers return a final record with no `usage`, so run-case.sh writes
+        `input_tokens: null` — a normal outcome, not corruption. It must arrive in the
+        ledger as null while the fields that WERE measured keep their real values."""
+        p, rows = self.run_reporter(*self.build(meta={"input_tokens": None,
+                                                      "turns": None}))
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertIsNone(rows[0]["input_tokens"])
+        self.assertIsNone(rows[0]["turns"])
+        self.assertEqual(rows[0]["duration_s"], 78, "one absence must not null the rest")
+        self.assertEqual(rows[0]["output_tokens"], 2261)
+
+    def test_a_zero_cost_is_kept_as_zero(self):
+        """The other direction of the same rule: a measured 0 is data. If `or None`
+        ever creeps in here, a genuinely free run becomes an unmeasured one."""
+        p, rows = self.run_reporter(*self.build(meta={"output_tokens": 0,
+                                                      "duration_s": 0}))
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertEqual(rows[0]["output_tokens"], 0)
+        self.assertEqual(rows[0]["duration_s"], 0)
+
+    def test_a_non_numeric_cost_is_null_not_the_garbage(self):
+        p, rows = self.run_reporter(*self.build(meta={"turns": "many",
+                                                      "input_tokens": True}))
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertIsNone(rows[0]["turns"])
+        self.assertIsNone(rows[0]["input_tokens"], "True must not arrive as 1 token")
 
 
 class TheJudgeIsSkippedWhenThereIsNothingToJudge(Harness):
