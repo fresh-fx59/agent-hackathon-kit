@@ -37,15 +37,31 @@ BUNDLES = {
             "logstat.py", "logjoin.py"],
 }
 
+# v11 deliberately FORKS its tools instead of sharing tools/. `citecheck.py` drops
+# the extension gate and gains `--ledger`, `logjoin.py` returns records instead of
+# lines, and `logstat.py` is replaced by `logmap.py`. None of that can land in
+# tools/ without silently redefining what v8-v10 measured — their numbers are
+# already quoted in the ledgers. So the fork is asserted, not tolerated: same
+# shipped/documented rules, same resolvable paths, but NO byte-identity.
+FORKED = {"v11": ["citecheck.py", "logjoin.py", "logmap.py"]}
+
 # Arms whose SKILL.md must invoke tools by a path that RESOLVES at runtime. v6/v7 are
 # frozen with the broken form and are deliberately exempt — v7 is kept precisely as
 # the arm that shipped the tools and never ran them.
-RESOLVABLE_PATHS_REQUIRED = ["v8", "v9", "v10"]
-EXECUTABLE = {"citecheck.py", "fetch-logs.sh", "logstat.py", "logjoin.py"}
+RESOLVABLE_PATHS_REQUIRED = ["v8", "v9", "v10", "v11"]
+EXECUTABLE = {"citecheck.py", "fetch-logs.sh", "logstat.py", "logjoin.py",
+              "logmap.py"}
 
 # Not invoked by the model — it accompanies fetch-logs.sh as a config template, so
 # SKILL.md has no reason to name it by path.
 COMPANIONS = {"fetch-logs.conf.example"}
+
+
+def shipped_files(ver):
+    """Files, not directories: `__pycache__` is a build artefact, not a tool, and
+    letting it fail the bundle check trains people to ignore a red suite."""
+    d = bundle_dir(ver)
+    return {n for n in os.listdir(d) if os.path.isfile(os.path.join(d, n))}
 
 
 def bundle_dir(ver):
@@ -69,6 +85,12 @@ class BundleCopiesAreByteIdentical(unittest.TestCase):
                                 "missing tools/%s" % name)
                 self.assertTrue(os.path.exists(os.path.join(bundle_dir(ver), name)),
                                 "the %s bundle is missing its copy of %s" % (ver, name))
+        # A forked arm owns its tools outright: `logmap.py` has no shared
+        # counterpart at all, which is the point.
+        for ver, names in FORKED.items():
+            for name in names:
+                self.assertTrue(os.path.exists(os.path.join(bundle_dir(ver), name)),
+                                "the %s bundle is missing %s" % (ver, name))
 
     def test_contents_match_byte_for_byte(self):
         for ver, names in BUNDLES.items():
@@ -79,7 +101,7 @@ class BundleCopiesAreByteIdentical(unittest.TestCase):
                                 % (ver, name, name))
 
     def test_the_exec_bit_survives_the_copy(self):
-        for ver, names in BUNDLES.items():
+        for ver, names in list(BUNDLES.items()) + list(FORKED.items()):
             for name in sorted(set(names) & EXECUTABLE):
                 b = os.path.join(bundle_dir(ver), name)
                 self.assertTrue(os.stat(b).st_mode & stat.S_IXUSR,
@@ -98,17 +120,17 @@ class ShippedAndDocumentedAgreeBothWays(unittest.TestCase):
     nothing shipped goes unmentioned."""
 
     def test_every_tool_named_in_skill_md_is_actually_shipped(self):
-        for ver in BUNDLES:
-            shipped = set(os.listdir(bundle_dir(ver)))
+        for ver in list(BUNDLES) + list(FORKED):
+            shipped = shipped_files(ver)
             for name in sorted(referenced_tools(ver)):
                 self.assertIn(name, shipped,
                               "%s/SKILL.md tells the model to run tools/%s, which the "
                               "bundle does not carry" % (ver, name))
 
     def test_every_shipped_tool_is_named_in_skill_md(self):
-        for ver in BUNDLES:
+        for ver in list(BUNDLES) + list(FORKED):
             named = referenced_tools(ver)
-            for name in sorted(set(os.listdir(bundle_dir(ver))) - COMPANIONS):
+            for name in sorted(shipped_files(ver) - COMPANIONS):
                 self.assertIn(name, named,
                               "%s ships tools/%s but its SKILL.md never mentions it — "
                               "the model will never run it" % (ver, name))
@@ -173,6 +195,40 @@ class DocumentedToolCommandsMustActuallyResolve(unittest.TestCase):
                               "%s: no home-install fallback in: %s" % (ver, line.strip()))
 
 
+class TheForkedArmOwnsItsTools(unittest.TestCase):
+    """A fork that has silently converged back on the shared copy is not a fork;
+    a fork that is never asserted is indistinguishable from drift."""
+
+    def test_the_forked_tools_really_differ_from_the_shared_ones(self):
+        for ver, names in FORKED.items():
+            for name in names:
+                shared = os.path.join(TOOLS, name)
+                if not os.path.exists(shared):
+                    continue            # logmap.py has no shared counterpart
+                self.assertFalse(
+                    filecmp.cmp(shared, os.path.join(bundle_dir(ver), name),
+                                shallow=False),
+                    "%s/%s is byte-identical to tools/%s — then it should be "
+                    "declared in BUNDLES, not FORKED" % (ver, name, name))
+
+    def test_the_shared_tools_were_not_edited_to_make_the_fork_work(self):
+        """The frozen arms read tools/ through BUNDLES; if the fork's changes had
+        been made there instead, v8-v10 would silently become different arms."""
+        for ver in ("v8", "v9", "v10"):
+            for name in BUNDLES[ver]:
+                self.assertTrue(
+                    filecmp.cmp(os.path.join(TOOLS, name),
+                                os.path.join(bundle_dir(ver), name), shallow=False),
+                    "tools/%s no longer matches %s — a frozen arm just changed"
+                    % (name, ver))
+
+    def test_the_replaced_tool_is_gone_from_the_forked_bundle(self):
+        for ver in FORKED:
+            self.assertNotIn("logstat.py", shipped_files(ver),
+                             "%s replaced logstat.py with logmap.py; shipping both "
+                             "leaves the model a choice it cannot make" % ver)
+
+
 class TheFrozenArmsAreUntouched(unittest.TestCase):
     """v1-v6 are frozen A/B arms — every measurement in the ledgers is relative to
     them. A new arm is additive; it may not reach back into an older bundle."""
@@ -184,6 +240,15 @@ class TheFrozenArmsAreUntouched(unittest.TestCase):
                 continue
             self.assertNotIn("fetch-logs.sh", os.listdir(d),
                              "%s is a frozen arm and must not gain the transport" % ver)
+
+    def test_the_new_tool_did_not_leak_into_any_older_arm(self):
+        for ver in ("v1", "v2", "v3", "v4", "v4.1", "v5", "v6", "v7", "v8", "v9",
+                    "v10"):
+            d = bundle_dir(ver)
+            if not os.path.isdir(d):
+                continue
+            self.assertNotIn("logmap.py", os.listdir(d),
+                             "%s is a frozen arm and must not gain logmap.py" % ver)
 
     def test_no_analysis_tool_leaked_into_v1_to_v6(self):
         """v6 is on main and its number is quotable; adding tools to it in place would
@@ -198,7 +263,7 @@ class TheFrozenArmsAreUntouched(unittest.TestCase):
                                  "%s is a frozen arm and must not gain %s" % (ver, tool))
 
     def test_each_arm_carries_a_skill(self):
-        for ver in BUNDLES:
+        for ver in list(BUNDLES) + list(FORKED):
             self.assertTrue(
                 os.path.exists(os.path.join(SHERLOCK, "skills", ver, "SKILL.md")),
                 "skills/%s/SKILL.md is what makes %s loadable as an eval arm"

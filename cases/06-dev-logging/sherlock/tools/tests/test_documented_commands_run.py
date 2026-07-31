@@ -20,6 +20,7 @@ caught the bug before a single cell was spent.
 """
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -32,7 +33,7 @@ SHERLOCK = os.path.dirname(TOOLS)
 
 # Arms required to have runnable documented commands. v6/v7 are frozen with the broken
 # form; v7 is deliberately preserved as "the arm that shipped tools it could never run".
-ARMS = ["v8", "v9", "v10"]
+ARMS = ["v8", "v9", "v10", "v11"]
 
 # The two layouts that exist in reality:
 #   project-local  — what measure/run-case.sh builds ($W/.qwen/skills/log-rca)
@@ -61,11 +62,30 @@ class EveryDocumentedCommandResolves(unittest.TestCase):
         self.home = os.path.join(self.root, "home")
         os.makedirs(os.path.join(self.work, "logs"), exist_ok=True)
         os.makedirs(self.home, exist_ok=True)
-        with open(os.path.join(self.work, "logs", "app.log"), "w", encoding="utf-8") as fh:
-            fh.write("2026-07-28 09:00:00 ERROR boom order=ORD-1\n"
-                     "2026-07-28 09:00:01 INFO ok order=ORD-1\n")
+        with open(os.path.join(self.work, "logs", "app.log"), "w",
+                  encoding="utf-8") as fh:
+            # Big enough to BE a log: a two-line file is mostly-unique by
+            # construction, and a residue tool correctly refuses to call that a
+            # stream of records. The corpus has to be plausible for the
+            # end-to-end proof to mean anything.
+            for i in range(200):
+                fh.write("2026-07-28 09:%02d:00 INFO ok order=ORD-1\n" % (i % 60))
+            fh.write("2026-07-28 09:59:59 ERROR boom order=ORD-1\n")
+            fh.write("2026-07-28 09:59:59 ALARM a shape seen exactly once\n")
         with open(os.path.join(self.work, "report.md"), "w", encoding="utf-8") as fh:
             fh.write("## Улики\nlogs/app.log:1 — ERROR boom\n")
+
+    def _sub(self, cmd):
+        """Substitute the corpus placeholder exactly as the model is told to.
+
+        v11 documents `<КАТАЛОГ_ЛОГОВ>` instead of `./logs` because BOTH harnesses
+        cd into a fresh temp dir and pass the corpus by ABSOLUTE path — `./logs`
+        never exists there, and SKILL.md routed that failure into the no-tool
+        fallback, i.e. a path slip read as "the tool is absent" and skipped the
+        whole mechanism. The previous version of this suite manufactured a `logs/`
+        dir in the work dir, which made the broken command pass."""
+        return cmd.replace("<КАТАЛОГ_ЛОГОВ>",
+                           shlex.quote(os.path.join(self.work, "logs")))
 
     def tearDown(self):
         shutil.rmtree(self.root, ignore_errors=True)
@@ -112,22 +132,65 @@ class EveryDocumentedCommandResolves(unittest.TestCase):
                         "%s/%s: resolved to a non-existent file: %s"
                         % (ver, layout, found[0]))
 
-    def test_logstat_actually_executes_and_produces_output(self):
+    # The arm's mapping tool: v8-v10 ship logstat.py, v11 replaces it with
+    # logmap.py. Hard-coding one name here would have silently skipped the only
+    # end-to-end proof the new arm has.
+    MAP_TOOL = {"v8": "logstat.py", "v9": "logstat.py", "v10": "logstat.py",
+                "v11": "logmap.py"}
+
+    def test_the_map_tool_actually_executes_and_produces_output(self):
         """The full end-to-end proof for the one command with real arguments."""
         for ver in ARMS:
             for layout in LAYOUTS:
                 self._install(ver, layout)
-                cmd = next(c for c in documented_commands(ver)
-                           if "logstat.py" in c and "--json" not in c)
+                cmd = self._sub(next(c for c in documented_commands(ver)
+                                     if self.MAP_TOOL[ver] in c and "--json" not in c))
                 p = subprocess.run(["bash", "-c", cmd], cwd=self.work,
                                    env=dict(os.environ, HOME=self.home),
                                    capture_output=True, text=True, timeout=120)
                 self.assertEqual(p.returncode, 0,
-                                 "%s/%s: documented logstat command failed: %s\n%s"
+                                 "%s/%s: documented map command failed: %s\n%s"
                                  % (ver, layout, cmd, p.stderr[:400]))
                 self.assertIn("app.log", p.stdout,
-                              "%s/%s: logstat ran but reported nothing about the corpus"
-                              % (ver, layout))
+                              "%s/%s: the map tool ran but reported nothing about "
+                              "the corpus" % (ver, layout))
+
+    def test_the_forked_arm_writes_a_worklist_that_starts_unadjudicated(self):
+        """v11's whole mechanism is a worklist the model must write back. If the
+        first command does not produce one, nothing downstream can run."""
+        for layout in LAYOUTS:
+            self._install("v11", layout)
+            cmd = self._sub(next(c for c in documented_commands("v11")
+                                 if "logmap.py" in c))
+            p = subprocess.run(["bash", "-c", cmd], cwd=self.work,
+                               env=dict(os.environ, HOME=self.home),
+                               capture_output=True, text=True, timeout=300)
+            self.assertEqual(p.returncode, 0, p.stderr[:400])
+            wl = os.path.join(self.work, "work", "worklist.tsv")
+            self.assertTrue(os.path.exists(wl), "no worklist at %s" % wl)
+            rows = [l.split("\t") for l in open(wl, encoding="utf-8")
+                    if not l.startswith("#") and l.strip()]
+            self.assertTrue(rows, "the worklist is empty")
+            self.assertTrue(all(r[1] == "?" for r in rows),
+                            "every row must start unadjudicated")
+
+    def test_the_forked_arm_ledger_refuses_an_unadjudicated_worklist(self):
+        """Free proof of the stopping condition: exit code, not self-assessment."""
+        self._install("v11", "project")
+        cmd = self._sub(next(c for c in documented_commands("v11")
+                             if "logmap.py" in c))
+        subprocess.run(["bash", "-c", cmd], cwd=self.work,
+                       env=dict(os.environ, HOME=self.home),
+                       capture_output=True, text=True, timeout=300)
+        cc = self._sub(next(c for c in documented_commands("v11")
+                            if "citecheck.py" in c))
+        p = subprocess.run(["bash", "-c", cc], cwd=self.work,
+                           env=dict(os.environ, HOME=self.home),
+                           capture_output=True, text=True, timeout=300)
+        self.assertEqual(p.returncode, 1,
+                         "a worklist full of `?` must block the report:\n%s"
+                         % p.stdout[-1500:])
+        self.assertIn("неразобранных строк", p.stdout)
 
     def test_every_reference_file_pointed_to_actually_exists(self):
         """Progressive disclosure adds a new way to be silently wrong.
@@ -172,6 +235,20 @@ class EveryDocumentedCommandResolves(unittest.TestCase):
         self.assertNotEqual(p.returncode, 0,
                             "the original broken form somehow succeeded — this test "
                             "would not have caught the bug it exists for")
+
+
+class TheForkedArmNeverHardcodesTheCorpusPath(unittest.TestCase):
+    """REGRESSION for the path trap. Neither harness creates ./logs — both cd into
+    a fresh temp dir and name the corpus by absolute path — so a documented command
+    that passes ./logs as the corpus argument fails at runtime, and SKILL.md sent
+    exactly that failure into the no-tool fallback."""
+
+    def test_no_v11_command_passes_a_bare_dot_logs_as_corpus(self):
+        offenders = [c for c in documented_commands("v11")
+                     if re.search(r"(?:^|\s)\./logs(?:\s|$)", c)]
+        self.assertEqual(offenders, [],
+                         "v11 must use the <КАТАЛОГ_ЛОГОВ> placeholder: %s"
+                         % offenders)
 
 
 if __name__ == "__main__":
