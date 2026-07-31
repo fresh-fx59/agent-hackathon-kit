@@ -51,7 +51,10 @@ else:
 v = measure.verdict(case, stream, report, judged["found"],
                     corpus_root=os.path.join(a.case, "corpus"))
 meta = json.load(open(os.path.join(a.run, "meta.json"), encoding="utf-8"))
-row = {"case_id": v["case_id"], "arm": meta["arm"],
+# `model` is load-bearing, not decoration: the provider under test changed mid-project
+# (linkapi 400s -> the same deepseek-v4-flash reached via CloseRouter), and a row that
+# does not name its engine can be silently averaged with one from another engine.
+row = {"case_id": v["case_id"], "arm": meta["arm"], "model": meta.get("model"),
        "tier": a.tier, "diagnosis": v["diagnosis"], "judge_found": v["judge_found"],
        "why": judged["why"], "requires": v["requires"],
        "files_opened": len(v["reach"]["files_opened"]),

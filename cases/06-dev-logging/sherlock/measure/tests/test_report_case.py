@@ -42,7 +42,8 @@ class Harness(unittest.TestCase):
         self.d = tempfile.mkdtemp(prefix="report-case-test-")
 
     def build(self, report=REPORT_BODY, kind="capability_micro", stream=None,
-              judge='{"found": true, "why": "identifies the NPE"}'):
+              judge='{"found": true, "why": "identifies the NPE"}',
+              model="[SP]deepseek-v4-flash"):
         case_dir = os.path.join(self.d, "cases", "cap-multiline-stitching")
         os.makedirs(os.path.join(case_dir, "corpus"), exist_ok=True)
         with open(os.path.join(case_dir, "case.json"), "w", encoding="utf-8") as fh:
@@ -57,7 +58,7 @@ class Harness(unittest.TestCase):
             fh.write(report)
         with open(os.path.join(run_dir, "meta.json"), "w", encoding="utf-8") as fh:
             json.dump({"case_id": "cap-multiline-stitching", "arm": "v6",
-                       "duration_s": 78, "exit_code": 0}, fh)
+                       "model": model, "duration_s": 78, "exit_code": 0}, fh)
         # The stream is the REAL captured one unless a test supplies its own. Either
         # way it is rebased onto THIS case's corpus, so containment is asked of the
         # case actually under measurement. Tests that build a stream from scratch
@@ -161,6 +162,29 @@ class CoverageMustBeReachableFromTheReporter(Harness):
         self.assertEqual(p.returncode, 0, p.stderr)
         self.assertEqual(rows[0]["reach_verdict"], "unknown")
         self.assertEqual(rows[0]["diagnosis"], "inconclusive")
+
+
+class TheRowNamesTheModelThatProducedIt(Harness):
+    """A row that does not name its model cannot be compared to anything.
+
+    On 2026-07-31 the provider under test changed mid-project: linkapi began
+    returning 400 on every call and the same deepseek-v4-flash was reached through
+    CloseRouter instead. `meta.json` recorded the model all along, but the emitted
+    row dropped it — so rows from two different providers sat in one ledger,
+    indistinguishable. That is the same defect already fixed for the JUDGE in
+    score.py (`judge_model`), one layer down: identical numbers from different
+    engines silently averaged together."""
+
+    def test_the_row_carries_the_model_from_meta(self):
+        p, rows = self.run_reporter(*self.build(model="[SP]deepseek-v4-flash"))
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertEqual(rows[0]["model"], "[SP]deepseek-v4-flash")
+
+    def test_a_different_provider_is_visible_in_the_row(self):
+        p, rows = self.run_reporter(*self.build(model="closerouter/cr-deepseek-v4-flash"))
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertEqual(rows[0]["model"], "closerouter/cr-deepseek-v4-flash",
+                         "two providers in one ledger must never look identical")
 
 
 class TheJudgeIsSkippedWhenThereIsNothingToJudge(Harness):
