@@ -33,12 +33,14 @@ BUNDLES = {
            "logstat.py", "logjoin.py"],
     "v9": ["citecheck.py", "fetch-logs.sh", "fetch-logs.conf.example",
            "logstat.py", "logjoin.py"],
+    "v10": ["citecheck.py", "fetch-logs.sh", "fetch-logs.conf.example",
+            "logstat.py", "logjoin.py"],
 }
 
 # Arms whose SKILL.md must invoke tools by a path that RESOLVES at runtime. v6/v7 are
 # frozen with the broken form and are deliberately exempt — v7 is kept precisely as
 # the arm that shipped the tools and never ran them.
-RESOLVABLE_PATHS_REQUIRED = ["v8", "v9"]
+RESOLVABLE_PATHS_REQUIRED = ["v8", "v9", "v10"]
 EXECUTABLE = {"citecheck.py", "fetch-logs.sh", "logstat.py", "logjoin.py"}
 
 # Not invoked by the model — it accompanies fetch-logs.sh as a config template, so

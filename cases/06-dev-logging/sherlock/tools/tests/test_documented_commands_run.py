@@ -32,7 +32,7 @@ SHERLOCK = os.path.dirname(TOOLS)
 
 # Arms required to have runnable documented commands. v6/v7 are frozen with the broken
 # form; v7 is deliberately preserved as "the arm that shipped tools it could never run".
-ARMS = ["v8", "v9"]
+ARMS = ["v8", "v9", "v10"]
 
 # The two layouts that exist in reality:
 #   project-local  — what measure/run-case.sh builds ($W/.qwen/skills/log-rca)
@@ -128,6 +128,39 @@ class EveryDocumentedCommandResolves(unittest.TestCase):
                 self.assertIn("app.log", p.stdout,
                               "%s/%s: logstat ran but reported nothing about the corpus"
                               % (ver, layout))
+
+    def test_every_reference_file_pointed_to_actually_exists(self):
+        """Progressive disclosure adds a new way to be silently wrong.
+
+        Moving heavy sections into `reference/*.md` keeps SKILL.md near the size of
+        Qwen's own reference skill (239 lines), which matters because smaller models
+        tolerate far less distance between an instruction and its use. But a pointer
+        to a file that is not there is worse than the inline text it replaced: the
+        model follows the pointer, finds nothing, and silently loses that guidance —
+        the same class of failure as a tool path that never resolved."""
+        for ver in ARMS:
+            skill_dir = os.path.join(SHERLOCK, "skills", ver)
+            body = open(os.path.join(skill_dir, "SKILL.md"), encoding="utf-8").read()
+            refs = set(re.findall(r"`(reference/[A-Za-z0-9_./-]+\.md)`", body))
+            for ref in sorted(refs):
+                self.assertTrue(
+                    os.path.exists(os.path.join(skill_dir, ref)),
+                    "%s/SKILL.md points at %s, which does not exist — the model will "
+                    "follow it and silently lose that guidance" % (ver, ref))
+
+    def test_no_reference_file_is_orphaned(self):
+        """The other direction: a reference file nothing points at is dead weight the
+        model will never load."""
+        for ver in ARMS:
+            skill_dir = os.path.join(SHERLOCK, "skills", ver)
+            ref_dir = os.path.join(skill_dir, "reference")
+            if not os.path.isdir(ref_dir):
+                continue
+            body = open(os.path.join(skill_dir, "SKILL.md"), encoding="utf-8").read()
+            for name in sorted(os.listdir(ref_dir)):
+                self.assertIn(name, body,
+                              "%s/reference/%s is never referenced from SKILL.md, so "
+                              "nothing will ever load it" % (ver, name))
 
     def test_a_cwd_relative_command_would_have_failed_this_test(self):
         """Negative control: prove the test can actually catch the original bug,
