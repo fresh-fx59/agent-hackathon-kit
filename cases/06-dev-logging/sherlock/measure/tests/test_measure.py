@@ -211,6 +211,15 @@ class AgainstTheRealCapturedStream(unittest.TestCase):
                          "a directory-scoped search must never manufacture a coverage failure")
         self.assertEqual(r["not_reached"], [])
 
+    def test_a_dir_scan_of_an_unrelated_subtree_still_leaves_the_proof_missed(self):
+        """The fixture's list_directory is on the CASE dir, so with the corpus root
+        supplied it does cover this proof. Point a scan somewhere else and the
+        coverage failure must survive — see DirScanContainment for the full matrix."""
+        elsewhere = [dict(e, dir="/somewhere/else") for e in self.events
+                     if e["kind"] == "dir"]
+        r = measure.proof_reach(elsewhere, self.PROOF, corpus_root="/c/corpus")
+        self.assertEqual(r["verdict"], "not_reached", r)
+
     def test_files_opened_counts_corpus_files_only(self):
         """Important-8. The live row recorded files_opened=3 for a corpus holding ONE
         log file: the directory, case.json, and the log."""
@@ -221,6 +230,103 @@ class AgainstTheRealCapturedStream(unittest.TestCase):
         body = open(FIXTURE, encoding="utf-8").read()
         self.assertNotIn("Read lines", body,
                          "if the CLI ever does emit this, the derivation can be revisited")
+
+
+CORPUS = "/sandbox/cases/c1/corpus"
+NESTED_PROOF = [{"file": "web/nginx/access.log", "line_start": 10, "line_end": 20,
+                 "note": "the 502 burst"}]
+
+
+class DirScanContainment(unittest.TestCase):
+    """A directory scan may excuse a miss ONLY for proofs inside the scanned subtree.
+
+    The defect this class exists to prevent: `_dir_scan_covers` was
+    `bool(dir) and bool(proof)` — no correlation between the directory scanned and
+    the proof at all. Since `list_directory` / `glob` / `grep_search` are how every
+    agent opens an investigation, ONE such call anywhere made `coverage` unreachable
+    for the whole run — and coverage-vs-reasoning is the only thing this module
+    exists to tell apart. The fix for "manufactured coverage failures" had inverted
+    into "coverage never fires".
+
+    The proof locations are corpus-RELATIVE and the scanned dirs are ABSOLUTE, so
+    the containment question is only answerable against the corpus root. That root
+    is not guessed: the rig builds `cases/<id>/corpus` and hands it in (AGENTS.md
+    input-gate principle — constrain at the boundary instead of disambiguating
+    unconstrained input downstream).
+    """
+
+    def scan(self, *dirs):
+        return measure.read_events(stream(
+            *[tool_use("list_directory", {"path": d}) for d in dirs]))
+
+    def test_scanning_an_unrelated_subtree_does_not_excuse_the_miss(self):
+        """THE regression. `db/` cannot have surfaced `web/nginx/access.log`."""
+        r = measure.proof_reach(self.scan(CORPUS + "/db"), NESTED_PROOF,
+                                corpus_root=CORPUS)
+        self.assertEqual(r["verdict"], "not_reached", r)
+        self.assertEqual(r["not_reached"], ["web/nginx/access.log:10-20"])
+
+    def test_scanning_the_proofs_own_directory_softens_the_miss_to_unknown(self):
+        r = measure.proof_reach(self.scan(CORPUS + "/web/nginx"), NESTED_PROOF,
+                                corpus_root=CORPUS)
+        self.assertEqual(r["verdict"], "unknown", r)
+
+    def test_scanning_an_ancestor_of_the_proof_softens_the_miss_to_unknown(self):
+        """A recursive glob/grep at `web/` reports the whole subtree beneath it."""
+        r = measure.proof_reach(self.scan(CORPUS + "/web"), NESTED_PROOF,
+                                corpus_root=CORPUS)
+        self.assertEqual(r["verdict"], "unknown", r)
+
+    def test_scanning_the_corpus_root_covers_every_proof(self):
+        r = measure.proof_reach(self.scan(CORPUS), NESTED_PROOF, corpus_root=CORPUS)
+        self.assertEqual(r["verdict"], "unknown", r)
+
+    def test_scanning_outside_the_corpus_entirely_covers_nothing(self):
+        r = measure.proof_reach(self.scan("/etc"), NESTED_PROOF, corpus_root=CORPUS)
+        self.assertEqual(r["verdict"], "not_reached", r)
+
+    def test_a_near_miss_sibling_directory_does_not_cover(self):
+        """`web/nginx-old` shares a string prefix with `web/nginx` but is a different
+        directory. Prefix matching on raw strings would wrongly excuse this."""
+        r = measure.proof_reach(self.scan(CORPUS + "/web/nginx-old"), NESTED_PROOF,
+                                corpus_root=CORPUS)
+        self.assertEqual(r["verdict"], "not_reached", r)
+
+    def test_one_covering_scan_among_several_unrelated_ones_is_enough(self):
+        r = measure.proof_reach(
+            self.scan(CORPUS + "/db", "/etc", CORPUS + "/web/nginx"),
+            NESTED_PROOF, corpus_root=CORPUS)
+        self.assertEqual(r["verdict"], "unknown", r)
+
+    def test_a_trailing_slash_on_the_scanned_dir_changes_nothing(self):
+        r = measure.proof_reach(self.scan(CORPUS + "/web/nginx/"), NESTED_PROOF,
+                                corpus_root=CORPUS)
+        self.assertEqual(r["verdict"], "unknown", r)
+
+    def test_scanning_a_directory_that_contains_the_whole_corpus_covers(self):
+        """A recursive glob/grep at the CASE dir (the corpus's parent) reaches every
+        file in the corpus. The real capture's list_directory is exactly this — it
+        scanned `cases/cap-multiline-stitching`, one level above `corpus/`."""
+        r = measure.proof_reach(self.scan("/sandbox/cases/c1"), NESTED_PROOF,
+                                corpus_root=CORPUS)
+        self.assertEqual(r["verdict"], "unknown", r)
+
+    def test_without_a_corpus_root_the_conservative_answer_is_kept(self):
+        """Degraded mode: no anchor means containment is genuinely unanswerable, so
+        `unknown` ("cannot exclude") stays the honest verdict. Production never takes
+        this path — test_report_case asserts report-case.py supplies the root."""
+        r = measure.proof_reach(self.scan(CORPUS + "/db"), NESTED_PROOF)
+        self.assertEqual(r["verdict"], "unknown", r)
+
+    def test_a_real_read_of_the_proof_still_wins_over_containment(self):
+        """Containment can only ever soften not_reached to unknown. It must never
+        downgrade a genuine read, and never manufacture `reached`."""
+        events = measure.read_events(stream(
+            tool_use("list_directory", {"path": CORPUS + "/db"}),
+            tool_use("read_file", {"file_path": CORPUS + "/web/nginx/access.log",
+                                   "offset": 5, "limit": 40})))
+        r = measure.proof_reach(events, NESTED_PROOF, corpus_root=CORPUS)
+        self.assertEqual(r["verdict"], "reached", r)
 
 
 REPORT_OK = """

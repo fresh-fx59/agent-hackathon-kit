@@ -24,6 +24,18 @@ FIXTURE = os.path.join(HERE, "fixtures", "real-stream-excerpt.jsonl")
 REPORT_BODY = ("## Что произошло\nNPE в PromoCodeResolver, checkout-api.log:3-6.\n"
                "## Корневая причина\nPromoCode.normalized() возвращает null.\n") * 20
 
+# The fixture was captured on 2026-07-30, under the PRE-SPLIT layout where the corpus
+# files sat directly in the case dir next to case.json. Its absolute paths are
+# therefore that machine's, and they are baked into the recorded tool calls.
+#
+# Coverage is a question about CONTAINMENT — is the directory that was scanned an
+# ancestor of the proof? — so a stream whose paths point at a different case dir than
+# the one under measurement is not a realistic run, and testing against it measures
+# the mismatch instead of the behaviour. Rebasing onto the temp case dir's corpus/ is
+# what a real run of this case actually looks like.
+CAPTURED_ROOT = ("/home/claude-developer/hack/agent-hackathon-kit/cases/06-dev-logging"
+                 "/sherlock/measure/cases/cap-multiline-stitching")
+
 
 class Harness(unittest.TestCase):
     def setUp(self):
@@ -46,8 +58,12 @@ class Harness(unittest.TestCase):
         with open(os.path.join(run_dir, "meta.json"), "w", encoding="utf-8") as fh:
             json.dump({"case_id": "cap-multiline-stitching", "arm": "v6",
                        "duration_s": 78, "exit_code": 0}, fh)
-        # The stream is the REAL captured one unless a test supplies its own.
+        # The stream is the REAL captured one unless a test supplies its own. Either
+        # way it is rebased onto THIS case's corpus, so containment is asked of the
+        # case actually under measurement. Tests that build a stream from scratch
+        # carry no captured prefix, so for them the rebase is a no-op.
         body = stream if stream is not None else open(FIXTURE, encoding="utf-8").read()
+        body = body.replace(CAPTURED_ROOT, os.path.join(case_dir, "corpus"))
         with open(os.path.join(run_dir, "stream.jsonl"), "w", encoding="utf-8") as fh:
             fh.write(body)
         judge_path = os.path.join(self.d, "judge.json")
@@ -113,6 +129,38 @@ class EveryFieldOfTheEmittedRow(Harness):
         self.assertEqual(rows[0]["reach_verdict"], "unknown")
         self.assertEqual(rows[0]["diagnosis"], "inconclusive")
         self.assertEqual(rows[0]["files_opened"], 0)
+
+
+class CoverageMustBeReachableFromTheReporter(Harness):
+    """The containment fix in measure.py is worthless unless report-case.py hands it
+    the corpus root. This is the wiring test: without it the parameter defaults to
+    None, every run degrades to "cannot exclude", and `coverage` — the whole point of
+    the module — can never appear in the artifact. `logstat.py` shipping nowhere is
+    the same failure mode; assert the plumbing, not just the function."""
+
+    def scan_of(self, path):
+        return json.dumps({"type": "assistant", "message": {"content": [
+            {"type": "tool_use", "id": "call_x", "name": "list_directory",
+             "input": {"path": path}}]}}, ensure_ascii=False) + "\n"
+
+    def test_a_scan_of_an_unrelated_directory_is_a_coverage_row(self):
+        case_dir, run_dir, judge = self.build(
+            stream=self.scan_of("/var/log/somewhere-else"),
+            judge='{"found": false, "why": "no"}')
+        p, rows = self.run_reporter(case_dir, run_dir, judge)
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertEqual(rows[0]["reach_verdict"], "not_reached")
+        self.assertEqual(rows[0]["diagnosis"], "coverage")
+
+    def test_a_scan_of_the_corpus_itself_stays_inconclusive(self):
+        case_dir, run_dir, judge = self.build(judge='{"found": false, "why": "no"}')
+        case_dir2, run_dir2, judge2 = case_dir, run_dir, judge
+        with open(os.path.join(run_dir2, "stream.jsonl"), "w", encoding="utf-8") as fh:
+            fh.write(self.scan_of(os.path.join(case_dir2, "corpus")))
+        p, rows = self.run_reporter(case_dir2, run_dir2, judge2)
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertEqual(rows[0]["reach_verdict"], "unknown")
+        self.assertEqual(rows[0]["diagnosis"], "inconclusive")
 
 
 class TheJudgeIsSkippedWhenThereIsNothingToJudge(Harness):

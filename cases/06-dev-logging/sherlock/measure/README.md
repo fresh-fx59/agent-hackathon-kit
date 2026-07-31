@@ -45,6 +45,33 @@ not imply corpus-green**, and a tier-1 pass proves only that the fix does someth
 — not that it broke nothing else. Only a tier-3 full-corpus number may be quoted as
 a benchmark result.
 
+## How `coverage` is distinguished from `reasoning`
+
+Proof locations are corpus-RELATIVE; the directories a scan reports are ABSOLUTE.
+Containment is only answerable against the corpus root, so `report-case.py` hands
+`<case>/corpus` to `measure.verdict(..., corpus_root=…)`. It is **built by the rig
+and passed in, never inferred from the stream** (AGENTS.md input-gate principle).
+
+A directory scan can only ever soften `not_reached` to `unknown` — it is never
+evidence the proof lines were *displayed*, so it can never yield `reached`. It
+softens only for proofs genuinely inside the scanned subtree:
+
+| scan | proof `web/nginx/access.log` |
+|---|---|
+| `<corpus>/db` | `not_reached` — unrelated subtree |
+| `<corpus>/web/nginx-old` | `not_reached` — sibling, not an ancestor |
+| `/etc` | `not_reached` — outside the corpus |
+| `<corpus>/web` or `<corpus>` | `unknown` — an ancestor scan could have surfaced it |
+| the corpus's parent | `unknown` — contains the corpus outright |
+
+Omit `corpus_root` and containment is unanswerable, so every miss degrades to
+`unknown` → `inconclusive`. That degraded reading was once the *only* one
+(`bool(dir) and bool(proof)`, no correlation at all): since every investigation
+opens with a dir scan, one such call anywhere made `coverage` unreachable for the
+whole run — the fix for "manufactured coverage failures" had inverted into
+"coverage never fires". `test_report_case.py` asserts the plumbing, not just the
+function; a correct predicate that nothing calls is worth nothing.
+
 ## Judge
 
 `gpt-5.5` via the cliproxyapi broker, secret `eval_broker_api_key` (subscription).

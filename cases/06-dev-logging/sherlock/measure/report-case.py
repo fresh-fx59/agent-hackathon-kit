@@ -44,7 +44,12 @@ if checks["collapsed"]:
 else:
     judged = score_case.score(case, report, call=judge_call)
 
-v = measure.verdict(case, stream, report, judged["found"])
+# The corpus root is what makes a `coverage` diagnosis reachable: proof locations are
+# corpus-relative, the directories a scan reports are absolute, and without the anchor
+# every miss degrades to "cannot exclude" -> `inconclusive`. The rig BUILDS this path,
+# so it is known exactly and must never be inferred from the stream.
+v = measure.verdict(case, stream, report, judged["found"],
+                    corpus_root=os.path.join(a.case, "corpus"))
 meta = json.load(open(os.path.join(a.run, "meta.json"), encoding="utf-8"))
 row = {"case_id": v["case_id"], "arm": meta["arm"],
        "tier": a.tier, "diagnosis": v["diagnosis"], "judge_found": v["judge_found"],

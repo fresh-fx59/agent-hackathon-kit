@@ -178,22 +178,44 @@ def _relative_name(file_path, proof_locations):
     return os.path.basename(fp)
 
 
-def _dir_scan_covers(dir_path, proof_rel):
+def _dir_scan_covers(dir_path, proof_rel, corpus_root=None):
     """Can a directory-scoped search have surfaced this proof?
 
     `search_file_content` / `glob` / `list_directory` are how an agent normally finds
     a log line, and they report a SUBTREE, never which bytes of which file came back.
-    We know the absolute directory that was scanned; the proof location is
-    corpus-RELATIVE. There is no sound way to prove a corpus-relative path is *not*
-    under an absolute sandbox directory, so the only honest answer is "cannot
-    exclude" — which the three-valued design spells `unknown`, never `not_reached`.
+    So this can only ever soften not_reached to unknown; it can never produce
+    `reached`, because a directory scan is not evidence the proof lines were shown.
 
-    This can only ever soften not_reached to unknown. It can never produce `reached`:
-    a directory scan is not evidence that the proof lines were displayed."""
-    return bool(_norm(dir_path)) and bool(_norm(proof_rel))
+    The scanned dir is ABSOLUTE and the proof location is corpus-RELATIVE, so the
+    containment question is only answerable against the corpus root. That root is
+    handed in, never guessed (AGENTS.md input-gate principle): the rig builds
+    `cases/<id>/corpus` and knows it exactly.
+
+    Without a root, containment is genuinely unanswerable and the conservative
+    "cannot exclude" is kept. That conservative answer used to be the ONLY answer —
+    a blanket `bool(dir) and bool(proof)` with no correlation whatsoever. Since every
+    investigation opens with a dir scan, one such call anywhere made `coverage`
+    unreachable for the whole run: the fix for "manufactured coverage failures" had
+    inverted into "coverage never fires", silencing the one distinction this module
+    exists to draw."""
+    d, p = _norm(dir_path).rstrip("/"), _norm(proof_rel)
+    if not d or not p:
+        return False
+    if corpus_root is None:
+        return True
+    root = _norm(corpus_root).rstrip("/")
+    if d == root or root.startswith(d + "/"):
+        # The scan covered the corpus root, or a directory containing it outright.
+        return True
+    if not d.startswith(root + "/"):
+        return False  # scanned somewhere outside the corpus entirely
+    rel = d[len(root) + 1:]
+    # The "/" boundary is load-bearing: `web/nginx-old` is a different directory from
+    # `web/nginx`, and a raw string-prefix test would wrongly excuse the miss.
+    return p == rel or p.startswith(rel + "/")
 
 
-def proof_reach(events, proof_locations):
+def proof_reach(events, proof_locations, corpus_root=None):
     reached, not_reached, unknown = [], [], []
     dir_events = [e for e in events if e.get("kind") == "dir" and e.get("dir")]
     for pr in proof_locations:
@@ -209,7 +231,8 @@ def proof_reach(events, proof_locations):
             if ev["line_start"] <= pr["line_end"] and ev["line_end"] >= pr["line_start"]:
                 state = "reached"
                 break
-        if state == "not_reached" and any(_dir_scan_covers(e["dir"], pr["file"])
+        if state == "not_reached" and any(_dir_scan_covers(e["dir"], pr["file"],
+                                                           corpus_root)
                                           for e in dir_events):
             state = "unknown"
         {"reached": reached, "not_reached": not_reached, "unknown": unknown}[state].append(
@@ -284,8 +307,14 @@ def budget_profile(events):
     return {"tool_calls": len(events), "by_tool": by_tool}
 
 
-def verdict(case, stream_path, report_text, judge_found):
+def verdict(case, stream_path, report_text, judge_found, corpus_root=None):
     """Combine trajectory reach + report checks into one diagnosis.
+
+    `corpus_root` anchors the corpus-relative proof locations against the absolute
+    directories a scan reports, and it is what makes the `coverage` branch reachable
+    at all — see _dir_scan_covers. Callers that omit it get the conservative
+    "cannot exclude" reading, which collapses every coverage failure to
+    `inconclusive`; report-case.py always supplies it.
 
     Reachable in this increment: "collapse", "ok", "reasoning", "inconclusive",
     "coverage" — exactly the branches below. "fabricated_evidence" (citing a
@@ -295,7 +324,7 @@ def verdict(case, stream_path, report_text, judge_found):
     function can never return it.
     """
     events = read_events(stream_path)
-    reach = proof_reach(events, case.get("proof_locations", []))
+    reach = proof_reach(events, case.get("proof_locations", []), corpus_root)
     report = report_checks(report_text, case.get("kind"))
     budget = budget_profile(events)
 
