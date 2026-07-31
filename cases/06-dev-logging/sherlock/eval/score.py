@@ -40,9 +40,19 @@ Return STRICT JSON, no prose, no markdown fence:
   "notes": "<two sentences max on the quality of what was found>"}}"""
 
 
+# Offline stub, for testing THIS file without a metered judge call. Same contract as
+# report-case.py's SHERLOCK_JUDGE_STUB: every row produced with it carries
+# judge_stub:true, so a stubbed number can never be mistaken for a measured one. The
+# alternative was leaving the scorer that produces every quoted recall figure
+# completely untested.
+STUB = os.environ.get("SHERLOCK_SCORE_STUB")
+
+
 def judge(answer, key_text):
+    if STUB:
+        return _parse_verdict(open(STUB, encoding="utf-8").read())
     if not JUDGE_KEY:
-        sys.exit("set JUDGE_API_KEY (use with-secret.sh cliproxyapi_api_key --env JUDGE_API_KEY -- ...)")
+        sys.exit("set JUDGE_API_KEY (use with-secret.sh eval_broker_api_key --env JUDGE_API_KEY -- ...)")
     body = json.dumps({
         "model": JUDGE_MODEL,
         "messages": [{"role": "user",
@@ -55,7 +65,11 @@ def judge(answer, key_text):
                  "User-Agent": "sherlock-eval/1.0"})
     with urllib.request.urlopen(req, timeout=600) as r:
         out = json.load(r)
-    txt = out["choices"][0]["message"]["content"].strip()
+    return _parse_verdict(out["choices"][0]["message"]["content"])
+
+
+def _parse_verdict(txt):
+    txt = (txt or "").strip()
     if txt.startswith("```"):
         txt = txt.split("\n", 1)[1].rsplit("```", 1)[0]
     return json.loads(txt)
@@ -122,7 +136,9 @@ def main():
     # rep index per (dataset, arm), in ledger order — so three v7 rows read r1/r2/r3
     # instead of three indistinguishable lines.
     seen = {}
-    out_path = os.path.join(HERE, "scores.jsonl")
+    out_path = os.environ.get("SHERLOCK_SCORES_OUT") or os.path.join(HERE, "scores.jsonl")
+    if STUB:
+        print("  ⚠ JUDGE STUB ACTIVE (%s) — these rows are NOT measurements" % STUB)
     for (ds, arm), r in selected:
         seen[(ds, arm)] = seen.get((ds, arm), 0) + 1
         v = judge(r.get("answer", ""), key_text)
@@ -134,7 +150,7 @@ def main():
                "recall_pct": round(100.0 * len(found) / total, 1) if total else None,
                "false_positives": v.get("false_positives"),
                "turns": r.get("turns"), "duration_s": r.get("duration_s"),
-               "notes": v.get("notes", "")}
+               "notes": v.get("notes", ""), "judge_stub": bool(STUB)}
         with open(out_path, "a", encoding="utf-8") as f:
             f.write(json.dumps(rec, ensure_ascii=False) + "\n")
         print("%-16s %-5s recall=%5.1f%%  found=%2d/%d  FP=%s" % (
