@@ -120,22 +120,23 @@ PROMPT="Продакшн деградировал. Логи со всей пла
 # base model while being labelled with the arm. An arm measured on barely half
 # its runs is not measured at all.
 #
-# So the arm's own text goes IN the prompt. It is the same content the `skill`
-# tool would have returned — delivery becomes certain instead of lucky. The
-# skill directory is still copied, so progressive disclosure (reference/*.md
-# loaded on demand) and the bundled tools work exactly as before.
+# So the prompt NAMES the skill and tells the model to load it. Deliberately a
+# POINTER, not the text: pasting SKILL.md into the prompt would remove the very
+# behaviour under test (progressive disclosure — SKILL.md pulls reference/*.md
+# on demand) and would measure a different system. Naming it removes the
+# DISCOVERY problem while leaving the loading behaviour intact, so
+# `skill_loaded` still means what it always meant: the model called the tool.
 #
-# NOTE for comparisons: rows produced this way are not delivery-comparable with
-# pre-2026-08-01 rows, which were a coin flip. `skill_delivery` records which.
+# NOTE for comparisons: `skill_delivery` records "named" vs "tool-only" so rows
+# from either side of 2026-08-01 are never silently pooled.
 SKILL_DELIVERY="tool-only"
 if [ "$ARM" != "none" ] && [ -f "$W/.qwen/skills/log-rca/SKILL.md" ]; then
   PROMPT="$PROMPT
 
-Ниже — процедура, которой ты обязан следовать (навык log-rca). Её инструменты
-лежат в .qwen/skills/log-rca/tools/ относительно текущего каталога.
-
-$(cat "$W/.qwen/skills/log-rca/SKILL.md")"
-  SKILL_DELIVERY="injected"
+Решай эту задачу С ПОМОЩЬЮ НАВЫКА log-rca (Sherlock). Он уже установлен:
+ПЕРВЫМ ДЕЙСТВИЕМ загрузи его инструментом skill (skill: log-rca) и дальше
+следуй его процедуре. Его инструменты лежат в .qwen/skills/log-rca/tools/."
+  SKILL_DELIVERY="named"
 fi
 
 START=$(date +%s)

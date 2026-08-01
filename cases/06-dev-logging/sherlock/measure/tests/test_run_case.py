@@ -352,10 +352,17 @@ class TheArmMustNotBeACoinFlip(unittest.TestCase):
         rd = [os.path.join(runs, x) for x in os.listdir(runs)][0]
         return argv, rd
 
-    def test_the_arm_text_reaches_the_model_without_a_tool_call(self):
+    def test_the_prompt_tells_the_model_to_use_the_skill(self):
         with tempfile.TemporaryDirectory() as d:
             argv, _rd = self.go(d)
-            self.assertIn("SHERLOCK-ARM-MARKER-9F3A", argv)
+            self.assertIn("log-rca", argv)
+            self.assertIn("skill", argv.lower())
+
+    def test_the_skill_body_is_NOT_pasted_into_the_prompt(self):
+        """Injecting SKILL.md would measure a different system."""
+        with tempfile.TemporaryDirectory() as d:
+            argv, _rd = self.go(d)
+            self.assertNotIn("SHERLOCK-ARM-MARKER-9F3A", argv)
 
     def test_the_none_arm_gets_no_injected_text(self):
         """The control arm must stay a control arm."""
@@ -377,7 +384,7 @@ class TheArmMustNotBeACoinFlip(unittest.TestCase):
             subprocess.run(["bash", RUNNER, case_dir, "none"], capture_output=True,
                            text=True, env=env, timeout=120)
             with open(log, encoding="utf-8") as fh:
-                self.assertNotIn("SHERLOCK-ARM-MARKER-9F3A", fh.read())
+                self.assertNotIn("log-rca", fh.read())
 
 
 class TheWorkingReportIsEvidenceAndMustSurvive(unittest.TestCase):

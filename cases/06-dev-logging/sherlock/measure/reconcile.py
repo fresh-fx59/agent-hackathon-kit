@@ -112,7 +112,7 @@ def audit(run_dir, row):
 
     usage = (final or {}).get("usage") or {}
     derived = {
-        "skill_loaded": bool(skill_seen or meta.get("skill_delivery") == "injected"),
+        "skill_loaded": skill_seen,
         "skill_delivery": meta.get("skill_delivery") or "tool-only",
         "map_tool_ran": used(map_tool) if map_tool else None,
         "citecheck_ran": used("citecheck"),
@@ -141,9 +141,7 @@ def audit(run_dir, row):
     # A pass that did not use the arm's own mechanism is not evidence for the arm.
     if map_tool and derived["map_tool_ran"] == 0:
         flags.append("MAP-TOOL-NEVER-RAN")
-    # "injected" means the runner put the arm's text in the prompt, so the arm
-    # WAS in context even though no `skill` tool_use exists to point at.
-    if not skill_seen and meta.get("skill_delivery") != "injected":
+    if not skill_seen:
         flags.append("SKILL-NEVER-LOADED")
     if derived["subagent_spawned"]:
         flags.append("SUBAGENT-SPAWNED")
