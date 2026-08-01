@@ -83,9 +83,14 @@ def cost(key):
 def _provenance(run_dir):
     """Re-derive from the raw stream whether the ARM actually drove this run.
 
-    `skill_loaded` must come from a `skill` tool_use. Substring-searching the
-    trajectory for the skill name looks equivalent and silently always passes,
-    because the corpus path itself contains it.
+    `skill_loaded` must come from a `skill` tool_use OR from the runner having
+    INJECTED the arm's text into the prompt (meta.skill_delivery == "injected").
+    Substring-searching the trajectory for the skill name looks equivalent and
+    silently always passes, because the corpus path itself contains it.
+
+    Injection exists because 4 of 9 v11 rows never called the tool — 44 %. A row
+    whose arm text was injected DID have the arm in context, so reporting it as
+    never-loaded would be the same lie in the opposite direction.
     """
     import os as _os
     out = {"skill_loaded": None, "map_tool_ran": None, "subagent_spawned": None}
@@ -115,7 +120,15 @@ def _provenance(run_dir):
             cmd = str((part.get("input") or {}).get("command") or "")
             if "logmap.py" in cmd or "logstat.py" in cmd:
                 mapped += 1
-    return {"skill_loaded": skill, "map_tool_ran": mapped,
+    injected = False
+    mp = _os.path.join(run_dir, "meta.json")
+    if _os.path.exists(mp):
+        try:
+            injected = json.load(open(mp, encoding="utf-8")
+                                 ).get("skill_delivery") == "injected"
+        except ValueError:
+            pass
+    return {"skill_loaded": bool(skill or injected), "map_tool_ran": mapped,
             "subagent_spawned": sub}
 
 

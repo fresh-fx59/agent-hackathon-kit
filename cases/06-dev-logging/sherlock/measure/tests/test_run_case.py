@@ -310,5 +310,99 @@ class EveryRunNamesTheModelThatActuallyAnswered(unittest.TestCase):
             self.assertEqual(url, "https://linkapi.ai/v1")
 
 
+class TheArmMustNotBeACoinFlip(unittest.TestCase):
+    """4 of 9 recorded v11 rows carry SKILL-NEVER-LOADED — 44 %, not the 8 % on
+    record. The prompt never mentioned the skill, so the model had to discover
+    `.qwen/skills/` and choose to call the `skill` tool. An arm measured on
+    barely half its runs is not measured. So the runner puts the arm's own text
+    in the prompt: same content the `skill` tool would have returned, delivered
+    with certainty instead of by luck."""
+
+    STUB = ("#!/usr/bin/env bash\n"
+            'printf "%s\\0" "$@" >> "$QWEN_STUB_LOG"\n'
+            "mkdir -p work && printf 'WORKING REPORT %s' \"$(head -c 400 /dev/zero | tr '\\0' x)\" > work/report.md\n"
+            "cat <<'JSON'\n"
+            '{"type":"result","result":"' + ("x" * 40) + '","num_turns":1,'
+            '"usage":{"input_tokens":11,"output_tokens":22}}\n'
+            "JSON\nexit 0\n")
+
+    def go(self, d, marker="SHERLOCK-ARM-MARKER-9F3A"):
+        case_dir = make_case(d)
+        binp = os.path.join(d, "bin"); os.makedirs(binp, exist_ok=True)
+        qwen = os.path.join(binp, "qwen")
+        with open(qwen, "w", encoding="utf-8") as fh:
+            fh.write(self.STUB)
+        os.chmod(qwen, os.stat(qwen).st_mode | stat.S_IEXEC)
+        skills = os.path.join(d, "skills", "v6"); os.makedirs(skills)
+        with open(os.path.join(skills, "SKILL.md"), "w", encoding="utf-8") as fh:
+            fh.write("---\nname: sherlock\n---\n# Процедура\n%s\n" % marker)
+        log = os.path.join(d, "stub.log")
+        runs = os.path.join(d, "runs")
+        env = dict(os.environ)
+        env.update({"PATH": binp + os.pathsep + os.environ["PATH"],
+                    "QWEN_STUB_LOG": log, "QWEN_BIN": qwen,
+                    "SHERLOCK_SKILLS": os.path.dirname(skills),
+                    "SHERLOCK_RUNS": runs,
+                    "SHERLOCK_UPSTREAM_LOG": "0",
+                    "SHERLOCK_API_KEY": "stub-key"})
+        subprocess.run(["bash", RUNNER, case_dir, "v6"], capture_output=True,
+                       text=True, env=env, timeout=120)
+        with open(log, encoding="utf-8") as fh:
+            argv = fh.read()
+        rd = [os.path.join(runs, x) for x in os.listdir(runs)][0]
+        return argv, rd
+
+    def test_the_arm_text_reaches_the_model_without_a_tool_call(self):
+        with tempfile.TemporaryDirectory() as d:
+            argv, _rd = self.go(d)
+            self.assertIn("SHERLOCK-ARM-MARKER-9F3A", argv)
+
+    def test_the_none_arm_gets_no_injected_text(self):
+        """The control arm must stay a control arm."""
+        with tempfile.TemporaryDirectory() as d:
+            case_dir = make_case(d)
+            binp = os.path.join(d, "bin"); os.makedirs(binp, exist_ok=True)
+            qwen = os.path.join(binp, "qwen")
+            with open(qwen, "w", encoding="utf-8") as fh:
+                fh.write(self.STUB)
+            os.chmod(qwen, os.stat(qwen).st_mode | stat.S_IEXEC)
+            log = os.path.join(d, "stub.log")
+            env = dict(os.environ)
+            env.update({"PATH": binp + os.pathsep + os.environ["PATH"],
+                        "QWEN_STUB_LOG": log, "QWEN_BIN": qwen,
+                        "SHERLOCK_SKILLS": os.path.join(d, "skills"),
+                        "SHERLOCK_RUNS": os.path.join(d, "runs"),
+                        "SHERLOCK_UPSTREAM_LOG": "0",
+                        "SHERLOCK_API_KEY": "stub-key"})
+            subprocess.run(["bash", RUNNER, case_dir, "none"], capture_output=True,
+                           text=True, env=env, timeout=120)
+            with open(log, encoding="utf-8") as fh:
+                self.assertNotIn("SHERLOCK-ARM-MARKER-9F3A", fh.read())
+
+
+class TheWorkingReportIsEvidenceAndMustSurvive(unittest.TestCase):
+    """D04 wrote an 18,186-char report naming the right root cause and delivered
+    143 chars. The 18 KB lived in the scratch dir, which the runner rm -rf's on
+    exit — so the only proof the model FOUND the defect was buried in the
+    trajectory. Keep the artifact and measure it, so 'found but not delivered'
+    becomes a number instead of an inference. It does NOT become the score."""
+
+    def test_the_models_working_report_is_kept_beside_the_answer(self):
+        with tempfile.TemporaryDirectory() as d:
+            _argv, rd = TheArmMustNotBeACoinFlip().go(d)
+            p = os.path.join(rd, "working-report.md")
+            self.assertTrue(os.path.exists(p), "working-report.md not preserved")
+            with open(p, encoding="utf-8") as fh:
+                self.assertIn("WORKING REPORT", fh.read())
+
+    def test_meta_records_both_sizes_so_the_gap_is_visible(self):
+        with tempfile.TemporaryDirectory() as d:
+            _argv, rd = TheArmMustNotBeACoinFlip().go(d)
+            with open(os.path.join(rd, "meta.json"), encoding="utf-8") as fh:
+                meta = json.load(fh)
+            self.assertEqual(meta["answer_chars"], 40)
+            self.assertGreater(meta["artifact_chars"], 400)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

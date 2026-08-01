@@ -113,6 +113,31 @@ PROMPT="Продакшн деградировал. Логи со всей пла
 Найди ВСЕ проблемы и инциденты, определи корневую причину каждой и предложи,
 что делать. Ссылайся на конкретные строки в формате файл:строка."
 
+# THE ARM MUST NOT BE A COIN FLIP. 4 of 9 recorded v11 rows carry
+# SKILL-NEVER-LOADED — 44 %, not the 8 % we had on record. The prompt never
+# named the skill, so the model had to discover .qwen/skills/ by itself and
+# then choose to call the `skill` tool; when it didn't, the row measured the
+# base model while being labelled with the arm. An arm measured on barely half
+# its runs is not measured at all.
+#
+# So the arm's own text goes IN the prompt. It is the same content the `skill`
+# tool would have returned — delivery becomes certain instead of lucky. The
+# skill directory is still copied, so progressive disclosure (reference/*.md
+# loaded on demand) and the bundled tools work exactly as before.
+#
+# NOTE for comparisons: rows produced this way are not delivery-comparable with
+# pre-2026-08-01 rows, which were a coin flip. `skill_delivery` records which.
+SKILL_DELIVERY="tool-only"
+if [ "$ARM" != "none" ] && [ -f "$W/.qwen/skills/log-rca/SKILL.md" ]; then
+  PROMPT="$PROMPT
+
+Ниже — процедура, которой ты обязан следовать (навык log-rca). Её инструменты
+лежат в .qwen/skills/log-rca/tools/ относительно текущего каталога.
+
+$(cat "$W/.qwen/skills/log-rca/SKILL.md")"
+  SKILL_DELIVERY="injected"
+fi
+
 START=$(date +%s)
 # The key travels by ENVIRONMENT, never argv: /proc/<pid>/cmdline is world-readable.
 ( cd "$W" && OPENAI_API_KEY="$SHERLOCK_API_KEY" OPENAI_BASE_URL="$BASE_URL" \
@@ -123,9 +148,19 @@ START=$(date +%s)
 RC=$?
 ELAPSED=$(( $(date +%s) - START ))
 
-python3 - "$RUN_DIR" "$CASE_ID" "$ARM" "$ELAPSED" "$RC" "$MODEL" <<'PY'
+# KEEP THE MODEL'S WORKING REPORT. D04 wrote an 18,186-char report naming the
+# right root cause and then delivered 143 chars; the 18 KB sat in $W, which the
+# EXIT trap deletes, so the only surviving proof that the model FOUND the defect
+# was buried in the trajectory. This copy makes "found but not delivered" a
+# measured number instead of an inference. It is EVIDENCE, NOT THE SCORE — the
+# answer stays the final message, exactly as before.
+for wr in "$W/work/report.md" "$W/report.md"; do
+  [ -f "$wr" ] && { cp "$wr" "$RUN_DIR/working-report.md" 2>/dev/null; break; }
+done
+
+python3 - "$RUN_DIR" "$CASE_ID" "$ARM" "$ELAPSED" "$RC" "$MODEL" "$SKILL_DELIVERY" <<'PY'
 import json, sys, os
-run_dir, case_id, arm, elapsed, rc, model = sys.argv[1:7]
+run_dir, case_id, arm, elapsed, rc, model, skill_delivery = sys.argv[1:8]
 final = None
 for line in open(os.path.join(run_dir, "stream.jsonl"), encoding="utf-8", errors="replace"):
     line = line.strip()
@@ -169,7 +204,14 @@ meta = {"case_id": case_id, "arm": arm, "model": model,
         "started_at": os.path.basename(run_dir).split("-")[0],
         "duration_s": int(elapsed), "exit_code": int(rc),
         "input_tokens": u.get("input_tokens"), "output_tokens": u.get("output_tokens"),
-        "answer_chars": len(text), "turns": final.get("num_turns")}
+        "answer_chars": len(text), "turns": final.get("num_turns"),
+        "skill_delivery": skill_delivery,
+        # the model's own working file: evidence that it found the defect even
+        # when it failed to deliver it. Never the score. None = it wrote none.
+        "artifact_chars": (len(open(os.path.join(run_dir, "working-report.md"),
+                                    encoding="utf-8", errors="replace").read())
+                           if os.path.exists(os.path.join(run_dir, "working-report.md"))
+                           else None)}
 with open(os.path.join(run_dir, "meta.json"), "w", encoding="utf-8") as fh:
     json.dump(meta, fh, ensure_ascii=False, indent=2)
 print("  ✓ %s/%s  %ss  chars=%d  -> %s" % (case_id, arm, elapsed, len(text), run_dir))
