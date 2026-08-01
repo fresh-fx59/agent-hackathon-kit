@@ -224,7 +224,9 @@ def strip_line(line):
     # `github.com/acme/...batch.(*Retrier).flush` from the quotes themselves, so
     # a verbatim quote no longer matched the line it was copied from.
     out, pos = [], 0
-    for a, b in quoted_spans(line):
+    for a, b in protected_spans(line):
+        if a < pos:                   # nested/overlapping span, already covered
+            continue
         out.append(BARE_NAME_RE.sub(" ", blanked[pos:a]))
         out.append(blanked[a:b])
         pos = b
@@ -342,6 +344,27 @@ def quoted_spans(line):
     return [(m.start(), m.end()) for m in LONG_QUOTE_RE.finditer(line)]
 
 
+# QUOTE_RE accepts FOUR delimiters; LONG_QUOTE_RE protects only three of them.
+# That asymmetry cost D04 123 of its 146 turns and 14.2M input tokens: a
+# backtick-quoted SQL line was accepted as a quote and then had `c.title` and
+# `c.attrs` blanked out of it by BARE_NAME_RE, so the verbatim quote no longer
+# matched the line it was copied from. Log lines are full of dotted identifiers
+# (Java logger names, Python modules, SQL column lists) and a backtick code span
+# is the markdown convention the report format itself uses, so the gate was
+# unpassable for the commonest way of quoting the commonest kind of log line.
+#
+# Kept SEPARATE from LONG_QUOTE_RE on purpose: `citation_matches` must go on
+# treating a backtick span as a possible citation (`app.log:12` is written that
+# way), and only the bare-name stripper needs to keep its hands off the evidence.
+PROTECTED_SPAN_RE = re.compile(LONG_QUOTE_RE.pattern
+                               + r'|`[^`\n]{%d,400}`' % LONG_QUOTE_MIN)
+
+
+def protected_spans(line):
+    """Spans strip_line must not touch — quoted evidence, any delimiter."""
+    return [(m.start(), m.end()) for m in PROTECTED_SPAN_RE.finditer(line)]
+
+
 def quotes_in(claim):
     out = []
     for m in QUOTE_RE.finditer(claim):
@@ -355,9 +378,15 @@ def support(claim, line, min_overlap, min_tokens):
 
     `via` says HOW it was decided — "quote" only when a verbatim substring of the
     line appears in the claim. `--require-quote` accepts nothing else."""
+    # EVERY quote gets its verbatim chance before any of them falls back. The
+    # single loop returned on the first quote that merely cleared the token
+    # floor, so a long inexact quote short-circuited a short verbatim one
+    # standing right beside it — the second half of the D04 collapse, and on its
+    # own enough to fail a citation whose evidence was present and exact.
     for q in sorted(quotes_in(claim), key=len, reverse=True):
         if norm(q) and norm(q) in norm(line):
             return "ok", 1.0, 0, 0, "quote"              # verbatim quote
+    for q in sorted(quotes_in(claim), key=len, reverse=True):
         qt = set(checkable(toks(q), line))
         # A two-word quote is usually a SEARCH TERM in prose («всегда искать
         # "Accepted password"»), not a quoted log line. Calibration on 18 saved

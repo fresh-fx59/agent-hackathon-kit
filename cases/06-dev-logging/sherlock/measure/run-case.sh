@@ -63,7 +63,45 @@ RUN_DIR="$RUNS/$STAMP-$CASE_ID-$ARM"
 mkdir -p "$RUN_DIR" || { echo "✗ cannot create $RUN_DIR" >&2; exit 1; }
 
 W="$(mktemp -d "${TMPDIR:-/tmp}/runcase-XXXXXX")"
-trap 'rm -rf "$W"' EXIT        # the SCRATCH dir goes; the RUN dir stays.
+PROXY_PID=""
+# the SCRATCH dir goes; the RUN dir stays. The proxy must not outlive the run.
+trap 'rm -rf "$W"; [ -n "${PROXY_PID:-}" ] && kill "$PROXY_PID" 2>/dev/null' EXIT
+
+# NAME THE MODEL THAT ACTUALLY ANSWERS. `[SP]deepseek-v4-flash` is an ALIAS:
+# measured over 40 byte-identical requests it answered as two identities that are
+# ~19x apart on whether they emit a tool call (4.8 % vs 89.5 %). The arm under
+# test IS a tool-execution mechanism, so the upstream can decide whether the arm
+# runs at all — and qwen-code stamps only the REQUESTED name, so without this a
+# row can never be attributed to an upstream, retroactively or otherwise.
+# Opt out with SHERLOCK_UPSTREAM_LOG=0. → measure/probes/upstream-split.sh
+if [ "${SHERLOCK_UPSTREAM_LOG:-1}" = "1" ]; then
+  PROXY_PORT="$(python3 -c 'import socket
+s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1]); s.close()')"
+  UPSTREAM_BASE="$BASE_URL" UPSTREAM_LOG="$RUN_DIR/upstream.jsonl" \
+  LISTEN_PORT="$PROXY_PORT" RUN_TAG="$STAMP-$CASE_ID-$ARM" \
+    python3 "$HERE/upstream-log-proxy.py" >/dev/null 2>"$RUN_DIR/proxy.err" &
+  PROXY_PID=$!
+  if python3 - "$PROXY_PORT" <<'PY'
+import sys, time, urllib.request
+for _ in range(100):
+    try:
+        with urllib.request.urlopen("http://127.0.0.1:%s/healthz" % sys.argv[1],
+                                    timeout=1) as r:
+            r.read()
+        sys.exit(0)
+    except Exception:
+        time.sleep(0.05)
+sys.exit(1)
+PY
+  then
+    BASE_URL="http://127.0.0.1:$PROXY_PORT/v1"
+  else
+    # Never abort a metered run over a local helper — but say so loudly. The
+    # ABSENCE of upstream.jsonl is the signal: unmeasured is null, never a guess.
+    echo "  ⚠ upstream-log-proxy did not start — running WITHOUT attribution" >&2
+    kill "$PROXY_PID" 2>/dev/null; PROXY_PID=""
+  fi
+fi
 export QWEN_HOME="$W/home"; mkdir -p "$QWEN_HOME"
 
 if [ "$ARM" != "none" ]; then

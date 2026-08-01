@@ -258,5 +258,57 @@ class TheAnswerIsNotInThePrompt(unittest.TestCase):
                              "a refused run must leave no orphan run dir")
 
 
+class EveryRunNamesTheModelThatActuallyAnswered(unittest.TestCase):
+    """`[SP]deepseek-v4-flash` is an alias that fans out to (at least) two
+    upstreams ~19x apart on whether they emit a tool call, and qwen-code stamps
+    only the REQUESTED name. Without a pass-through in front of the provider no
+    recorded row can be attributed to an upstream — not later, not ever. So the
+    runner points the CLI at a local logger by default."""
+
+    ECHO_ENV = ("#!/usr/bin/env bash\n"
+                'printf "%s" "$OPENAI_BASE_URL" > "$QWEN_STUB_LOG.baseurl"\n'
+                "cat <<'JSON'\n"
+                '{"type":"result","result":"'  + ("x" * 40) + '","num_turns":1,'
+                '"usage":{"input_tokens":11,"output_tokens":22}}\n'
+                "JSON\nexit 0\n")
+
+    def go(self, d, extra_env):
+        case_dir = make_case(d)
+        binp = os.path.join(d, "bin")
+        os.makedirs(binp, exist_ok=True)
+        qwen = os.path.join(binp, "qwen")
+        with open(qwen, "w", encoding="utf-8") as fh:
+            fh.write(self.ECHO_ENV)
+        os.chmod(qwen, os.stat(qwen).st_mode | stat.S_IEXEC)
+        skills = os.path.join(d, "skills", "v6")
+        os.makedirs(skills)
+        with open(os.path.join(skills, "SKILL.md"), "w", encoding="utf-8") as fh:
+            fh.write("---\nname: sherlock\n---\n")
+        log = os.path.join(d, "stub.log")
+        env = dict(os.environ)
+        env.update({"PATH": binp + os.pathsep + os.environ["PATH"],
+                    "QWEN_STUB_LOG": log, "QWEN_BIN": qwen,
+                    "SHERLOCK_SKILLS": os.path.dirname(skills),
+                    "SHERLOCK_RUNS": os.path.join(d, "runs"),
+                    "SHERLOCK_BASE_URL": "https://linkapi.ai/v1",
+                    "SHERLOCK_API_KEY": "stub-key"})
+        env.update(extra_env)
+        subprocess.run(["bash", RUNNER, case_dir, "v6"], capture_output=True,
+                       text=True, env=env, timeout=120)
+        with open(log + ".baseurl", encoding="utf-8") as fh:
+            return fh.read()
+
+    def test_the_cli_is_pointed_at_the_local_logger_by_default(self):
+        with tempfile.TemporaryDirectory() as d:
+            url = self.go(d, {})
+            self.assertTrue(url.startswith("http://127.0.0.1:"),
+                            "OPENAI_BASE_URL was %r" % url)
+
+    def test_it_can_be_turned_off_and_then_talks_to_the_provider_directly(self):
+        with tempfile.TemporaryDirectory() as d:
+            url = self.go(d, {"SHERLOCK_UPSTREAM_LOG": "0"})
+            self.assertEqual(url, "https://linkapi.ai/v1")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

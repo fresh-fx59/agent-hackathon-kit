@@ -336,5 +336,84 @@ class VerdictClassification(unittest.TestCase):
         self.assertEqual(C._ids_of("g007"), ["g007"])
 
 
+class RequireQuoteMustNotDependOnTheQUOTEDelimiter(unittest.TestCase):
+    """D04 spent 123 of its 146 turns — 14.2M of 16.4M input tokens, 87 % of the
+    run — failing to pass `--require-quote` on citations that were verbatim
+    correct. It then delivered a 161-char message and scored `collapse`.
+
+    Root cause, reproduced here from the real report line: the checker accepts
+    FOUR quote delimiters (`"` `«»` `“”` and a backtick, QUOTE_RE) but protects
+    only THREE of them from the bare-filename stripper (LONG_QUOTE_RE has no
+    backtick branch). So `c.title` and `c.attrs` inside a backtick-quoted SQL
+    line were blanked out as if they were filenames, and the quote could no
+    longer be found in the line it was copied from verbatim.
+
+    Log lines are FULL of dotted identifiers — Java logger names
+    (`c.a.catalog.repo.VendorRefLookupRepository`), Python modules
+    (`inventory.db`), SQL column lists. Backticks are also the markdown
+    convention the report format itself uses. The gate was therefore
+    unpassable for the commonest way to quote the commonest kind of log line.
+    """
+
+    # verbatim from cases/D04/corpus, apps/catalog-svc/catalog-svc.log:50539
+    LINE = ("2026-07-28 11:05:12.771 DEBUG 1 --- [http-nio-8080-exec-7] "
+            "c.a.catalog.repo.VendorRefLookupRepository: executing SELECT "
+            "c.sku_id, c.title, c.attrs FROM catalog_items c WHERE c.attrs "
+            "->> 'vendor_ref' = ? ORDER BY c.updated_at DESC -- took 1188ms "
+            "rows=3")
+
+    def _corpus(self, d):
+        p = os.path.join(d, "apps", "catalog-svc")
+        os.makedirs(p, exist_ok=True)
+        with open(os.path.join(p, "catalog-svc.log"), "w",
+                  encoding="utf-8") as fh:
+            fh.write("filler\nfiller\nfiller\n" + self.LINE + "\n")
+        return d                                  # the line above is :4
+
+    def test_backtick_quoted_evidence_passes_require_quote(self):
+        """The claim quotes the line verbatim. The delimiter must not decide."""
+        with tempfile.TemporaryDirectory() as d:
+            self._corpus(d)
+            report = ("- `apps/catalog-svc/catalog-svc.log:4` — vendor_ref "
+                      "lookup, 1188 ms: `executing SELECT c.sku_id, c.title, "
+                      "c.attrs FROM catalog_items c WHERE c.attrs ->> "
+                      "'vendor_ref' = ? ORDER BY c.updated_at DESC -- took "
+                      "1188ms rows=3`\n")
+            _p, got = run(report, d, "--require-quote")
+            self.assertEqual(got["citations"][0]["verdict"], "ok")
+            self.assertEqual(got["citations"][0]["via"], "quote")
+
+    def test_the_same_evidence_in_guillemets_already_passed(self):
+        """The control. If this ever fails the test above proves nothing."""
+        with tempfile.TemporaryDirectory() as d:
+            self._corpus(d)
+            report = ("- `apps/catalog-svc/catalog-svc.log:4` — vendor_ref "
+                      "lookup, 1188 ms: «executing SELECT c.sku_id, c.title, "
+                      "c.attrs FROM catalog_items c WHERE c.attrs ->> "
+                      "'vendor_ref' = ? ORDER BY c.updated_at DESC -- took "
+                      "1188ms rows=3»\n")
+            _p, got = run(report, d, "--require-quote")
+            self.assertEqual(got["citations"][0]["verdict"], "ok")
+            self.assertEqual(got["citations"][0]["via"], "quote")
+
+    def test_a_verbatim_quote_wins_over_a_longer_inexact_one(self):
+        """D04 also wrote a SHORT verbatim quote beside the long code span.
+
+        `support` returned on the first quote that cleared the token floor, so
+        the long one short-circuited the verdict to `quote-tokens` and the
+        short verbatim one was never tried. Longest-first is the right search
+        ORDER; returning before every quote has had its verbatim chance is not.
+        """
+        with tempfile.TemporaryDirectory() as d:
+            self._corpus(d)
+            report = ("- `apps/catalog-svc/catalog-svc.log:4` — vendor_ref "
+                      "lookup: \"executing SELECT c.sku_id ... ORDER BY "
+                      "c.updated_at DESC and then some paraphrase\" "
+                      "«took 1188ms rows=3»\n")
+            _p, got = run(report, d, "--require-quote")
+            self.assertEqual(got["citations"][0]["verdict"], "ok")
+            self.assertEqual(got["citations"][0]["via"], "quote")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
