@@ -75,7 +75,12 @@ def records_of(path, rel):
     """-> iterator of (start_line, end_line, text). Falls back to one per line."""
     if _logmap is not None:
         try:
-            framing, _shape, _axes, _note = _logmap.probe(path)
+            # Take the framing by POSITION, not by unpacking the whole tuple. It
+            # was unpacked whole, so the day logmap.probe() grew a fifth return
+            # value every citation here silently collapsed from a record range to
+            # a single line — the `except` below swallowed the arity mismatch and
+            # the fallback looks exactly like a log that has no multi-line records.
+            framing = _logmap.probe(path)[0]
             return _logmap.stream_records(path, framing), framing
         except Exception:                             # noqa: BLE001
             pass
