@@ -205,6 +205,16 @@ class ItNamesWhatActuallyAnswered(ProxyCase):
         rec = self.lines()[0]
         self.assertEqual(rec["status"], 400)
 
+    def test_records_how_big_the_request_was(self):
+        """~52 % of upstream calls in a real run come back 400 while 7 KB probes
+        pass 40/40. Request size is the leading hypothesis and the ledger has
+        never carried it, so a 400 could never be correlated with anything."""
+        self.start("json_toolcall")
+        self.post({"model": "[SP]deepseek-v4-flash",
+                   "messages": [{"role": "user", "content": "x" * 5000}]})
+        rec = self.lines()[0]
+        self.assertGreater(rec["request_bytes"], 5000)
+
 
 class ItStaysOutOfTheWay(ProxyCase):
 

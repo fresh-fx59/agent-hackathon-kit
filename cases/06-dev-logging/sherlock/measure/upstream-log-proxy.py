@@ -130,7 +130,7 @@ class Proxy(BaseHTTPRequestHandler):
             record(requested_model=requested, returned_model=None,
                    tool_call=False, status=None, error=str(e)[:300],
                    duration_ms=int((time.time() - t0) * 1000),
-                   path=self.path, stream=False)
+                   request_bytes=len(body), path=self.path, stream=False)
             self.send_response(502)
             payload = json.dumps({"error": {"message": "proxy: %s" % e}}).encode()
             self.send_header("Content-Type", "application/json")
@@ -151,7 +151,7 @@ class Proxy(BaseHTTPRequestHandler):
                    returned_model=state["returned_model"],
                    tool_call=state["tool_call"], status=status,
                    duration_ms=int((time.time() - t0) * 1000),
-                   path=self.path, stream=streaming)
+                   request_bytes=len(body), path=self.path, stream=streaming)
 
     def _relay_headers(self, resp, status, extra=()):
         self.send_response(status)
