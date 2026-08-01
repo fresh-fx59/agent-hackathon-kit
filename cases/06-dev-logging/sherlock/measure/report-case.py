@@ -10,6 +10,55 @@ shorter than any real investigation of this case KIND — has nothing in it for 
 judge to find, so the call is skipped and the row records why.
 """
 import argparse, json, os, sys
+
+# qwen-code refuses a prompt above this. Not a guess: the error names it —
+# "Estimated prompt tokens: 193512; hard limit: 177000". D06 PASSES at 162,438,
+# 91 % of it, so every case runs on ~15k of margin. Recomputing that by hand
+# from the trajectories, every time, is how it stayed invisible for a week.
+CONTEXT_CEILING = 177000
+
+
+def trajectory_facts(run_dir):
+    """Peak context and corpus read-volume, re-derived from the raw stream.
+
+    `lines_read` is the sum of every `read_file` limit — the accumulating cost
+    that killed D04 with 29 NARROW calls, not one wide one. Every line read
+    stays in context for the rest of the run.
+    """
+    import os as _os
+    out = {"peak_input_tokens": None, "lines_read": None, "read_calls": None,
+           "ceiling_headroom": None}
+    sp = _os.path.join(run_dir, "stream.jsonl")
+    if not _os.path.exists(sp):
+        return out
+    peak = lines = calls = 0
+    for raw in open(sp, encoding="utf-8", errors="replace"):
+        raw = raw.strip()
+        if not raw:
+            continue
+        try:
+            rec = json.loads(raw)
+        except ValueError:
+            continue
+        if rec.get("type") != "assistant":
+            continue
+        msg = rec.get("message")
+        if not isinstance(msg, dict):
+            continue
+        peak = max(peak, (msg.get("usage") or {}).get("input_tokens") or 0)
+        for part in msg.get("content") or []:
+            if not isinstance(part, dict) or part.get("type") != "tool_use":
+                continue
+            if part.get("name") == "read_file":
+                lim = (part.get("input") or {}).get("limit")
+                if lim:
+                    lines += int(lim)
+                    calls += 1
+    return {"peak_input_tokens": peak or None, "lines_read": lines,
+            "read_calls": calls,
+            "ceiling_headroom": (CONTEXT_CEILING - peak) if peak else None}
+
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import measure, score_case  # noqa: E402
@@ -124,6 +173,7 @@ def _provenance(run_dir):
 
 
 row = {"case_id": v["case_id"], "arm": meta.get("arm"), "model": meta.get("model"),
+       **trajectory_facts(a.run),
        "tier": a.tier, "diagnosis": v["diagnosis"], "judge_found": v["judge_found"],
        "why": judged["why"], "requires": v["requires"],
        "files_opened": len(v["reach"]["files_opened"]),

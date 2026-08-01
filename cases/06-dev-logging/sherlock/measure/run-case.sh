@@ -173,19 +173,43 @@ for line in open(os.path.join(run_dir, "stream.jsonl"), encoding="utf-8", errors
         continue
     if r.get("type") == "result":
         final = r
+# THE BURN LEDGER. A refused run is NOT free: it died partway, so every turn
+# before the failure was billed. run-case.sh correctly refuses to record it as a
+# measurement — which is exactly why the spend was invisible. On 2026-08-01,
+# 5,896,031 tokens across 6 dead runs never appeared anywhere, while
+# results.jsonl showed only the 5,306,617 that survived. Same mistake as the
+# 2.3M burn that created the spend cap. So: refusals go in burned.jsonl.
+def burn(reason):
+    try:
+        u = (final or {}).get("usage") or {}
+        rec = {"case_id": case_id, "arm": arm, "model": model, "reason": reason,
+               "input_tokens": u.get("input_tokens"),
+               "output_tokens": u.get("output_tokens"),
+               "turns": (final or {}).get("num_turns"),
+               "duration_s": int(elapsed), "exit_code": int(rc),
+               "run_dir": run_dir}
+        bp = os.path.join(os.path.dirname(os.path.dirname(run_dir.rstrip("/"))),
+                          "burned.jsonl")
+        with open(bp, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(rec, ensure_ascii=False) + "\n")
+    except Exception:
+        pass          # a bookkeeping failure must never mask the real error
+
+
 # CRITICAL-4. A non-zero exit from qwen — including timeout's 124 — means the run did
 # not complete. Whatever partial text landed in the stream is not a measurement. This
 # was captured into meta.json as `exit_code` and then ignored, so a timed-out run was
 # recorded as a normal row.
 if int(rc) != 0:
-    print("  ✗ runner exited %s (timeout/crash), NOT recorded" % rc); sys.exit(4)
+    print("  ✗ runner exited %s (timeout/crash), NOT recorded" % rc)
+    burn("runner-exit-%s" % rc); sys.exit(4)
 
 if final is None:
-    print("  ✗ no final result record — NOT recorded"); sys.exit(2)
+    print("  ✗ no final result record — NOT recorded"); burn("no-result"); sys.exit(2)
 
 text = final.get("result") or ""
 if not text.strip():
-    print("  ✗ empty result — NOT recorded"); sys.exit(2)
+    print("  ✗ empty result — NOT recorded"); burn("empty-result"); sys.exit(2)
 
 # CRITICAL-4. Same guard as run-bench.sh:61, whose FIRST check is is_error — dropped
 # here, so a record with is_error true, >=400 chars and no leading "[API Error" was
@@ -196,7 +220,7 @@ if final.get("is_error") or text.lstrip().startswith("[API Error") \
         or ("[API Error" in text and len(text) < 400):
     print("  ✗ provider/run error, NOT recorded: %s"
           % str(final.get("error") or text)[:160].replace("\n", " "))
-    sys.exit(3)
+    burn("provider-error"); sys.exit(3)
 
 with open(os.path.join(run_dir, "report.md"), "w", encoding="utf-8") as fh:
     fh.write(text)

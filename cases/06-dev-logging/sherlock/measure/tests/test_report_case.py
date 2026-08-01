@@ -314,5 +314,42 @@ class TheJudgeIsSkippedWhenThereIsNothingToJudge(Harness):
         self.assertEqual(rows[0]["diagnosis"], "collapse")
 
 
+class TheCeilingMustBeVisibleInTheLedger(unittest.TestCase):
+    """qwen-code refuses at 177,000 prompt tokens. D06 PASSES at 162,438 — 91 % of
+    it — so every case runs on ~15k of margin and nothing in results.jsonl said
+    so. Peak context and how much corpus was pulled had to be recomputed by hand
+    from the trajectories every time the question came up."""
+
+    def test_row_carries_peak_context_and_read_volume(self):
+        with tempfile.TemporaryDirectory() as d:
+            run = os.path.join(d, "run"); os.makedirs(run)
+            with open(os.path.join(run, "stream.jsonl"), "w", encoding="utf-8") as fh:
+                for it, lim in ((31412, None), (124432, 60), (162438, 20)):
+                    msg = {"role": "assistant", "usage": {"input_tokens": it},
+                           "content": ([{"type": "tool_use", "name": "read_file",
+                                         "input": {"absolute_path": "/c/a.log",
+                                                   "offset": 10, "limit": lim}}]
+                                       if lim else [])}
+                    fh.write(json.dumps({"type": "assistant", "message": msg}) + "\n")
+            import importlib.util
+            here = os.path.dirname(os.path.abspath(__file__))
+            rc = os.path.join(os.path.dirname(here), "report-case.py")
+            spec = importlib.util.spec_from_file_location("report_case_mod", rc)
+            mod = importlib.util.module_from_spec(spec)
+            sys.argv = ["report-case.py", "--case", d, "--run", run,
+                        "--results", os.path.join(d, "r.jsonl")]
+            try:
+                spec.loader.exec_module(mod)
+            except SystemExit:
+                pass
+            except Exception:
+                pass
+            got = mod.trajectory_facts(run)
+            self.assertEqual(got["peak_input_tokens"], 162438)
+            self.assertEqual(got["lines_read"], 80)
+            self.assertEqual(got["read_calls"], 2)
+            self.assertEqual(got["ceiling_headroom"], 177000 - 162438)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

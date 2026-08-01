@@ -18,6 +18,7 @@ import os
 import shutil
 import stat
 import subprocess
+import sys
 import tempfile
 import unittest
 
@@ -220,6 +221,49 @@ class Tier1MissingCaseDir(GateHarness):
         self.assertNotEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertIn("D99", r.stderr)
         self.assertEqual(self.invoked(), [])
+
+
+class TheGateHasASpendGuard(unittest.TestCase):
+    """gate.sh had none. one-defect.sh did, but it refuses an already-recorded
+    cell, so every D04 rep on 2026-08-01 ran unguarded and 5,896,031 tokens died
+    without appearing in results.jsonl. Cap the BURN, not the retry count."""
+
+    def test_burned_since_counts_only_this_arm_after_this_stamp(self):
+        import subprocess as sp
+        here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        with tempfile.TemporaryDirectory() as d:
+            rows = [
+                {"arm": "vX", "input_tokens": 100, "run_dir": "/r/20260801T100000Z-a-vX"},
+                {"arm": "vX", "input_tokens": 700, "run_dir": "/r/20260801T230000Z-a-vX"},
+                {"arm": "vY", "input_tokens": 900, "run_dir": "/r/20260801T230000Z-a-vY"},
+            ]
+            script = os.path.join(d, "burned-since.py")
+            with open(os.path.join(here, "burned-since.py"), encoding="utf-8") as fh:
+                src = fh.read()
+            with open(script, "w", encoding="utf-8") as fh:
+                fh.write(src)
+            with open(os.path.join(d, "burned.jsonl"), "w", encoding="utf-8") as fh:
+                for r in rows:
+                    fh.write(json.dumps(r) + "\n")
+            out = sp.run([sys.executable, script, "vX", "20260801T200000Z"],
+                         capture_output=True, text=True)
+            # only vX, only after the stamp: the 700 row
+            self.assertEqual(out.stdout.strip(), "700")
+
+    def test_a_missing_burn_ledger_reads_as_zero_not_as_an_error(self):
+        """An empty guard must fail OPEN loudly, never crash the gate."""
+        import subprocess as sp
+        here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        with tempfile.TemporaryDirectory() as d:
+            script = os.path.join(d, "burned-since.py")
+            with open(os.path.join(here, "burned-since.py"), encoding="utf-8") as fh:
+                src = fh.read()
+            with open(script, "w", encoding="utf-8") as fh:
+                fh.write(src)
+            out = sp.run([sys.executable, script, "vX", "20260801T000000Z"],
+                         capture_output=True, text=True)
+            self.assertEqual(out.returncode, 0)
+            self.assertEqual(out.stdout.strip(), "0")
 
 
 if __name__ == "__main__":

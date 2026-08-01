@@ -23,10 +23,22 @@ TIER="${1:?usage: gate.sh <0|1|2|3> <arm> [case_id]}"
 ARM="${2:?usage: gate.sh <0|1|2|3> <arm> [case_id]}"
 ONLY="${3:-}"
 CASES="${SHERLOCK_CASES:-$HERE/cases}"
+BURN_CAP_TOKENS="${BURN_CAP_TOKENS:-8000000}"
+GATE_T0="$(date -u +%Y%m%dT%H%M%SZ)"
 RESULTS="${SHERLOCK_RESULTS:-$HERE/results.jsonl}"
 
 run_one() {
   local case_dir="$1" out rd last
+  # SPEND GUARD. gate.sh had none - only one-defect.sh did, and that one refuses
+  # an already-recorded cell, so every D04 rep on 2026-08-01 ran unguarded and
+  # 5,896,031 tokens died invisibly. On a metered provider a guard here is not
+  # optional: cap the BURN, not the retry count, because a provider burst fails
+  # every attempt for minutes. -> measure/spend.py
+  burned="$(python3 "$HERE/burned-since.py" "$ARM" "$GATE_T0")"
+  if [ "${burned:-0}" -ge "$BURN_CAP_TOKENS" ]; then
+    echo "GUARD: $burned burned tokens on $ARM this gate (cap $BURN_CAP_TOKENS) - stopping" >&2
+    return 20
+  fi
   out="$("$HERE/run-case.sh" "$case_dir" "$ARM")" || { echo "$out"; return 1; }
   echo "$out"
   # run-case.sh's contract (its final print, see run-case.sh) is: on success the
