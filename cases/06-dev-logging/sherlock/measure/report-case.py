@@ -80,6 +80,45 @@ def cost(key):
 # `model` is load-bearing, not decoration: the provider under test changed mid-project
 # (linkapi 400s -> the same deepseek-v4-flash reached via CloseRouter), and a row that
 # does not name its engine can be silently averaged with one from another engine.
+def _provenance(run_dir):
+    """Re-derive from the raw stream whether the ARM actually drove this run.
+
+    `skill_loaded` must come from a `skill` tool_use. Substring-searching the
+    trajectory for the skill name looks equivalent and silently always passes,
+    because the corpus path itself contains it.
+    """
+    import os as _os
+    out = {"skill_loaded": None, "map_tool_ran": None, "subagent_spawned": None}
+    sp = _os.path.join(run_dir, "stream.jsonl")
+    if not _os.path.exists(sp):
+        return out
+    skill, mapped, sub = False, 0, 0
+    for raw in open(sp, encoding="utf-8", errors="replace"):
+        raw = raw.strip()
+        if not raw:
+            continue
+        try:
+            rec = json.loads(raw)
+        except ValueError:
+            continue
+        msg = rec.get("message")
+        if not isinstance(msg, dict):
+            continue
+        for part in msg.get("content") or []:
+            if not isinstance(part, dict) or part.get("type") != "tool_use":
+                continue
+            name = part.get("name")
+            if name == "skill":
+                skill = True
+            elif name == "agent":
+                sub += 1
+            cmd = str((part.get("input") or {}).get("command") or "")
+            if "logmap.py" in cmd or "logstat.py" in cmd:
+                mapped += 1
+    return {"skill_loaded": skill, "map_tool_ran": mapped,
+            "subagent_spawned": sub}
+
+
 row = {"case_id": v["case_id"], "arm": meta.get("arm"), "model": meta.get("model"),
        "tier": a.tier, "diagnosis": v["diagnosis"], "judge_found": v["judge_found"],
        "why": judged["why"], "requires": v["requires"],
@@ -93,6 +132,13 @@ row = {"case_id": v["case_id"], "arm": meta.get("arm"), "model": meta.get("model
        "collapse_reason": v["report"]["collapse_reason"],
        "report_chars": v["report"]["chars"],
        "tool_calls": v["budget"]["tool_calls"], "run_dir": a.run,
+       # PROVENANCE — did this row come from the ARM, or from the bare model?
+       # An `ok` scored with the skill never loaded and the arm's own first tool
+       # never invoked is a fact about the base model, not evidence for the arm.
+       # Two v11 rows (D01, D11) were exactly that and were reported as arm wins
+       # until reconcile.py caught it, so the ledger now carries provenance itself
+       # instead of leaving it to a later audit that may not happen.
+       **_provenance(a.run),
        # Cost is the other half of the comparison: an arm that scores the same for 3×
        # the tokens and 7× the wall clock is not an improvement, it is a regression
        # nobody priced. run-case.sh has captured all four into meta.json from the
