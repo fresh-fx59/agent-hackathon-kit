@@ -1,29 +1,41 @@
 #!/usr/bin/env python3
-"""backfill-cost-fields.py — put duration_s/input_tokens/output_tokens/turns on the
-rows that were scored before report-case.py started emitting them.
+"""backfill-row-fields.py — put the fields meta.json always held onto the rows that
+were scored before report-case.py started emitting them.
 
-Every one of those numbers already exists on disk, in the run dir's meta.json; the
-rows just never carried it. This reads each row's own `run_dir` — never a guess from
-the timestamp, never a re-derivation from the stream — and copies the four fields
-across.
+Two waves of the same defect. The COST fields (duration_s / input_tokens /
+output_tokens / turns) reached results.jsonl only from 2026-07-31; the ARM CONDITIONS
+(skill_delivery, subagent_available) only from 2026-08-02. Both were in each run dir's
+meta.json the whole time. This reads each row's own `run_dir` — never a guess from the
+timestamp, never a re-derivation from the stream — and copies them across.
+
+Conditions are not decoration: `subagent_available` is what separates the fan-out-free
+runs that converted D11 and D01 into mechanism greens from the earlier ones that had
+the `agent` tool, and a ledger that cannot see it pools two different experiments.
 
 Idempotent by construction: a field is written only if the KEY IS ABSENT from the
 row. A key that is present, including one already holding null, is left exactly as it
 is, so re-running can neither double-write nor overwrite a measured value with a
 later absence.
 
-A row whose run dir or meta.json is gone, or whose meta.json will not parse, gets the
-four keys with explicit nulls. Null is the point: it says "this run's cost is
-unrecoverable" and can never be mistaken for a run that was measured and cost
-nothing. Filling those with 0 would invent a free arm.
+A row whose run dir or meta.json is gone, or whose meta.json will not parse, gets
+every key with an explicit null. Null is the point: it says "unrecoverable for this
+run" and can never be mistaken for a measurement. Filling cost with 0 would invent a
+free arm; defaulting `subagent_available` to False would claim fan-out was off on the
+rows where it was on.
 
-    python3 backfill-cost-fields.py            # rewrite results.jsonl in place
-    python3 backfill-cost-fields.py --dry-run  # report only, touch nothing
+    python3 backfill-row-fields.py            # rewrite results.jsonl in place
+    python3 backfill-row-fields.py --dry-run  # report only, touch nothing
 """
 import argparse, json, os, sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-FIELDS = ("duration_s", "input_tokens", "output_tokens", "turns")
+# field -> the type a value must ALREADY have in meta.json to be copied. Nothing is
+# coerced: a cost must be a real number (a bool is not — True would average as 1) and
+# `subagent_available` must be a real bool, because the string "false" is truthy and
+# copying it would invert the record.
+NUMBER = (int, float)
+FIELDS = {"duration_s": NUMBER, "input_tokens": NUMBER, "output_tokens": NUMBER,
+          "turns": NUMBER, "skill_delivery": str, "subagent_available": bool}
 
 ap = argparse.ArgumentParser()
 ap.add_argument("--results", default=os.path.join(HERE, "results.jsonl"))
@@ -31,11 +43,23 @@ ap.add_argument("--dry-run", action="store_true")
 a = ap.parse_args()
 
 
-def cost_fields(row):
-    """The four fields for one row, plus why they are what they are.
+def kept(v, want):
+    """A meta.json value, only if it is already the type this field is recorded in.
 
-    Same null-not-zero rule as report-case.py: a value that is not a real number in
-    meta.json — absent, null, a string — is unmeasured, so it is None.
+    Same rule as report-case.py, in both directions: `isinstance(True, int)` is True,
+    so a bool must be excluded from the numeric fields, and a bool field must accept
+    ONLY a bool — never a truthy string.
+    """
+    if want is bool:
+        return v if isinstance(v, bool) else None
+    return v if isinstance(v, want) and not isinstance(v, bool) else None
+
+
+def row_fields(row):
+    """Every backfillable field for one row, plus why they are what they are.
+
+    Same null-not-guess rule as report-case.py: a value that is absent, null, or of
+    the wrong type in meta.json was never recorded, so it is None.
     """
     run_dir = row.get("run_dir")
     if not run_dir:
@@ -50,12 +74,9 @@ def cost_fields(row):
     except ValueError as e:
         return {k: None for k in FIELDS}, "meta.json malformed (%s)" % e
     out, missing = {}, []
-    for k in FIELDS:
-        v = meta.get(k)
-        if isinstance(v, (int, float)) and not isinstance(v, bool):
-            out[k] = v
-        else:
-            out[k] = None
+    for k, want in FIELDS.items():
+        out[k] = kept(meta.get(k), want)
+        if out[k] is None:
             missing.append(k)
     if missing:
         return out, "meta.json read; not measured: %s" % ", ".join(missing)
@@ -86,7 +107,7 @@ for row in rows:
     if all(k in row for k in FIELDS):
         skipped += 1
         continue
-    values, why = cost_fields(row)
+    values, why = row_fields(row)
     for k in FIELDS:
         row.setdefault(k, values[k])
     if any(values[k] is not None for k in FIELDS):
@@ -96,7 +117,8 @@ for row in rows:
         nulled += 1
         mark = "∅"
     print("%s %-24s %-4s %s" % (mark, row.get("case_id"), row.get("arm"), why))
-    print("    " + "  ".join("%s=%s" % (k, values[k]) for k in FIELDS))
+    for k in FIELDS:
+        print("    %-20s %s" % (k, values[k]))
 
 print("\n%d row(s): %d got real values, %d got explicit nulls, %d already had the fields"
       % (len(rows), filled, nulled, skipped))

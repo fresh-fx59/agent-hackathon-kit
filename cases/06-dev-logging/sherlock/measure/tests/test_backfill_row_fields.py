@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tests for backfill-cost-fields.py — the one-off that repairs an existing ledger.
+"""Tests for backfill-row-fields.py — the one-off that repairs an existing ledger.
 
 A migration that runs once, over rows that cost real money to produce, gets exactly
 one chance to be right: results.jsonl is gitignored, so there is no `git checkout` to
@@ -18,8 +18,11 @@ import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 MEASURE = os.path.dirname(HERE)
-BACKFILL = os.path.join(MEASURE, "backfill-cost-fields.py")
+BACKFILL = os.path.join(MEASURE, "backfill-row-fields.py")
 COST = ("duration_s", "input_tokens", "output_tokens", "turns")
+# The ARM CONDITIONS: how the run was driven, not what it scored. Same backfill, same
+# rules — they sat in meta.json exactly like the cost fields did and never reached a row.
+CONDITIONS = ("skill_delivery", "subagent_available")
 
 
 class Harness(unittest.TestCase):
@@ -115,6 +118,61 @@ class TheNumbersComeFromTheRunsOwnMeta(Harness):
         self.assertIn("no run_dir", p.stdout)
 
 
+class TheArmConditionsAreBackfilledToo(Harness):
+    """18 of the 23 rows in the live ledger predate `subagent_available` entirely, and
+    the 3 that carry it are the fan-out-free runs that converted D11 and D01 into
+    mechanism greens. A ledger that cannot tell those apart pools two experiments."""
+
+    def test_a_good_meta_fills_both_conditions(self):
+        meta = dict(FULL, skill_delivery="named", subagent_available=False)
+        p, rows = self.backfill(self.ledger([self.row("r1", meta)]))
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertEqual(rows[0]["skill_delivery"], "named")
+        self.assertIs(rows[0]["subagent_available"], False)
+
+    def test_fan_out_on_is_recorded_as_true(self):
+        meta = dict(FULL, skill_delivery="tool-only", subagent_available=True)
+        p, rows = self.backfill(self.ledger([self.row("r1", meta)]))
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertIs(rows[0]["subagent_available"], True)
+
+    def test_conditions_absent_from_an_old_meta_become_explicit_nulls(self):
+        """FULL is a pre-2026-08-02 meta.json: it recorded cost and nothing about how
+        the arm was driven. Null says 'unrecorded' — guessing "tool-only"/False would
+        claim a condition nobody observed."""
+        p, rows = self.backfill(self.ledger([self.row("r1", FULL)]))
+        self.assertEqual(p.returncode, 0, p.stderr)
+        for k in CONDITIONS:
+            self.assertIn(k, rows[0], "the key must exist so the gap is visible")
+            self.assertIsNone(rows[0][k], k)
+        self.assertEqual(rows[0]["duration_s"], 1187, "cost still backfills beside it")
+
+    def test_a_non_boolean_subagent_flag_is_null_not_truthy(self):
+        meta = dict(FULL, subagent_available="false")
+        p, rows = self.backfill(self.ledger([self.row("r1", meta)]))
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertIsNone(rows[0]["subagent_available"],
+                          '"false" is a true string; coercing it inverts the record')
+
+    def test_a_missing_meta_nulls_the_conditions_as_well(self):
+        p, rows = self.backfill(self.ledger([self.row("r1", None)]))
+        self.assertEqual(p.returncode, 0, p.stderr)
+        for k in CONDITIONS:
+            self.assertIsNone(rows[0][k], k)
+
+    def test_a_row_holding_only_cost_still_gets_its_conditions(self):
+        """The rows report-case.py wrote between the cost fix and the condition fix
+        carry all four numbers and neither condition — skipping them because 'the cost
+        fields are already there' is how a half-migrated ledger happens."""
+        row = self.row("r1", dict(FULL, skill_delivery="named", subagent_available=False),
+                       duration_s=1187, input_tokens=6042442, output_tokens=58974, turns=34)
+        p, rows = self.backfill(self.ledger([row]))
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertEqual(rows[0]["skill_delivery"], "named")
+        self.assertIs(rows[0]["subagent_available"], False)
+        self.assertEqual(rows[0]["duration_s"], 1187, "the measured cost is untouched")
+
+
 class RunningItTwiceChangesNothing(Harness):
     def test_the_second_run_is_a_no_op(self):
         results = self.ledger([self.row("r1", FULL)])
@@ -130,10 +188,12 @@ class RunningItTwiceChangesNothing(Harness):
         Re-deriving them from meta.json would be harmless today and wrong the moment
         the two disagree — the row is the artifact, meta.json is only its source."""
         row = self.row("r1", FULL, duration_s=99, input_tokens=1,
-                       output_tokens=2, turns=3)
+                       output_tokens=2, turns=3, skill_delivery="tool-only",
+                       subagent_available=True)
         p, rows = self.backfill(self.ledger([row]))
         self.assertEqual(p.returncode, 0, p.stderr)
         self.assertEqual([rows[0][k] for k in COST], [99, 1, 2, 3])
+        self.assertEqual(rows[0]["skill_delivery"], "tool-only")
         self.assertIn("already had the fields", p.stdout)
 
     def test_dry_run_touches_nothing(self):

@@ -53,7 +53,14 @@ absence. Once they are the same value, no average can separate them again — so
 missing, malformed or non-numeric `meta.json` field yields `null` and a loud warning,
 and never blocks the row: the judged verdict is expensive, the cost record is not.
 
-`backfill-cost-fields.py` retrofits rows scored before this existed. It reads each
+Two **arm conditions** ride along for the same reason: `skill_delivery` (did the
+prompt name the skill?) and `subagent_available` (was the `agent` tool on the CLI?).
+Removing the `agent` tool is what converted D11 and D01 from base-model greens into
+mechanism greens, so rows run with fan-out on and off are different experiments and
+must never be pooled. Unrecorded stays `null` — a default `False` would claim fan-out
+was off on the rows where it was on.
+
+`backfill-row-fields.py` retrofits rows scored before these existed. It reads each
 row's own `run_dir`, writes only keys that are ABSENT (so re-running is a no-op and a
 measured value is never overwritten), refuses to rewrite a ledger containing a line it
 cannot parse, and preserves the file's `0600` mode. `--dry-run` reports and touches

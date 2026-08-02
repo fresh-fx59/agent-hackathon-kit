@@ -209,6 +209,53 @@ class TheRowNamesTheModelThatProducedIt(Harness):
                          "two providers in one ledger must never look identical")
 
 
+class TheRowRecordsTheConditionsTheArmRanUnder(Harness):
+    """Two rows of the same arm are only comparable if the arm ran the same way.
+
+    `skill_delivery` ("named" vs "tool-only") says whether the prompt named the skill,
+    and `subagent_available` says whether the `agent` tool was on the CLI. Both are
+    ARM CONDITIONS, not decoration: on 2026-08-02 taking the `agent` tool away
+    converted D11 and D01 from base-model greens into mechanism greens on the first
+    attempt. run-case.sh has written both into meta.json all along and the emitted row
+    dropped both — so rows produced with fan-out ON and fan-out OFF sit in one ledger
+    looking identical, which is exactly the defect already fixed for `model`.
+
+    Same rule as cost: unrecorded is null, never a guessed default. Back-filling an
+    absent `skill_delivery` with "tool-only" invents a measurement of a run nobody
+    observed, and `subagent_available: False` would claim fan-out was off on the rows
+    where it was on.
+    """
+
+    def test_the_row_carries_the_arm_conditions_from_meta(self):
+        p, rows = self.run_reporter(*self.build(
+            meta={"skill_delivery": "named", "subagent_available": False}))
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertEqual(rows[0]["skill_delivery"], "named")
+        self.assertIs(rows[0]["subagent_available"], False)
+
+    def test_fan_out_on_is_visible_in_the_row(self):
+        p, rows = self.run_reporter(*self.build(
+            meta={"skill_delivery": "tool-only", "subagent_available": True}))
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertEqual(rows[0]["skill_delivery"], "tool-only")
+        self.assertIs(rows[0]["subagent_available"], True,
+                      "a fan-out run must never look like a fan-out-free one")
+
+    def test_conditions_absent_from_meta_are_null_not_a_default(self):
+        p, rows = self.run_reporter(*self.build())  # NORMAL meta predates both keys
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertIsNone(rows[0]["skill_delivery"])
+        self.assertIsNone(rows[0]["subagent_available"])
+
+    def test_a_non_boolean_subagent_flag_is_null_not_truthy(self):
+        """`"false"` is a true string. Coercing it would report fan-out ON for a run
+        that had it OFF — the one direction that turns a mechanism green back into an
+        unattributable one."""
+        p, rows = self.run_reporter(*self.build(meta={"subagent_available": "false"}))
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertIsNone(rows[0]["subagent_available"])
+
+
 class TheRowCarriesWhatTheRunCost(Harness):
     """Quality with no price attached is half a measurement.
 

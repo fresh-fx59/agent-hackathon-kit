@@ -156,6 +156,25 @@ def cost(key):
     return v if isinstance(v, (int, float)) and not isinstance(v, bool) else None
 
 
+def condition(key, want):
+    """One ARM CONDITION from meta.json, or None if this run never recorded it.
+
+    Conditions are how the arm was run, not what it scored: `skill_delivery`
+    ("named" vs "tool-only") and `subagent_available` (was the `agent` tool on the
+    CLI). They decide whether two rows of the same arm may be compared at all —
+    removing the `agent` tool on 2026-08-02 converted D11 and D01 from base-model
+    greens into mechanism greens on the first attempt, so a ledger that cannot see
+    fan-out pools two different experiments.
+
+    Same rule as cost, for the same reason: absent is null, never a default. A
+    guessed "tool-only" would report a delivery nobody observed, and the string
+    "false" is truthy — coercing it would claim fan-out was ON for a run that had
+    it off, the one direction that silently disqualifies a real mechanism green.
+    """
+    v = meta.get(key)
+    return v if isinstance(v, want) else None
+
+
 # `model` is load-bearing, not decoration: the provider under test changed mid-project
 # (linkapi 400s -> the same deepseek-v4-flash reached via CloseRouter), and a row that
 # does not name its engine can be silently averaged with one from another engine.
@@ -223,6 +242,11 @@ row = {"case_id": v["case_id"], "arm": meta.get("arm"), "model": meta.get("model
        # until reconcile.py caught it, so the ledger now carries provenance itself
        # instead of leaving it to a later audit that may not happen.
        **_provenance(a.run),
+       # ARM CONDITIONS — how the arm was run, which decides whether two rows of the
+       # same arm may be compared at all. Both have been in meta.json from the start
+       # and stopped at the run dir, so fan-out-on and fan-out-off rows were pooled.
+       "skill_delivery": condition("skill_delivery", str),
+       "subagent_available": condition("subagent_available", bool),
        # Cost is the other half of the comparison: an arm that scores the same for 3×
        # the tokens and 7× the wall clock is not an improvement, it is a regression
        # nobody priced. run-case.sh has captured all four into meta.json from the
