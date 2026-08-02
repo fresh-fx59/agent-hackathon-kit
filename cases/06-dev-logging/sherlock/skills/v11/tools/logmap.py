@@ -1452,6 +1452,21 @@ def rate_candidates(counts, tmpl_hour, per_hour_total, slot_pct, first_seen,
             base.update({"slot": best[1], "p50": (best[2], best[3]),
                          "p90": (best[4], best[5]), "p99": (best[6], best[7]),
                          "p99_ratio": best[0], "label": slot_label(tmpl, best[1])})
+            # WHEN, not just how much. Comparing h0 with h1 says a metric moved
+            # and leaves its onset to be guessed — so on D08 the run saw a 5xx
+            # outage timed to the interval, a p99 shift with no time at all, and
+            # concluded the shift was the outage's consequence. It was its
+            # earliest symptom, two hours earlier. The per-hour percentiles were
+            # already computed; only the two endpoints were ever printed.
+            series = []
+            for h in sorted(hc):
+                if h < h0 or h > h1:
+                    continue
+                v = slot_pct.get((tmpl, h, best[1]))
+                if v and v[3] is not None:
+                    series.append((h, v[3]))
+            base["p99_series"] = series
+            base["onset"] = hourly_onset(series)
         share_moved = share_ratio is not None and (
             share_ratio >= RATE_FACTOR or share_ratio <= 1.0 / RATE_FACTOR)
         p99_moved = best is not None and (
@@ -1472,6 +1487,31 @@ def rate_candidates(counts, tmpl_hour, per_hour_total, slot_pct, first_seen,
     moved.sort(key=lambda t: -t[0])
     flat.sort(key=lambda t: -t[0])
     return [b for _f, b in moved[:AXIS3_CAP]], [b for _n, b in flat[:AXIS3_BG_CAP]]
+
+
+def hourly_onset(series):
+    """The first hour a metric departs from its own opening baseline.
+
+    `RATE_FACTOR` decides that a metric moved; the same factor decides WHEN, so a
+    row can never claim an onset for a shift it did not call significant.
+
+    Returns None when the series never departs — and None is a real answer. A
+    metric that was already high in the first hour did not START inside this
+    window, and inventing an onset of h0 would place a cause before every event
+    in the corpus. That is the failure this whole column exists to prevent, in
+    the opposite direction.
+    """
+    if len(series) < 2:
+        return None
+    base = series[0][1]
+    if not base:
+        return None
+    for hour, val in series[1:]:
+        if val is None:
+            continue
+        if val >= base * RATE_FACTOR or val <= base / RATE_FACTOR:
+            return hour
+    return None
 
 
 def abs_dev(r):
@@ -1776,6 +1816,14 @@ def _rate_row(rid, kind, rel, b):
                        fmt_num(b["p50"][0]), fmt_num(b["p50"][1]),
                        fmt_num(b["p99"][0]), fmt_num(b["p99"][1])))
     bits.append("n %d→%d" % (b["n0"], b["n1"]))
+    # The series is printed for the same reason the outcome axis prints its
+    # intervals: an onset with nothing behind it is one more number to trust.
+    series = b.get("p99_series") or []
+    if len(series) > 2:
+        bits.append("p99 по часам " + " ".join("%02dh=%s" % (h, fmt_num(v))
+                                               for h, v in series))
+    if b.get("onset") is not None:
+        bits.append("сдвиг с %02dh" % b["onset"])
     metric = "доля" if b.get("driver") == "доля" or slot is None \
         else "слот#%d" % (slot + 1)
     return {"id": rid, "kind": kind, "file": b.get("file") or rel,

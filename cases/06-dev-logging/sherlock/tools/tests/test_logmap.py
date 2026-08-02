@@ -421,6 +421,78 @@ class TheRateAxisIsFormatAgnostic(unittest.TestCase):
                           "the median must be reported flat next to the p99 "
                           "shift:\n%s" % body)
 
+    def test_a_shifted_metric_says_WHEN_it_started(self):
+        """D08 was lost here, and not by the model.
+
+        The rate axis compares the first comparable hour with the last and prints
+        `09h→15h p99 95→1421`. That says a metric moved; it never says when. The
+        run had the outcome axis telling it a 5xx outage began at 13:40 with
+        interval resolution, and a p99 shift with no onset at all — so it wrote
+        «S001 N (p99 рост — следствие, не причина)» and the judge marked it a miss.
+        The reasoning was sound on the evidence it had. The evidence was missing a
+        column.
+
+        Here the shift starts at 11h and the outage-shaped hours are 13h-15h. An
+        onset of 11h is what makes «effect precedes cause» checkable — the whole
+        answer for a case whose defect IS the earliest detectable signal.
+        """
+        with tempfile.TemporaryDirectory() as d:
+            corpus, out = os.path.join(d, "c"), os.path.join(d, "w")
+            lines = []
+            for hour in range(9, 16):
+                slow = 130 if hour < 11 else 1300     # onset at 11h, flat before
+                for i in range(800):
+                    dur = 10 if i % 100 else slow
+                    lines.append('{"start":"2026-07-28T%02d:%02d:00Z",'
+                                 '"path":"/api/v1/search","code":200,"duration":%d}'
+                                 % (hour, i % 60, dur))
+            write(corpus, "gw.json", lines)
+            run(corpus, out)
+            body = open(os.path.join(out, "axis3.tsv"), encoding="utf-8").read()
+            self.assertIn("сдвиг с 11h", body,
+                          "the onset hour must be stated, not left to be inferred "
+                          "from a two-endpoint comparison:\n%s" % body)
+
+    def test_the_hourly_series_is_printed_so_the_onset_can_be_checked(self):
+        """An onset with no series behind it is one more number to trust. The
+        outcome axis already prints its intervals (`13:30=129 13:40=716 …`) and
+        that is the row the model used correctly on D07."""
+        with tempfile.TemporaryDirectory() as d:
+            corpus, out = os.path.join(d, "c"), os.path.join(d, "w")
+            lines = []
+            for hour in range(9, 16):
+                slow = 130 if hour < 11 else 1300
+                for i in range(800):
+                    dur = 10 if i % 100 else slow
+                    lines.append('{"start":"2026-07-28T%02d:%02d:00Z",'
+                                 '"path":"/api/v1/search","code":200,"duration":%d}'
+                                 % (hour, i % 60, dur))
+            write(corpus, "gw.json", lines)
+            run(corpus, out)
+            body = open(os.path.join(out, "axis3.tsv"), encoding="utf-8").read()
+            self.assertIn("p99 по часам", body, body[:800])
+            self.assertIn("10h=130", body, "the flat hours must be visible too")
+            self.assertIn("11h=1300", body, "the first shifted hour must be visible")
+
+    def test_a_metric_that_was_high_from_the_start_reports_no_onset(self):
+        """No onset is a real answer: a metric that never had a quiet baseline did
+        not START anywhere in this window, and inventing an onset of 09h would put
+        a cause before every event in the corpus."""
+        with tempfile.TemporaryDirectory() as d:
+            corpus, out = os.path.join(d, "c"), os.path.join(d, "w")
+            lines = []
+            for hour in range(9, 16):
+                for i in range(800):
+                    dur = 10 if i % 100 else (1300 + hour)   # high throughout
+                    lines.append('{"start":"2026-07-28T%02d:%02d:00Z",'
+                                 '"path":"/api/v1/search","code":200,"duration":%d}'
+                                 % (hour, i % 60, dur))
+            write(corpus, "gw.json", lines)
+            run(corpus, out)
+            body = open(os.path.join(out, "axis3.tsv"), encoding="utf-8").read()
+            self.assertNotIn("сдвиг с ", body,
+                             "a flat-high metric has no onset to report:\n%s" % body)
+
     def test_the_background_list_is_a_written_measurement(self):
         """A refutation nobody was asked for never gets written down."""
         with tempfile.TemporaryDirectory() as d:
