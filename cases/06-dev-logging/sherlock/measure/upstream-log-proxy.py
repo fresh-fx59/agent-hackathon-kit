@@ -40,6 +40,15 @@ UPSTREAM_BASE = os.environ.get("UPSTREAM_BASE", "https://linkapi.ai/v1").rstrip(
 UPSTREAM_LOG = os.environ.get("UPSTREAM_LOG", "upstream.jsonl")
 LISTEN_PORT = int(os.environ.get("LISTEN_PORT", "8791"))
 RUN_TAG = os.environ.get("RUN_TAG", "")
+# THE 177,000-TOKEN CEILING WAS A MODEL-ID PARSING ARTIFACT, not a real limit.
+# qwen-code sizes the context window from the model id, and its own normalize()
+# turns "[SP]deepseek-v4-flash" into "[sp]deepseek-v4-flash", which matches no
+# entry in its table and falls back to DEFAULT_TOKEN_LIMIT = 200,000 — from
+# which the 177,000 hard limit follows. Drop the prefix and the same table gives
+# /^deepseek-v4/ => 1,000,000. Verified by running qwen-code's own normalize().
+# linkapi needs the prefix; qwen-code must not see it. So qwen-code is given the
+# clean id and this restores the alias on the way out.
+UPSTREAM_MODEL = os.environ.get("UPSTREAM_MODEL", "")
 
 _BASE_PATH = urlsplit(UPSTREAM_BASE).path.rstrip("/")     # e.g. "/v1"
 _LOG_LOCK = threading.Lock()
@@ -106,11 +115,25 @@ class Proxy(BaseHTTPRequestHandler):
 
     def _relay(self, body):
         t0 = time.time()
-        requested = None
-        try:
-            requested = (json.loads(body or b"{}") or {}).get("model")
-        except Exception:
-            pass
+        requested = sent = None
+        if UPSTREAM_MODEL and body:
+            # Rewrite ONLY the model field, and only when the body parses as the
+            # object we expect. A proxy that reformats a request it did not
+            # fully understand is a proxy that corrupts one silently.
+            try:
+                obj = json.loads(body)
+                if isinstance(obj, dict) and obj.get("model"):
+                    requested = obj["model"]
+                    obj["model"] = UPSTREAM_MODEL
+                    sent = UPSTREAM_MODEL
+                    body = json.dumps(obj, ensure_ascii=False).encode("utf-8")
+            except Exception:
+                pass
+        if requested is None:
+            try:
+                requested = (json.loads(body or b"{}") or {}).get("model")
+            except Exception:
+                pass
 
         headers = {k: v for k, v in self.headers.items()
                    if k.lower() not in _HOP}
@@ -129,7 +152,7 @@ class Proxy(BaseHTTPRequestHandler):
         except Exception as e:                       # DNS, TLS, refused, timeout
             record(requested_model=requested, returned_model=None,
                    tool_call=False, status=None, error=str(e)[:300],
-                   duration_ms=int((time.time() - t0) * 1000),
+                   duration_ms=int((time.time() - t0) * 1000), sent_model=sent,
                    request_bytes=len(body), path=self.path, stream=False)
             self.send_response(502)
             payload = json.dumps({"error": {"message": "proxy: %s" % e}}).encode()
@@ -150,7 +173,7 @@ class Proxy(BaseHTTPRequestHandler):
             record(requested_model=requested,
                    returned_model=state["returned_model"],
                    tool_call=state["tool_call"], status=status,
-                   duration_ms=int((time.time() - t0) * 1000),
+                   duration_ms=int((time.time() - t0) * 1000), sent_model=sent,
                    request_bytes=len(body), path=self.path, stream=streaming)
 
     def _relay_headers(self, resp, status, extra=()):

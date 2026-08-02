@@ -248,5 +248,67 @@ class ItStaysOutOfTheWay(ProxyCase):
             self.assertNotIn("sekrit", fh.read())
 
 
+class ItCanRestoreTheProviderAlias(ProxyCase):
+    """The whole 177,000-token ceiling was a MODEL-ID PARSING artifact.
+
+    qwen-code sizes the context window from the model id. Verified against its
+    own normalize() + table: "deepseek-v4-flash" matches /^deepseek-v4/ and gets
+    1,000,000 input tokens; "[SP]deepseek-v4-flash" normalizes to
+    "[sp]deepseek-v4-flash", matches nothing, and falls back to the 200,000
+    default -- from which the 177,000 hard limit follows. linkapi's alias has to
+    carry the [SP] prefix, and qwen-code has to not see it.
+
+    So the proxy sends qwen-code's clean id upstream as the aliased one:
+    UPSTREAM_MODEL replaces the request's model field on the way out. The rest
+    of the body is untouched, and the recorded row still names what answered.
+    """
+
+    def start_rewriting(self, mode, upstream_model):
+        self.srv.mode = mode
+        env = dict(os.environ,
+                   UPSTREAM_BASE="http://127.0.0.1:%d/v1" % self.up_port,
+                   UPSTREAM_LOG=self.log, LISTEN_PORT=str(self.px_port),
+                   UPSTREAM_MODEL=upstream_model)
+        self.proc = subprocess.Popen([sys.executable, PROXY], env=env,
+                                     stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        for _ in range(100):
+            try:
+                with urllib.request.urlopen(
+                        "http://127.0.0.1:%d/healthz" % self.px_port, timeout=1) as r:
+                    r.read()
+                return
+            except Exception:
+                time.sleep(0.05)
+        self.fail("proxy never came up")
+
+    def test_the_provider_sees_the_aliased_id(self):
+        self.start_rewriting("json_toolcall", "[SP]deepseek-v4-flash")
+        self.post({"model": "deepseek-v4-flash", "messages": []})
+        self.assertEqual(self.srv.seen[0]["body"]["model"], "[SP]deepseek-v4-flash")
+
+    def test_the_row_still_records_what_the_client_asked_for(self):
+        self.start_rewriting("json_toolcall", "[SP]deepseek-v4-flash")
+        self.post({"model": "deepseek-v4-flash", "messages": []})
+        rec = self.lines()[0]
+        self.assertEqual(rec["requested_model"], "deepseek-v4-flash")
+        self.assertEqual(rec["sent_model"], "[SP]deepseek-v4-flash")
+        self.assertEqual(rec["returned_model"], "DeepSeek-V4-Flash")
+
+    def test_nothing_else_in_the_body_is_touched(self):
+        self.start_rewriting("json_toolcall", "[SP]deepseek-v4-flash")
+        self.post({"model": "deepseek-v4-flash", "messages": [{"role": "user",
+                   "content": "hi"}], "tools": [1, 2], "stream": False})
+        body = self.srv.seen[0]["body"]
+        self.assertEqual(body["tools"], [1, 2])
+        self.assertEqual(body["messages"][0]["content"], "hi")
+        self.assertIs(body["stream"], False)
+
+    def test_without_the_env_var_the_model_is_left_alone(self):
+        """Default must stay a pass-through proxy."""
+        self.start("json_toolcall")
+        self.post({"model": "deepseek-v4-flash", "messages": []})
+        self.assertEqual(self.srv.seen[0]["body"]["model"], "deepseek-v4-flash")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

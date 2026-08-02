@@ -27,7 +27,22 @@ TIMEOUT="${SHERLOCK_TIMEOUT:-2700}"
 [ -d "$CORPUS" ] || { echo "✗ corpus not found: $CORPUS" >&2; exit 1; }
 
 W="$(mktemp -d "${TMPDIR:-/tmp}/bench-XXXXXX")"
-trap 'rm -rf "$W"' EXIT
+# The trajectory is the ONLY way to tell "never opened the file" from "opened it
+# and closed it wrongly" from "found it and discarded it" — and that is exactly
+# the question every arm since v5 exists to answer. It used to be deleted on
+# exit, so five runs in a row were unreadable. Keep it next to the ledger.
+RUNS="$HERE/runs"; mkdir -p "$RUNS"
+STAMP="$(date -u +%Y%m%dT%H%M%SZ)-$ARM"
+TRACE="$RUNS/$STAMP"
+save_trace() {
+  mkdir -p "$TRACE"
+  [ -f "$W/out.json" ] && cp "$W/out.json" "$TRACE/out.json"
+  [ -f "$W/err.txt" ]  && cp "$W/err.txt"  "$TRACE/err.txt"
+  # whatever the run wrote for itself (v11 keeps its worklist verdicts here)
+  [ -d "$W/work" ] && cp -r "$W/work" "$TRACE/work"
+  rm -rf "$W"
+}
+trap save_trace EXIT
 export QWEN_HOME="$W/home"; mkdir -p "$QWEN_HOME"
 
 if [ "$ARM" != "none" ]; then
@@ -49,9 +64,9 @@ START=$(date +%s)
 ELAPSED=$(( $(date +%s) - START ))
 [ -s "$W/out.json" ] || { echo "  ✗ no output"; sed -n '1,8p' "$W/err.txt"; exit 1; }
 
-python3 - "$W/out.json" "$ARM" "$ELAPSED" "$CORPUS" "$LEDGER" <<'PY'
+python3 - "$W/out.json" "$ARM" "$ELAPSED" "$CORPUS" "$LEDGER" "$TRACE" <<'PY'
 import json, os, re, sys
-out, arm, elapsed, corpus, ledger = sys.argv[1:6]
+out, arm, elapsed, corpus, ledger, trace = sys.argv[1:7]
 d = json.load(open(out)); d = d if isinstance(d, list) else [d]
 final = next((r for r in d if r.get("type") == "result"), None)
 sysr  = next((r for r in d if r.get("type") == "system"), {})
@@ -61,22 +76,27 @@ t = final.get("result") or ""
 if final.get("is_error") or t.lstrip().startswith("[API Error") or ("[API Error" in t and len(t) < 400):
     print("  ✗ provider/run error, NOT recorded:", (final.get("error") or t)[:160]); sys.exit(2)
 
-# coverage: how many of the corpus's files does the answer actually name?
-names = []
+# Coverage: how many of the corpus's files does the answer actually name?
+# Matched on the RELATIVE PATH, not the basename. Two files here are both called
+# `syslog`, so a basename count reported 30 files in a 31-file corpus and called
+# one citation two.
+rels = set()
 for root, _, fs in os.walk(corpus):
     for f in fs:
-        names.append(f)
-cited = {f for f in set(names) if f in t}
+        rels.add(os.path.relpath(os.path.join(root, f), corpus).replace(os.sep, "/"))
+cited = {r for r in rels if r in t}
 u = final.get("usage") or {}
 rec = {"arm": arm, "model": sysr.get("model"), "turns": final.get("num_turns"),
        "duration_s": int(elapsed), "input_tokens": u.get("input_tokens"),
        "output_tokens": u.get("output_tokens"), "answer_chars": len(t),
-       "files_in_corpus": len(set(names)), "files_cited": len(cited),
+       "files_in_corpus": len(rels), "files_cited": len(cited),
+       "cited_files": sorted(cited),
        "line_refs": len(re.findall(r":\d+", t)), "dataset": "bench649",
-       "answer": t}
+       "trace_dir": trace, "answer": t}
 with open(ledger, "a", encoding="utf-8") as f:
     f.write(json.dumps(rec, ensure_ascii=False) + "\n")
 print("  ✓ turns=%s %ss in/out=%s/%s chars=%d files_cited=%d/%d line_refs=%d"
       % (rec["turns"], elapsed, rec["input_tokens"], rec["output_tokens"],
          rec["answer_chars"], rec["files_cited"], rec["files_in_corpus"], rec["line_refs"]))
+print("  trajectory: %s" % trace)
 PY

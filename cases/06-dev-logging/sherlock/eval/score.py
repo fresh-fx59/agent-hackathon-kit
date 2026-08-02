@@ -18,6 +18,12 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 JUDGE_URL = os.environ.get("JUDGE_BASE_URL", "http://127.0.0.1:8317/v1")
 JUDGE_MODEL = os.environ.get("JUDGE_MODEL", "gpt-5.5")
 JUDGE_KEY = os.environ.get("JUDGE_API_KEY")
+# Pinned, not left to the provider's default. Measured: the same four answers,
+# re-judged by the same model, swung one arm 18.2 -> 9.1 and another 9.1 -> 18.2.
+# A comparison across arms is meaningless while the judge itself moves by a whole
+# defect, so temperature and seed are part of the measurement, not of the weather.
+JUDGE_TEMPERATURE = float(os.environ.get("JUDGE_TEMPERATURE", "0"))
+JUDGE_SEED = int(os.environ.get("JUDGE_SEED", "20260728"))
 
 PROMPT = """You are grading an incident-investigation report against a known answer key.
 
@@ -55,6 +61,8 @@ def judge(answer, key_text):
         sys.exit("set JUDGE_API_KEY (use with-secret.sh eval_broker_api_key --env JUDGE_API_KEY -- ...)")
     body = json.dumps({
         "model": JUDGE_MODEL,
+        "temperature": JUDGE_TEMPERATURE,
+        "seed": JUDGE_SEED,
         "messages": [{"role": "user",
                       "content": PROMPT.format(key=key_text, answer=answer[:120000])}],
     }).encode()
@@ -146,6 +154,7 @@ def main():
         rec = {"dataset": ds, "arm": arm, "model": r.get("model"),
                "rep": seen[(ds, arm)], "ledger": os.path.basename(args.ledger),
                "ledger_line": r["_line"], "judge_model": JUDGE_MODEL,
+               "judge_temperature": JUDGE_TEMPERATURE, "judge_seed": JUDGE_SEED,
                "found_ids": found, "missed_ids": v.get("missed_ids", []),
                "recall_pct": round(100.0 * len(found) / total, 1) if total else None,
                "false_positives": v.get("false_positives"),

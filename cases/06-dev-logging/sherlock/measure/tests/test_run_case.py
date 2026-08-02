@@ -15,7 +15,9 @@ import shutil
 import stat
 import subprocess
 import tempfile
+import threading
 import unittest
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 MEASURE = os.path.dirname(HERE)
@@ -409,6 +411,143 @@ class TheWorkingReportIsEvidenceAndMustSurvive(unittest.TestCase):
                 meta = json.load(fh)
             self.assertEqual(meta["answer_chars"], 40)
             self.assertGreater(meta["artifact_chars"], 400)
+
+
+class TheClientMustNotSeeTheProviderPrefix(unittest.TestCase):
+    """The 177,000-token ceiling was a MODEL-ID PARSING artifact, not a limit.
+
+    qwen-code sizes its context window from the model id it was given. Its own
+    normalize() lowercases and table-matches: "deepseek-v4-flash" hits
+    /^deepseek-v4/ and gets 1,000,000 input tokens; "[SP]deepseek-v4-flash"
+    becomes "[sp]deepseek-v4-flash", matches nothing, and falls back to
+    DEFAULT_TOKEN_LIMIT = 200,000 — from which the 177,000 hard limit follows.
+    Every v11/v12 run that "died on the ceiling" died on this.
+
+    linkapi's alias HAS to carry the [SP] prefix; qwen-code has to not see it.
+    The proxy already sits in the path, so the split is: the CLI is given the
+    clean id, and the proxy restores the alias on the way out. The whole point
+    is worthless unless the runner actually wires it — so these tests drive a
+    real request all the way through the real proxy to a stub provider.
+    """
+
+    # Records its own argv, then makes ONE real POST through whatever
+    # OPENAI_BASE_URL it was handed, carrying the id it was told to use.
+    RELAY = r"""#!/usr/bin/env bash
+printf '%s\0' "$@" >> "$QWEN_STUB_LOG"
+M=""
+while [ $# -gt 0 ]; do
+  case "$1" in --model) M="$2"; shift 2 ;; *) shift ;; esac
+done
+python3 -c '
+import json, os, sys, urllib.request
+url = os.environ["OPENAI_BASE_URL"].rstrip("/") + "/chat/completions"
+body = json.dumps({"model": sys.argv[1], "messages": []}).encode("utf-8")
+req = urllib.request.Request(url, data=body,
+                             headers={"Content-Type": "application/json"})
+try:
+    urllib.request.urlopen(req, timeout=10).read()
+except Exception:
+    pass
+' "$M"
+cat <<'JSON'
+{"type":"result","result":"REPLACE_ME","num_turns":1,"usage":{"input_tokens":11,"output_tokens":22}}
+JSON
+exit 0
+""".replace("REPLACE_ME", "x" * 40)
+
+    def _provider(self):
+        """A stub provider that records the model id it was actually sent."""
+        seen = []
+
+        class H(BaseHTTPRequestHandler):
+            def do_POST(self):
+                n = int(self.headers.get("content-length") or 0)
+                raw = self.rfile.read(n)
+                try:
+                    seen.append(json.loads(raw))
+                except ValueError:
+                    seen.append({"unparseable": raw[:200].decode("utf-8", "replace")})
+                out = json.dumps({"model": "DeepSeek-V4-Flash",
+                                  "choices": [{"message": {"content": "ok"}}]}
+                                 ).encode("utf-8")
+                self.send_response(200)
+                self.send_header("content-type", "application/json")
+                self.send_header("content-length", str(len(out)))
+                self.end_headers()
+                self.wfile.write(out)
+
+            def log_message(self, *a):
+                pass
+
+        srv = ThreadingHTTPServer(("127.0.0.1", 0), H)
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        return srv, seen
+
+    def go(self, d, extra_env):
+        srv, seen = self._provider()
+        self.addCleanup(srv.server_close)
+        self.addCleanup(srv.shutdown)
+        case_dir = make_case(d)
+        binp = os.path.join(d, "bin")
+        os.makedirs(binp, exist_ok=True)
+        qwen = os.path.join(binp, "qwen")
+        with open(qwen, "w", encoding="utf-8") as fh:
+            fh.write(self.RELAY)
+        os.chmod(qwen, os.stat(qwen).st_mode | stat.S_IEXEC)
+        skills = os.path.join(d, "skills", "v6")
+        os.makedirs(skills)
+        with open(os.path.join(skills, "SKILL.md"), "w", encoding="utf-8") as fh:
+            fh.write("---\nname: sherlock\n---\n")
+        log = os.path.join(d, "stub.log")
+        env = dict(os.environ)
+        env.update({"PATH": binp + os.pathsep + os.environ["PATH"],
+                    "QWEN_STUB_LOG": log, "QWEN_BIN": qwen,
+                    "SHERLOCK_SKILLS": os.path.dirname(skills),
+                    "SHERLOCK_RUNS": os.path.join(d, "runs"),
+                    "SHERLOCK_BASE_URL": "http://127.0.0.1:%d/v1"
+                                         % srv.server_address[1],
+                    "SHERLOCK_API_KEY": "stub-key"})
+        env.update(extra_env)
+        subprocess.run(["bash", RUNNER, case_dir, "v6"], capture_output=True,
+                       text=True, env=env, timeout=120)
+        with open(log, "rb") as fh:
+            argv = fh.read().decode("utf-8").split("\0")
+        runs = os.path.join(d, "runs")
+        rd = os.path.join(runs, os.listdir(runs)[0])
+        return argv, seen, rd
+
+    def cli_model(self, argv):
+        return argv[argv.index("--model") + 1]
+
+    def test_the_cli_is_given_the_clean_id(self):
+        with tempfile.TemporaryDirectory() as d:
+            argv, _seen, _rd = self.go(d, {})
+            self.assertEqual(self.cli_model(argv), "deepseek-v4-flash")
+
+    def test_the_provider_still_receives_the_aliased_id(self):
+        with tempfile.TemporaryDirectory() as d:
+            _argv, seen, _rd = self.go(d, {})
+            self.assertEqual([r.get("model") for r in seen],
+                             ["[SP]deepseek-v4-flash"])
+
+    def test_without_the_proxy_the_cli_keeps_the_alias(self):
+        """Nothing restores the prefix, so stripping it would 404 the model."""
+        with tempfile.TemporaryDirectory() as d:
+            argv, _seen, _rd = self.go(d, {"SHERLOCK_UPSTREAM_LOG": "0"})
+            self.assertEqual(self.cli_model(argv), "[SP]deepseek-v4-flash")
+
+    def test_the_ledger_still_names_the_provider_alias(self):
+        """`model` is the attribution axis: it must stay what answered."""
+        with tempfile.TemporaryDirectory() as d:
+            _argv, _seen, rd = self.go(d, {})
+            with open(os.path.join(rd, "meta.json"), encoding="utf-8") as fh:
+                self.assertEqual(json.load(fh)["model"], "[SP]deepseek-v4-flash")
+
+    def test_a_model_with_no_prefix_is_passed_through_untouched(self):
+        with tempfile.TemporaryDirectory() as d:
+            argv, seen, _rd = self.go(d, {"SHERLOCK_MODEL": "qwen3-coder-plus"})
+            self.assertEqual(self.cli_model(argv), "qwen3-coder-plus")
+            self.assertEqual([r.get("model") for r in seen], ["qwen3-coder-plus"])
 
 
 if __name__ == "__main__":
