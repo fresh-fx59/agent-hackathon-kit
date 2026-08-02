@@ -633,6 +633,44 @@ def ledger(d, report, path):
     return "\n".join(out), total
 
 
+EXAMPLE_MAX = 90          # a suggested quote long enough to be evidence, short
+EXAMPLE_MIN = 4           # enough to paste; QUOTE_RE's own floor is 4 chars
+
+
+def quote_example(r):
+    """A pasteable citation built from the line that was refused.
+
+    A refusal that names the accepted delimiters is better than one that does
+    not, and a refusal that hands back the finished line is better again: D07
+    spent 40 turns and 11.15 M tokens reverse-engineering this checker rather
+    than adding a pair of quotes, and D04 spent 123 turns doing the same thing
+    before it. The next move should be a paste, not an investigation.
+
+    The delimiter is chosen so the span cannot close it early, and «» is tried
+    first because it is one of the three the bare-filename stripper protects —
+    a backtick span containing a dotted identifier gets blanked and would not
+    match the line it was copied from, which is the exact bug D04 died on.
+    """
+    text = (r.get("text") or "").strip()
+    if len(text) < EXAMPLE_MIN:
+        return None
+    span = text
+    if len(span) > EXAMPLE_MAX:
+        # The tail carries the message; the head is a timestamp and a thread
+        # name. Cut forward to a space so the span never starts mid-token.
+        span = span[-EXAMPLE_MAX:]
+        cut = span.find(" ")
+        if 0 <= cut < EXAMPLE_MAX // 2:
+            span = span[cut + 1:]
+    span = span.strip()
+    if len(span) < EXAMPLE_MIN:
+        return None
+    for op, cl in (("«", "»"), ('"', '"'), ("“", "”")):
+        if op not in span and cl not in span:
+            return "%s:%d — %s%s%s" % (r["path"], r["line"], op, span, cl)
+    return None
+
+
 # --------------------------------------------------------------------------
 def render(d):
     out = []
@@ -644,9 +682,12 @@ def render(d):
                                          "  [неоднозначно: %d файла]" % r["candidates"]
                                          if r["how"].endswith("ambiguous") else ""))
         if r["verdict"] == "no-quote":
-            out.append("    нет дословной цитаты этой строки — процитируй её "
-                       "кусок буквально")
+            out.append("    строка не процитирована — оберни её кусок в «…», "
+                       "\"…\", “…” или `…`")
             out.append("    строка %d: %s" % (r["line"], (r["text"] or "")[:200]))
+            ex = quote_example(r)
+            if ex:
+                out.append("    например: %s" % ex)
         elif r["verdict"] == "wrong-content":
             out.append("    утверждение: %s" % r["claim"][:160])
             out.append("    строка %d говорит: %s" % (r["line"], (r["text"] or "")[:200]))

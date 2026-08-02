@@ -56,6 +56,20 @@ def corpus(d):
     return d
 
 
+def run_human(report_text, root, *extra):
+    """The RENDERED output — what the model actually reads. `run()` asks for
+    --json, so a message-quality assertion made against it tests nothing."""
+    with tempfile.NamedTemporaryFile("w", suffix=".md", delete=False,
+                                     encoding="utf-8") as fh:
+        fh.write(report_text)
+        path = fh.name
+    try:
+        return subprocess.run([sys.executable, CC, path, "--corpus", root, *extra],
+                              capture_output=True, text=True)
+    finally:
+        os.unlink(path)
+
+
 def run(report_text, root, *extra):
     with tempfile.NamedTemporaryFile("w", suffix=".md", delete=False,
                                      encoding="utf-8") as fh:
@@ -209,6 +223,62 @@ class RequireQuoteIsTheSecondGate(unittest.TestCase):
             _p, got = run("- apps/app.log:2 — тут написано про таймаут "
                           "резервирования заказа", d)
             self.assertNotEqual(got["citations"][0]["verdict"], "no-quote")
+
+
+class ARefusalMustSayHowToPassIt(unittest.TestCase):
+    """D07 burned 11.15 M tokens and produced no row, fighting this message.
+
+    The run copied four log lines into the report verbatim after an em-dash and
+    no delimiters — `- file:50539 — 2026-07-28 11:05:12.771 DEBUG …`. `no-quote`
+    was the CORRECT verdict, and the text it printed was «нет дословной цитаты
+    этой строки — процитируй её кусок буквально». From the model's side that
+    reads as a contradiction: it had copied the line literally. So it did what
+    D04 did before it — 40 turns reading citecheck.py's own source to work out
+    what the checker wanted — and timed out at 2700 s.
+
+    The gate was right and unpassable in practice, because a refusal that does
+    not name the accepted form is not actionable. Four delimiters are accepted;
+    the message named none of them. It now names them and shows the fix built
+    from the offending line, so the next move is a paste, not an investigation.
+    """
+
+    def test_the_message_names_the_delimiters_it_accepts(self):
+        with tempfile.TemporaryDirectory() as d:
+            corpus(d)
+            p = run_human("- apps/app.log:2 — reservation timeout for order", d,
+                          "--require-quote")
+            for delim in ("«", "»", '"', "`"):
+                self.assertIn(delim, p.stdout,
+                              "a refusal that hides the accepted form sends the "
+                              "model into the source:\n%s" % p.stdout)
+
+    def test_the_message_shows_a_ready_made_example_from_the_offending_line(self):
+        """Not a generic template: the fix, built from THIS line, pasteable."""
+        with tempfile.TemporaryDirectory() as d:
+            corpus(d)
+            p = run_human("- apps/app.log:2 — reservation timeout for order", d,
+                          "--require-quote")
+            self.assertIn("например", p.stdout, p.stdout)
+            self.assertRegex(p.stdout, r"apps/app\.log:2 — «[^»]{4,}»",
+                             "the example must be a complete citation line:\n%s"
+                             % p.stdout)
+
+    def test_the_example_it_prints_actually_passes_the_gate(self):
+        """An example that does not pass is worse than none: it would send the
+        model back to the source with one more contradiction to explain."""
+        with tempfile.TemporaryDirectory() as d:
+            corpus(d)
+            p = run_human("- apps/app.log:2 — reservation timeout for order", d,
+                          "--require-quote")
+            example = None
+            for line in p.stdout.splitlines():
+                if "например" in line:
+                    example = line.split("например:", 1)[1].strip()
+            self.assertIsNotNone(example, p.stdout)
+            _p2, got2 = run("- " + example, d, "--require-quote")
+            self.assertEqual(got2["citations"][0]["verdict"], "ok",
+                             "the tool's own suggested fix was rejected by the "
+                             "tool: %r" % example)
 
 
 class TheLedgerIsTheStoppingCondition(unittest.TestCase):
