@@ -46,6 +46,18 @@ class Stub(BaseHTTPRequestHandler):
                                  "auth": self.headers.get("Authorization"),
                                  "body": json.loads(body or b"{}")})
         mode = self.server.mode
+        # Simulate a provider BURST: fail the next N calls, then behave. This is
+        # what linkapi actually does — transient, minute-scale, independent of
+        # request size and shape (both controlled for on 2026-08-02).
+        if getattr(self.server, "fail_times", 0) > 0:
+            self.server.fail_times -= 1
+            payload = json.dumps({"error": {"message": "Upstream request failed"}}).encode()
+            self.send_response(400)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+            return
         if mode == "json_toolcall":
             payload = json.dumps({
                 "model": "DeepSeek-V4-Flash",
@@ -108,6 +120,7 @@ class ProxyCase(unittest.TestCase):
         self.srv = HTTPServer(("127.0.0.1", self.up_port), Stub)
         self.srv.seen = []
         self.srv.mode = "json_toolcall"
+        self.srv.fail_times = 0
         threading.Thread(target=self.srv.serve_forever, daemon=True).start()
         self.tmp = tempfile.mkdtemp()
         self.log = os.path.join(self.tmp, "upstream.jsonl")
@@ -246,6 +259,75 @@ class ItStaysOutOfTheWay(ProxyCase):
         self.post(auth="Bearer sekrit")
         with open(self.log, encoding="utf-8") as fh:
             self.assertNotIn("sekrit", fh.read())
+
+
+class ItRidesOutAProviderBurst(ProxyCase):
+    """qwen-code's retry budget is SHORTER than a linkapi burst, so runs die.
+
+    Measured 2026-08-02. The 400s on this lane are transient bursts lasting a
+    minute or two; neither request size nor request shape explains them —
+    controlled for both, interleaved, 12/12 succeeded. But D11 died anyway:
+    4 consecutive 400s at 143 KB then a 200, then **5 consecutive 400s at
+    171 KB and the run was over** — «Model stream ended without a finish
+    reason», 98,515 tokens billed for no row. The client gave up mid-burst.
+
+    The proxy is already in the path and it is the only place that can wait
+    longer than the client will. It retries a failed upstream call with
+    exponential backoff, and it records EVERY attempt, because a retry
+    re-uploads the whole context and is therefore billed — an invisible retry
+    would be exactly the "failed calls are free" mistake that the spend cap
+    exists to prevent.
+
+    It never retries once bytes have reached the client: a half-streamed answer
+    cannot be un-sent.
+    """
+
+    def start_retrying(self, mode, attempts, delay_ms="10"):
+        self.srv.mode = mode
+        env = dict(os.environ,
+                   UPSTREAM_BASE="http://127.0.0.1:%d/v1" % self.up_port,
+                   UPSTREAM_LOG=self.log, LISTEN_PORT=str(self.px_port),
+                   UPSTREAM_RETRY_MAX=str(attempts),
+                   UPSTREAM_RETRY_BASE_MS=delay_ms)
+        self.proc = subprocess.Popen([sys.executable, PROXY], env=env,
+                                     stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        for _ in range(100):
+            try:
+                with urllib.request.urlopen(
+                        "http://127.0.0.1:%d/healthz" % self.px_port, timeout=1) as r:
+                    r.read()
+                return
+            except Exception:
+                time.sleep(0.05)
+        self.fail("proxy never came up")
+
+    def test_a_burst_shorter_than_the_budget_is_survived(self):
+        self.srv.fail_times = 3
+        self.start_retrying("json_toolcall", attempts=6)
+        code, _ = self.post({"model": "m", "messages": []})
+        self.assertEqual(code, 200, "the proxy gave up inside a survivable burst")
+
+    def test_every_attempt_is_recorded_because_every_attempt_is_billed(self):
+        self.srv.fail_times = 2
+        self.start_retrying("json_toolcall", attempts=6)
+        self.post({"model": "m", "messages": []})
+        rows = self.lines()
+        self.assertEqual(len(rows), 3, "retries must not be invisible: %r" % rows)
+        self.assertEqual([r["status"] for r in rows], [400, 400, 200])
+        self.assertEqual([r["attempt"] for r in rows], [1, 2, 3])
+
+    def test_a_burst_longer_than_the_budget_still_surfaces(self):
+        self.srv.fail_times = 99
+        self.start_retrying("json_toolcall", attempts=2)
+        code, _ = self.post({"model": "m", "messages": []})
+        self.assertEqual(code, 400, "a genuine failure must reach the client")
+
+    def test_retrying_is_off_unless_asked_for(self):
+        """Default stays a pass-through: one request in, one request out."""
+        self.srv.fail_times = 1
+        self.start("json_toolcall")
+        self.post({"model": "m", "messages": []})
+        self.assertEqual(len(self.lines()), 1)
 
 
 class ItCanRestoreTheProviderAlias(ProxyCase):

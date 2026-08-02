@@ -4,7 +4,8 @@
 #   SHERLOCK_API_KEY=... bash probes/lane-health.sh            # 3 sizes x 2 reps
 #   PROBE_REPS=3 PROBE_SIZES_KB="150 300 450" bash probes/lane-health.sh
 #   PROBE_BASE_URL=http://127.0.0.1:PORT/v1 bash probes/lane-health.sh   # dry run
-#   PROBE_SHAPE=plain bash probes/lane-health.sh   # drop streaming + the tools block
+#   PROBE_SHAPE=plain|agentic|history       # request shape (see below)
+#   PROBE_TOOLS=25                          # how many tool definitions to carry
 #
 # WHY THIS EXISTS. The old probe sends a ~1 KB single-turn request. On 2026-08-02
 # it returned 3/3 healthy and the metered run it gated immediately ran at a
@@ -35,9 +36,11 @@ BAD_PCT="${PROBE_BAD_PCT:-35}"
 # A real turn STREAMS and carries a tools block. A probe that sends neither is
 # measuring a different request than the one you are about to pay for — which is
 # how a 3/3 "healthy" verdict gated a run that then failed 46 % of its calls.
-SHAPE="${PROBE_SHAPE:-agentic}"
+SHAPE="${PROBE_SHAPE:-history}"
+NTOOLS="${PROBE_TOOLS:-25}"
 export PROBE_URL="$BASE_URL" PROBE_MODEL="$MODEL" PROBE_SIZES="$SIZES_KB" \
-       PROBE_N="$REPS" PROBE_OK="$OK_PCT" PROBE_BAD="$BAD_PCT" PROBE_SHAPE="$SHAPE"
+       PROBE_N="$REPS" PROBE_OK="$OK_PCT" PROBE_BAD="$BAD_PCT" PROBE_SHAPE="$SHAPE" \
+       PROBE_TOOLS="$NTOOLS"
 
 python3 - <<'PY'
 import json, os, sys, time, urllib.request
@@ -59,11 +62,23 @@ LINE = ('2026-07-28 11:05:12.771 DEBUG 1 --- [http-nio-8080-exec-7] '
 
 shape = os.environ.get("PROBE_SHAPE", "agentic")
 
+ntools = int(os.environ.get("PROBE_TOOLS", "25"))
+
+# qwen-code 0.21.1 offers ~25 core tools on every turn. A probe carrying ONE is
+# not carrying what the run carries.
+TOOL_NAMES = ["read_file", "list_directory", "grep_search", "glob", "edit",
+              "write_file", "run_shell_command", "todo_write", "web_fetch",
+              "skill", "notebook_edit", "zoom_image", "record_artifact",
+              "read_mcp_resource", "list_agents", "task_stop", "send_message",
+              "enter_worktree", "exit_worktree", "cron_create", "cron_list",
+              "cron_delete", "loop_wakeup", "create_sub_session", "monitor"]
+
 TOOLS = [{"type": "function", "function": {
-    "name": "read_file", "description": "Read a slice of a file",
+    "name": n, "description": "Tool %s used by the agent loop" % n,
     "parameters": {"type": "object", "properties": {
         "file_path": {"type": "string"}, "offset": {"type": "integer"},
-        "limit": {"type": "integer"}}, "required": ["file_path"]}}}]
+        "limit": {"type": "integer"}}, "required": []}}}
+    for n in TOOL_NAMES[:ntools]]
 
 
 def body_of(kb):
@@ -71,10 +86,28 @@ def body_of(kb):
     while sum(map(len, filler)) < kb * 1024:
         filler.append("%06d " % i + LINE)
         i += 1
-    b = {"model": model, "max_tokens": 16,
-         "messages": [{"role": "user",
-                       "content": "".join(filler) + "\nReply with one word: ok"}]}
-    if shape == "agentic":
+    text = "".join(filler)
+    msgs = [{"role": "user", "content": text + "\nReply with one word: ok"}]
+    if shape == "history":
+        # What a REAL turn 5 looks like: assistant tool_calls and tool results
+        # interleaved. On 2026-08-02 a run failed 9 of 12 calls at 143-171 KB
+        # while this probe passed 6/6 at the SAME sizes two minutes later — the
+        # only remaining difference was this history and the tool count.
+        head = text[: len(text) // 2]
+        tail = text[len(text) // 2:]
+        msgs = [{"role": "user", "content": head}]
+        for i in range(4):
+            cid = "call_%d" % i
+            msgs.append({"role": "assistant", "content": None, "tool_calls": [
+                {"id": cid, "type": "function", "function": {
+                    "name": "read_file",
+                    "arguments": json.dumps({"file_path": "/c/apps/api.log",
+                                             "offset": i * 100, "limit": 100})}}]})
+            msgs.append({"role": "tool", "tool_call_id": cid,
+                         "content": tail[i * (len(tail) // 5):(i + 1) * (len(tail) // 5)]})
+        msgs.append({"role": "user", "content": "Reply with one word: ok"})
+    b = {"model": model, "max_tokens": 16, "messages": msgs}
+    if shape in ("agentic", "history"):
         b["stream"] = True
         b["tools"] = TOOLS
     return json.dumps(b).encode("utf-8")
@@ -108,7 +141,7 @@ for kb in sizes:
             rows.append((kb, code, time.time() - t0, None))
         total_bytes += len(payload)
 
-print("shape=%s" % shape)
+print("shape=%s tools=%d" % (shape, len(TOOLS)))
 print("size   ok/total   median s   returned")
 worst = 0.0
 for kb in sizes:

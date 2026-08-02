@@ -28,7 +28,16 @@
 #     table. The provider needs the prefix to route; qwen-code must not see it.
 #     So: the CLI gets the clean id, the proxy restores the alias on the way out.
 #
-#  3. A FALLBACK THAT CANNOT MAKE THINGS WORSE. If the proxy does not come up,
+#  3. RIDING OUT A BURST. linkapi's 400s are transient and minute-scale, and are
+#     NOT explained by request size or shape — both were controlled for on
+#     2026-08-02 and 12/12 interleaved calls succeeded at the size and shape that
+#     had failed minutes before. What kills runs is that qwen-code's own retry
+#     budget is SHORTER than a burst: D11 took 4 x 400 at 143 KB then a 200, then
+#     5 x 400 at 171 KB and the run ended — 98,515 tokens billed, no row. The
+#     proxy waits longer than the client will, and records every attempt because
+#     every retry re-uploads the context and is therefore billed.
+#
+#  4. A FALLBACK THAT CANNOT MAKE THINGS WORSE. If the proxy does not come up,
 #     the caller gets the DIRECT url and the ALIASED id — because with nothing in
 #     the path to restore the prefix, a stripped id is a 404. Never abort a
 #     metered run over a local helper; say so loudly instead. The ABSENCE of the
@@ -61,6 +70,8 @@ s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1]); s.clos
 
   UPSTREAM_BASE="$up_base" UPSTREAM_LOG="$log_path" LISTEN_PORT="$port" \
   RUN_TAG="$run_tag" UPSTREAM_MODEL="$model" \
+  UPSTREAM_RETRY_MAX="${SHERLOCK_UPSTREAM_RETRY:-6}" \
+  UPSTREAM_RETRY_BASE_MS="${SHERLOCK_UPSTREAM_RETRY_BASE_MS:-2000}" \
     python3 "$proxy" >/dev/null 2>>"${log_path%.jsonl}.proxy.err" &
   LANE_PROXY_PID=$!
 

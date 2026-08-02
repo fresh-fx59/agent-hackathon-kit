@@ -49,6 +49,19 @@ RUN_TAG = os.environ.get("RUN_TAG", "")
 # linkapi needs the prefix; qwen-code must not see it. So qwen-code is given the
 # clean id and this restores the alias on the way out.
 UPSTREAM_MODEL = os.environ.get("UPSTREAM_MODEL", "")
+# RIDE OUT A PROVIDER BURST. linkapi's 400s are transient and minute-scale —
+# measured 2026-08-02, and NOT explained by request size or shape (both
+# controlled for, interleaved, 12/12 succeeded at the size and shape that had
+# just failed). The problem is that qwen-code's own retry budget is SHORTER than
+# a burst: D11 took 4 × 400 at 143 KB then a 200, then 5 × 400 at 171 KB and the
+# run was over — 98,515 tokens billed, no row. This proxy is the only thing in
+# the path that can wait longer than the client will.
+# Off by default (0) so the proxy stays a pass-through unless a runner asks.
+UPSTREAM_RETRY_MAX = int(os.environ.get("UPSTREAM_RETRY_MAX", "0") or 0)
+UPSTREAM_RETRY_BASE_MS = int(os.environ.get("UPSTREAM_RETRY_BASE_MS", "2000") or 2000)
+# Only statuses that are transient on this lane. A 401/404/422 is a real defect
+# in the request and retrying it just burns the context again for nothing.
+_RETRYABLE = {400, 408, 429, 500, 502, 503, 504}
 
 _BASE_PATH = urlsplit(UPSTREAM_BASE).path.rstrip("/")     # e.g. "/v1"
 _LOG_LOCK = threading.Lock()
@@ -144,23 +157,50 @@ class Proxy(BaseHTTPRequestHandler):
                                      headers=headers, method=self.command)
         state = {"returned_model": None, "tool_call": False}
         status = None
-        try:
-            resp = urllib.request.urlopen(req, timeout=1800)
-            status = resp.getcode()
-        except urllib.error.HTTPError as e:
-            resp, status = e, e.code
-        except Exception as e:                       # DNS, TLS, refused, timeout
-            record(requested_model=requested, returned_model=None,
-                   tool_call=False, status=None, error=str(e)[:300],
-                   duration_ms=int((time.time() - t0) * 1000), sent_model=sent,
-                   request_bytes=len(body), path=self.path, stream=False)
-            self.send_response(502)
-            payload = json.dumps({"error": {"message": "proxy: %s" % e}}).encode()
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Content-Length", str(len(payload)))
-            self.end_headers()
-            self.wfile.write(payload)
-            return
+        attempt = 0
+        while True:
+            attempt += 1
+            t_try = time.time()
+            try:
+                resp = urllib.request.urlopen(req, timeout=1800)
+                status = resp.getcode()
+                break
+            except urllib.error.HTTPError as e:
+                resp, status = e, e.code
+                if (status in _RETRYABLE and attempt <= UPSTREAM_RETRY_MAX):
+                    # EVERY attempt is recorded, because every attempt re-uploads
+                    # the whole context and is therefore billed. An invisible
+                    # retry is the "failed calls are free" mistake all over again.
+                    record(requested_model=requested, returned_model=None,
+                           tool_call=False, status=status, attempt=attempt,
+                           duration_ms=int((time.time() - t_try) * 1000),
+                           sent_model=sent, request_bytes=len(body),
+                           path=self.path, stream=False)
+                    try:
+                        e.read()
+                    except Exception:
+                        pass
+                    time.sleep(min(60.0, (UPSTREAM_RETRY_BASE_MS / 1000.0)
+                                   * (2 ** (attempt - 1))))
+                    req = urllib.request.Request(self._upstream_url(),
+                                                 data=body or None,
+                                                 headers=headers,
+                                                 method=self.command)
+                    continue
+                break
+            except Exception as e:                   # DNS, TLS, refused, timeout
+                record(requested_model=requested, returned_model=None,
+                       tool_call=False, status=None, error=str(e)[:300],
+                       attempt=attempt,
+                       duration_ms=int((time.time() - t0) * 1000), sent_model=sent,
+                       request_bytes=len(body), path=self.path, stream=False)
+                self.send_response(502)
+                payload = json.dumps({"error": {"message": "proxy: %s" % e}}).encode()
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(payload)))
+                self.end_headers()
+                self.wfile.write(payload)
+                return
 
         ctype = (resp.headers.get("Content-Type") or "")
         streaming = "text/event-stream" in ctype.lower()
@@ -171,7 +211,7 @@ class Proxy(BaseHTTPRequestHandler):
                 self._pump_whole(resp, status, state)
         finally:
             record(requested_model=requested,
-                   returned_model=state["returned_model"],
+                   returned_model=state["returned_model"], attempt=attempt,
                    tool_call=state["tool_call"], status=status,
                    duration_ms=int((time.time() - t0) * 1000), sent_model=sent,
                    request_bytes=len(body), path=self.path, stream=streaming)

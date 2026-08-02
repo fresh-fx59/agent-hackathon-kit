@@ -31,12 +31,23 @@ LANE = os.path.join(MEASURE, "upstream-lane.sh")
 class StubProvider:
     """Records the bodies it is sent; answers like an OpenAI-compatible API."""
 
-    def __init__(self):
+    def __init__(self, fail_times=0):
         self.seen = []
         seen = self.seen
+        state = {"fail": fail_times}
+        self.state = state
 
         class H(BaseHTTPRequestHandler):
             def do_POST(self):
+                if state["fail"] > 0:
+                    state["fail"] -= 1
+                    out = b'{"error":{"message":"Upstream request failed"}}'
+                    self.send_response(400)
+                    self.send_header("content-type", "application/json")
+                    self.send_header("content-length", str(len(out)))
+                    self.end_headers()
+                    self.wfile.write(out)
+                    return
                 n = int(self.headers.get("content-length") or 0)
                 raw = self.rfile.read(n)
                 try:
@@ -93,8 +104,8 @@ except Exception as e:
 
 
 class TheLanePutsTheProxyInThePath(unittest.TestCase):
-    def drive(self, model, env=None):
-        prov = StubProvider()
+    def drive(self, model, env=None, fail_times=0):
+        prov = StubProvider(fail_times=fail_times)
         self.addCleanup(prov.close)
         d = tempfile.mkdtemp()
         self.addCleanup(lambda: None)
@@ -148,6 +159,23 @@ class TheLanePutsTheProxyInThePath(unittest.TestCase):
         self.assertNotIn("/v1/v1", out.get("BASE", ""))
         self.assertIn("upstream lane", p.stderr,
                       "a silently missing lane is an unattributed run")
+
+    def test_it_rides_out_a_provider_burst(self):
+        """The client's retry budget is shorter than a linkapi burst.
+
+        D11 died after 5 consecutive 400s at 171 KB — 98,515 tokens billed, no
+        row — while the same request succeeded on the 5th try at 143 KB. The
+        lane is the only place that can wait longer than qwen-code will.
+        """
+        # real backoff is 2s,4s,8s… — deliberately longer than a burst. Shrink
+        # it here so the test measures the MECHANISM, not the wall clock.
+        out, seen, rows, p = self.drive(
+            "[SP]deepseek-v4-flash", {"SHERLOCK_UPSTREAM_RETRY_BASE_MS": "20"},
+            fail_times=3)
+        self.assertEqual(len(seen), 1, "the retried request never landed")
+        statuses = [r["status"] for r in rows]
+        self.assertEqual(statuses, [400, 400, 400, 200],
+                         "expected 3 recorded failures then a success: %r" % rows)
 
     def test_it_can_be_switched_off_entirely(self):
         out, seen, rows, _p = self.drive("[SP]deepseek-v4-flash",
