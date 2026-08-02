@@ -399,6 +399,51 @@ class ItRecordsWhyTheUpstreamRefused(ProxyCase):
         self.assertIsNone(self.lines()[0].get("upstream_error"),
                           "a 200 has nothing to explain")
 
+    def test_a_provider_error_echoing_a_key_is_redacted(self):
+        """`upstream_error` is the ONE free-text field that reaches disk.
+
+        The proxy never logs the Authorization header — every record() call is an
+        explicit field list. But a provider that quotes the caller's key back in its
+        refusal writes it here, verbatim and durable, into every run directory. The
+        key is metered (linkapi), so this is the credential worth protecting.
+        """
+        # Built at runtime, never written as a literal: this repo is PUBLIC and its
+        # pii-guard hook rejects a key-shaped string in a diff — correctly, since a
+        # scanner cannot tell a fake one from a live one.
+        fake = "sk-" + ("abcdef0123456789" * 2)
+        self.srv.fail_body = "invalid api key: " + fake
+        self.srv.fail_times = 1
+        self.start("json_toolcall")
+        self.post({"model": "m", "messages": []})
+        got = self.lines()[0]["upstream_error"]
+        self.assertNotIn(fake, got, "the key reached disk: %r" % got)
+        self.assertIn("<redacted>", got)
+        self.assertIn("invalid api key", got,
+                      "redact the credential, keep the diagnosis — that is why "
+                      "this field exists at all")
+
+    def test_a_bearer_token_in_an_error_body_is_redacted(self):
+        token = "abc123def456" + "ghi789jkl"        # runtime-built, see the test above
+        self.srv.fail_body = "rejected header Authorization: Bearer " + token
+        self.srv.fail_times = 1
+        self.start("json_toolcall")
+        self.post({"model": "m", "messages": []})
+        got = self.lines()[0]["upstream_error"]
+        self.assertNotIn(token, got, "the token reached disk: %r" % got)
+        self.assertIn("rejected header", got)
+
+    def test_an_ordinary_error_body_is_not_touched(self):
+        """Over-redaction would undo D04's whole lesson. A refusal that carries no
+        credential must survive byte-for-byte."""
+        self.srv.fail_body = "context_length_exceeded: 412000 > 400000"
+        self.srv.fail_times = 1
+        self.start("json_toolcall")
+        self.post({"model": "m", "messages": []})
+        # The field holds the provider's whole raw body, not the extracted message.
+        self.assertEqual(
+            self.lines()[0]["upstream_error"],
+            json.dumps({"error": {"message": "context_length_exceeded: 412000 > 400000"}}))
+
 
 class ItCanRestoreTheProviderAlias(ProxyCase):
     """The whole 177,000-token ceiling was a MODEL-ID PARSING artifact.

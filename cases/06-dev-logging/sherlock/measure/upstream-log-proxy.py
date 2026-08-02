@@ -28,6 +28,7 @@ a default. → measure/probes/upstream-split.sh
 """
 import json
 import os
+import re
 import sys
 import threading
 import time
@@ -72,7 +73,31 @@ _HOP = {"connection", "keep-alive", "proxy-authenticate", "proxy-authorization",
         "content-length", "accept-encoding"}
 
 
+# A credential must never reach the ledger. This proxy already never logs the
+# Authorization header, but `upstream_error` carries the provider's own words, and a
+# provider that quotes the caller's key back in a refusal would write it here —
+# verbatim, durable, in every run directory. Scrubbing happens in record() rather
+# than at each call site so any field added later is covered without being
+# remembered. The patterns are deliberately narrow: over-redaction would undo the
+# reason this field exists, which is that 60 failures on D04 were bare integers.
+_SECRET_PATTERNS = (
+    (re.compile(r"\bsk-[A-Za-z0-9_-]{16,}"), "<redacted>"),
+    (re.compile(r"(?i)\b(bearer\s+)[A-Za-z0-9._~+/=-]{16,}"), r"\1<redacted>"),
+    (re.compile(r"(?i)\b(api[-_]?key|token|secret)(\"?\s*[:=]\s*\"?)"
+                r"[A-Za-z0-9._~+/=-]{16,}"), r"\1\2<redacted>"),
+)
+
+
+def _scrub(value):
+    if not isinstance(value, str):
+        return value
+    for pattern, replacement in _SECRET_PATTERNS:
+        value = pattern.sub(replacement, value)
+    return value
+
+
 def record(**row):
+    row = {k: _scrub(v) for k, v in row.items()}
     row["ts"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     if RUN_TAG:
         row["run_tag"] = RUN_TAG
