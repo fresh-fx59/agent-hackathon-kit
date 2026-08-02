@@ -112,6 +112,7 @@ class GateHarness(unittest.TestCase):
         env["SHERLOCK_RESULTS"] = self.results
         env["STUB_LOG_DIR"] = self.stub_log_dir
         env["FAIL_CASES"] = fail_cases
+        env.setdefault("JUDGE_API_KEY", "stub-judge-key")
         env.update(self._extra_env)
         return subprocess.run([self.gate, *args], env=env,
                                capture_output=True, text=True, timeout=30)
@@ -137,6 +138,43 @@ class GateHarness(unittest.TestCase):
             return []
         with open(self.results, encoding="utf-8") as fh:
             return [json.loads(l) for l in fh if l.strip()]
+
+
+class TheJudgeKeyIsCheckedBEFORESpending(GateHarness):
+    """A missing judge key is a CONFIG error, and it used to cost metered runs.
+
+    2026-08-02: `smoke.sh v11` was launched with only the model secret. The run
+    succeeded — 625 s, 27 turns, **2,090,545 input tokens**, a 2,601-char answer,
+    23/23 clean upstream calls — and then `report-case.py` died with
+    `set JUDGE_API_KEY`. The harness read that as "the run itself failed" and
+    started attempt 2 of 4, so ONE typo was on course to buy FOUR metered runs.
+
+    The two secrets are different (`eval_linkapi_key` for the model under test,
+    `eval_broker_api_key` for the judge) and `with-secret.sh` takes one per
+    invocation, so they must be nested — which is exactly the thing that is easy
+    to get wrong at 3 a.m. Check it before the money, not after.
+    """
+
+    def test_a_missing_judge_key_stops_before_the_model_runs(self):
+        self.make_cases("D01")
+        env_without = {k: v for k, v in os.environ.items() if k != "JUDGE_API_KEY"}
+        self._extra_env = {"JUDGE_API_KEY": ""}
+        p = self.run_gate("2", "v6")
+        self.assertEqual(self.invoked(), [],
+                         "the model ran before the judge key was checked")
+        self.assertIn("JUDGE_API_KEY", p.stderr)
+
+    def test_it_can_be_waived_for_a_judge_free_run(self):
+        self.make_cases("D01")
+        self._extra_env = {"JUDGE_API_KEY": "", "SHERLOCK_NO_JUDGE": "1"}
+        self.run_gate("2", "v6")
+        self.assertEqual(self.invoked(), ["D01"])
+
+    def test_with_the_key_it_runs(self):
+        self.make_cases("D01")
+        self._extra_env = {"JUDGE_API_KEY": "stub-judge-key"}
+        self.run_gate("2", "v6")
+        self.assertEqual(self.invoked(), ["D01"])
 
 
 class TheSpendGuardActuallyStops(GateHarness):

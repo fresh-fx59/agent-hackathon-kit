@@ -11,11 +11,17 @@ judge to find, so the call is skipped and the row records why.
 """
 import argparse, json, os, sys
 
-# qwen-code refuses a prompt above this. Not a guess: the error names it —
-# "Estimated prompt tokens: 193512; hard limit: 177000". D06 PASSES at 162,438,
-# 91 % of it, so every case runs on ~15k of margin. Recomputing that by hand
-# from the trajectories, every time, is how it stayed invisible for a week.
-CONTEXT_CEILING = 177000
+# The window the run actually had. Headroom is only meaningful against THAT.
+#
+# This used to be a hardcoded 177000, taken from qwen-code's own error text
+# ("Estimated prompt tokens: 193512; hard limit: 177000"). On 2026-08-02 that
+# number turned out to be a MODEL-ID PARSING ARTIFACT — a `[SP]` prefix made
+# qwen-code miss its own limit table and fall back to a 200,000 default — and
+# the runners now state the window outright. A constant here would have every
+# row from now on quietly reporting headroom against a limit that no longer
+# exists, which is the same class of stale-number bug the field was added to
+# kill. It follows SHERLOCK_CONTEXT_WINDOW, exactly as run-case.sh does.
+CONTEXT_CEILING = int(os.environ.get("SHERLOCK_CONTEXT_WINDOW") or 400000)
 
 
 def trajectory_facts(run_dir):

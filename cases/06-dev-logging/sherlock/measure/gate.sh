@@ -27,13 +27,37 @@ BURN_CAP_TOKENS="${BURN_CAP_TOKENS:-8000000}"
 GATE_T0="$(date -u +%Y%m%dT%H%M%SZ)"
 RESULTS="${SHERLOCK_RESULTS:-$HERE/results.jsonl}"
 
+
 run_one() {
   local case_dir="$1" out rd last
+  # Two money guards, both BEFORE any provider call.
+  # CHECK THE JUDGE KEY BEFORE THE MONEY, NOT AFTER. On 2026-08-02 a smoke run was
+  # launched with only the model secret. The run SUCCEEDED — 625 s, 27 turns,
+  # 2,090,545 input tokens, 23/23 clean upstream calls — and then report-case.py
+  # died with `set JUDGE_API_KEY`. The harness read that as "the run itself failed"
+  # and started attempt 2 of 4: one typo, on course to buy four metered runs.
+  # The two secrets differ (eval_linkapi_key = model under test, eval_broker_api_key
+  # = judge) and with-secret.sh takes one per invocation, so they must be NESTED —
+  # precisely the thing that is easy to get wrong. SHERLOCK_NO_JUDGE=1 waives it.
+  if [ "${SHERLOCK_NO_JUDGE:-0}" != "1" ] && [ -z "${JUDGE_API_KEY:-}" ]; then
+    echo "✗ JUDGE_API_KEY is not set — refusing to spend on a run that cannot be scored." >&2
+    echo "  The judge uses a DIFFERENT secret from the model. Nest them:" >&2
+    echo "    S=…/secret-use/with-secret.sh" >&2
+    echo "    \$S eval_linkapi_key --env SHERLOCK_API_KEY -- \\" >&2
+    echo "      \$S eval_broker_api_key --env JUDGE_API_KEY -- \\" >&2
+    echo "      env SHERLOCK_BASE_URL=https://linkapi.ai/v1 \\" >&2
+    echo "          JUDGE_BASE_URL=http://127.0.0.1:8317/v1 JUDGE_MODEL=gpt-5.5 \\" >&2
+    echo "      bash gate.sh $TIER $ARM ${ONLY:-}" >&2
+    echo "  Or set SHERLOCK_NO_JUDGE=1 for a deliberately unscored run." >&2
+    return 2
+  fi
+
   # SPEND GUARD. gate.sh had none - only one-defect.sh did, and that one refuses
   # an already-recorded cell, so every D04 rep on 2026-08-01 ran unguarded and
   # 5,896,031 tokens died invisibly. On a metered provider a guard here is not
   # optional: cap the BURN, not the retry count, because a provider burst fails
   # every attempt for minutes. -> measure/spend.py
+  #
   # FAIL CLOSED. `${burned:-0}` reads an unmeasurable burn as ZERO, which is a
   # guard that is always open — the very failure burned-since.py's own docstring
   # warns about, one level up. A guard that cannot measure must refuse to spend.

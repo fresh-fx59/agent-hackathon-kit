@@ -348,7 +348,30 @@ class TheCeilingMustBeVisibleInTheLedger(unittest.TestCase):
             self.assertEqual(got["peak_input_tokens"], 162438)
             self.assertEqual(got["lines_read"], 80)
             self.assertEqual(got["read_calls"], 2)
-            self.assertEqual(got["ceiling_headroom"], 177000 - 162438)
+            # Headroom is measured against the window the RUN ACTUALLY HAD, not a
+            # constant. 177,000 stopped being the ceiling on 2026-08-02 — it was a
+            # model-id parsing artifact — and a hardcoded number here would have
+            # every future row quietly reporting headroom against a dead limit.
+            self.assertEqual(got["ceiling_headroom"], 400000 - 162438)
+
+    def test_headroom_follows_the_configured_window(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            "rc_mod2", os.path.join(MEASURE, "report-case.py"))
+        mod = importlib.util.module_from_spec(spec)
+        old = os.environ.get("SHERLOCK_CONTEXT_WINDOW")
+        os.environ["SHERLOCK_CONTEXT_WINDOW"] = "250000"
+        try:
+            try:
+                spec.loader.exec_module(mod)
+            except (SystemExit, Exception):
+                pass
+            self.assertEqual(mod.CONTEXT_CEILING, 250000)
+        finally:
+            if old is None:
+                os.environ.pop("SHERLOCK_CONTEXT_WINDOW", None)
+            else:
+                os.environ["SHERLOCK_CONTEXT_WINDOW"] = old
 
 
 if __name__ == "__main__":
