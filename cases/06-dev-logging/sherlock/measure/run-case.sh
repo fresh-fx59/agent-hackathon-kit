@@ -95,10 +95,30 @@ export QWEN_HOME="$W/home"; mkdir -p "$QWEN_HOME"
 # so an unbounded window is an unbounded bill in unmeasured territory. Raise it
 # with SHERLOCK_CONTEXT_WINDOW once that measurement exists; 0 writes nothing.
 CTX_WINDOW="${SHERLOCK_CONTEXT_WINDOW:-400000}"
+
+# AND TAKE AWAY THE SUBAGENT. `reconcile.py --arm v11` over the nine recorded
+# rows: 4 carry SKILL-NEVER-LOADED and THREE OF THOSE FOUR also carry
+# SUBAGENT-SPAWNED — D09 rep1 (first tool call was `agent`, 109-char final
+# message), D01, D04 rep2. Not one subagent run loaded the arm; every
+# skill-loaded subagent-free row is `ok`. The subagent does not inherit
+# `.qwen/skills/`, and a headless `qwen -p` fan-out loses the report on top.
+# `excludeTools` is supported and the tool is named `agent`; verified on 0.21.1
+# that the init record then lists 60 tools instead of 61, `skill` still present.
+# This CHANGES WHAT A RUN DOES — meta records it, so rows from either side of
+# this change are never pooled. SHERLOCK_ALLOW_SUBAGENT=1 gives it back.
+SUBAGENT_AVAILABLE=true
+EXCLUDE_JSON=''
+if [ "${SHERLOCK_ALLOW_SUBAGENT:-0}" != "1" ]; then
+  SUBAGENT_AVAILABLE=false
+  EXCLUDE_JSON=', "tools": { "exclude": ["agent"] }'
+fi
 if [ "$CTX_WINDOW" != "0" ]; then
   mkdir -p "$W/.qwen"
-  printf '{ "model": { "generationConfig": { "contextWindowSize": %s } } }\n' \
-    "$CTX_WINDOW" > "$W/.qwen/settings.json"
+  printf '{ "model": { "generationConfig": { "contextWindowSize": %s } }%s }\n' \
+    "$CTX_WINDOW" "$EXCLUDE_JSON" > "$W/.qwen/settings.json"
+elif [ -n "$EXCLUDE_JSON" ]; then
+  mkdir -p "$W/.qwen"
+  printf '{ "tools": { "exclude": ["agent"] } }\n' > "$W/.qwen/settings.json"
 fi
 
 if [ "$ARM" != "none" ]; then
@@ -156,9 +176,9 @@ for wr in "$W/work/report.md" "$W/report.md"; do
   [ -f "$wr" ] && { cp "$wr" "$RUN_DIR/working-report.md" 2>/dev/null; break; }
 done
 
-python3 - "$RUN_DIR" "$CASE_ID" "$ARM" "$ELAPSED" "$RC" "$MODEL" "$SKILL_DELIVERY" <<'PY'
+python3 - "$RUN_DIR" "$CASE_ID" "$ARM" "$ELAPSED" "$RC" "$MODEL" "$SKILL_DELIVERY" "$SUBAGENT_AVAILABLE" <<'PY'
 import json, sys, os
-run_dir, case_id, arm, elapsed, rc, model, skill_delivery = sys.argv[1:8]
+run_dir, case_id, arm, elapsed, rc, model, skill_delivery, subagent = sys.argv[1:9]
 final = None
 for line in open(os.path.join(run_dir, "stream.jsonl"), encoding="utf-8", errors="replace"):
     line = line.strip()
@@ -228,6 +248,9 @@ meta = {"case_id": case_id, "arm": arm, "model": model,
         "input_tokens": u.get("input_tokens"), "output_tokens": u.get("output_tokens"),
         "answer_chars": len(text), "turns": final.get("num_turns"),
         "skill_delivery": skill_delivery,
+        # whether the model COULD fan out. Rows on either side of this are
+        # not comparable — the arm is a tool-execution mechanism.
+        "subagent_available": subagent == "true",
         # the model's own working file: evidence that it found the defect even
         # when it failed to deliver it. Never the score. None = it wrote none.
         "artifact_chars": (len(open(os.path.join(run_dir, "working-report.md"),

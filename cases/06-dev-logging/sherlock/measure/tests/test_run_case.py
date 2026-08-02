@@ -473,11 +473,80 @@ class TheContextWindowIsStatedOutright(unittest.TestCase):
             self.assertEqual(
                 settings["model"]["generationConfig"]["contextWindowSize"], 1048576)
 
-    def test_zero_means_leave_the_cli_alone(self):
-        """An escape hatch that writes no settings at all, for a control arm."""
+    def test_zero_states_no_window(self):
+        """The window knob is independent of the subagent knob."""
         with tempfile.TemporaryDirectory() as d:
             settings, _p = self.go(d, {"SHERLOCK_CONTEXT_WINDOW": "0"})
+            self.assertNotIn("model", settings or {})
+
+    def test_both_knobs_off_leaves_the_cli_completely_alone(self):
+        """The true control arm: stock qwen-code, nothing configured."""
+        with tempfile.TemporaryDirectory() as d:
+            settings, _p = self.go(d, {"SHERLOCK_CONTEXT_WINDOW": "0",
+                                       "SHERLOCK_ALLOW_SUBAGENT": "1"})
             self.assertIsNone(settings)
+
+
+class TheModelMustNotFanOutToASubagent(unittest.TestCase):
+    """Every v11 run that spawned a subagent also never loaded the skill.
+
+    `reconcile.py --arm v11` over the nine recorded rows: 4 carry
+    SKILL-NEVER-LOADED and **3 of those 4 carry SUBAGENT-SPAWNED** — D09 rep1
+    (first tool call was `agent`, 109-char final message), D01, D04 rep2. Not one
+    subagent run loaded the arm. Meanwhile every skill-loaded, subagent-free row
+    is `ok`. The subagent does not inherit `.qwen/skills/`, and a headless
+    `qwen -p` fan-out loses the report on top of that.
+
+    So the runner removes the option. `excludeTools` is a supported setting and
+    the tool is literally named `agent`; verified on 0.21.1 that the init record
+    then lists 60 tools instead of 61, with `skill` still present.
+
+    This CHANGES WHAT A RUN DOES, so meta records it and rows from either side
+    are never pooled — the same discipline `skill_delivery` already gets. Restore
+    the tool with SHERLOCK_ALLOW_SUBAGENT=1 for a control arm.
+    """
+
+    def go(self, d, extra_env=None):
+        case_dir = make_case(d)
+        binp = make_stub(d)
+        log = os.path.join(d, "stub.log")
+        skills = os.path.join(d, "skills", "v6")
+        os.makedirs(skills)
+        with open(os.path.join(skills, "SKILL.md"), "w", encoding="utf-8") as fh:
+            fh.write("---\nname: sherlock\n---\n")
+        env = dict(os.environ)
+        env.update({"PATH": binp + os.pathsep + os.environ["PATH"],
+                    "QWEN_STUB_LOG": log, "QWEN_BIN": os.path.join(binp, "qwen"),
+                    "SHERLOCK_SKILLS": os.path.dirname(skills),
+                    "SHERLOCK_RUNS": os.path.join(d, "runs"),
+                    "SHERLOCK_UPSTREAM_LOG": "0",
+                    "SHERLOCK_API_KEY": "stub-key"})
+        env.update(extra_env or {})
+        subprocess.run(["bash", RUNNER, case_dir, "v6"], capture_output=True,
+                       text=True, env=env, timeout=60)
+        with open(log + ".settings", encoding="utf-8") as fh:
+            settings = json.load(fh)
+        runs = os.path.join(d, "runs")
+        rd = os.path.join(runs, os.listdir(runs)[0])
+        with open(os.path.join(rd, "meta.json"), encoding="utf-8") as fh:
+            meta = json.load(fh)
+        return settings, meta
+
+    def test_the_agent_tool_is_excluded_by_default(self):
+        with tempfile.TemporaryDirectory() as d:
+            settings, _meta = self.go(d)
+            self.assertEqual(settings["tools"]["exclude"], ["agent"])
+
+    def test_meta_records_that_the_arm_could_not_fan_out(self):
+        with tempfile.TemporaryDirectory() as d:
+            _settings, meta = self.go(d)
+            self.assertIs(meta["subagent_available"], False)
+
+    def test_the_control_arm_can_have_it_back(self):
+        with tempfile.TemporaryDirectory() as d:
+            settings, meta = self.go(d, {"SHERLOCK_ALLOW_SUBAGENT": "1"})
+            self.assertNotIn("exclude", settings.get("tools", {}))
+            self.assertIs(meta["subagent_available"], True)
 
 
 class TheClientMustNotSeeTheProviderPrefix(unittest.TestCase):
