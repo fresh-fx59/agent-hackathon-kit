@@ -33,7 +33,30 @@ def trajectory_facts(run_dir):
     """
     import os as _os
     out = {"peak_input_tokens": None, "lines_read": None, "read_calls": None,
-           "ceiling_headroom": None}
+           "ceiling_headroom": None, "retry_calls": None, "retry_bytes": None,
+           "upstream_calls": None}
+    # WHAT THE PROXY RE-UPLOADED. Since 2026-08-02 the lane rides out provider
+    # bursts by retrying, which qwen-code never sees and therefore never counts:
+    # on D11 that was 15.82 MB across 51 retried calls against a recorded
+    # 3,273,084 input tokens. Leaving it out understates the bill by roughly
+    # half, and this project measures cost. "Unmeasured is null, never 0" cuts
+    # both ways — measured-and-dropped is the same lie in a nicer suit.
+    up = _os.path.join(run_dir, "upstream.jsonl")
+    if _os.path.exists(up):
+        rc = rb = n = 0
+        for raw in open(up, encoding="utf-8", errors="replace"):
+            raw = raw.strip()
+            if not raw:
+                continue
+            try:
+                r = json.loads(raw)
+            except ValueError:
+                continue
+            n += 1
+            if (r.get("attempt") or 1) > 1:
+                rc += 1
+                rb += r.get("request_bytes") or 0
+        out["retry_calls"], out["retry_bytes"], out["upstream_calls"] = rc, rb, n
     sp = _os.path.join(run_dir, "stream.jsonl")
     if not _os.path.exists(sp):
         return out
@@ -60,9 +83,10 @@ def trajectory_facts(run_dir):
                 if lim:
                     lines += int(lim)
                     calls += 1
-    return {"peak_input_tokens": peak or None, "lines_read": lines,
-            "read_calls": calls,
-            "ceiling_headroom": (CONTEXT_CEILING - peak) if peak else None}
+    out.update({"peak_input_tokens": peak or None, "lines_read": lines,
+                "read_calls": calls,
+                "ceiling_headroom": (CONTEXT_CEILING - peak) if peak else None})
+    return out
 
 
 HERE = os.path.dirname(os.path.abspath(__file__))

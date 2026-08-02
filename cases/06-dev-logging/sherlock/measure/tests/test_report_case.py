@@ -354,6 +354,39 @@ class TheCeilingMustBeVisibleInTheLedger(unittest.TestCase):
             # every future row quietly reporting headroom against a dead limit.
             self.assertEqual(got["ceiling_headroom"], 400000 - 162438)
 
+    def test_the_row_counts_what_the_retries_re_uploaded(self):
+        """The ledger's input_tokens now UNDER-REPORTS the bill.
+
+        The proxy retries a burst transparently, so qwen-code never sees those
+        attempts and never counts them. On D11 that was **15.82 MB re-uploaded
+        across 51 retried calls** against a recorded 3,273,084 input tokens — the
+        row understated real upload by roughly half. A cost axis that silently
+        omits half the cost is worse than no cost axis. `unmeasured is null,
+        never 0` cuts both ways: measured-and-dropped is the same lie.
+        """
+        import importlib.util
+        with tempfile.TemporaryDirectory() as d:
+            run = os.path.join(d, "run")
+            os.makedirs(run)
+            with open(os.path.join(run, "stream.jsonl"), "w", encoding="utf-8") as fh:
+                fh.write("")
+            with open(os.path.join(run, "upstream.jsonl"), "w", encoding="utf-8") as fh:
+                for attempt, status, nbytes in ((1, 400, 1000), (2, 400, 1000),
+                                                (3, 200, 1000), (1, 200, 500)):
+                    fh.write(json.dumps({"attempt": attempt, "status": status,
+                                         "request_bytes": nbytes}) + "\n")
+            spec = importlib.util.spec_from_file_location(
+                "rc_mod3", os.path.join(MEASURE, "report-case.py"))
+            mod = importlib.util.module_from_spec(spec)
+            try:
+                spec.loader.exec_module(mod)
+            except (SystemExit, Exception):
+                pass
+            got = mod.trajectory_facts(run)
+            self.assertEqual(got["retry_calls"], 2, "retried attempts not counted")
+            self.assertEqual(got["retry_bytes"], 2000)
+            self.assertEqual(got["upstream_calls"], 4)
+
     def test_headroom_follows_the_configured_window(self):
         import importlib.util
         spec = importlib.util.spec_from_file_location(
