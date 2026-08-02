@@ -1,0 +1,122 @@
+#!/usr/bin/env bash
+# gate.sh — promote a change through four tiers, cheapest first.
+#
+#   gate.sh 0 v6         # floor:   capability micro-corpora, tiny and cheap
+#   gate.sh 1 v6 D11     # iterate: the one slice being fixed
+#   gate.sh 2 v6         # regress: ALL slices — mandatory before acceptance
+#   gate.sh 3 v6         # accept:  the full 649MB corpus (metered)
+#
+# Tier 0 is the capability floor (Task 7): green at tier 0 proves nothing about the
+# corpus — these hand-written corpora are even easier than a slice, which is itself
+# easier than the full 649MB corpus. RED at tier 0 is the useful signal. Tier 2 exists
+# because partial runs miss interaction effects: fixing D11's coverage
+# by widening a search instruction can silently blow D03's context budget. NO CHANGE
+# IS ACCEPTED ON A TIER-1 PASS ALONE, and only a tier-3 number may be quoted as a
+# benchmark result — a slice is an easier task than the corpus.
+set -uo pipefail
+shopt -s nullglob   # an unmatched "$CASES"/D* or "$CASES"/cap-* must expand to
+                    # NOTHING, not the literal glob string — otherwise tier 0's
+                    # or tier 2's loop "runs" once over a non-directory and
+                    # reports PASS on zero real cases.
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+TIER="${1:?usage: gate.sh <0|1|2|3> <arm> [case_id]}"
+ARM="${2:?usage: gate.sh <0|1|2|3> <arm> [case_id]}"
+ONLY="${3:-}"
+CASES="${SHERLOCK_CASES:-$HERE/cases}"
+BURN_CAP_TOKENS="${BURN_CAP_TOKENS:-8000000}"
+GATE_T0="$(date -u +%Y%m%dT%H%M%SZ)"
+RESULTS="${SHERLOCK_RESULTS:-$HERE/results.jsonl}"
+
+
+run_one() {
+  local case_dir="$1" out rd last
+  # Two money guards, both BEFORE any provider call.
+  # CHECK THE JUDGE KEY BEFORE THE MONEY, NOT AFTER. On 2026-08-02 a smoke run was
+  # launched with only the model secret. The run SUCCEEDED — 625 s, 27 turns,
+  # 2,090,545 input tokens, 23/23 clean upstream calls — and then report-case.py
+  # died with `set JUDGE_API_KEY`. The harness read that as "the run itself failed"
+  # and started attempt 2 of 4: one typo, on course to buy four metered runs.
+  # The two secrets differ (eval_linkapi_key = model under test, eval_broker_api_key
+  # = judge) and with-secret.sh takes one per invocation, so they must be NESTED —
+  # precisely the thing that is easy to get wrong. SHERLOCK_NO_JUDGE=1 waives it.
+  if [ "${SHERLOCK_NO_JUDGE:-0}" != "1" ] && [ -z "${JUDGE_API_KEY:-}" ]; then
+    echo "✗ JUDGE_API_KEY is not set — refusing to spend on a run that cannot be scored." >&2
+    echo "  The judge uses a DIFFERENT secret from the model. Nest them:" >&2
+    echo "    S=…/secret-use/with-secret.sh" >&2
+    echo "    \$S eval_linkapi_key --env SHERLOCK_API_KEY -- \\" >&2
+    echo "      \$S eval_broker_api_key --env JUDGE_API_KEY -- \\" >&2
+    echo "      env SHERLOCK_BASE_URL=https://linkapi.ai/v1 \\" >&2
+    echo "          JUDGE_BASE_URL=http://127.0.0.1:8317/v1 JUDGE_MODEL=gpt-5.5 \\" >&2
+    echo "      bash gate.sh $TIER $ARM ${ONLY:-}" >&2
+    echo "  Or set SHERLOCK_NO_JUDGE=1 for a deliberately unscored run." >&2
+    return 2
+  fi
+
+  # SPEND GUARD. gate.sh had none - only one-defect.sh did, and that one refuses
+  # an already-recorded cell, so every D04 rep on 2026-08-01 ran unguarded and
+  # 5,896,031 tokens died invisibly. On a metered provider a guard here is not
+  # optional: cap the BURN, not the retry count, because a provider burst fails
+  # every attempt for minutes. -> measure/spend.py
+  #
+  # FAIL CLOSED. `${burned:-0}` reads an unmeasurable burn as ZERO, which is a
+  # guard that is always open — the very failure burned-since.py's own docstring
+  # warns about, one level up. A guard that cannot measure must refuse to spend.
+  burned="$(python3 "$HERE/burned-since.py" "$ARM" "$GATE_T0" 2>/dev/null)"
+  case "$burned" in
+    ''|*[!0-9]*)
+      echo "GUARD: cannot measure burn for $ARM (burned-since.py gave '${burned}') - refusing to spend" >&2
+      return 20 ;;
+  esac
+  if [ "$burned" -ge "$BURN_CAP_TOKENS" ]; then
+    echo "GUARD: $burned burned tokens on $ARM this gate (cap $BURN_CAP_TOKENS) - stopping" >&2
+    return 20
+  fi
+  out="$("$HERE/run-case.sh" "$case_dir" "$ARM")" || { echo "$out"; return 1; }
+  echo "$out"
+  # run-case.sh's contract (its final print, see run-case.sh) is: on success the
+  # LAST stdout line ends " -> <run_dir>". Parse it explicitly and validate the
+  # result rather than trusting `${out##*-> }` blindly — if that contract is ever
+  # violated (format change, empty output), fail loudly here instead of handing
+  # report-case.py a garbled or empty --run path.
+  last="${out##*$'\n'}"
+  case "$last" in
+    *' -> '*) rd="${last##*' -> '}" ;;
+    *) echo "gate.sh: no run dir (' -> ' marker) in run-case.sh output: $last" >&2
+       return 1 ;;
+  esac
+  [ -d "$rd" ] || { echo "gate.sh: run dir not found: $rd" >&2; return 1; }
+  python3 "$HERE/report-case.py" --case "$case_dir" --run "$rd" --tier "$TIER" \
+    --results "$RESULTS"
+}
+
+case "$TIER" in
+  0) rc=0 n=0
+     for c in "$CASES"/cap-*; do [ -d "$c" ] || continue; n=$((n + 1)); run_one "$c" || rc=1; done
+     # Same trustworthy-MANDATORY-gate rule as tier 2 below: zero matching
+     # micro-corpora (stale SHERLOCK_CASES, or gate.sh run before micro.py has
+     # populated cases/) must fail loudly, not report PASS on nothing run.
+     [ "$n" -gt 0 ] || { echo "gate.sh: tier 0 found 0 cases in $CASES" >&2; exit 1; }
+     exit $rc ;;
+  1) [ -n "$ONLY" ] || { echo "tier 1 needs a case id" >&2; exit 1; }
+     [ -d "$CASES/$ONLY" ] || { echo "gate.sh: tier 1 case not found: $CASES/$ONLY" >&2; exit 1; }
+     run_one "$CASES/$ONLY" ;;
+  2) rc=0 n=0
+     for c in "$CASES"/D*; do [ -d "$c" ] || continue; n=$((n + 1)); run_one "$c" || rc=1; done
+     # A trustworthy MANDATORY gate must never report PASS on zero real cases: a
+     # stale SHERLOCK_CASES, or running tier 2 before slice.py has populated
+     # cases/, must fail loudly and distinctly from "all cases passed".
+     [ "$n" -gt 0 ] || { echo "gate.sh: tier 2 found 0 cases in $CASES" >&2; exit 1; }
+     exit $rc ;;
+  3) : "${SHERLOCK_CORPUS:?tier 3 needs SHERLOCK_CORPUS}"
+     # Tier 3 is not implemented here — it is a hand-driven run of
+     # eval/bench/run-bench.sh against the full corpus. It must therefore exit
+     # NON-ZERO: the same silent-PASS class already fixed for tiers 0/1/2. A gate
+     # that measured nothing and returned success is indistinguishable, to any
+     # caller or CI step, from a gate that ran the whole 649MB corpus and passed —
+     # and tier 3 is the ONLY tier whose number may be quoted as a benchmark result.
+     echo "gate.sh: tier 3 is NOT run by this script and NOTHING was measured." >&2
+     echo "  run: eval/bench/run-bench.sh $ARM against \$SHERLOCK_CORPUS," \
+          "then score with eval/score.py. Only that number is quotable." >&2
+     exit 2 ;;
+  *) echo "bad tier: $TIER" >&2; exit 1 ;;
+esac

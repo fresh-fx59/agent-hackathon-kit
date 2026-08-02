@@ -18,6 +18,12 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 JUDGE_URL = os.environ.get("JUDGE_BASE_URL", "http://127.0.0.1:8317/v1")
 JUDGE_MODEL = os.environ.get("JUDGE_MODEL", "gpt-5.5")
 JUDGE_KEY = os.environ.get("JUDGE_API_KEY")
+# Pinned, not left to the provider's default. Measured: the same four answers,
+# re-judged by the same model, swung one arm 18.2 -> 9.1 and another 9.1 -> 18.2.
+# A comparison across arms is meaningless while the judge itself moves by a whole
+# defect, so temperature and seed are part of the measurement, not of the weather.
+JUDGE_TEMPERATURE = float(os.environ.get("JUDGE_TEMPERATURE", "0"))
+JUDGE_SEED = int(os.environ.get("JUDGE_SEED", "20260728"))
 
 PROMPT = """You are grading an incident-investigation report against a known answer key.
 
@@ -40,11 +46,23 @@ Return STRICT JSON, no prose, no markdown fence:
   "notes": "<two sentences max on the quality of what was found>"}}"""
 
 
+# Offline stub, for testing THIS file without a metered judge call. Same contract as
+# report-case.py's SHERLOCK_JUDGE_STUB: every row produced with it carries
+# judge_stub:true, so a stubbed number can never be mistaken for a measured one. The
+# alternative was leaving the scorer that produces every quoted recall figure
+# completely untested.
+STUB = os.environ.get("SHERLOCK_SCORE_STUB")
+
+
 def judge(answer, key_text):
+    if STUB:
+        return _parse_verdict(open(STUB, encoding="utf-8").read())
     if not JUDGE_KEY:
-        sys.exit("set JUDGE_API_KEY (use with-secret.sh cliproxyapi_api_key --env JUDGE_API_KEY -- ...)")
+        sys.exit("set JUDGE_API_KEY (use with-secret.sh eval_broker_api_key --env JUDGE_API_KEY -- ...)")
     body = json.dumps({
         "model": JUDGE_MODEL,
+        "temperature": JUDGE_TEMPERATURE,
+        "seed": JUDGE_SEED,
         "messages": [{"role": "user",
                       "content": PROMPT.format(key=key_text, answer=answer[:120000])}],
     }).encode()
@@ -55,7 +73,11 @@ def judge(answer, key_text):
                  "User-Agent": "sherlock-eval/1.0"})
     with urllib.request.urlopen(req, timeout=600) as r:
         out = json.load(r)
-    txt = out["choices"][0]["message"]["content"].strip()
+    return _parse_verdict(out["choices"][0]["message"]["content"])
+
+
+def _parse_verdict(txt):
+    txt = (txt or "").strip()
     if txt.startswith("```"):
         txt = txt.split("\n", 1)[1].rsplit("```", 1)[0]
     return json.loads(txt)
@@ -68,6 +90,12 @@ def main():
     ap.add_argument("--ledger", default=os.path.join(HERE, "runs.jsonl"),
                     help="run ledger to score (default eval/runs.jsonl; the 649MB "
                          "benchmark keeps its own at eval/bench/runs-bench.jsonl)")
+    ap.add_argument("--all-rows", action="store_true",
+                    help="score EVERY row, not just the latest per (dataset, arm). "
+                         "Required for repetitions: this corpus produced 100/73/18 %% "
+                         "on ONE arm, so a single run per arm cannot separate a real "
+                         "improvement from run-to-run spread. Each score carries its "
+                         "source line number so the number traces back to raw data.")
     args = ap.parse_args()
 
     key = json.load(open(args.key, encoding="utf-8"))
@@ -96,26 +124,42 @@ def main():
     print("answer key: %d real defects + %d red herrings (denominator = %d)"
           % (total, len(herrings), total))
 
-    latest = {}
-    for line in open(args.ledger, encoding="utf-8"):
+    latest, rows = {}, []
+    for lineno, line in enumerate(open(args.ledger, encoding="utf-8"), 1):
         line = line.strip()
         if not line:
             continue
         r = json.loads(line)
         if args.dataset and r.get("dataset") != args.dataset:
             continue
+        r["_line"] = lineno
         latest[(r["dataset"], r["arm"])] = r
+        rows.append(r)
 
-    out_path = os.path.join(HERE, "scores.jsonl")
-    for (ds, arm), r in sorted(latest.items()):
+    if args.all_rows:
+        selected = [((r["dataset"], r["arm"]), r) for r in rows]
+    else:
+        selected = sorted(latest.items())
+
+    # rep index per (dataset, arm), in ledger order — so three v7 rows read r1/r2/r3
+    # instead of three indistinguishable lines.
+    seen = {}
+    out_path = os.environ.get("SHERLOCK_SCORES_OUT") or os.path.join(HERE, "scores.jsonl")
+    if STUB:
+        print("  ⚠ JUDGE STUB ACTIVE (%s) — these rows are NOT measurements" % STUB)
+    for (ds, arm), r in selected:
+        seen[(ds, arm)] = seen.get((ds, arm), 0) + 1
         v = judge(r.get("answer", ""), key_text)
         found = v.get("found_ids", [])
         rec = {"dataset": ds, "arm": arm, "model": r.get("model"),
+               "rep": seen[(ds, arm)], "ledger": os.path.basename(args.ledger),
+               "ledger_line": r["_line"], "judge_model": JUDGE_MODEL,
+               "judge_temperature": JUDGE_TEMPERATURE, "judge_seed": JUDGE_SEED,
                "found_ids": found, "missed_ids": v.get("missed_ids", []),
                "recall_pct": round(100.0 * len(found) / total, 1) if total else None,
                "false_positives": v.get("false_positives"),
                "turns": r.get("turns"), "duration_s": r.get("duration_s"),
-               "notes": v.get("notes", "")}
+               "notes": v.get("notes", ""), "judge_stub": bool(STUB)}
         with open(out_path, "a", encoding="utf-8") as f:
             f.write(json.dumps(rec, ensure_ascii=False) + "\n")
         print("%-16s %-5s recall=%5.1f%%  found=%2d/%d  FP=%s" % (

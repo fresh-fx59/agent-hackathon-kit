@@ -1,0 +1,10 @@
+# CRITICAL-3: everything below is BUILT FROM the answer key + the 649MB corpus,
+# which live OUTSIDE this repo on purpose — this repo is PUBLIC. `slice.py --out
+# cases` writes real corpus bytes into cases/, run-case.sh writes captured model
+# output into runs/, and results.jsonl is the scratch ledger. None of it may ever
+# become stageable: `git add -A` from the repo root must not see them.
+cases/
+runs/
+results.jsonl
+__pycache__/
+*.pyc

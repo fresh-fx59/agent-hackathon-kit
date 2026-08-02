@@ -1,0 +1,115 @@
+# fetch-logs.sh — stand configuration. Copy to ~/.sherlock/stand.ini and chmod 600.
+#
+#   mkdir -p ~/.sherlock
+#   cp fetch-logs.conf.example ~/.sherlock/stand.ini
+#   $EDITOR ~/.sherlock/stand.ini
+#   chmod 600 ~/.sherlock/stand.ini
+#   tools/fetch-logs.sh --probe && tools/fetch-logs.sh
+#
+# The chmod is REQUIRED: the script refuses to run (exit 12) on a config that anyone
+# else can read, and says so with the exact command to fix it.
+#
+# THIS FILE CONTAINS NO REAL CREDENTIAL AND MUST NEVER CONTAIN ONE. It is committed.
+# The file you actually use lives OUTSIDE the repo, in your home directory.
+#
+# Resolution order, first hit wins:
+#   1) --config FILE   2) $SHERLOCK_STAND_CONFIG   3) ./sherlock-stand.ini   4) ~/.sherlock/stand.ini
+#
+# The config is OPTIONAL. `fetch-logs.sh --source local:<DIR>` needs none at all, and the
+# skill's normal path — ordinary files on disk — needs neither. Nothing here is required
+# for Sherlock to work (AGENTS.md R1).
+#
+# GRAMMAR — a strict INI subset, and one rule surprises people:
+#   * `#` or `;` starts a comment ONLY as the first character of a line. An inline `#`
+#     is a LITERAL character, because a password is allowed to contain one. So write
+#     comments on their own line, never after a value — `host = h  # note` would make
+#     the host literally `h  # note`.
+#   * No continuations, no duplicate keys, no ${interpolation}, no $(substitution).
+#   * An unknown key or section is a refusal (exit 10) naming the line, never a silent
+#     skip: a typo like `identityfile =` must not fall through to a password prompt.
+#   * WHITESPACE AND QUOTES. For every key EXCEPT `password`, leading and trailing
+#     whitespace is trimmed and ONE matching layer of '...' or "..." is removed, so
+#     `user = " ops "` means `ops`. `password` is the exception: only LEADING whitespace
+#     is removed, and nothing else — trailing spaces and quote characters are significant
+#     bytes of a secret, and authenticating with bytes you never typed surfaces as exit 20
+#     «the stand refused you», which sends you to the wrong diagnosis entirely.
+#     If your password ends in a space or starts with a quote, use `password_env`.
+#   * A password may not contain a CONTROL character (newline, tab, CR). The SSH_ASKPASS
+#     channel is one line, so ssh would authenticate with the first line only. Refused at
+#     exit 11 for BOTH `password` and `password_env`, rather than silently truncated.
+
+[stand]
+
+# --- where -------------------------------------------------------------------
+# host: hostname / IPv4, or a bracketed IPv6 such as [2001:db8::1] — the brackets are
+# stripped before ssh sees the value (OpenSSH does not strip them from a positional
+# host, and getaddrinfo cannot resolve `[2001:db8::1]`). The port always travels as -p.
+host = your-stand.example.com
+port = 22
+user = ops
+
+# --- how to authenticate -----------------------------------------------------
+# EXACTLY ONE of identity_file | password_env | password. Two or more is a refusal
+# (exit 11) — a silent precedence rule would be a trap. Zero means ssh-agent, and
+# then $SSH_AUTH_SOCK must be set.
+#
+# 1) identity_file — PREFERRED. Must be mode 600 or 400, or the script refuses (exit 12).
+identity_file = ~/.ssh/id_ed25519
+#
+# 2) password_env — the NAME of an environment variable holding the password.
+#    Preferred over an inline password: the secret never lands in a file at all.
+#      read -rs SHERLOCK_STAND_PASSWORD && export SHERLOCK_STAND_PASSWORD
+# password_env = SHERLOCK_STAND_PASSWORD
+#
+# 3) password — inline. DISCOURAGED. chmod 600 on this file is then the ONLY thing
+#    protecting it. Never commit a file that has this key filled in.
+# password = ...
+#
+# However it is supplied, the password is delivered to ssh through SSH_ASKPASS +
+# SSH_ASKPASS_REQUIRE=force, so it never appears in argv (which `ps` shows to every
+# user on the box), never in a log line, and never in a manifest or a report. That
+# needs OpenSSH >= 8.4 on THIS machine; an older client is refused up front with
+# exit 21 instead of hanging. `sshpass` is never used: `sshpass -p` would put the
+# password straight back onto argv.
+
+# --- what to fetch -----------------------------------------------------------
+log_dir   = /opt/flink/current/log
+file_glob = flink-*-*.log
+
+# exclude_glob is matched against BASENAMES locally, after the listing. The default
+# skips the daily-rotated archives, the empty `.out` files and the RocksDB `*_db_LOG`
+# files that a Flink log directory is full of.
+exclude_glob = *.zip *.out *_db_LOG *.gz
+
+# --- connection behaviour ----------------------------------------------------
+# strict_host_key: accept-new | yes | no.
+# `accept-new` records an unknown host key and continues; `yes` requires the key to be
+# known already; `no` disables the check. This key exists because OpenSSH's own default
+# would stop and ASK on the first connection, hanging a non-interactive run.
+#
+# WITH PASSWORD AUTH THIS IS FORCED TO `yes`, and writing `no` or `accept-new` next to a
+# password is a refusal (exit 11). Trust-on-first-use means the password is offered to
+# whatever host answers, and known_hosts here is kept PER RUN ROOT — so "first use"
+# recurs on every fresh root. With a key, a wrong host key costs a failed handshake; with
+# a password it costs the credential. The per-root known_hosts is seeded (read-only) from
+# ~/.ssh/known_hosts, so a stand you have already accepted keeps working; for a new one:
+#   ssh-keyscan -p 22 your-stand.example.com >> ~/.ssh/known_hosts
+strict_host_key = accept-new
+connect_timeout = 15
+
+# max_bytes_per_file: per-file, per-tick byte cap. Also the cold-start tail — the first
+# time a file is seen, only its last max_bytes_per_file bytes are taken (use --from-start
+# to read it whole). An APPEND bigger than the cap also keeps the NEWEST bytes and rolls
+# the previous mirror aside, because the incident is at the end of a burst. A capped fetch
+# is never silent: the manifest records truncated_head and skipped_bytes, and the skill is
+# told to declare that as a coverage boundary.
+max_bytes_per_file = 10485760
+
+[watch]
+
+# Only used by --watch. The default run is a single tick that exits.
+poll_seconds = 30
+
+# 0 = unlimited. In a non-interactive run an unbounded --watch is refused (exit 1):
+# use --once, or set a bound here or with --max-ticks N.
+max_ticks = 0
