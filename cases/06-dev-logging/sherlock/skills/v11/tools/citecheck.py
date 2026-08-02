@@ -62,8 +62,10 @@ import sys
 # `22:22` and `127.0.0.1:8317` all fail.
 # --------------------------------------------------------------------------
 # A CANDIDATE path — deliberately permissive, because the corpus index is the
-# gate now, not a guess about extensions. Real corpora carry `.plog`, `dmesg`,
-# `syslog` and `ordersync-prod-2026-07-28`; none of them has a listable extension.
+# gate now, not a guess about extensions. Real corpora carry names like `.plog`,
+# `kernring` or `batchjob-stage-2019-03-11`; none has a listable extension.
+# (Illustrative names only: nothing here may name a file of the corpus under
+# test, or the skill would be handing the model a place to look.)
 PATH_RE = r"(?:[A-Za-z0-9_.\-]+[/\\])*[A-Za-z0-9_.\-]{1,120}"
 CITE_RE = re.compile(r"(?<![A-Za-z0-9_/\\.\-])(" + PATH_RE + r")"
                      r":(\d{1,9})(?:\s*[-–—]\s*(\d{1,9}))?(?![0-9])")
@@ -138,10 +140,11 @@ def index_corpus(root):
 def resolve(cited, by_rel, by_base):
     """Citation path -> (candidate relpaths, how). Relative path wins, always.
 
-    Basename matching stays as a last resort, but it is now REPORTED: one corpus
-    holds `syslog/node-a/syslog` and `syslog/node-b/syslog`, so a bare
-    `syslog:8792` silently resolved to whichever of the two happened to agree —
-    turning an ambiguous citation into a confident `ok`."""
+    Basename matching stays as a last resort, but it is now REPORTED: a corpus
+    can hold `hostlog/edge-1/hostlog` and `hostlog/edge-2/hostlog`, so a bare
+    `hostlog:4211` silently resolved to whichever of the two happened to agree —
+    turning an ambiguous citation into a confident `ok`. (Names invented: this
+    file ships inside the skill, so it must not name the corpus under test.)"""
     cited = cited.replace("\\", "/").lstrip("./")
     if cited in by_rel:
         return [cited], "rel"

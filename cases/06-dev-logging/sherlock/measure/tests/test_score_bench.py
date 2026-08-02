@@ -52,6 +52,42 @@ class TheHerringsAreScoredOnTheOppositeAxis(unittest.TestCase):
                          "the mark is a prefix on the KEY's title, not a substring "
                          "anywhere in it")
 
+    def test_a_decoy_is_asked_the_OPPOSITE_question(self):
+        """The bug this test exists for cost a published headline.
+
+        The defect prompt asks "did the report identify THIS defect?". Asked of a
+        decoy titled «RED HERRING: …», `false` means "did not call it a red
+        herring" — which is exactly what a report that presents the decoy as a
+        ROOT CAUSE returns. Scored as a defect, that read as "refused", and the
+        649 MB rep 1 — whose findings list contains «Н-7 · SYN flooding» — was
+        reported as 0 false positives.
+
+        So a decoy must be asked whether the report presented it as REAL.
+        """
+        seen = {}
+
+        def call(prompt):
+            seen[("herring" if "PLANTED\nDECOY" in prompt or "DECOY" in prompt
+                  else "defect")] = prompt
+            return '{"found": false, "why": "x"}'
+        SB.score(KEY, "report", call)
+        self.assertIn("herring", seen, "a decoy went through the defect prompt")
+        self.assertIn("present this decoy as a REAL", seen["herring"])
+        self.assertNotIn("Did the report identify THIS defect?", seen["herring"])
+
+    def test_presenting_the_decoy_as_a_cause_is_the_false_positive(self):
+        def call(prompt):
+            # the model reported everything it saw, decoys included
+            return '{"found": true, "why": "listed among the findings"}'
+        res = SB.score(KEY, "report", call)
+        self.assertEqual(res["false_positives"], 2)
+
+    def test_setting_the_decoy_aside_is_clean(self):
+        def call(prompt):
+            return '{"found": false, "why": "explicitly set aside as noise"}'
+        res = SB.score(KEY, "report", call)
+        self.assertEqual(res["false_positives"], 0)
+
     def test_the_denominator_counts_real_defects_only(self):
         res = SB.score(KEY, "report", lambda _p: '{"found": true, "why": "x"}')
         self.assertEqual(res["total"], 2, "13 as a denominator rewards over-reporting")
