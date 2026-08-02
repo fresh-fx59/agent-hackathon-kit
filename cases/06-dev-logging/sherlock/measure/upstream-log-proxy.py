@@ -82,6 +82,27 @@ def record(**row):
             fh.write(line + "\n")
 
 
+# How much of an upstream error body is kept. 300 chars is enough for every
+# provider message seen on this lane ("Upstream request failed", a rate-limit
+# notice, a context-length refusal) and short enough that a body which echoes
+# part of the REQUEST cannot drag corpus lines into the log. It lands in the run
+# dir next to the trajectory, and it never contains a header.
+_ERR_CHARS = 300
+
+
+def _err_text(payload):
+    """The provider's own words for a refusal, truncated.
+
+    Sixty 400s were recorded on D04 as a bare integer while this very body was
+    read and thrown away in the retry path. "Rate limit exceeded" and "invalid
+    request" are indistinguishable in a status column, and three separate
+    theories about these failures were argued from counts because of it.
+    """
+    if not payload:
+        return None
+    return payload.decode("utf-8", "replace").strip()[:_ERR_CHARS] or None
+
+
 def _scan_obj(obj, state):
     """Pull the two things we care about out of one response object."""
     if not isinstance(obj, dict):
@@ -155,7 +176,7 @@ class Proxy(BaseHTTPRequestHandler):
         headers["Accept-Encoding"] = "identity"
         req = urllib.request.Request(self._upstream_url(), data=body or None,
                                      headers=headers, method=self.command)
-        state = {"returned_model": None, "tool_call": False}
+        state = {"returned_model": None, "tool_call": False, "error": None}
         status = None
         attempt = 0
         while True:
@@ -171,15 +192,18 @@ class Proxy(BaseHTTPRequestHandler):
                     # EVERY attempt is recorded, because every attempt re-uploads
                     # the whole context and is therefore billed. An invisible
                     # retry is the "failed calls are free" mistake all over again.
+                    # Read the body BEFORE recording — it was already being read
+                    # and discarded here, which is why every 400 in this ledger
+                    # is a bare status code with no reason attached.
+                    try:
+                        why = _err_text(e.read())
+                    except Exception:
+                        why = None
                     record(requested_model=requested, returned_model=None,
                            tool_call=False, status=status, attempt=attempt,
                            duration_ms=int((time.time() - t_try) * 1000),
                            sent_model=sent, request_bytes=len(body),
-                           path=self.path, stream=False)
-                    try:
-                        e.read()
-                    except Exception:
-                        pass
+                           path=self.path, stream=False, upstream_error=why)
                     time.sleep(min(60.0, (UPSTREAM_RETRY_BASE_MS / 1000.0)
                                    * (2 ** (attempt - 1))))
                     req = urllib.request.Request(self._upstream_url(),
@@ -214,7 +238,8 @@ class Proxy(BaseHTTPRequestHandler):
                    returned_model=state["returned_model"], attempt=attempt,
                    tool_call=state["tool_call"], status=status,
                    duration_ms=int((time.time() - t0) * 1000), sent_model=sent,
-                   request_bytes=len(body), path=self.path, stream=streaming)
+                   request_bytes=len(body), path=self.path, stream=streaming,
+                   upstream_error=state["error"])
 
     def _relay_headers(self, resp, status, extra=()):
         self.send_response(status)
@@ -227,6 +252,11 @@ class Proxy(BaseHTTPRequestHandler):
 
     def _pump_whole(self, resp, status, state):
         payload = resp.read()
+        # The body is read exactly once and then relayed verbatim, so recording
+        # the reason cannot consume the client's copy — a proxy that logs why and
+        # hands the client an empty 400 has moved the blindness, not removed it.
+        if status and status >= 400:
+            state["error"] = _err_text(payload)
         try:
             _scan_obj(json.loads(payload.decode("utf-8", "replace")), state)
         except Exception:

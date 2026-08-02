@@ -123,9 +123,21 @@ for kb in sizes:
         try:
             with urllib.request.urlopen(req, timeout=120) as resp:
                 raw = resp.read()
-            if shape == "agentic":
-                name = None
-                for ln in raw.decode("utf-8", "replace").splitlines():
+            # A 200 IS the health signal. Which model answered is a bonus, and
+            # failing to extract it must never be reported as a lane failure.
+            #
+            # It was, for every call in the default shape. The shell defaults to
+            # PROBE_SHAPE=history; `history` sets stream:true exactly like
+            # `agentic`; and this branch parsed SSE only when the shape was
+            # literally named "agentic", so json.loads() hit an event stream and
+            # threw. Every history-shape call landed in the except clause below
+            # and the probe returned "0/N — DEGRADED" against a healthy lane.
+            #
+            # So dispatch on what CAME BACK, not on what the shape was called —
+            # a name can drift from behaviour, a body cannot.
+            name, text = None, raw.decode("utf-8", "replace")
+            if text.lstrip().startswith("data:"):
+                for ln in text.splitlines():
                     if ln.startswith("data: ") and '"model"' in ln:
                         try:
                             name = json.loads(ln[6:]).get("model")
@@ -134,11 +146,24 @@ for kb in sizes:
                         if name:
                             break
             else:
-                name = json.loads(raw).get("model")
-            rows.append((kb, 200, time.time() - t0, name))
+                try:
+                    name = json.loads(text).get("model")
+                except ValueError:
+                    pass
+            rows.append((kb, 200, time.time() - t0, name, None))
         except Exception as e:
             code = getattr(e, "code", None) or type(e).__name__
-            rows.append((kb, code, time.time() - t0, None))
+            # KEEP THE PROVIDER'S OWN WORDS. Until 2026-08-02 this except clause
+            # discarded the response body, so a degraded verdict said "0/6" and
+            # nothing about whether the lane was rate-limiting us, refusing the
+            # request, or falling over. Three theories about these failures were
+            # argued from counts alone and two were wrong.
+            why = None
+            try:
+                why = e.read().decode("utf-8", "replace").strip()[:300]
+            except Exception:
+                pass
+            rows.append((kb, code, time.time() - t0, None, why))
         total_bytes += len(payload)
 
 print("shape=%s tools=%d" % (shape, len(TOOLS)))
@@ -155,6 +180,22 @@ for kb in sizes:
                                           ",".join(names) or "-"))
 print("\nuploaded %.2f MB across %d calls; worst-size fail rate %.1f%%"
       % (total_bytes / 1048576, len(rows), worst))
+
+# What the lane SAID, not just how often it said no. A rate limit, a malformed
+# request and an overloaded backend are the same integer in a status column, and
+# they call for three different responses: wait, fix the request, or switch lane.
+reasons = {}
+for r in rows:
+    if r[1] != 200:
+        # The status is always shown, even when the body is empty: "400 with no
+        # body" is itself a finding, and hiding the failure behind a missing
+        # explanation is the blindness this block exists to remove.
+        key = "%s  %s" % (r[1], (r[4] or "(no body)").replace("\n", " "))
+        reasons[key] = reasons.get(key, 0) + 1
+if reasons:
+    print("\nwhat the provider said:")
+    for txt, n in sorted(reasons.items(), key=lambda kv: -kv[1]):
+        print("  %3d x  %s" % (n, txt))
 
 if worst >= bad_pct:
     print("VERDICT: DEGRADED — do not start a metered batch")

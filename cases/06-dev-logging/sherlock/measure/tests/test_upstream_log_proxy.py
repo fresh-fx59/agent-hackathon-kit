@@ -51,7 +51,8 @@ class Stub(BaseHTTPRequestHandler):
         # request size and shape (both controlled for on 2026-08-02).
         if getattr(self.server, "fail_times", 0) > 0:
             self.server.fail_times -= 1
-            payload = json.dumps({"error": {"message": "Upstream request failed"}}).encode()
+            msg = getattr(self.server, "fail_body", "Upstream request failed")
+            payload = json.dumps({"error": {"message": msg}}).encode()
             self.send_response(400)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(payload)))
@@ -156,6 +157,25 @@ class ProxyCase(unittest.TestCase):
         out, err = self.proc.communicate(timeout=5)
         self.fail("proxy never came up: %s %s" % (out, err))
 
+    def start_retrying(self, mode, attempts, delay_ms="10"):
+        self.srv.mode = mode
+        env = dict(os.environ,
+                   UPSTREAM_BASE="http://127.0.0.1:%d/v1" % self.up_port,
+                   UPSTREAM_LOG=self.log, LISTEN_PORT=str(self.px_port),
+                   UPSTREAM_RETRY_MAX=str(attempts),
+                   UPSTREAM_RETRY_BASE_MS=delay_ms)
+        self.proc = subprocess.Popen([sys.executable, PROXY], env=env,
+                                     stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        for _ in range(100):
+            try:
+                with urllib.request.urlopen(
+                        "http://127.0.0.1:%d/healthz" % self.px_port, timeout=1) as r:
+                    r.read()
+                return
+            except Exception:
+                time.sleep(0.05)
+        self.fail("proxy never came up")
+
     def post(self, body=None, auth="Bearer sekrit"):
         body = body if body is not None else {"model": "[SP]deepseek-v4-flash",
                                               "messages": [{"role": "user", "content": "hi"}]}
@@ -170,15 +190,21 @@ class ProxyCase(unittest.TestCase):
             with e:
                 return e.code, e.read()
 
-    def lines(self):
-        for _ in range(100):                       # the write is off the hot path
+    def lines(self, expect=1):
+        """The recorded rows, once at least `expect` of them exist.
+
+        The final record is written AFTER the client's bytes go out, so post()
+        can return before the last line lands. Waiting for content alone made a
+        two-row assertion flaky in the row order it cares about."""
+        rows = []
+        for _ in range(200):                       # the write is off the hot path
             if os.path.exists(self.log):
                 with open(self.log, encoding="utf-8") as fh:
-                    if fh.read().strip():
-                        break
+                    rows = [json.loads(l) for l in fh if l.strip()]
+                if len(rows) >= expect:
+                    break
             time.sleep(0.05)
-        with open(self.log, encoding="utf-8") as fh:
-            return [json.loads(l) for l in fh if l.strip()]
+        return rows
 
 
 class ItNamesWhatActuallyAnswered(ProxyCase):
@@ -282,25 +308,6 @@ class ItRidesOutAProviderBurst(ProxyCase):
     cannot be un-sent.
     """
 
-    def start_retrying(self, mode, attempts, delay_ms="10"):
-        self.srv.mode = mode
-        env = dict(os.environ,
-                   UPSTREAM_BASE="http://127.0.0.1:%d/v1" % self.up_port,
-                   UPSTREAM_LOG=self.log, LISTEN_PORT=str(self.px_port),
-                   UPSTREAM_RETRY_MAX=str(attempts),
-                   UPSTREAM_RETRY_BASE_MS=delay_ms)
-        self.proc = subprocess.Popen([sys.executable, PROXY], env=env,
-                                     stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        for _ in range(100):
-            try:
-                with urllib.request.urlopen(
-                        "http://127.0.0.1:%d/healthz" % self.px_port, timeout=1) as r:
-                    r.read()
-                return
-            except Exception:
-                time.sleep(0.05)
-        self.fail("proxy never came up")
-
     def test_a_burst_shorter_than_the_budget_is_survived(self):
         self.srv.fail_times = 3
         self.start_retrying("json_toolcall", attempts=6)
@@ -311,7 +318,7 @@ class ItRidesOutAProviderBurst(ProxyCase):
         self.srv.fail_times = 2
         self.start_retrying("json_toolcall", attempts=6)
         self.post({"model": "m", "messages": []})
-        rows = self.lines()
+        rows = self.lines(3)
         self.assertEqual(len(rows), 3, "retries must not be invisible: %r" % rows)
         self.assertEqual([r["status"] for r in rows], [400, 400, 200])
         self.assertEqual([r["attempt"] for r in rows], [1, 2, 3])
@@ -328,6 +335,69 @@ class ItRidesOutAProviderBurst(ProxyCase):
         self.start("json_toolcall")
         self.post({"model": "m", "messages": []})
         self.assertEqual(len(self.lines()), 1)
+
+
+class ItRecordsWhyTheUpstreamRefused(ProxyCase):
+    """60 failures on D04 and not one of them says WHY.
+
+    Every 400 this project has reasoned about was a bare status code. Three
+    successive theories — size, then shape, then bursts — were each argued from
+    counts alone, and two of them were wrong, because the one artifact that could
+    have settled it in a minute was being read and thrown away: the retry path
+    already calls `e.read()` and discards the provider's own message. "Rate limit
+    exceeded" and "invalid request" are the same integer in this ledger.
+
+    So a non-2xx now records the provider's text, truncated. Truncation is not
+    only tidiness: an error body can echo part of the request, and the request
+    carries corpus lines. It lands in the run dir beside the trajectory, which is
+    already 0700, and it never carries a header.
+    """
+
+    def test_a_retried_failure_records_what_the_provider_said(self):
+        self.srv.fail_body = "Rate limit exceeded for org-42"
+        self.srv.fail_times = 1
+        self.start_retrying("json_toolcall", attempts=6)
+        self.post({"model": "m", "messages": []})
+        rows = self.lines(2)
+        self.assertEqual([r["status"] for r in rows], [400, 200])
+        self.assertIn("Rate limit exceeded", rows[0]["upstream_error"],
+                      "the retry path reads the body already — record it: %r" % rows[0])
+
+    def test_the_final_failure_records_what_the_provider_said(self):
+        """Retrying off: the single row IS the failure, and it is the row a
+        post-mortem reads."""
+        self.srv.fail_body = "context_length_exceeded: 412000 > 400000"
+        self.srv.fail_times = 1
+        self.start("json_toolcall")
+        code, _ = self.post({"model": "m", "messages": []})
+        self.assertEqual(code, 400)
+        rows = self.lines()
+        self.assertEqual(len(rows), 1)
+        self.assertIn("context_length_exceeded", rows[0]["upstream_error"])
+
+    def test_the_client_still_gets_the_real_error_body(self):
+        """Reading the body to log it must not consume it. A proxy that logs the
+        reason and hands the client an empty 400 has moved the blindness, not
+        removed it."""
+        self.srv.fail_body = "Upstream request failed: burst"
+        self.srv.fail_times = 1
+        self.start("json_toolcall")
+        code, body = self.post({"model": "m", "messages": []})
+        self.assertEqual(code, 400)
+        self.assertIn("burst", json.loads(body)["error"]["message"])
+
+    def test_a_long_error_body_is_truncated(self):
+        self.srv.fail_body = "E" * 5000
+        self.srv.fail_times = 1
+        self.start("json_toolcall")
+        self.post({"model": "m", "messages": []})
+        self.assertLessEqual(len(self.lines()[0]["upstream_error"]), 300)
+
+    def test_a_successful_call_records_no_error_text(self):
+        self.start("json_toolcall")
+        self.post()
+        self.assertIsNone(self.lines()[0].get("upstream_error"),
+                          "a 200 has nothing to explain")
 
 
 class ItCanRestoreTheProviderAlias(ProxyCase):
