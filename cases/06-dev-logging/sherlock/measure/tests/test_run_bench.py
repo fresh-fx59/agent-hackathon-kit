@@ -26,6 +26,7 @@ RUNNER = os.path.join(SHERLOCK, "eval", "bench", "run-bench.sh")
 # handed, then answers in run-bench.sh's `--output-format json` shape.
 STUB = r"""#!/usr/bin/env bash
 printf '%s\0' "$@" >> "$QWEN_STUB_LOG"
+[ -f .qwen/settings.json ] && cp .qwen/settings.json "$QWEN_STUB_LOG.settings"
 M=""
 while [ $# -gt 0 ]; do
   case "$1" in --model) M="$2"; shift 2 ;; *) shift ;; esac
@@ -103,6 +104,7 @@ class TheBenchRunnerUsesTheSameUpstreamLane(unittest.TestCase):
             fh.write(STUB)
         os.chmod(qwen, os.stat(qwen).st_mode | stat.S_IEXEC)
         log = os.path.join(d, "stub.log")
+        self._stub_log = log
         env = dict(os.environ)
         env.update({"PATH": binp + os.pathsep + os.environ["PATH"],
                     "QWEN_STUB_LOG": log, "QWEN_BIN": qwen,
@@ -143,6 +145,16 @@ class TheBenchRunnerUsesTheSameUpstreamLane(unittest.TestCase):
     def test_without_the_lane_the_cli_keeps_the_alias(self):
         argv, _seen, _rows, _p = self.go({"SHERLOCK_UPSTREAM_LOG": "0"})
         self.assertEqual(self.cli_model(argv), "[SP]deepseek-v4-flash")
+
+    def test_it_states_the_context_window_too(self):
+        """The 649 MB corpus is where a 177,000-token ceiling hurts most."""
+        self.go()
+        sp = self._stub_log + ".settings"
+        self.assertTrue(os.path.exists(sp), "no .qwen/settings.json was written")
+        with open(sp, encoding="utf-8") as fh:
+            self.assertEqual(
+                json.load(fh)["model"]["generationConfig"]["contextWindowSize"],
+                400000)
 
 
 if __name__ == "__main__":

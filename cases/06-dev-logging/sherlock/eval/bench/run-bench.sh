@@ -46,6 +46,16 @@ save_trace() {
 trap save_trace EXIT
 export QWEN_HOME="$W/home"; mkdir -p "$QWEN_HOME"
 
+# STATE THE CONTEXT WINDOW OUTRIGHT, same as run-case.sh. This is the runner on
+# the 649 MB corpus, so a 177,000-token ceiling hurts here most of all.
+# → measure/run-case.sh for why the default is 400,000 and not 1,048,576.
+CTX_WINDOW="${SHERLOCK_CONTEXT_WINDOW:-400000}"
+if [ "$CTX_WINDOW" != "0" ]; then
+  mkdir -p "$W/.qwen"
+  printf '{ "model": { "generationConfig": { "contextWindowSize": %s } } }\n' \
+    "$CTX_WINDOW" > "$W/.qwen/settings.json"
+fi
+
 if [ "$ARM" != "none" ]; then
   mkdir -p "$W/.qwen/skills"
   cp -r "$SKILLS/$ARM" "$W/.qwen/skills/log-rca" || exit 1

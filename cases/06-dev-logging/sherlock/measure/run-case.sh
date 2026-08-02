@@ -80,6 +80,27 @@ PROXY_PID="$LANE_PROXY_PID"
 
 export QWEN_HOME="$W/home"; mkdir -p "$QWEN_HOME"
 
+# STATE THE CONTEXT WINDOW OUTRIGHT — belt and braces on the 177,000 ceiling.
+# Stripping the `[SP]` prefix above fixes the limit only via a three-link
+# inference (strip => qwen-code's table matches => 1M), and it deliberately does
+# NOT happen when the proxy is down. This says the number instead, which
+# qwen-code honours regardless of the model id. Verified on 0.21.1 against a
+# local provider: the same 312,713-token prompt is refused with
+# `hard limit: 177000` under the prefixed id and sent once this is set.
+#
+# Default 400,000, NOT DeepSeek-V4-Flash's true 1,048,576. The arm's own
+# procedure needs ~250k (SKILL.md's mandated per-candidate windows and citation
+# re-reads); 400k clears that with margin. The largest request ever PROVEN on
+# this provider lane is 580 KB ≈ 145k tokens, and cost is Σ(context) over turns,
+# so an unbounded window is an unbounded bill in unmeasured territory. Raise it
+# with SHERLOCK_CONTEXT_WINDOW once that measurement exists; 0 writes nothing.
+CTX_WINDOW="${SHERLOCK_CONTEXT_WINDOW:-400000}"
+if [ "$CTX_WINDOW" != "0" ]; then
+  mkdir -p "$W/.qwen"
+  printf '{ "model": { "generationConfig": { "contextWindowSize": %s } } }\n' \
+    "$CTX_WINDOW" > "$W/.qwen/settings.json"
+fi
+
 if [ "$ARM" != "none" ]; then
   mkdir -p "$W/.qwen/skills"
   cp -r "$SKILLS/$ARM" "$W/.qwen/skills/log-rca" || exit 1

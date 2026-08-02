@@ -25,6 +25,9 @@ RUNNER = os.path.join(MEASURE, "run-case.sh")
 
 STUB = r"""#!/usr/bin/env bash
 printf '%s\0' "$@" >> "$QWEN_STUB_LOG"
+# the CLI runs with cwd = the scratch dir, which is deleted on exit — so capture
+# the project settings it would have read while they still exist
+[ -f .qwen/settings.json ] && cp .qwen/settings.json "$QWEN_STUB_LOG.settings"
 cat <<'JSON'
 {"type":"system","subtype":"init","model":"[SP]deepseek-v4-flash"}
 {"type":"assistant","message":{"content":[{"type":"tool_use","name":"read_file","input":{"file_path":"/c/apps/api.log","offset":0,"limit":10}}]}}
@@ -411,6 +414,70 @@ class TheWorkingReportIsEvidenceAndMustSurvive(unittest.TestCase):
                 meta = json.load(fh)
             self.assertEqual(meta["answer_chars"], 40)
             self.assertGreater(meta["artifact_chars"], 400)
+
+
+class TheContextWindowIsStatedOutright(unittest.TestCase):
+    """Belt and braces on the 177,000-token ceiling.
+
+    Stripping the `[SP]` prefix fixes the limit only because qwen-code then
+    matches its own model table — an inference chain three links long, and the
+    strip correctly does NOT happen when the proxy is down. So the runner also
+    states the window outright, which qwen-code honours regardless of the id.
+    Verified on 0.21.1 against a local provider: the same 312,713-token prompt is
+    refused with `hard limit: 177000` under `[SP]deepseek-v4-flash` and sent when
+    `model.generationConfig.contextWindowSize` is set.
+
+    The default is 400,000, not DeepSeek-V4-Flash's true 1,048,576: the arm's own
+    procedure needs ~250k (SKILL.md's mandated re-reads), 400k clears that with
+    margin, and the largest request ever PROVEN on this provider lane is 580 KB
+    ≈ 145k tokens. Cost is Σ(context) over turns, so an unbounded window is an
+    unbounded bill on a lane whose behaviour above ~600 KB nobody has measured.
+    Raise it with SHERLOCK_CONTEXT_WINDOW when that measurement exists.
+    """
+
+    def go(self, d, extra_env=None):
+        case_dir = make_case(d)
+        binp = make_stub(d)
+        log = os.path.join(d, "stub.log")
+        skills = os.path.join(d, "skills", "v6")
+        os.makedirs(skills)
+        with open(os.path.join(skills, "SKILL.md"), "w", encoding="utf-8") as fh:
+            fh.write("---\nname: sherlock\n---\n")
+        env = dict(os.environ)
+        env.update({"PATH": binp + os.pathsep + os.environ["PATH"],
+                    "QWEN_STUB_LOG": log, "QWEN_BIN": os.path.join(binp, "qwen"),
+                    "SHERLOCK_SKILLS": os.path.dirname(skills),
+                    "SHERLOCK_RUNS": os.path.join(d, "runs"),
+                    "SHERLOCK_UPSTREAM_LOG": "0",
+                    "SHERLOCK_API_KEY": "stub-key"})
+        env.update(extra_env or {})
+        p = subprocess.run(["bash", RUNNER, case_dir, "v6"], capture_output=True,
+                           text=True, env=env, timeout=60)
+        sp = log + ".settings"
+        settings = None
+        if os.path.exists(sp):
+            with open(sp, encoding="utf-8") as fh:
+                settings = json.load(fh)
+        return settings, p
+
+    def test_the_run_states_a_context_window(self):
+        with tempfile.TemporaryDirectory() as d:
+            settings, p = self.go(d)
+            self.assertIsNotNone(settings, "no .qwen/settings.json; %s" % p.stderr[-400:])
+            self.assertEqual(
+                settings["model"]["generationConfig"]["contextWindowSize"], 400000)
+
+    def test_the_window_is_overridable(self):
+        with tempfile.TemporaryDirectory() as d:
+            settings, _p = self.go(d, {"SHERLOCK_CONTEXT_WINDOW": "1048576"})
+            self.assertEqual(
+                settings["model"]["generationConfig"]["contextWindowSize"], 1048576)
+
+    def test_zero_means_leave_the_cli_alone(self):
+        """An escape hatch that writes no settings at all, for a control arm."""
+        with tempfile.TemporaryDirectory() as d:
+            settings, _p = self.go(d, {"SHERLOCK_CONTEXT_WINDOW": "0"})
+            self.assertIsNone(settings)
 
 
 class TheClientMustNotSeeTheProviderPrefix(unittest.TestCase):
