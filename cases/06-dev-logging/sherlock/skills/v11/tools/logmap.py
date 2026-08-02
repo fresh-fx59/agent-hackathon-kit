@@ -1703,7 +1703,7 @@ def build_worklist(reports, cap, per_file_cap):
             # occurrence physically sits in.
             rows.append({"file": cite_rel or rel, "kind": kind, "count": count,
                          "line_start": s, "line_end": e, "display": disp,
-                         "spread": spread})
+                         "spread": spread, "template": tmpl, "owner": rel})
             progress = True
     trunc = {}
     for r in reports:
@@ -1725,6 +1725,109 @@ def freq_cell(n, spread):
     return "n=%d · %s" % (n, spread) if spread else "n=%d" % n
 
 
+CLOCK_RE = re.compile(r"\b([0-2]?\d):([0-5]\d):([0-5]\d)\b")
+
+
+def _clock_of(text):
+    """Seconds-of-day from the first wall clock in a record, or None.
+
+    Read off the record itself rather than threaded through the pipeline: the
+    line already carries its own time in every format this tool accepts, and a
+    candidate with no clock must simply get no note.
+    """
+    m = CLOCK_RE.search(text or "")
+    if not m:
+        return None
+    h, mi, s = (int(x) for x in m.groups())
+    return None if h > 23 else h * 3600 + mi * 60 + s
+
+
+def _gap(seconds):
+    h, m = divmod(abs(int(seconds)) // 60, 60)
+    return ("%d ч %02d м" % (h, m)) if h else ("%d м" % m)
+
+
+SIBLING_MIN_TOKENS = 4
+
+
+def _sibling_bg(owner, tmpl, bg_by_tmpl):
+    """A background row for the same message SHAPE, when it is not the same template.
+
+    On the 649 MB corpus the decoy line is
+    `eviction pass took #ms for # entries (threshold 500ms)` — one occurrence — while
+    14,042 lines carry `eviction pass took #ms for # entries` and are measured flat
+    all day. Different templates, so an exact join can never connect them, and the
+    rate argument that refutes the decoy sits in a row the candidate never mentions.
+
+    The match is a token-boundary PREFIX in either direction, at least four tokens
+    deep. That is deliberately narrow: a looser rule would stamp «background» onto
+    genuinely distinct messages, and suppressing a real defect is a worse failure
+    than leaving a decoy unannotated. The note says «родственный» for the same
+    reason — it reports a neighbour, it does not pronounce the candidate normal.
+    """
+    if not tmpl:
+        return None
+    exact = bg_by_tmpl.get((owner, tmpl))
+    if exact:
+        return exact + (True,)
+    want = tmpl.split()
+    if len(want) < SIBLING_MIN_TOKENS:
+        return None
+    for (own, cand), val in bg_by_tmpl.items():
+        if own != owner or not cand:
+            continue
+        have = cand.split()
+        n = min(len(want), len(have))
+        if n < SIBLING_MIN_TOKENS or want[:n] != have[:n]:
+            continue
+        return val + (False,)
+    return None
+
+
+def _refutations(row, bg_by_tmpl, peak_at):
+    """The facts already in the residue that bear on THIS candidate.
+
+    Both planted decoys survived two full-corpus runs because these facts existed
+    in other rows of other files and the comparison was left to the reader. A
+    cache-eviction line was offered as a rare candidate while a background row
+    measured the same template as flat all day; a kernel alarm was offered with a
+    timestamp five and a half hours from a peak recorded on the outcome axis.
+
+    Neither note is a verdict — a genuine defect can precede its outage by hours,
+    and a real fault can hide inside a flat stream. They are the two measurements
+    a reader would otherwise have to remember to go and make.
+    """
+    notes = []
+    bg = _sibling_bg(row.get("owner"), row.get("template"), bg_by_tmpl)
+    if bg:
+        rid, s0, s1, exact = bg
+        label = "фон" if exact else "родственный фон"
+        if s0 is not None and s1 is not None:
+            notes.append("%s %s: доля %.2f%%→%.2f%%, не сдвинулось"
+                         % (label, rid, 100 * s0, 100 * s1))
+        else:
+            notes.append("%s %s: не сдвинулось" % (label, rid))
+    if peak_at is not None:
+        t = _clock_of(row.get("display"))
+        if t is not None:
+            # `peak_at` is a bucket index times a bucket width, so it counts from
+            # an arbitrary epoch, while a clock read off a record counts from
+            # midnight. Both are day-less faces — compare them as such, and take
+            # the short way round the dial so 23:50 against 00:10 is 20 minutes
+            # and not 23 hours 40.
+            d = (t % 86400) - (int(peak_at) % 86400)
+            if d > 43200:
+                d -= 86400
+            elif d < -43200:
+                d += 86400
+            when = "до" if d < 0 else "после"
+            notes.append("%s, за %s %s пика %s"
+                         % (hhmm(t), _gap(d), when, hhmm(peak_at))
+                         if abs(d) >= 60 else
+                         "%s, на пике %s" % (hhmm(t), hhmm(peak_at)))
+    return notes
+
+
 def write_worklist(out_dir, rows, rate_rows):
     path = os.path.join(out_dir, "worklist.tsv")
     with open(path, "w", encoding="utf-8") as fh:
@@ -1733,11 +1836,27 @@ def write_worklist(out_dir, rows, rate_rows):
                  "· X данных не хватает\n")
         fh.write("# частота: n=<сколько> · <первая>→<последняя> <разброс>=<доля "
                  "окна захвата>; ВСПЛЕСК = всё уместилось в узкое окно\n")
+        # What already bears on each candidate, joined onto its own line. The
+        # background rows and the outcome peak are computed by the time this runs;
+        # leaving the join to the reader is what let both decoys through.
+        bg_by_tmpl = {}
+        peak_at = None
+        for rr in rate_rows:
+            if rr.get("kind") == "bg" and rr.get("template") is not None:
+                s0, s1 = rr.get("share") or (None, None)
+                bg_by_tmpl.setdefault((rr.get("owner"), rr["template"]),
+                                      (rr["id"], s0, s1))
+            elif rr.get("kind") == "out" and peak_at is None:
+                # out rows arrive sorted by factor, so the first is the sharpest
+                # burst in the corpus — the moment everything else is timed from.
+                peak_at = rr.get("peak_at")
         for i, r in enumerate(rows, 1):
-            fh.write("g%03d\t?\t%s\t%s\t%s\t%s\n"
+            notes = _refutations(r, bg_by_tmpl, peak_at)
+            fh.write("g%03d\t?\t%s\t%s\t%s\t%s%s\n"
                      % (i, r["kind"], cite(r["file"], r["line_start"],
                                            r["line_end"]),
-                        freq_cell(r["count"], r.get("spread")), r["display"]))
+                        freq_cell(r["count"], r.get("spread")), r["display"],
+                        ("  ⟨%s⟩" % " · ".join(notes)) if notes else ""))
         for i, r in enumerate(rate_rows, 1):
             fh.write("%s\t?\t%s\t%s\tn=%d\t%s\n"
                      % (r["id"], r["kind"], cite(r["file"], r["line_start"],
@@ -1830,11 +1949,14 @@ def _rate_row(rid, kind, rel, b):
             "line_start": b["line_start"], "line_end": b["line_end"],
             "n": b["n"], "summary": " ".join(bits), "display": b["display"],
             "factor": b.get("factor", 1.0), "metric": metric,
+            "template": b.get("template"), "owner": rel,
+            "share": (b.get("share0"), b.get("share1")),
             "t0": "%02dh" % b["h0"], "t1": "%02dh" % b["h1"]}
 
 
 def _out_row(rid, rel, b):
-    return {"id": rid, "kind": "out", "file": b.get("file") or rel,
+    return {"id": rid, "kind": "out", "peak_at": b.get("peak_at"),
+            "file": b.get("file") or rel,
             "line_start": b["line_start"], "line_end": b["line_end"],
             "n": b["n"], "summary": "ось «%s» %s" % (b["axis"], b["summary"]),
             "display": b["display"], "factor": b["factor"],

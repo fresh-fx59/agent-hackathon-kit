@@ -508,6 +508,125 @@ class TheRateAxisIsFormatAgnostic(unittest.TestCase):
             self.assertIn("eviction", body)
 
 
+class ACandidateCarriesWhatAlreadyRefutesIt(unittest.TestCase):
+    """Both planted decoys survived because the residue split the refutation away
+    from the candidate.
+
+    On the 649 MB corpus the eviction WARN appears TWICE: as `g027 rare
+    catalog-console-ansi.log:38996 … eviction pass took 1523ms` — one line, inside
+    the incident window — and as `B013 bg … 09h→15h доля 25.39%→24.53% … n
+    2047→1980`, which is the measurement that refutes it. Nothing on g027 pointed
+    at B013, and both reports promoted the decoy to a finding.
+
+    The other decoy is a SYN flood at `Jul 28 08:12:51`, five and a half hours
+    before a 5xx peak the outcome axis times to `13:40` — in a different row of a
+    different file. The comparison is arithmetic the model has to remember to do.
+
+    So a candidate now carries, on its own line, the two facts that kill it: the
+    background row that already measured it as flat, and its distance from the
+    incident peak. This is the D08 lesson again — the residue had the magnitude and
+    withheld the onset, and the run reasoned correctly to the wrong answer.
+    """
+
+    def build(self, d):
+        """The shape the real corpus has: a flat, chatty template whose ONE rare
+        variant lands mid-incident, and a loud one-off hours before anything
+        fails. A file under 4 KB is quoted verbatim instead of becoming a
+        candidate, so the kernel log has to be a real log."""
+        corpus, out = os.path.join(d, "c"), os.path.join(d, "w")
+        lines = []
+        for hour in range(9, 16):
+            for i in range(600):
+                entries = 999777 if (hour == 13 and i == 50) else 184203
+                lines.append("2026-07-28 %02d:%02d:%02d CacheEviction eviction "
+                             "pass took %dms for %d entries"
+                             % (hour, i % 60, i % 60, 1500 + (i % 7), entries))
+        write(corpus, "console.log", lines)
+        kern = ["2026-07-28 %02d:%02d:%02d kernel eth0 link state periodic "
+                "check ok seq=%d" % (h, i % 60, i % 60, i)
+                for h in range(8, 16) for i in range(120)]
+        kern.insert(15, "2026-07-28 08:12:51 kernel TCP request_sock_TCP Possible "
+                        "SYN flooding on port 443 Sending cookies")
+        write(corpus, "kern.log", kern)
+        gw = []
+        for hour in range(9, 16):
+            for i in range(400):
+                code = 503 if (hour == 13 and 40 <= i % 60 <= 59) else 200
+                gw.append('{"start":"2026-07-28T%02d:%02d:%02dZ","path":"/v1/x",'
+                          '"response_code":%d,"duration":12}'
+                          % (hour, i % 60, i % 60, code))
+        write(corpus, "gw.json", gw)
+        run(corpus, out)
+        return (open(os.path.join(out, "worklist.tsv"), encoding="utf-8").read(),
+                open(os.path.join(out, "axis3.tsv"), encoding="utf-8").read())
+
+    def test_a_candidate_measured_flat_by_a_background_row_says_so(self):
+        with tempfile.TemporaryDirectory() as d:
+            wl, ax = self.build(d)
+            self.assertIn("\tbg\t", ax, "no background row was produced:\n%s" % ax)
+            hit = [l for l in wl.splitlines()
+                   if "eviction pass" in l and not l.startswith("B")]
+            self.assertTrue(hit, "the eviction line never became a candidate:\n%s" % wl)
+            self.assertTrue(any("фон B" in l for l in hit),
+                            "a candidate whose own template was measured as FLAT "
+                            "background must name that row:\n%s" % "\n".join(hit))
+
+    def test_the_background_note_carries_the_numbers_not_just_a_label(self):
+        """«фон» alone is a claim. The share before and after is the argument."""
+        with tempfile.TemporaryDirectory() as d:
+            wl, _ax = self.build(d)
+            note = [l for l in wl.splitlines() if "фон B" in l]
+            self.assertTrue(note, wl)
+            self.assertRegex(note[0], r"фон B\d+[^\t]*%")
+
+    def test_a_candidate_hours_from_the_incident_peak_says_how_far(self):
+        with tempfile.TemporaryDirectory() as d:
+            wl, ax = self.build(d)
+            self.assertIn("\tout\t", ax, "no outcome row, so no peak:\n%s" % ax)
+            syn = [l for l in wl.splitlines() if "SYN flooding" in l]
+            self.assertTrue(syn, "the SYN line never became a candidate:\n%s" % wl)
+            self.assertRegex(syn[0], r"пик",
+                             "a candidate must carry its distance from the "
+                             "incident peak:\n%s" % syn[0])
+            self.assertIn("13:40", syn[0], syn[0])
+
+    def test_an_unrelated_candidate_gets_no_background_note(self):
+        """The note must never be cheap. Stamping «background» on a message that
+        merely shares a file would suppress a real defect, which is a worse
+        failure than leaving a decoy unannotated — so the join is a token-boundary
+        prefix at least four tokens deep, and this asserts it does not fire on a
+        line that only shares the file."""
+        with tempfile.TemporaryDirectory() as d:
+            corpus, out = os.path.join(d, "c"), os.path.join(d, "w")
+            lines = ["2026-07-28 %02d:%02d:%02d CacheEviction eviction pass took "
+                     "%dms for 184203 entries" % (h, i % 60, i % 60, 1500 + i % 7)
+                     for h in range(9, 16) for i in range(600)]
+            lines.append("2026-07-28 13:50:00 PaymentGateway settlement batch "
+                         "rejected by acquirer code=91")
+            write(corpus, "console.log", lines)
+            run(corpus, out)
+            wl = open(os.path.join(out, "worklist.tsv"), encoding="utf-8").read()
+            odd = [l for l in wl.splitlines() if "settlement batch rejected" in l]
+            self.assertTrue(odd, "the odd line never became a candidate:\n%s" % wl)
+            self.assertNotIn("фон", odd[0],
+                             "an unrelated message must not be called background "
+                             "just because it shares a file:\n%s" % odd[0])
+
+    def test_a_corpus_with_no_outcome_axis_still_writes_a_worklist(self):
+        """No 5xx anywhere means no peak to measure against. That must degrade to
+        no note, never to a crash or an invented peak."""
+        with tempfile.TemporaryDirectory() as d:
+            corpus, out = os.path.join(d, "c"), os.path.join(d, "w")
+            write(corpus, "quiet.log",
+                  ["2026-07-28 %02d:%02d:00 INFO service healthy" % (h, i % 60)
+                   for h in range(9, 16) for i in range(200)]
+                  + ["2026-07-28 09:00:01 WARN one-off oddity here"])
+            run(corpus, out)
+            wl = open(os.path.join(out, "worklist.tsv"), encoding="utf-8").read()
+            self.assertIn("oddity", wl)
+            self.assertNotIn("пик", wl)
+
+
 class ARepeatedGroupCarriesItsSpread(unittest.TestCase):
     """`n=7` is not an observation. Measured on a real corpus: one shape occurred
     seven times inside 284 seconds of a ten-hour capture and, because the capture
