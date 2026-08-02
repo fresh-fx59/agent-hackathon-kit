@@ -1,0 +1,149 @@
+#!/usr/bin/env python3
+"""Tests for eval/bench/run-bench.sh — the 649 MB corpus runner.
+
+It had no tests, and that is exactly how it drifted: `run-case.sh` grew an
+upstream proxy (attribution) and then the model-id split (the 177,000-token
+ceiling), and `run-bench.sh` — the runner pointed at the BIGGEST corpus, where
+the ceiling bites hardest — silently kept neither.
+
+A stub `qwen` and a stub provider keep this network-free and free of charge.
+"""
+import json
+import os
+import stat
+import subprocess
+import tempfile
+import threading
+import unittest
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+MEASURE = os.path.dirname(HERE)
+SHERLOCK = os.path.dirname(MEASURE)
+RUNNER = os.path.join(SHERLOCK, "eval", "bench", "run-bench.sh")
+
+# Records argv, relays ONE request through OPENAI_BASE_URL carrying the id it was
+# handed, then answers in run-bench.sh's `--output-format json` shape.
+STUB = r"""#!/usr/bin/env bash
+printf '%s\0' "$@" >> "$QWEN_STUB_LOG"
+M=""
+while [ $# -gt 0 ]; do
+  case "$1" in --model) M="$2"; shift 2 ;; *) shift ;; esac
+done
+python3 -c '
+import json, os, sys, urllib.request
+url = os.environ["OPENAI_BASE_URL"].rstrip("/") + "/chat/completions"
+body = json.dumps({"model": sys.argv[1], "messages": []}).encode("utf-8")
+req = urllib.request.Request(url, data=body,
+                             headers={"Content-Type": "application/json"})
+try:
+    urllib.request.urlopen(req, timeout=10).read()
+except Exception:
+    pass
+' "$M"
+cat <<JSON
+[{"type":"system","model":"$M"},
+ {"type":"result","result":"apps/api.log:1 something broke","num_turns":2,
+  "usage":{"input_tokens":11,"output_tokens":22}}]
+JSON
+exit 0
+"""
+
+
+class StubProvider:
+    def __init__(self):
+        self.seen = []
+        seen = self.seen
+
+        class H(BaseHTTPRequestHandler):
+            def do_POST(self):
+                n = int(self.headers.get("content-length") or 0)
+                raw = self.rfile.read(n)
+                try:
+                    seen.append(json.loads(raw))
+                except ValueError:
+                    seen.append({"unparseable": True})
+                out = json.dumps({"model": "DeepSeek-V4-Flash",
+                                  "choices": [{"message": {"content": "ok"}}]}
+                                 ).encode("utf-8")
+                self.send_response(200)
+                self.send_header("content-type", "application/json")
+                self.send_header("content-length", str(len(out)))
+                self.end_headers()
+                self.wfile.write(out)
+
+            def log_message(self, *a):
+                pass
+
+        self.srv = ThreadingHTTPServer(("127.0.0.1", 0), H)
+        threading.Thread(target=self.srv.serve_forever, daemon=True).start()
+
+    @property
+    def url(self):
+        return "http://127.0.0.1:%d/v1" % self.srv.server_address[1]
+
+    def close(self):
+        self.srv.shutdown()
+        self.srv.server_close()
+
+
+class TheBenchRunnerUsesTheSameUpstreamLane(unittest.TestCase):
+    def go(self, extra_env=None):
+        prov = StubProvider()
+        self.addCleanup(prov.close)
+        d = tempfile.mkdtemp()
+        corpus = os.path.join(d, "corpus", "apps")
+        os.makedirs(corpus)
+        with open(os.path.join(corpus, "api.log"), "w", encoding="utf-8") as fh:
+            fh.write("one\ntwo\n")
+        binp = os.path.join(d, "bin")
+        os.makedirs(binp)
+        qwen = os.path.join(binp, "qwen")
+        with open(qwen, "w", encoding="utf-8") as fh:
+            fh.write(STUB)
+        os.chmod(qwen, os.stat(qwen).st_mode | stat.S_IEXEC)
+        log = os.path.join(d, "stub.log")
+        env = dict(os.environ)
+        env.update({"PATH": binp + os.pathsep + os.environ["PATH"],
+                    "QWEN_STUB_LOG": log, "QWEN_BIN": qwen,
+                    "SHERLOCK_CORPUS": os.path.join(d, "corpus"),
+                    "SHERLOCK_BASE_URL": prov.url,
+                    "SHERLOCK_API_KEY": "stub-key",
+                    "BENCH_LEDGER": os.path.join(d, "runs-bench.jsonl"),
+                    "BENCH_RUNS": os.path.join(d, "runs")})
+        env.update(extra_env or {})
+        p = subprocess.run(["bash", RUNNER, "none"], capture_output=True,
+                           text=True, env=env, timeout=120)
+        with open(log, "rb") as fh:
+            argv = fh.read().decode("utf-8").split("\0")
+        rows = []
+        led = env["BENCH_LEDGER"]
+        if os.path.exists(led):
+            with open(led, encoding="utf-8") as fh:
+                rows = [json.loads(l) for l in fh if l.strip()]
+        return argv, prov.seen, rows, p
+
+    def cli_model(self, argv):
+        return argv[argv.index("--model") + 1]
+
+    def test_the_cli_is_given_the_clean_id(self):
+        argv, _seen, _rows, p = self.go()
+        self.assertEqual(self.cli_model(argv), "deepseek-v4-flash",
+                         "stderr: %s" % p.stderr[-800:])
+
+    def test_the_provider_receives_the_aliased_id(self):
+        _argv, seen, _rows, _p = self.go()
+        self.assertEqual([r.get("model") for r in seen], ["[SP]deepseek-v4-flash"])
+
+    def test_the_ledger_names_the_provider_alias(self):
+        _argv, _seen, rows, p = self.go()
+        self.assertEqual(len(rows), 1, "no ledger row; stderr: %s" % p.stderr[-800:])
+        self.assertEqual(rows[0]["model"], "[SP]deepseek-v4-flash")
+
+    def test_without_the_lane_the_cli_keeps_the_alias(self):
+        argv, _seen, _rows, _p = self.go({"SHERLOCK_UPSTREAM_LOG": "0"})
+        self.assertEqual(self.cli_model(argv), "[SP]deepseek-v4-flash")
+
+
+if __name__ == "__main__":
+    unittest.main(verbosity=2)

@@ -15,7 +15,7 @@ set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SKILLS="$(cd "$HERE/../.." && pwd)/skills"
 QWEN="${QWEN_BIN:-$HOME/.local/bin/qwen}"
-LEDGER="$HERE/runs-bench.jsonl"
+LEDGER="${BENCH_LEDGER:-$HERE/runs-bench.jsonl}"
 
 ARM="${1:?usage: run-bench.sh <none|v1|v2|v3>}"
 CORPUS="${SHERLOCK_CORPUS:?set SHERLOCK_CORPUS to the 649MB corpus dir}"
@@ -31,7 +31,7 @@ W="$(mktemp -d "${TMPDIR:-/tmp}/bench-XXXXXX")"
 # and closed it wrongly" from "found it and discarded it" — and that is exactly
 # the question every arm since v5 exists to answer. It used to be deleted on
 # exit, so five runs in a row were unreadable. Keep it next to the ledger.
-RUNS="$HERE/runs"; mkdir -p "$RUNS"
+RUNS="${BENCH_RUNS:-$HERE/runs}"; mkdir -p "$RUNS"
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)-$ARM"
 TRACE="$RUNS/$STAMP"
 save_trace() {
@@ -41,6 +41,7 @@ save_trace() {
   # whatever the run wrote for itself (v11 keeps its worklist verdicts here)
   [ -d "$W/work" ] && cp -r "$W/work" "$TRACE/work"
   rm -rf "$W"
+  [ -n "${LANE_PROXY_PID:-}" ] && kill "$LANE_PROXY_PID" 2>/dev/null
 }
 trap save_trace EXIT
 export QWEN_HOME="$W/home"; mkdir -p "$QWEN_HOME"
@@ -54,19 +55,30 @@ PROMPT="Продакшн деградировал. Логи со всей пла
 Найди ВСЕ проблемы и инциденты, определи корневую причину каждой и предложи,
 что делать. Ссылайся на конкретные строки в формате файл:строка."
 
+# THE SAME UPSTREAM LANE AS run-case.sh. This runner used to talk to linkapi
+# directly, which cost it two things: no row could be attributed to an upstream
+# (the alias fans out to identities ~19x apart on tool-calling), and the CLI was
+# handed `[SP]deepseek-v4-flash`, whose bracket prefix defeats qwen-code's own
+# model-id table and pins the context window to 200,000 — the "177,000-token
+# ceiling". On the 649 MB corpus that is the runner where it hurts most.
+. "$(cd "$HERE/../../measure" && pwd)/upstream-lane.sh"
+upstream_lane_start "$BASE_URL" "$TRACE.upstream.jsonl" "$STAMP" "$MODEL"
+BASE_URL="$LANE_BASE_URL"
+CLIENT_MODEL="$LANE_CLIENT_MODEL"
+
 echo "▶ bench arm=$ARM  corpus=$(du -sh "$CORPUS" | cut -f1)  model=$MODEL"
 START=$(date +%s)
 # key via environment, never argv (visible in ps; this box has a guest account)
 ( cd "$W" && OPENAI_API_KEY="$SHERLOCK_API_KEY" OPENAI_BASE_URL="$BASE_URL" \
-  timeout "$TIMEOUT" "$QWEN" --auth-type openai --model "$MODEL" \
+  timeout "$TIMEOUT" "$QWEN" --auth-type openai --model "$CLIENT_MODEL" \
     --approval-mode yolo -p "$PROMPT" --output-format json </dev/null \
 ) >"$W/out.json" 2>"$W/err.txt"
 ELAPSED=$(( $(date +%s) - START ))
 [ -s "$W/out.json" ] || { echo "  ✗ no output"; sed -n '1,8p' "$W/err.txt"; exit 1; }
 
-python3 - "$W/out.json" "$ARM" "$ELAPSED" "$CORPUS" "$LEDGER" "$TRACE" <<'PY'
+python3 - "$W/out.json" "$ARM" "$ELAPSED" "$CORPUS" "$LEDGER" "$TRACE" "$MODEL" <<'PY'
 import json, os, re, sys
-out, arm, elapsed, corpus, ledger, trace = sys.argv[1:7]
+out, arm, elapsed, corpus, ledger, trace, model = sys.argv[1:8]
 d = json.load(open(out)); d = d if isinstance(d, list) else [d]
 final = next((r for r in d if r.get("type") == "result"), None)
 sysr  = next((r for r in d if r.get("type") == "system"), {})
@@ -86,7 +98,10 @@ for root, _, fs in os.walk(corpus):
         rels.add(os.path.relpath(os.path.join(root, f), corpus).replace(os.sep, "/"))
 cited = {r for r in rels if r in t}
 u = final.get("usage") or {}
-rec = {"arm": arm, "model": sysr.get("model"), "turns": final.get("num_turns"),
+# `model` = what the PROVIDER was asked for (the alias); `client_model` = the
+# id the CLI reported, which is the one it sized its context window from.
+rec = {"arm": arm, "model": model, "client_model": sysr.get("model"),
+       "turns": final.get("num_turns"),
        "duration_s": int(elapsed), "input_tokens": u.get("input_tokens"),
        "output_tokens": u.get("output_tokens"), "answer_chars": len(t),
        "files_in_corpus": len(rels), "files_cited": len(cited),

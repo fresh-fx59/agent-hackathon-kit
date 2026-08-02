@@ -67,59 +67,17 @@ PROXY_PID=""
 # the SCRATCH dir goes; the RUN dir stays. The proxy must not outlive the run.
 trap 'rm -rf "$W"; [ -n "${PROXY_PID:-}" ] && kill "$PROXY_PID" 2>/dev/null' EXIT
 
-# NAME THE MODEL THAT ACTUALLY ANSWERS. `[SP]deepseek-v4-flash` is an ALIAS:
-# measured over 40 byte-identical requests it answered as two identities that are
-# ~19x apart on whether they emit a tool call (4.8 % vs 89.5 %). The arm under
-# test IS a tool-execution mechanism, so the upstream can decide whether the arm
-# runs at all — and qwen-code stamps only the REQUESTED name, so without this a
-# row can never be attributed to an upstream, retroactively or otherwise.
-# Opt out with SHERLOCK_UPSTREAM_LOG=0. → measure/probes/upstream-split.sh
-#
-# AND, on the same wire: THE 177,000-TOKEN CEILING IS A MODEL-ID PARSING ARTIFACT.
-# qwen-code sizes its context window from the model id. Its own normalize() turns
-# `[SP]deepseek-v4-flash` into `[sp]deepseek-v4-flash`, which matches no entry in
-# its table, so it falls back to DEFAULT_TOKEN_LIMIT = 200,000 — and the 177,000
-# hard limit follows from that. Drop the prefix and the SAME table matches
-# /^deepseek-v4/ => 1,000,000. Verified by running qwen-code's own normalize().
-# The provider needs the prefix (it is how linkapi routes); qwen-code must not
-# see it. So the CLI gets the clean id and the proxy restores the alias on the
-# way out. `$MODEL` — the ledger's attribution axis — stays the provider alias.
-# Without the proxy nothing can restore it, so the CLI keeps the alias as-is.
-CLIENT_MODEL="$MODEL"
-if [ "${SHERLOCK_UPSTREAM_LOG:-1}" = "1" ]; then
-  PROXY_PORT="$(python3 -c 'import socket
-s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1]); s.close()')"
-  UPSTREAM_BASE="$BASE_URL" UPSTREAM_LOG="$RUN_DIR/upstream.jsonl" \
-  LISTEN_PORT="$PROXY_PORT" RUN_TAG="$STAMP-$CASE_ID-$ARM" \
-  UPSTREAM_MODEL="$MODEL" \
-    python3 "$HERE/upstream-log-proxy.py" >/dev/null 2>"$RUN_DIR/proxy.err" &
-  PROXY_PID=$!
-  if python3 - "$PROXY_PORT" <<'PY'
-import sys, time, urllib.request
-for _ in range(100):
-    try:
-        with urllib.request.urlopen("http://127.0.0.1:%s/healthz" % sys.argv[1],
-                                    timeout=1) as r:
-            r.read()
-        sys.exit(0)
-    except Exception:
-        time.sleep(0.05)
-sys.exit(1)
-PY
-  then
-    BASE_URL="http://127.0.0.1:$PROXY_PORT/v1"
-    # Strip a leading bracketed routing tag — `[SP]`, `[FREE]`, whatever the
-    # provider prefixes next. Generic on purpose: the bug is "the client is
-    # shown a routing tag it parses as part of the model name", not this one
-    # tag. A model id with no tag comes out unchanged and this is a no-op.
-    CLIENT_MODEL="$(printf '%s' "$MODEL" | sed -E 's/^\[[^]]+\]//')"
-  else
-    # Never abort a metered run over a local helper — but say so loudly. The
-    # ABSENCE of upstream.jsonl is the signal: unmeasured is null, never a guess.
-    echo "  ⚠ upstream-log-proxy did not start — running WITHOUT attribution" >&2
-    kill "$PROXY_PID" 2>/dev/null; PROXY_PID=""
-  fi
-fi
+# NAME THE MODEL THAT ACTUALLY ANSWERS, and do not let the CLI parse the routing
+# prefix as part of the model name. Both live in the shared lane, because
+# run-bench.sh needs exactly the same wire and drifted for weeks without it.
+# Opt out with SHERLOCK_UPSTREAM_LOG=0. → measure/upstream-lane.sh
+. "$HERE/upstream-lane.sh"
+upstream_lane_start "$BASE_URL" "$RUN_DIR/upstream.jsonl" \
+                    "$STAMP-$CASE_ID-$ARM" "$MODEL"
+BASE_URL="$LANE_BASE_URL"
+CLIENT_MODEL="$LANE_CLIENT_MODEL"
+PROXY_PID="$LANE_PROXY_PID"
+
 export QWEN_HOME="$W/home"; mkdir -p "$QWEN_HOME"
 
 if [ "$ARM" != "none" ]; then
