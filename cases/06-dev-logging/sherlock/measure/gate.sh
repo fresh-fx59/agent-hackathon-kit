@@ -34,8 +34,16 @@ run_one() {
   # 5,896,031 tokens died invisibly. On a metered provider a guard here is not
   # optional: cap the BURN, not the retry count, because a provider burst fails
   # every attempt for minutes. -> measure/spend.py
-  burned="$(python3 "$HERE/burned-since.py" "$ARM" "$GATE_T0")"
-  if [ "${burned:-0}" -ge "$BURN_CAP_TOKENS" ]; then
+  # FAIL CLOSED. `${burned:-0}` reads an unmeasurable burn as ZERO, which is a
+  # guard that is always open — the very failure burned-since.py's own docstring
+  # warns about, one level up. A guard that cannot measure must refuse to spend.
+  burned="$(python3 "$HERE/burned-since.py" "$ARM" "$GATE_T0" 2>/dev/null)"
+  case "$burned" in
+    ''|*[!0-9]*)
+      echo "GUARD: cannot measure burn for $ARM (burned-since.py gave '${burned}') - refusing to spend" >&2
+      return 20 ;;
+  esac
+  if [ "$burned" -ge "$BURN_CAP_TOKENS" ]; then
     echo "GUARD: $burned burned tokens on $ARM this gate (cap $BURN_CAP_TOKENS) - stopping" >&2
     return 20
   fi

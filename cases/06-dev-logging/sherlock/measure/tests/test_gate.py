@@ -87,6 +87,13 @@ class GateHarness(unittest.TestCase):
         _chmod_x(os.path.join(gate_dir, "run-case.sh"))
         with open(os.path.join(gate_dir, "report-case.py"), "w", encoding="utf-8") as fh:
             fh.write(REPORT_CASE_STUB)
+        # The spend guard shells out to burned-since.py. Without it the command
+        # fails, `burned` is empty, `${burned:-0}` reads 0 and the guard is
+        # ALWAYS OPEN — the exact failure its own docstring warns about. Ship the
+        # real file so these tests exercise the real guard.
+        shutil.copy(os.path.join(MEASURE, "burned-since.py"),
+                    os.path.join(gate_dir, "burned-since.py"))
+        self.gate_dir = gate_dir
         self.gate = os.path.join(gate_dir, "gate.sh")
 
         self.cases = os.path.join(self.d, "cases")
@@ -105,8 +112,18 @@ class GateHarness(unittest.TestCase):
         env["SHERLOCK_RESULTS"] = self.results
         env["STUB_LOG_DIR"] = self.stub_log_dir
         env["FAIL_CASES"] = fail_cases
+        env.update(self._extra_env)
         return subprocess.run([self.gate, *args], env=env,
                                capture_output=True, text=True, timeout=30)
+
+    _extra_env = {}
+
+    def seed_burn(self, arm, input_tokens, run_dir="29990101T000000Z-D01-x"):
+        """A run that spent tokens and recorded nothing — what burned.jsonl is for."""
+        with open(os.path.join(self.gate_dir, "burned.jsonl"), "a",
+                  encoding="utf-8") as fh:
+            fh.write(json.dumps({"arm": arm, "input_tokens": input_tokens,
+                                 "reason": "test", "run_dir": run_dir}) + "\n")
 
     def invoked(self):
         p = os.path.join(self.stub_log_dir, "invoked.log")
@@ -120,6 +137,47 @@ class GateHarness(unittest.TestCase):
             return []
         with open(self.results, encoding="utf-8") as fh:
             return [json.loads(l) for l in fh if l.strip()]
+
+
+class TheSpendGuardActuallyStops(GateHarness):
+    """gate.sh ran unguarded on 2026-08-01 and 5,896,031 tokens died invisibly.
+
+    A guard is only a guard if something proves it closes. It caps the BURN, not
+    the retry count, because a provider burst fails every attempt for minutes —
+    counting retries would let a bad lane bill for as long as it stays bad.
+    """
+
+    def test_it_refuses_to_launch_once_the_cap_is_passed(self):
+        self.make_cases("D01", "D02")
+        self.seed_burn("v6", 9_000_000)
+        self._extra_env = {"BURN_CAP_TOKENS": "1000000"}
+        p = self.run_gate("2", "v6")
+        self.assertEqual(self.invoked(), [], "a capped gate still spent money")
+        self.assertIn("GUARD", p.stderr)
+
+    def test_burn_under_the_cap_runs_normally(self):
+        self.make_cases("D01")
+        self.seed_burn("v6", 10_000)
+        self._extra_env = {"BURN_CAP_TOKENS": "1000000"}
+        self.run_gate("2", "v6")
+        self.assertEqual(self.invoked(), ["D01"])
+
+    def test_another_arms_burn_does_not_stop_this_one(self):
+        self.make_cases("D01")
+        self.seed_burn("v12", 9_000_000)
+        self._extra_env = {"BURN_CAP_TOKENS": "1000000"}
+        self.run_gate("2", "v6")
+        self.assertEqual(self.invoked(), ["D01"])
+
+    def test_a_missing_helper_closes_the_gate_instead_of_opening_it(self):
+        """Fail CLOSED. An empty reading must never be read as zero burn."""
+        os.remove(os.path.join(self.gate_dir, "burned-since.py"))
+        self.make_cases("D01")
+        self._extra_env = {"BURN_CAP_TOKENS": "1000000"}
+        p = self.run_gate("2", "v6")
+        self.assertEqual(self.invoked(), [],
+                         "the guard could not measure burn and spent anyway")
+        self.assertIn("GUARD", p.stderr)
 
 
 class Tier0AllPass(GateHarness):
