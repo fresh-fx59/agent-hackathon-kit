@@ -602,7 +602,7 @@ def findings_without_evidence(report, results):
     return bad, len(bounds)
 
 
-def ledger(d, report, path):
+def ledger(d, report, path, report_path=None):
     rows, closed = read_ledger(path)
     open_rows = [r for r in rows
                  if r["state"] == "open" and not (set(r["ids"]) & closed)]
@@ -628,8 +628,21 @@ def ledger(d, report, path):
                    % ", ".join("Н-%s" % n for n in unproven))
     total = len(open_rows) + len(unproven) + bad + nonref
     out.append("")
-    out.append("ИТОГ: %s" % ("можно писать отчёт" if total == 0
-                             else "НЕ ЗАКОНЧЕНО — осталось %d" % total))
+    if total:
+        out.append("ИТОГ: НЕ ЗАКОНЧЕНО — осталось %d" % total)
+        return "\n".join(out), total
+    # GREEN. This is the last thing the model reads before it decides it is
+    # finished, so it is where the delivery step belongs — not 400 lines up in
+    # SKILL.md. D03 reached 10 proofs, wrote a 28,960-char report, read «можно
+    # писать отчёт» at a moment when the report was already written, and
+    # answered «Отлично. Все проверки пройдены. Отчёт готов и доставлен.» in 56
+    # characters. The row scored `collapse`: the judge never saw the report.
+    # Permission to write is not an instruction to deliver.
+    out.append("ИТОГ: можно отдавать отчёт.")
+    out.append("ПОСЛЕДНИЙ ШАГ: выведи файл целиком — cat %s"
+               % (report_path or "<файл отчёта>"))
+    out.append("Файл на диске — НЕ доставка. Ответом считается только текст "
+               "твоего последнего сообщения; «отчёт готов» в нём = пустой ответ.")
     return "\n".join(out), total
 
 
@@ -743,7 +756,8 @@ def main():
     if args.ledger:
         if not os.path.exists(args.ledger):
             sys.exit("нет такого файла: %s" % args.ledger)
-        body, left = ledger(d, text, args.ledger)
+        body, left = ledger(d, text, args.ledger,
+                            None if args.report == "-" else args.report)
         d["ledger"] = {"unresolved_total": left}
     print(json.dumps(d, ensure_ascii=False, indent=1) if args.json else render(d))
     if args.ledger:

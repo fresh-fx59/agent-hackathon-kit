@@ -368,7 +368,71 @@ class TheLedgerIsTheStoppingCondition(unittest.TestCase):
                        "timeout for order»",
                 extra=("--require-quote",))
             self.assertEqual(p.returncode, 0, p.stdout[-2000:])
-            self.assertIn("можно писать отчёт", p.stdout)
+            self.assertIn("можно", p.stdout)
+
+
+class GreenMustNameTheDeliveryNotJustPermitIt(unittest.TestCase):
+    """D03 wrote a 28,960-char report and answered in 56 characters.
+
+    «Отлично. Все проверки пройдены. Отчёт готов и доставлен.» — 10 proofs
+    reached, `reach_verdict: reached`, root cause correct in the file, and the
+    row scored `collapse` because the judge never saw any of it. The model
+    believed writing the file WAS delivering.
+
+    The last thing it read before deciding was this ledger's «ИТОГ: можно писать
+    отчёт» — permission to write, at the moment the report was already written.
+    Nothing anywhere in that output said the file is not the answer. SKILL.md
+    says so (`ebf39ca`) and D04 obeyed it; a rule 400 lines away from the moment
+    of decision is not a mechanism.
+
+    Same fix that converted D07: put the next action in the tool output at the
+    point the decision is made.
+    """
+
+    def green(self, d, report_name="r.md"):
+        corpus(d)
+        rows = [r.replace("\t?\t", "\tX файл обрезан ротацией\t", 1)
+                for r in TheLedgerIsTheStoppingCondition.WORKLIST]
+        wl = os.path.join(d, "worklist.tsv")
+        open(wl, "w", encoding="utf-8").write("\n".join(rows) + "\n")
+        rp = os.path.join(d, report_name)
+        open(rp, "w", encoding="utf-8").write(
+            "### Н-1 · таймаут\n- apps/app.log:2 — «reservation timeout for "
+            "order»\n")
+        return subprocess.run([sys.executable, CC, rp, "--corpus", d,
+                               "--ledger", wl, "--require-quote"],
+                              capture_output=True, text=True), rp
+
+    def test_the_green_verdict_names_the_delivery_command(self):
+        with tempfile.TemporaryDirectory() as d:
+            p, rp = self.green(d)
+            self.assertEqual(p.returncode, 0, p.stdout[-1500:])
+            self.assertIn("cat %s" % rp, p.stdout,
+                          "green must end with the exact command that delivers, "
+                          "not with permission to write:\n%s" % p.stdout[-1500:])
+
+    def test_the_green_verdict_says_the_file_is_not_the_answer(self):
+        with tempfile.TemporaryDirectory() as d:
+            p, _rp = self.green(d)
+            self.assertIn("НЕ доставка", p.stdout,
+                          "the belief that produced a 56-char answer must be "
+                          "contradicted in the output that produced it:\n%s"
+                          % p.stdout[-1500:])
+
+    def test_an_unfinished_ledger_does_NOT_invite_delivery(self):
+        """The instruction belongs only where it applies. Printing it beside
+        «НЕ ЗАКОНЧЕНО» would tell the model to deliver an unfinished report."""
+        with tempfile.TemporaryDirectory() as d:
+            corpus(d)
+            wl = os.path.join(d, "worklist.tsv")
+            open(wl, "w", encoding="utf-8").write(
+                "\n".join(TheLedgerIsTheStoppingCondition.WORKLIST) + "\n")
+            rp = os.path.join(d, "r.md")
+            open(rp, "w", encoding="utf-8").write("### Н-1\n- apps/app.log:2 — «x»\n")
+            p = subprocess.run([sys.executable, CC, rp, "--corpus", d,
+                                "--ledger", wl], capture_output=True, text=True)
+            self.assertNotEqual(p.returncode, 0)
+            self.assertNotIn("НЕ доставка", p.stdout, p.stdout[-800:])
 
 
 class VerdictClassification(unittest.TestCase):
