@@ -251,5 +251,71 @@ class TheForkedArmNeverHardcodesTheCorpusPath(unittest.TestCase):
                          % offenders)
 
 
+SKILL_DIR_RE = re.compile(r"\.qwen/skills/([A-Za-z0-9_.-]+)")
+
+
+def dirs_skill_md_depends_on(ver):
+    """Install-directory names hardcoded inside an arm's own tool commands.
+
+    v11 documents `ls .qwen/skills/log-rca/tools/logmap.py …`, so the arm only
+    works when it is installed under exactly that directory name.
+    """
+    body = open(os.path.join(SHERLOCK, "skills", ver, "SKILL.md"),
+                encoding="utf-8").read()
+    return {m for m in SKILL_DIR_RE.findall(body)}
+
+
+def runner_install_dirs():
+    """Every `.qwen/skills/<name>` a shipped runner writes to, by script."""
+    out = {}
+    for root, dirs, files in os.walk(SHERLOCK):
+        dirs[:] = [d for d in dirs
+                   if d not in ("tests", ".git", "__pycache__", "runs")]
+        for f in files:
+            if not f.endswith(".sh"):
+                continue
+            p = os.path.join(root, f)
+            with open(p, encoding="utf-8", errors="replace") as fh:
+                names = set(SKILL_DIR_RE.findall(fh.read()))
+            if names:
+                out[os.path.relpath(p, SHERLOCK)] = names
+    return out
+
+
+class EveryRunnerInstallsWhereTheSkillLooksForItsTools(unittest.TestCase):
+    """A runner that installs the skill under the wrong directory name silently
+    disarms it.
+
+    v11's commands are `ls .qwen/skills/log-rca/tools/X.py ~/.qwen/skills/…` —
+    under any other directory BOTH paths miss, `ls` prints nothing, and the
+    command becomes `python3 ""`. SKILL.md routes exactly that failure into its
+    "if the tool is absent" fallback, so the run looks like a normal skill-less
+    run instead of a broken install. That is the same trap that cost four metered
+    cells on 2026-07-31, arriving from the runner side instead of the skill side.
+
+    Measured 2026-08-03: six shipped runners installed to `log-rca` and five to
+    `sherlock`, so `verify.sh`, `eval/run.sh` and `knowledge/measure/run-kb.sh`
+    could never have run v11's tools.
+    """
+
+    def test_the_arms_agree_on_one_install_directory(self):
+        for ver in ARMS:
+            self.assertEqual(dirs_skill_md_depends_on(ver), {"log-rca"},
+                             "%s/SKILL.md names a different install dir" % ver)
+
+    def test_every_runner_uses_that_same_directory(self):
+        wanted = dirs_skill_md_depends_on("v11")
+        bad = {s: n for s, n in runner_install_dirs().items() if not n <= wanted}
+        self.assertEqual(bad, {},
+                         "these runners install where SKILL.md's tool commands "
+                         "cannot find the tools (wanted %s)" % sorted(wanted))
+
+    def test_the_check_can_see_a_runner_at_all(self):
+        """A walk that silently matches nothing would pass forever."""
+        found = runner_install_dirs()
+        self.assertIn("measure/run-case.sh", found)
+        self.assertIn("eval/bench/run-bench.sh", found)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

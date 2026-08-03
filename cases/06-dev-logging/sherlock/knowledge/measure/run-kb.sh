@@ -56,7 +56,7 @@ mkdir -p "$QWEN_HOME"
 printf '{ "tools": { "approvalMode": "yolo" } }\n' >"$QWEN_HOME/settings.json"
 
 # ---- build the skill: v1 + the self-improvement section, identical in both arms ----
-SKILL_DIR="$RUN_DIR/.qwen/skills/sherlock"
+SKILL_DIR="$RUN_DIR/.qwen/skills/log-rca"
 mkdir -p "$SKILL_DIR/knowledge/patterns"
 BASE_SKILL="${SHERLOCK_BASE_SKILL:-v4}"     # follow whatever version currently ships
 python3 "$KNOW/measure/merge-skill.py" \

@@ -42,9 +42,9 @@ green "corpus: $LOGS ($(du -sh "$LOGS" 2>/dev/null | cut -f1), $NLINES lines)"
 # ------------------------------------------------- install skill where qwen looks
 # Qwen Code discovers skills from <project>/.qwen/skills/<name>/SKILL.md
 mkdir -p "$WORK/.qwen/skills"
-rm -rf "$WORK/.qwen/skills/sherlock"
-cp -r "$HERE/skills/$VER" "$WORK/.qwen/skills/sherlock" || fail "could not install skill"
-green "skill installed: $WORK/.qwen/skills/sherlock/SKILL.md"
+rm -rf "$WORK/.qwen/skills/log-rca"
+cp -r "$HERE/skills/$VER" "$WORK/.qwen/skills/log-rca" || fail "could not install skill"
+green "skill installed: $WORK/.qwen/skills/log-rca/SKILL.md"
 
 # --------------------------------------------------------------------- auth
 # THE KEY AND THE BASE URL TRAVEL BY ENVIRONMENT, NEVER ON ARGV. argv is world-readable in `ps`

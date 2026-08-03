@@ -1,5 +1,12 @@
 # `tools/` — four scripts the skill may call, and must survive without
 
+> **Lineage note (2026-08-03).** This directory is the **v8–v10** toolset and is
+> kept so their recorded measurements stay reproducible. **The shipped arm `v11`
+> carries its own fork in `skills/v11/tools/`** — `logmap.py` (which replaced
+> `logstat.py`), `logjoin.py`, `citecheck.py`, and no `fetch-logs.sh`. Editing a
+> script here would rewrite what has already been measured for v8–v10, which is
+> why the fork exists (`tools/tests/test_bundle_copy.py::TheForkedArmOwnsItsTools`).
+
 Three are **single self-contained `python3` files**; the fourth is a single
 **`bash` script**. All are **stdlib / coreutils only, zero config** (AGENTS.md
 R1). No pip, no network, no LLM. They ship inside the skill folder, so installing

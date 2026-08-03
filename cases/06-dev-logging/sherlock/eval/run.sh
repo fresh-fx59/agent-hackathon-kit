@@ -69,7 +69,7 @@ else
   SRC="$HERE/skills/$ARM"
   [ -f "$SRC/SKILL.md" ] || { echo "✗ no skill at $SRC/SKILL.md" >&2; exit 1; }
   mkdir -p "$RUN_DIR/.qwen/skills"
-  cp -r "$SRC" "$RUN_DIR/.qwen/skills/sherlock"
+  cp -r "$SRC" "$RUN_DIR/.qwen/skills/log-rca"
 fi
 
 # Identical prompt for every arm — the ONLY variable is whether the skill is present.
