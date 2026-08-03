@@ -173,14 +173,17 @@ class TheScoredRowIsTraceable(unittest.TestCase):
     """A number with no provenance is the artifact this project keeps getting burned
     by: it must name the arm, the model under test, the judge, and the trajectory."""
 
-    def run_it(self, answer="a report", found=True):
+    def run_it(self, answer="a report", found=True, artifact=None):
         d = tempfile.mkdtemp(prefix="score-bench-test-")
         ledger = os.path.join(d, "runs-bench.jsonl")
+        row = {"arm": "v11", "model": "[SP]deepseek-v4-flash",
+               "dataset": "bench649", "trace_dir": "/runs/x",
+               "turns": 48, "duration_s": 1850,
+               "input_tokens": 6995082, "answer": answer}
+        if artifact is not None:
+            row["artifact"] = artifact
         with open(ledger, "w", encoding="utf-8") as fh:
-            fh.write(json.dumps({"arm": "v11", "model": "[SP]deepseek-v4-flash",
-                                 "dataset": "bench649", "trace_dir": "/runs/x",
-                                 "turns": 48, "duration_s": 1850,
-                                 "input_tokens": 6995082, "answer": answer}) + "\n")
+            fh.write(json.dumps(row) + "\n")
         key = os.path.join(d, "key.json")
         json.dump(KEY, open(key, "w", encoding="utf-8"))
         stub = os.path.join(d, "judge.json")
@@ -218,13 +221,92 @@ class TheScoredRowIsTraceable(unittest.TestCase):
         self.assertEqual(rows[0]["false_positives"], 2)
 
     def test_an_empty_answer_is_refused_instead_of_scored_as_zero(self):
-        """A collapsed run has no report. Scoring it 0/11 would put a delivery
-        failure on the recall axis, which is the confusion the slice ledger spent
-        two days separating."""
+        """A run with NO report at all — neither channel. Scoring it 0/11 would
+        put a delivery failure on the recall axis, which is the confusion the
+        slice ledger spent two days separating."""
         p, rows = self.run_it(answer="   ")
         self.assertNotEqual(p.returncode, 0)
         self.assertEqual(rows, [])
-        self.assertIn("no answer", p.stderr)
+        self.assertIn("nothing to score", p.stderr)
+
+    def test_the_scored_row_names_the_channel_the_report_arrived_on(self):
+        """Recall and delivery stay separately visible. A row that scores 8 of 11
+        off a 101-char final message is a real finding AND a real defect."""
+        _p, rows = self.run_it(answer="Отчёт готов.", artifact="x" * 5000)
+        self.assertEqual(rows[0]["delivered_in"], "file")
+        self.assertEqual(rows[0]["answer_chars"], len("Отчёт готов."))
+        self.assertEqual(rows[0]["artifact_chars"], 5000)
+
+    def test_a_run_that_only_wrote_a_report_file_is_scored_not_refused(self):
+        p, rows = self.run_it(answer="", artifact="# Отчёт\napps/api.log:1 x")
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertEqual(len(rows), 1, "a paid-for run was thrown away again")
+        self.assertEqual(rows[0]["delivered_in"], "file")
+
+
+class ItScoresTheDeliverableNotOnlyTheFinalMessage(unittest.TestCase):
+    """The 18.76 M-token row this exists for.
+
+    `20260802T221034Z-v11` answered «Отчёт готов…» in 101 chars beside a complete
+    19,991-char `work/report.md` that had just passed `citecheck` 45/45. Judging
+    the final message alone scores a finished investigation 0 of 11 — a delivery
+    failure recorded on the recall axis, which is the exact confusion this rig
+    was built to separate.
+    """
+
+    def row(self, **kw):
+        r = {"arm": "v11", "model": "[SP]deepseek-v4-flash", "dataset": "bench649",
+             "trace_dir": "/runs/x", "turns": 90, "answer": ""}
+        r.update(kw)
+        return r
+
+    def test_the_report_file_reaches_the_judge(self):
+        got = []
+        r = self.row(answer="Отчёт готов.", artifact="PAYLOAD-MARKER api.log:1")
+        SB.score({"D01": KEY["D01"]}, SB.deliverable.of_row(r),
+                 lambda p: got.append(p) or '{"found": true, "why": "x"}')
+        self.assertIn("PAYLOAD-MARKER", got[0])
+        self.assertIn("Отчёт готов.", got[0], "the message is evidence too")
+
+    def test_a_message_only_row_reaches_the_judge_byte_identical(self):
+        """Twelve published rows are message-only. If composition perturbed them,
+        the 0-of-11 baseline would stop being comparable to its own number."""
+        self.assertEqual(SB.deliverable.of_row(self.row(answer="just this")),
+                         "just this")
+
+
+class TheRowUnderTestIsChosenExplicitly(unittest.TestCase):
+    """`rows[-1]` can reach exactly one run, and four stub rows sit in the real
+    bench ledger (`input_tokens: 11`, from a runner smoke test) where it would
+    happily score one of them as a measurement."""
+
+    ROWS = [{"arm": "v11", "trace_dir": "/runs/WANTED", "answer": "a"},
+            {"arm": "none", "trace_dir": "/runs/base", "answer": "b"},
+            {"arm": "v11", "trace_dir": "/runs/stub", "answer": "c", "stub": True},
+            {"arm": "v11", "trace_dir": "/runs/later", "answer": "d"}]
+
+    def test_the_default_is_still_the_last_real_row(self):
+        self.assertEqual(SB.select_row(self.ROWS, None, None)["trace_dir"],
+                         "/runs/later")
+
+    def test_a_stub_row_is_never_selected(self):
+        rows = self.ROWS[:3]
+        self.assertEqual(SB.select_row(rows, "v11", None)["trace_dir"],
+                         "/runs/WANTED", "a stub row was scored as a measurement")
+
+    def test_a_named_trajectory_is_selected_by_substring(self):
+        self.assertEqual(SB.select_row(self.ROWS, None, "WANTED")["trace_dir"],
+                         "/runs/WANTED")
+
+    def test_an_arm_and_a_trajectory_compose(self):
+        self.assertEqual(SB.select_row(self.ROWS, "none", None)["trace_dir"],
+                         "/runs/base")
+
+    def test_a_trajectory_that_matches_nothing_raises_instead_of_scoring_another(self):
+        """Silently falling back to the last row is how a re-score gets published
+        against a run nobody asked for."""
+        with self.assertRaises(SystemExit):
+            SB.select_row(self.ROWS, None, "no-such-run")
 
 
 if __name__ == "__main__":

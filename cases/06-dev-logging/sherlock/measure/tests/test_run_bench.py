@@ -42,11 +42,20 @@ try:
 except Exception:
     pass
 ' "$M"
-cat <<JSON
-[{"type":"system","model":"$M"},
- {"type":"result","result":"apps/api.log:1 something broke","num_turns":2,
-  "usage":{"input_tokens":11,"output_tokens":22}}]
-JSON
+# A real run writes its report into work/report.md and may then deliver it on
+# either channel, or on neither. The stub reproduces all three.
+if [ -n "${QWEN_STUB_REPORT:-}" ]; then
+  mkdir -p work && printf '%s' "$QWEN_STUB_REPORT" > work/report.md
+fi
+[ -n "${QWEN_STUB_KILL:-}" ] && exit 143
+QWEN_STUB_MODEL="$M" python3 -c '
+import json, os
+print(json.dumps([
+  {"type": "system", "model": os.environ["QWEN_STUB_MODEL"]},
+  {"type": "result",
+   "result": os.environ.get("QWEN_STUB_ANSWER", "apps/api.log:1 something broke"),
+   "num_turns": 2, "usage": {"input_tokens": 11, "output_tokens": 22}}]))
+'
 exit 0
 """
 
@@ -88,7 +97,9 @@ class StubProvider:
         self.srv.server_close()
 
 
-class TheBenchRunnerUsesTheSameUpstreamLane(unittest.TestCase):
+class BenchRunnerRig:
+    """The stub rig: a fake `qwen`, a stub provider, a throwaway corpus."""
+
     def go(self, extra_env=None):
         prov = StubProvider()
         self.addCleanup(prov.close)
@@ -128,6 +139,8 @@ class TheBenchRunnerUsesTheSameUpstreamLane(unittest.TestCase):
     def cli_model(self, argv):
         return argv[argv.index("--model") + 1]
 
+
+class TheBenchRunnerUsesTheSameUpstreamLane(BenchRunnerRig, unittest.TestCase):
     def test_the_cli_is_given_the_clean_id(self):
         argv, _seen, _rows, p = self.go()
         self.assertEqual(self.cli_model(argv), "deepseek-v4-flash",
@@ -155,6 +168,79 @@ class TheBenchRunnerUsesTheSameUpstreamLane(unittest.TestCase):
             self.assertEqual(
                 json.load(fh)["model"]["generationConfig"]["contextWindowSize"],
                 400000)
+
+
+class TheLedgerRecordsEveryChannelTheRunDeliveredOn(BenchRunnerRig, unittest.TestCase):
+    """The 18.76 M-token row that recorded nothing.
+
+    `20260802T221034Z-v11`: `citecheck` green at 45/45, «Теперь финальный шаг —
+    вывести отчёт полностью», `read_file(work/report.md)`, stop. Final message
+    101 chars; `work/report.md` 19,991 chars and complete. A tool result is not
+    the `result` record, so the runner recorded a 101-char answer and the
+    scorer had nothing to judge.
+
+    These tests pin the fix at the RUNNER, not at the skill's wording — two
+    wording edits already failed, because "output the report" is satisfiable by
+    a tool the model has.
+    """
+
+    REPORT = ("# Отчёт\n\napps/api.log:1 the vendor_ref query has no index\n"
+              "svc/other.log:9 payments-worker panics on a short batch\n")
+
+    def test_a_report_file_is_recorded_beside_the_final_message(self):
+        _a, _s, rows, p = self.go({"QWEN_STUB_REPORT": self.REPORT})
+        self.assertEqual(len(rows), 1, "no ledger row; stderr: %s" % p.stderr[-800:])
+        self.assertEqual(rows[0]["artifact"], self.REPORT)
+        self.assertEqual(rows[0]["artifact_chars"], len(self.REPORT))
+
+    def test_a_collapsed_message_beside_a_full_report_is_recorded_as_file(self):
+        _a, _s, rows, _p = self.go({"QWEN_STUB_REPORT": self.REPORT,
+                                    "QWEN_STUB_ANSWER": "Отчёт готов."})
+        self.assertEqual(rows[0]["delivered_in"], "file")
+        self.assertEqual(rows[0]["answer_chars"], len("Отчёт готов."),
+                         "the collapse must stay visible, not be papered over")
+
+    def test_a_run_with_no_report_file_is_unchanged(self):
+        """Every row before 2026-08-03 is message-only, including the 0-of-11
+        baseline. If this row moved, the published comparison would break."""
+        _a, _s, rows, _p = self.go()
+        self.assertEqual(rows[0]["delivered_in"], "message")
+        self.assertEqual(rows[0]["artifact"], "")
+        self.assertEqual(rows[0]["deliverable_chars"], rows[0]["answer_chars"])
+
+    def test_coverage_counts_files_named_in_either_channel(self):
+        """`files_cited` drove the "cited 0 of 31" reading of the collapsed run.
+        It was counting a 101-char message against a 31-file corpus."""
+        _a, _s, rows, _p = self.go({"QWEN_STUB_REPORT": self.REPORT,
+                                    "QWEN_STUB_ANSWER": "Отчёт готов."})
+        self.assertEqual(rows[0]["files_cited"], 1,
+                         "apps/api.log is named in the file, not the message")
+        self.assertGreaterEqual(rows[0]["line_refs"], 2)
+
+    def test_a_killed_run_that_left_a_report_is_recorded_with_NULL_cost(self):
+        """`20260802T151710Z-v11`: 0-byte out.json, 24,233-char report.md. The
+        runner exited before recording anything, so a paid-for run left no row
+        at all — and ~33 % of this project's spend has bought exactly that.
+        Detection is still answerable from the report; cost is NOT, so every
+        cost field stays null and never 0.
+        → [[eval-must-measure-cost-not-just-quality]]"""
+        _a, _s, rows, p = self.go({"QWEN_STUB_REPORT": self.REPORT,
+                                   "QWEN_STUB_KILL": "1"})
+        self.assertEqual(len(rows), 1, "stdout: %s\nstderr: %s"
+                         % (p.stdout[-600:], p.stderr[-600:]))
+        r = rows[0]
+        self.assertIs(r["artifact_only"], True)
+        self.assertEqual(r["artifact"], self.REPORT)
+        self.assertIsNone(r["input_tokens"], "unmeasured cost is null, never 0")
+        self.assertIsNone(r["output_tokens"])
+        self.assertIsNone(r["turns"])
+
+    def test_a_run_that_produced_nothing_at_all_is_still_refused(self):
+        """No report, no answer: recording it would put a transport failure on
+        the recall axis, which is the confusion this rig exists to separate."""
+        _a, _s, rows, p = self.go({"QWEN_STUB_KILL": "1"})
+        self.assertEqual(rows, [], "stdout: %s" % p.stdout[-600:])
+        self.assertNotEqual(p.returncode, 0)
 
 
 if __name__ == "__main__":

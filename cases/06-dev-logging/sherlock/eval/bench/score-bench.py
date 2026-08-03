@@ -34,6 +34,15 @@ _spec = importlib.util.spec_from_file_location(
 score_case = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(score_case)
 
+# The union of every channel the run delivered on, defined once in measure/ and
+# imported by the runner too. A run can hand over its report in the final message
+# or in `work/report.md`, and on 2026-08-02 one did the latter after announcing it
+# would: 101-char answer, 19,991-char report, citecheck 45/45, nothing scored.
+_dspec = importlib.util.spec_from_file_location(
+    "deliverable", os.path.join(SHERLOCK, "measure", "deliverable.py"))
+deliverable = importlib.util.module_from_spec(_dspec)
+_dspec.loader.exec_module(deliverable)
+
 # The key marks these by prefixing the title. They are the discrimination test, not
 # the recall test, so they are scored on the opposite axis.
 HERRING_MARK = "RED HERRING"
@@ -129,23 +138,54 @@ def score(raw_key, answer, call):
             "herrings": len(herr)}
 
 
+def select_row(rows, arm, trace):
+    """The run under test, chosen explicitly — never "whatever landed last".
+
+    Two hazards this closes. `rows[-1]` can reach exactly one run, so a scorer
+    fix could never re-derive the arm's published numbers; and four STUB rows
+    (`input_tokens: 11`, from a runner smoke test) sit in the real bench ledger,
+    where `rows[-1]` would score one as a measurement.
+
+    A `--trace` that matches nothing RAISES. Falling back to the last row is how
+    a re-score gets published against a run nobody asked for.
+    """
+    live = [r for r in rows if not r.get("stub")]
+    if arm:
+        live = [r for r in live if r.get("arm") == arm]
+    if trace:
+        live = [r for r in live if trace in (r.get("trace_dir") or "")]
+    if not live:
+        sys.exit("no bench row matches%s%s"
+                 % (" arm=%s" % arm if arm else "",
+                    " trace~%s" % trace if trace else ""))
+    return live[-1]
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--ledger", default=os.path.join(HERE, "runs-bench.jsonl"))
     ap.add_argument("--key", default=os.path.join(HERE, "answer-key.json"))
     ap.add_argument("--arm")
+    ap.add_argument("--trace", help="substring of trace_dir — score THAT run")
     ap.add_argument("--out", default=os.path.join(HERE, "scores-bench.jsonl"))
     a = ap.parse_args()
 
     rows = [json.loads(l) for l in open(a.ledger, encoding="utf-8") if l.strip()]
-    if a.arm:
-        rows = [r for r in rows if r.get("arm") == a.arm]
     if not rows:
-        sys.exit("no bench rows%s" % (" for arm %s" % a.arm if a.arm else ""))
-    run = rows[-1]
-    answer = run.get("answer") or ""
+        sys.exit("no bench rows in %s" % a.ledger)
+    run = select_row(rows, a.arm, a.trace)
+    # Judge the DELIVERABLE: the final message plus `work/report.md`. Judging the
+    # message alone scored a finished, citecheck-green investigation as nothing.
+    answer = deliverable.of_row(run)
+    channel = deliverable.channel_of_row(run)
     if not answer.strip():
-        sys.exit("the bench row carries no answer — nothing to score")
+        sys.exit("the bench row carries neither an answer nor a report file — "
+                 "nothing to score")
+    if channel == "file":
+        print("⚠ DELIVERY: this run's report is in work/report.md, not in its "
+              "final message (%d chars) — the score below measures DETECTION, "
+              "and delivery is a separate, open defect"
+              % (run.get("answer_chars") or len(run.get("answer") or "")))
 
     key = json.load(open(a.key, encoding="utf-8"))
 
@@ -194,7 +234,13 @@ def main():
            "turns": run.get("turns"), "duration_s": run.get("duration_s"),
            "input_tokens": run.get("input_tokens"),
            "output_tokens": run.get("output_tokens"),
-           "answer_chars": run.get("answer_chars"),
+           "delivered_in": channel,
+           "answer_chars": run.get("answer_chars",
+                                   len(run.get("answer") or "")),
+           "artifact_chars": run.get("artifact_chars",
+                                     len(run.get("artifact") or "")),
+           "deliverable_chars": len(answer),
+           "artifact_only": run.get("artifact_only", False),
            "files_cited": run.get("files_cited"),
            "files_in_corpus": run.get("files_in_corpus"),
            "per_defect": [{k: r[k] for k in ("defect", "found", "herring", "why")}
