@@ -48,6 +48,8 @@ The design each test defends:
 
     python3 tools/tests/test_score_report.py
 """
+import gzip
+import hashlib
 import importlib.util
 import io
 import json
@@ -355,14 +357,89 @@ class TestCitecheckFold(unittest.TestCase):
             "app/only.log": numbered(50),
         })
 
-    def test_it_uses_v16_not_the_stale_working_copy(self):
+    def test_it_uses_a_current_skill_version_not_the_stale_working_copy(self):
         """tools/citecheck.py in the working tree is a v5-v10 snapshot: it has no
         `ambiguous` verdict at all. Loading it here would silently drop the one
-        column this scorer promises to keep visible."""
+        column this scorer promises to keep visible.
+
+        The PIN used to be the whole guard, and a pin is a guard that expires: it
+        named v16, v19 taught citecheck to read `.gz`, and the negative-control key
+        moved its biggest finding into `auth.log.2.gz`. So the version is RESOLVED
+        (highest on disk, or $SHERLOCK_CITECHECK_VERSION) and the guard is now a
+        behavioural probe instead of a string."""
         self.assertIn("ambiguous", S.citecheck.VERDICTS)
         self.assertNotIn("ambiguous", S.citecheck.RANK,
-                         "v16 keeps `ambiguous` out of RANK on purpose")
-        self.assertIn(os.path.join("skills", "v16"), S.CITECHECK_PATH)
+                         "`ambiguous` stays out of RANK on purpose")
+        self.assertIn(os.path.join("skills", S.CITECHECK_VERSION),
+                      S.CITECHECK_PATH)
+        self.assertRegex(S.CITECHECK_VERSION, r"^v[0-9][0-9.]*$")
+
+    def test_the_resolved_version_is_the_highest_one_on_disk(self):
+        """A pin that names a number goes stale the day the next arm ships. This
+        one is derived, so v21 becomes current by existing."""
+        name, path = S.resolve_citecheck(S.SHERLOCK)
+        self.assertEqual(name, S.CITECHECK_VERSION)
+        self.assertTrue(os.path.isfile(path))
+        avail = [v for v, _n, _p in S._skill_citecheckers(S.SHERLOCK)]
+        self.assertEqual(S._version_tuple(name), max(avail))
+
+    def test_an_explicit_version_can_still_be_pinned(self):
+        """Re-checking an old score needs the old checker. The receipt in the
+        record names a version AND a sha; both have to be reachable again."""
+        name, path = S.resolve_citecheck(S.SHERLOCK, want="v16")
+        self.assertEqual(name, "v16")
+        self.assertIn(os.path.join("skills", "v16"), path)
+
+    def test_a_checker_that_cannot_PRODUCE_ambiguous_is_refused(self):
+        """The guard the old comment described, made real. `tools/citecheck.py` is
+        the v5-v10 snapshot that is actually on disk in this repo — loading it must
+        RAISE, not quietly score with one fewer column."""
+        stale = os.path.join(TOOLS, "citecheck.py")
+        self.assertTrue(os.path.isfile(stale), "the stale snapshot is the fixture")
+        mod = S._load("citecheck_stale", stale)
+        self.assertNotIn("ambiguous", getattr(mod, "VERDICTS", ()))
+        with self.assertRaises(Exception):
+            S.assert_ambiguity_capable(mod, "stale", stale)
+
+    def test_the_checker_in_use_really_produces_ambiguous_on_a_two_host_corpus(self):
+        """Not `"ambiguous" in VERDICTS` — the verdict actually coming out."""
+        S.assert_ambiguity_capable(S.citecheck, S.CITECHECK_VERSION,
+                                   S.CITECHECK_PATH)
+
+    def test_a_gz_citation_is_not_scored_binary_file(self):
+        """v16 called every `.gz` a binary because it sniffed the RAW bytes, and a
+        gzip stream is full of NULs. v19 reads through `gzip.open`. The negative
+        control's biggest finding now lives in `mon/auth/auth.log.2.gz` (R01 went
+        6,650 -> 16,501), so a scorer still on v16 would score a CORRECT citation
+        of it as `binary-file`. No arm has cited a `.gz` yet; this is the test that
+        fires before one does."""
+        gz = os.path.join(self.tmp, "mon", "auth", "auth.log.2.gz")
+        os.makedirs(os.path.dirname(gz), exist_ok=True)
+        with gzip.open(gz, "wt", encoding="utf-8") as fh:
+            fh.write("Aug 02 00:00:01 mon sshd[1]: Invalid user admin from 1.2.3.4\n"
+                     * 3)
+        key = key_with([defect("D01", "ssh sweep",
+                               [{"file": "mon/auth/auth.log.2.gz",
+                                 "line_start": 2, "line_end": 2}])])
+        report = ("mon/auth/auth.log.2.gz:2 "
+                  "«Aug 02 00:00:01 mon sshd[1]: Invalid user admin from 1.2.3.4»")
+        with redirect_stdout(io.StringIO()):
+            rec = S.score(key, report, self.tmp, call=None)
+        self.assertEqual(rec["citecheck"]["binary-file"], 0,
+                         "a gzipped TEXT log is citable since v19")
+        self.assertEqual(rec["citecheck"]["ok"], 1)
+        self.assertEqual(rec["anchored"], 1,
+                         "and a `.gz` proof location must anchor")
+
+    def test_the_record_carries_a_re_checkable_receipt(self):
+        key = key_with([defect("D01", "x", [loc("app/only.log", 5)])])
+        with redirect_stdout(io.StringIO()):
+            rec = S.score(key, "app/only.log:5 «filler line 5»", self.tmp,
+                          call=None)
+        self.assertEqual(rec["citecheck_version"], S.CITECHECK_VERSION)
+        self.assertEqual(rec["citecheck_sha"],
+                         hashlib.sha1(open(S.CITECHECK_PATH, "rb").read()).hexdigest())
+        self.assertEqual(rec["citecheck_path"], S.CITECHECK_PATH)
 
     def test_summary_is_folded_in_with_ambiguous_as_its_own_count(self):
         key = key_with([defect("D01", "x", [loc("app/only.log", 5)])])
@@ -554,6 +631,353 @@ class TestLedger(unittest.TestCase):
         out = buf.getvalue()
         self.assertIn("anchored", out.lower())
         self.assertIn("asserted", out.lower())
+
+
+# --------------------------------------------------------------------------
+# H. the structural assertion axis — free, and NOT the same claim as `anchored`
+# --------------------------------------------------------------------------
+# `anchored` says the report put the proof line in front of the reader. It does
+# NOT say the report concluded anything, and two measured cases prove the gap:
+# BlueSky D01 was anchored and then argued away as pre-compromise, and BlueSky
+# D09's frame was cited under a DIFFERENT finding. The only column that could
+# catch that was `asserted`, which needs the judge — and the judge is the
+# unstable axis: one identical report scored 0/2, 2/2, 2/2 on decoys across three
+# runs. These reports have a structure, so the claim can be READ instead of
+# judged: a citation inside the findings section is an assertion, the same
+# citation inside «Отклонённые кандидаты» is a mention. Parsing, not judgement.
+FINDINGS_REPORT = """# Отчёт
+
+## 0. Короткий ответ
+
+Что-то произошло. app/a.log:5 «filler line 5»
+
+## 1. Находки
+
+### Н-1 · Первое
+
+Вот доказательство: app/a.log:10 «filler line 10»
+
+## 2. Отклонённые кандидаты
+
+- **«Второе»** — нет. app/a.log:20 «filler line 20» — это фон.
+- **«Третье»** — ничего относящегося.
+
+## 3. Покрытие
+
+| путь | что искал | вердикт |
+|---|---|---|
+| app/b.log | всё | ничего относящегося |
+
+## ВЕРДИКТ
+
+compromised
+"""
+
+
+class TestStructuralAssertionAxis(unittest.TestCase):
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        build_corpus(self.tmp, {"app/a.log": numbered(50),
+                                "app/b.log": numbered(50)})
+
+    def score(self, key, report=FINDINGS_REPORT):
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            rec = S.score(key, report, self.tmp, call=None)
+        return rec, buf.getvalue()
+
+    def test_a_citation_in_the_findings_section_is_an_assertion(self):
+        key = key_with([defect("D01", "x", [loc("app/a.log", 10)])])
+        rec, _ = self.score(key)
+        self.assertEqual(rec["anchored"], 1)
+        self.assertEqual(rec["presented"], 1)
+        self.assertEqual(rec["presentable"], 1)
+
+    def test_the_same_citation_in_the_rejected_section_is_only_a_mention(self):
+        """BlueSky D01: anchored, then argued away as pre-compromise. `anchored`
+        cannot see the difference; this axis can, and for free."""
+        key = key_with([defect("D01", "x", [loc("app/a.log", 20)])])
+        rec, _ = self.score(key)
+        self.assertEqual(rec["anchored"], 1, "it IS cited — that stays true")
+        self.assertEqual(rec["presented"], 0)
+        self.assertEqual(rec["dismissed"], 1)
+        self.assertEqual(rec["per_defect"][0]["anchored_zones"], ["rejected"])
+
+    def test_a_citation_in_neither_section_anchors_but_asserts_nothing(self):
+        """The executive summary, the coverage table and the inventory are all
+        real places to cite from, and none of them is a finding."""
+        key = key_with([defect("D01", "x", [loc("app/a.log", 5)])])
+        rec, _ = self.score(key)
+        self.assertEqual(rec["anchored"], 1)
+        self.assertEqual(rec["presented"], 0)
+        self.assertEqual(rec["dismissed"], 0)
+        self.assertEqual(rec["anchored_outside_findings"], 1)
+        self.assertEqual(rec["per_defect"][0]["anchored_zones"], ["other"])
+
+    def test_the_two_axes_are_reported_side_by_side_and_never_merged(self):
+        """The project's rule: axes are never summed. `anchored` also STAYS,
+        because it is what makes retroactive scoring of old trajectories possible."""
+        key = key_with([defect("D01", "x", [loc("app/a.log", 20)])])
+        rec, out = self.score(key)
+        self.assertIn("anchored", rec)
+        self.assertIn("presented", rec)
+        self.assertNotEqual(rec["anchored"], rec["presented"])
+        self.assertIn("anchored", out.lower())
+        self.assertIn("presented", out.lower())
+
+    def test_it_records_WHICH_heading_the_anchor_sits_under(self):
+        """BlueSky D09: the analyst cited a frame of the payload's callback and
+        filed it under the port scan. No free axis can call that wrong, but the
+        heading it landed under is free to record — so a reader can see it."""
+        key = key_with([defect("D01", "x", [loc("app/a.log", 10)])])
+        rec, _ = self.score(key)
+        self.assertEqual(rec["per_defect"][0]["anchored_headings"],
+                         ["Н-1 · Первое"])
+
+    def test_an_unparseable_report_returns_none_and_says_why(self):
+        """Never a silent 0. `asserted nothing` and `could not be read` are
+        different facts, and one of them is about the report."""
+        key = key_with([defect("D01", "x", [loc("app/a.log", 10)])])
+        rec, out = self.score(key, "no headings at all. app/a.log:10 «filler line 10»")
+        self.assertEqual(rec["anchored"], 1, "anchoring is unaffected")
+        self.assertIsNone(rec["presented"])
+        self.assertIsNone(rec["dismissed"])
+        self.assertIsNone(rec["decoys_presented"])
+        self.assertIsNone(rec["per_defect"][0]["presented"])
+        self.assertFalse(rec["structure"]["parsed"])
+        self.assertTrue(rec["structure"]["why"])
+        self.assertIn("находк", rec["structure"]["why"].lower())
+        self.assertRegex(out, r"NOT MEASURED|НЕ ИЗМЕР|could not")
+
+    def test_a_report_with_findings_but_no_rejected_section_still_scores(self):
+        """One missing half must not delete the other. `presented` is computable;
+        `dismissed` is not, so it is None — never 0."""
+        rep = "## 1. Находки\n\n### Н-1\n\napp/a.log:10 «filler line 10»\n"
+        key = key_with([defect("D01", "x", [loc("app/a.log", 10)])])
+        rec, _ = self.score(key, rep)
+        self.assertEqual(rec["presented"], 1)
+        self.assertIsNone(rec["dismissed"])
+        self.assertTrue(rec["structure"]["parsed"])
+        self.assertIsNone(rec["structure"]["rejections"])
+
+    def test_the_axis_sends_nothing_anywhere(self):
+        key = key_with([defect("D01", "x", [loc("app/a.log", 10)])])
+        saved = (S.score_case.http_call, S.score_bench.score)
+        S.score_case.http_call = Tripwire("score_case.http_call")
+        S.score_bench.score = Tripwire("score_bench.score")
+        try:
+            rec, _ = self.score(key)
+        finally:
+            S.score_case.http_call, S.score_bench.score = saved
+        self.assertEqual(rec["presented"], 1)
+        self.assertFalse(rec["judged"])
+
+    def test_presented_never_fills_the_judged_column(self):
+        """`asserted` is the JUDGED column. A free number is not allowed to
+        impersonate it — that is the same lie as recording an unasked question as
+        a negative answer."""
+        key = key_with([defect("D01", "x", [loc("app/a.log", 10)])])
+        rec, _ = self.score(key)
+        self.assertIsNone(rec["asserted"])
+        self.assertIsNone(rec["per_defect"][0]["asserted"])
+        self.assertEqual(rec["presented"], 1)
+
+    def test_headings_inside_a_code_fence_are_not_sections(self):
+        rep = ("## 1. Находки\n\n```\n## 2. Отклонённые кандидаты\n```\n"
+               "app/a.log:10 «filler line 10»\n")
+        key = key_with([defect("D01", "x", [loc("app/a.log", 10)])])
+        rec, _ = self.score(key, rep)
+        self.assertEqual(rec["presented"], 1,
+                         "a fenced `##` line is sample text, not a section")
+
+    def test_a_report_delivered_in_both_channels_parses_as_one_structure(self):
+        """`measure/deliverable.py` composes the final message and work/report.md
+        into one text, so every section appears twice. The axis must union them,
+        not choke on the duplicate."""
+        both = FINDINGS_REPORT.rstrip() + "\n\n--- work/report.md ---\n\n" + FINDINGS_REPORT
+        key = key_with([defect("D01", "x", [loc("app/a.log", 10)]),
+                        defect("D02", "y", [loc("app/a.log", 20)])])
+        rec, _ = self.score(key, both)
+        self.assertEqual(rec["presented"], 1)
+        self.assertEqual(rec["dismissed"], 1)
+        self.assertEqual(len(rec["structure"]["findings_sections"]), 2)
+        self.assertEqual(rec["structure"]["rejections"], 2,
+                         "two rejections in the report, not four in the "
+                         "composed deliverable — items are deduplicated by text")
+
+
+class TestDecoysGetTheFreeAssertionColumn(unittest.TestCase):
+    """`decoys_asserted` needed the judge and therefore was never filled on a free
+    run. The negative-control arm presented decoy D06 as its Н-10 and nothing free
+    could record it. Now something can."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        build_corpus(self.tmp, {"app/a.log": numbered(50),
+                                "app/b.log": numbered(50)})
+
+    def test_a_decoy_presented_as_a_finding_is_a_free_false_positive(self):
+        key = key_with([defect("D01", "real", [loc("app/a.log", 10)]),
+                        defect("D02", "RED HERRING: loud", [loc("app/a.log", 10)])])
+        with redirect_stdout(io.StringIO()):
+            rec = S.score(key, FINDINGS_REPORT, self.tmp, call=None)
+        self.assertEqual(rec["decoys_presented"], 1)
+        self.assertIsNone(rec["decoys_asserted"],
+                          "the JUDGED decoy column stays None — no judge ran")
+
+    def test_a_decoy_only_in_the_rejected_section_is_a_refusal(self):
+        key = key_with([defect("D01", "real", [loc("app/a.log", 10)]),
+                        defect("D02", "RED HERRING: loud", [loc("app/a.log", 20)])])
+        with redirect_stdout(io.StringIO()):
+            rec = S.score(key, FINDINGS_REPORT, self.tmp, call=None)
+        self.assertEqual(rec["decoys_anchored"], 1, "it is cited")
+        self.assertEqual(rec["decoys_presented"], 0, "but it is refused")
+        self.assertEqual(rec["decoys_dismissed"], 1)
+
+    def test_a_decoy_presented_never_enters_the_findings_numerator(self):
+        key = key_with([defect("D01", "real", [loc("app/a.log", 5)]),
+                        defect("D02", "RED HERRING: loud", [loc("app/a.log", 10)])])
+        with redirect_stdout(io.StringIO()):
+            rec = S.score(key, FINDINGS_REPORT, self.tmp, call=None)
+        self.assertEqual(rec["presented"], 0)
+        self.assertEqual(rec["presentable"], 1)
+        self.assertEqual(rec["decoys_presented"], 1)
+
+
+class TestARejectionWithNoCitationIsNotAJudgement(unittest.TestCase):
+    """The Linux arm disposed of 2,473 of 2,560 worklist rows with one invented
+    regex, and its disposal rows say «ничего относящегося» with no line reference
+    at all. A rejection nobody can check is not a judgement, and it belongs in the
+    score as its own visible count."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        build_corpus(self.tmp, {"app/a.log": numbered(50),
+                                "app/b.log": numbered(50)})
+
+    def test_it_counts_the_rejections_and_the_uncited_ones_separately(self):
+        key = key_with([defect("D01", "x", [loc("app/a.log", 10)])])
+        with redirect_stdout(io.StringIO()):
+            rec = S.score(key, FINDINGS_REPORT, self.tmp, call=None)
+        st = rec["structure"]
+        self.assertEqual(st["rejections"], 2)
+        self.assertEqual(st["rejections_uncited"], 1)
+        self.assertIn("Третье", st["uncited_rejections"][0])
+
+    def test_an_uncited_rejection_is_printed(self):
+        key = key_with([defect("D01", "x", [loc("app/a.log", 10)])])
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            S.score(key, FINDINGS_REPORT, self.tmp, call=None)
+        out = buf.getvalue()
+        self.assertRegex(out, r"без ссылк|no citation|uncited")
+
+    def test_coverage_rows_are_counted_the_same_way_and_kept_separate(self):
+        """«ничего относящегося» lives in the coverage table on the real arms, not
+        in the rejected section. Same rule, its own count — never merged."""
+        key = key_with([defect("D01", "x", [loc("app/a.log", 10)])])
+        with redirect_stdout(io.StringIO()):
+            rec = S.score(key, FINDINGS_REPORT, self.tmp, call=None)
+        st = rec["structure"]
+        self.assertEqual(st["coverage_rows"], 1)
+        self.assertEqual(st["coverage_rows_uncited"], 1)
+
+    def test_a_rejection_that_cites_a_line_is_not_counted_as_uncited(self):
+        rep = ("## 1. Находки\n\napp/a.log:10 «filler line 10»\n\n"
+               "## 2. Отклонённые кандидаты\n\n"
+               "- **«A»** — нет, app/b.log:3 «filler line 3» это фон.\n")
+        key = key_with([defect("D01", "x", [loc("app/a.log", 10)])])
+        with redirect_stdout(io.StringIO()):
+            rec = S.score(key, rep, self.tmp, call=None)
+        self.assertEqual(rec["structure"]["rejections"], 1)
+        self.assertEqual(rec["structure"]["rejections_uncited"], 0)
+
+    def test_a_rejection_that_points_at_an_existing_finding_is_backed(self):
+        """«см. измерение в Н-9» is a reference to a heading that exists in this
+        report's own findings section. Following it is parsing, not judgement, and
+        a rejection that hands the reader a checkable place to look is not the
+        shape being counted."""
+        rep = ("## 1. Находки\n\n### Н-1 · Первое\n\napp/a.log:10 «filler line 10»\n\n"
+               "## 2. Отклонённые кандидаты\n\n"
+               "- **«A»** — нет, см. измерение в Н-1.\n"
+               "- **«B»** — нет, см. измерение в Н-7.\n")
+        key = key_with([defect("D01", "x", [loc("app/a.log", 10)])])
+        with redirect_stdout(io.StringIO()):
+            rec = S.score(key, rep, self.tmp, call=None)
+        self.assertEqual(rec["structure"]["rejections"], 2)
+        self.assertEqual(rec["structure"]["rejections_uncited"], 1,
+                         "Н-1 exists as a heading; Н-7 does not")
+        self.assertIn("«B»", rec["structure"]["uncited_rejections"][0])
+
+    def test_a_coverage_row_that_names_a_finding_is_not_counted_as_uncited(self):
+        """The real coverage tables say «найдено: … (Н-5, Н-6)» on the rows that
+        found something and «ничего относящегося» on the rows that did not. Only
+        the second shape is a disposal nobody can check."""
+        rep = ("## 1. Находки\n\n### Н-1 · Первое\n\napp/a.log:10 «filler line 10»\n\n"
+               "## 3. Покрытие\n\n"
+               "| путь | что искал | вердикт |\n|---|---|---|\n"
+               "| app/a.log | всё | найдено (Н-1) |\n"
+               "| app/b.log | всё | ничего относящегося |\n")
+        key = key_with([defect("D01", "x", [loc("app/a.log", 10)])])
+        with redirect_stdout(io.StringIO()):
+            rec = S.score(key, rep, self.tmp, call=None)
+        self.assertEqual(rec["structure"]["coverage_rows"], 2)
+        self.assertEqual(rec["structure"]["coverage_rows_uncited"], 1)
+
+    def test_a_rejection_naming_a_bare_path_with_no_line_is_still_uncited(self):
+        """«ничего относящегося» next to a path family is exactly the shape being
+        counted: a file name is not a line reference."""
+        rep = ("## 1. Находки\n\napp/a.log:10 «filler line 10»\n\n"
+               "## 2. Отклонённые кандидаты\n\n"
+               "- **«A»** — смотрел `app/b.log`, ничего относящегося.\n")
+        key = key_with([defect("D01", "x", [loc("app/a.log", 10)])])
+        with redirect_stdout(io.StringIO()):
+            rec = S.score(key, rep, self.tmp, call=None)
+        self.assertEqual(rec["structure"]["rejections_uncited"], 1)
+
+
+# --------------------------------------------------------------------------
+# I. the axis, run against every report this project has on disk
+# --------------------------------------------------------------------------
+RUNS = os.environ.get(
+    "SHERLOCK_RUNS",
+    os.path.join(SHERLOCK, "eval", "bench", "runs"))
+BENCH = os.path.join(SHERLOCK, "eval", "bench")
+BLUESKY_CORPUS = os.path.join(
+    os.path.expanduser("~"), "Documents", "projects", "personal-os", "projects",
+    "active", "attachments", "sherlock-cyber-bench", "corpus")
+
+
+def _run_report(name):
+    p = os.path.join(RUNS, name, "report.md")
+    return p if os.path.isfile(p) else None
+
+
+class TestTheAxisOnTheRealReports(unittest.TestCase):
+    """The trajectories are a local artifact (`eval/bench/runs/` is gitignored), so
+    these skip where they are absent and run where the evidence is."""
+
+    BS19 = "20260818T174121Z-v19-claude-bluesky"
+
+    @unittest.skipUnless(_run_report(BS19) and os.path.isdir(BLUESKY_CORPUS),
+                         "BlueSky v19 trajectory or corpus not on this machine")
+    def test_bluesky_v19_D01_is_anchored_but_not_presented(self):
+        """The measured case the axis was built for: the report cites
+        `evtx/incident/BlueSkyRansomware.jsonl:425` — D01's own proof — inside
+        «Отклонённые кандидаты», concluding «До компрометации»."""
+        key = json.load(open(os.path.join(BENCH, "answer-key-bluesky.json"),
+                             encoding="utf-8"))
+        rep = open(_run_report(self.BS19), encoding="utf-8").read()
+        with redirect_stdout(io.StringIO()):
+            rec = S.score(key, rep, BLUESKY_CORPUS, call=None)
+        row = [r for r in rec["per_defect"] if r["defect"] == "D01"][0]
+        self.assertTrue(row["anchored"])
+        self.assertFalse(row["presented"])
+        self.assertIn("rejected", row["anchored_zones"])
+        self.assertEqual(rec["anchored"], 10)
+        self.assertEqual(rec["presented"], 9,
+                         "judged rather than anchored this arm is nearer 9 of 11")
 
 
 if __name__ == "__main__":

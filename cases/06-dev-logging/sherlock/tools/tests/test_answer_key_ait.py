@@ -237,5 +237,165 @@ class TheBuilderIsReproducible(unittest.TestCase):
         self.assertEqual(committed, again)
 
 
+# --------------------------------------------------------------------------
+# THE SAME EVENT, TWO HOSTS, ONE LABELLED
+# --------------------------------------------------------------------------
+# The Linux arm proved the DNS story from `inet-dns/logs/dnsmasq.log`. The AIT
+# labels live on `inet-firewall`'s copy of the same traffic — same packets, two
+# machines, and only one of them labelled. Crediting the other copy is a fairness
+# fix, and a fairness fix that is asserted rather than computed is just a key bent
+# to raise a score. So it is COMPUTED: two lines are the same event only if their
+# timestamp and their message body match, byte for byte, after removing the ONE
+# field that can never match across machines — the syslog PID.
+#
+# That strictness is the whole safety property, and it is checkable: this testbed
+# wrote `useradd[493]: new user: name=ait` in the SAME SECOND on 21 hosts. A rule
+# that dropped the hostname along with the PID would have equated all 21 and
+# handed every `auth.log` defect twenty free alternates.
+class AlternateLocationsAreComputedNotAsserted(unittest.TestCase):
+
+    def setUp(self):
+        self.k = json.load(open(KEY, encoding="utf-8"))
+
+    def test_every_defect_carries_the_field_even_when_it_is_empty(self):
+        """An absent field and an empty one read the same to a scorer and mean
+        different things to a reader. All eleven declare."""
+        for d in self.k["defects"]:
+            self.assertIn("alternate_proof_locations", d, d["id"])
+            self.assertIsInstance(d["alternate_proof_locations"], list)
+
+    def test_the_rule_is_written_into_the_key(self):
+        der = self.k["derivation"]
+        self.assertIn("cross_host_rule", der)
+        self.assertIn("PID", der["cross_host_rule"])
+        self.assertIn("timestamp", der["cross_host_rule"].lower())
+
+    def test_only_the_dns_defects_gain_an_alternate(self):
+        """Measured: 3 of 11 defects, all on `inet-firewall/logs/dnsmasq.log`,
+        whose twin is `inet-dns/logs/dnsmasq.log`."""
+        gained = {d["id"] for d in self.k["defects"]
+                  if d["alternate_proof_locations"]}
+        self.assertEqual(gained, {"A01", "A05", "A10"})
+        for d in self.k["defects"]:
+            for pl in d["alternate_proof_locations"]:
+                self.assertEqual(pl["file"], "inet-dns/logs/dnsmasq.log")
+
+    def test_the_auth_log_defect_gains_nothing_although_ten_hosts_have_one(self):
+        """The safety property, as arithmetic. `logs/auth.log` exists on ten
+        machines and every line of it carries its own hostname, so nothing
+        matches — which is exactly right, because those ARE different events."""
+        a08 = [d for d in self.k["defects"]
+               if d["file"] == "intranet_server/logs/auth.log"][0]
+        self.assertEqual(a08["alternate_proof_locations"], [])
+
+    def test_alternates_never_change_the_denominator(self):
+        """A defect is still one (file × phase). An alternate is a second address
+        for the SAME defect, not a second defect."""
+        self.assertEqual(len(self.k["defects"]), 11)
+        self.assertEqual(self.k["totals"]["real_defects"], 11)
+
+    def test_the_alternate_line_count_is_recorded(self):
+        der = self.k["derivation"]
+        self.assertEqual(der["alternate_defects"], 3)
+        self.assertEqual(der["alternate_lines"], 17637)
+
+    def test_alternate_runs_are_maximal_and_disjoint_too(self):
+        for d in self.k["defects"]:
+            prev = None
+            for pl in d["alternate_proof_locations"]:
+                self.assertLessEqual(pl["line_start"], pl["line_end"])
+                if prev is not None:
+                    self.assertGreater(pl["line_start"], prev + 1, d["id"])
+                prev = pl["line_end"]
+
+    def test_the_limitation_is_recorded_rather_than_papered_over(self):
+        """`audit.log` lines carry no syslog timestamp at all, so the rule cannot
+        see them. Said out loud, the way the fleet-negative key says its own."""
+        lim = self.k["derivation"]["known_limitations"]
+        self.assertTrue(lim)
+        self.assertTrue(any("audit" in x for x in lim))
+        self.assertTrue(any("apache" in x.lower() or "access.log" in x
+                            for x in lim))
+
+
+class TheScorerReadsTheAlternates(unittest.TestCase):
+
+    def setUp(self):
+        self.k = json.load(open(KEY, encoding="utf-8"))
+        self.key = SB.load_key(self.k)
+
+    def test_proof_spans_returns_the_other_hosts_copy_as_well(self):
+        a05 = self.key["A05"]
+        spans = SR.proof_spans(a05)
+        files = {f for (f, _lo, _hi) in spans}
+        self.assertEqual(files, {"inet-firewall/logs/dnsmasq.log",
+                                 "inet-dns/logs/dnsmasq.log"})
+
+    def test_citing_the_other_hosts_copy_anchors_the_defect(self):
+        """The fairness fix, run as arithmetic: an analyst who proved A05 on
+        `inet-dns` now anchors it."""
+        a05 = self.key["A05"]
+        alt = a05["alternate_proof_locations"][0]
+        spans = [("inet-dns/logs/dnsmasq.log", alt["line_start"], alt["line_start"])]
+        self.assertGreater(SR.anchor_hits(spans, SR.proof_spans(a05)), 0)
+
+    def test_a_random_line_of_the_other_hosts_file_still_anchors_nothing(self):
+        """Crediting the whole file would be the loosening this fix exists to
+        avoid. Only the computed lines count."""
+        a05 = self.key["A05"]
+        spans = [("inet-dns/logs/dnsmasq.log", 1, 1)]
+        self.assertEqual(SR.anchor_hits(spans, SR.proof_spans(a05)), 0)
+
+
+class TheAlternatesAreTrueOfTheCORPUS(unittest.TestCase):
+    """The key claims two lines are the same event. This reads both files and
+    checks it, which is the only thing that makes the claim more than a comment."""
+
+    CORPUS = os.environ.get(
+        "AIT_CORPUS",
+        os.path.expanduser("~/hack/sherlock-corpora/_sanitized/ait-russellmitchell"))
+
+    @unittest.skipUnless(
+        os.path.isfile(os.path.join(
+            os.environ.get("AIT_CORPUS", os.path.expanduser(
+                "~/hack/sherlock-corpora/_sanitized/ait-russellmitchell")),
+            "inet-dns", "logs", "dnsmasq.log")),
+        "AIT corpus not on this machine (set AIT_CORPUS)")
+    def test_every_alternate_line_matches_its_primary_byte_for_byte(self):
+        k = json.load(open(KEY, encoding="utf-8"))
+        def keyed(rel):
+            out = {}
+            with open(os.path.join(self.CORPUS, rel), errors="replace") as fh:
+                for i, line in enumerate(fh, 1):
+                    n = BUILD.event_key(line)
+                    if n:
+                        out.setdefault(n, []).append(i)
+            return out
+        prim = keyed("inet-firewall/logs/dnsmasq.log")
+        altf = {}
+        with open(os.path.join(self.CORPUS, "inet-dns", "logs", "dnsmasq.log"),
+                  errors="replace") as fh:
+            for i, line in enumerate(fh, 1):
+                altf[i] = BUILD.event_key(line)
+        checked = 0
+        for d in k["defects"]:
+            if not d["alternate_proof_locations"]:
+                continue
+            want = set()
+            for pl in d["proof_locations"]:
+                want |= set(range(pl["line_start"], pl["line_end"] + 1))
+            for pl in d["alternate_proof_locations"]:
+                for n in range(pl["line_start"], pl["line_end"] + 1):
+                    ek = altf.get(n)
+                    self.assertIsNotNone(ek, "%s: alt line %d does not parse"
+                                              % (d["id"], n))
+                    twins = set(prim.get(ek, ()))
+                    self.assertTrue(twins & want,
+                                    "%s: alt line %d has no labelled twin"
+                                    % (d["id"], n))
+                    checked += 1
+        self.assertEqual(checked, 17637)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
