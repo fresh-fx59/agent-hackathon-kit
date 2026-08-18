@@ -199,11 +199,25 @@ class TheNegativeControlKey(unittest.TestCase):
         self.k = json.load(open(os.path.join(BENCH, "answer-key-fleet-negative.json"),
                                 encoding="utf-8"))
 
-    def test_it_has_no_real_defects_only_decoys(self):
+    def test_it_has_decoys_AND_real_findings_now(self):
+        """This used to assert `real == []`, and that was right until 2026-08-18:
+        the key was decoys only, so `score-report.py` printed `anchored 0/0` and
+        could score what a report should REFUSE and nothing it should OBSERVE.
+        A negative control is not «a corpus with no findings» — it is a corpus with
+        no COMPROMISE. The ten real findings are true observations about a fleet
+        that was attacked and held, every one of them `provenance: counted`, and
+        `test_no_real_finding_TITLES_a_compromise` in
+        test_answer_key_fleet_negative.py is what keeps that distinction honest."""
         real = [d for d in self.k["defects"]
                 if not d["title"].upper().startswith("RED HERRING")]
-        self.assertEqual(real, [], "a negative control with a real defect is not one")
-        self.assertGreaterEqual(len(self.k["defects"]), 6)
+        decoys = [d for d in self.k["defects"]
+                  if d["title"].upper().startswith("RED HERRING")]
+        self.assertEqual(len(decoys), 8)
+        self.assertEqual(len(real), 10)
+        for d in real:
+            self.assertEqual(d["provenance"], "counted", d["id"])
+        self.assertEqual(self.k["totals"]["real_defects"], len(real))
+        self.assertEqual(self.k["totals"]["red_herrings"], len(decoys))
 
     def test_the_truth_is_the_middle_verdict(self):
         """Not 'clean': the attacks are real and visible. Not 'compromised': none
@@ -218,9 +232,14 @@ class TheNegativeControlKey(unittest.TestCase):
         self.assertIn("100.122.174.119", joined)
         self.assertIn("EVIDENCE COLLECTION ITSELF", joined.upper())
 
-    def test_every_decoy_names_where_to_look(self):
+    def test_every_defect_names_where_to_look(self):
+        """A decoy points with `anchor`, a counted finding with `proof_locations`.
+        Both are read by `score-report.py`'s `proof_spans`; what must never happen
+        is an entry that names neither, because that one silently leaves the
+        denominator and costs nothing to miss."""
         for d in self.k["defects"]:
-            self.assertTrue(d.get("anchor"), "%s has no anchor" % d["id"])
+            self.assertTrue(d.get("anchor") or d.get("proof_locations"),
+                            "%s says nowhere to look" % d["id"])
             self.assertTrue(d.get("root_cause"), "%s has no rationale" % d["id"])
 
     def test_zero_denominator_is_survivable(self):
