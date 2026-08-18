@@ -234,7 +234,9 @@ class KeysDeclareTheirCorpus(unittest.TestCase):
     def test_each_key_names_its_dataset(self):
         for f, ds in (("answer-key.json", "bench649"),
                       ("answer-key-bluesky.json", "bluesky"),
-                      ("answer-key-fleet-negative.json", "fleet-negative")):
+                      ("answer-key-fleet-negative.json", "fleet-negative"),
+                      ("answer-key-ait-russellmitchell.json",
+                       "ait-russellmitchell")):
             k = json.load(open(os.path.join(BENCH, f), encoding="utf-8"))
             self.assertEqual(k.get("dataset"), ds, f)
 
@@ -248,6 +250,20 @@ class KeysDeclareTheirCorpus(unittest.TestCase):
                            encoding="utf-8"))
         self.assertEqual(k.get("verdict"), "compromised")
         self.assertIn("never encrypted", k.get("verdict_rationale", ""))
+
+    def test_every_key_with_a_dataset_has_a_prompt_file(self):
+        """run-bench.sh refuses a dataset with no prompt, and the four security
+        datasets are SYMLINKS to security.txt so the negative control is asked the
+        identical question. A key whose prompt is missing cannot be run blind."""
+        for f in os.listdir(BENCH):
+            if not f.startswith("answer-key") or not f.endswith(".json"):
+                continue
+            ds = json.load(open(os.path.join(BENCH, f), encoding="utf-8")).get("dataset")
+            if not ds or ds == "bench649":      # bench649 keeps its prompt inline
+                continue
+            self.assertTrue(os.path.isfile(os.path.join(PROMPTS, ds + ".txt")),
+                            "%s declares dataset %r with no prompts/%s.txt"
+                            % (f, ds, ds))
 
 
 if __name__ == "__main__":
