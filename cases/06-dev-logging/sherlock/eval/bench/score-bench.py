@@ -138,27 +138,61 @@ def score(raw_key, answer, call):
             "herrings": len(herr)}
 
 
-def select_row(rows, arm, trace):
+def select_row(rows, arm, trace, dataset=None):
     """The run under test, chosen explicitly — never "whatever landed last".
 
-    Two hazards this closes. `rows[-1]` can reach exactly one run, so a scorer
-    fix could never re-derive the arm's published numbers; and four STUB rows
+    Three hazards this closes. `rows[-1]` can reach exactly one run, so a scorer
+    fix could never re-derive the arm's published numbers; four STUB rows
     (`input_tokens: 11`, from a runner smoke test) sit in the real bench ledger,
-    where `rows[-1]` would score one as a measurement.
+    where `rows[-1]` would score one as a measurement; and — added 2026-08-18 —
+    the ledger now holds runs against MORE THAN ONE CORPUS.
 
-    A `--trace` that matches nothing RAISES. Falling back to the last row is how
-    a re-score gets published against a run nobody asked for.
+    That third one is why this matters more than it used to. The runner wrote
+    `"dataset": "bench649"` as a literal on every row, so a run against an
+    intrusion corpus was filed under the dev corpus, and this function had no
+    dataset filter at all. The two together score a security run against the
+    wrong answer key and print a confident number. A scorer that cannot say
+    WHICH corpus a row came from is worse than no scorer.
+
+    Ambiguity RAISES rather than guessing, exactly like `--trace`.
     """
     live = [r for r in rows if not r.get("stub")]
     if arm:
         live = [r for r in live if r.get("arm") == arm]
     if trace:
         live = [r for r in live if trace in (r.get("trace_dir") or "")]
+    if dataset:
+        live = [r for r in live if r.get("dataset") == dataset]
     if not live:
-        sys.exit("no bench row matches%s%s"
+        sys.exit("no bench row matches%s%s%s"
                  % (" arm=%s" % arm if arm else "",
-                    " trace~%s" % trace if trace else ""))
+                    " trace~%s" % trace if trace else "",
+                    " dataset=%s" % dataset if dataset else ""))
+    seen = {r.get("dataset") for r in live}
+    if len(seen) > 1:
+        sys.exit("this ledger holds runs against %d different corpora (%s) and no "
+                 "--dataset was given. Scoring the wrong corpus against this key "
+                 "would produce a confident wrong number — name the dataset."
+                 % (len(seen), ", ".join(sorted(str(s) for s in seen))))
     return live[-1]
+
+
+def check_key_matches_dataset(key, run):
+    """A key belongs to a corpus. Refuse to score across that line.
+
+    The answer key file may declare `"dataset": "<id>"`. When it does and the run
+    row names a different one, this is not a warning — it is the exact failure the
+    dataset filter exists to prevent, arriving through the other door.
+    """
+    kd = key.get("dataset") if isinstance(key, dict) else None
+    rd = run.get("dataset")
+    if kd and rd and kd != rd:
+        sys.exit("answer key is for dataset %r but the run is against %r — refusing "
+                 "to score. Pass the matching --key." % (kd, rd))
+    if kd and not rd:
+        sys.exit("answer key is for dataset %r but the run row carries no dataset. "
+                 "It predates the dataset fix; re-run it or score it explicitly."
+                 % kd)
 
 
 def main():
@@ -167,13 +201,15 @@ def main():
     ap.add_argument("--key", default=os.path.join(HERE, "answer-key.json"))
     ap.add_argument("--arm")
     ap.add_argument("--trace", help="substring of trace_dir — score THAT run")
+    ap.add_argument("--dataset", help="corpus id the run must be against "
+                                      "(required once the ledger holds more than one)")
     ap.add_argument("--out", default=os.path.join(HERE, "scores-bench.jsonl"))
     a = ap.parse_args()
 
     rows = [json.loads(l) for l in open(a.ledger, encoding="utf-8") if l.strip()]
     if not rows:
         sys.exit("no bench rows in %s" % a.ledger)
-    run = select_row(rows, a.arm, a.trace)
+    run = select_row(rows, a.arm, a.trace, a.dataset)
     # Judge the DELIVERABLE: the final message plus `work/report.md`. Judging the
     # message alone scored a finished, citecheck-green investigation as nothing.
     answer = deliverable.of_row(run)
@@ -188,6 +224,7 @@ def main():
               % (run.get("answer_chars") or len(run.get("answer") or "")))
 
     key = json.load(open(a.key, encoding="utf-8"))
+    check_key_matches_dataset(key, run)
 
     def call(prompt, _inner=score_case.http_call):
         """Retry the TRANSPORT, never the verdict.
@@ -221,10 +258,18 @@ def main():
             mark = "✗ FALSE POSITIVE" if r["found"] else "✓ not a cause"
         print("%-3s %-18s %s" % (r["defect"], mark, r["title"][:70]))
         print("      %s" % r["why"][:160])
-    print("\nНАЙДЕНО %d из %d реальных дефектов (%.0f %%) · ложных срабатываний на "
+    # A NEGATIVE CONTROL has no real defects at all — only decoys — and every
+    # arm scores 0/0 on recall there. That is the point of it: the number that
+    # matters is the false-positive count. Dividing by a zero denominator would
+    # crash the one corpus whose whole job is to catch an arm crying wolf.
+    pct = ("%.0f %%" % (100.0 * res["found"] / res["total"])) if res["total"] else "—"
+    print("\nНАЙДЕНО %d из %d реальных дефектов (%s) · ложных срабатываний на "
           "приманках: %d из %d"
-          % (res["found"], res["total"], 100.0 * res["found"] / res["total"],
+          % (res["found"], res["total"], pct,
              res["false_positives"], res["herrings"]))
+    if not res["total"]:
+        print("НЕГАТИВНЫЙ КОНТРОЛЬ: реальных дефектов в ключе нет. Единственное, "
+              "что здесь измеряется, — сколько приманок арм выдал за находку.")
 
     out = {"arm": run.get("arm"), "model": run.get("model"),
            "judge_model": score_case.JUDGE_MODEL, "dataset": run.get("dataset"),

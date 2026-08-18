@@ -1,0 +1,1415 @@
+{
+ "generator": "/Users/a/Documents/projects/personal-os/projects/active/attachments/sherlock-cyber-bench/prepare-corpus.sh",
+ "seed": null,
+ "scale": 1.0,
+ "corpus_root": "/Users/a/Documents/projects/personal-os/projects/active/attachments/sherlock-cyber-bench/corpus",
+ "scenario": "BlueSky ransomware intrusion, real captured evidence, not generated. Victim 87.96.21.81 = DESKTOP-7EQVM78, Windows 10 Pro 19045, SQL Server 2022 Developer, on VMware. Attacker and C2 87.96.21.84, same /24. Two runs of one playbook are in evidence. HOST RUN, from the Windows event log: 2024-04-21 an 'sa' brute force succeeds; 2024-04-23 09:54:01Z Defender is snoozed, 09:59:54Z 22 failed 'sa' logins in 140 ms end in a success, 10:00:12Z xp_cmdshell is enabled, 10:01:17Z a PowerShell host named MSFConsole appears inside winlogon.exe. NETWORK RUN, from a packet capture five days later: 2024-04-28 00:29:56Z a 1,000-port sweep, 00:30:13Z xp_cmdshell re-enabled over TDS, 00:30:20-39Z a PE staged into %TEMP% by 68 xp_cmdshell echo statements and launched by a VBScript decoder, 00:30:41Z a 100-second outbound channel on 443 that carries 944,560 bytes of raw PE, 00:32:10-21Z the attacker toolkit and the ransomware pulled in cleartext HTTP. The ransomware is downloaded and never executed: ichigo-lite.ps1's Start-Process line is commented out, and no encryption event exists in any artefact. The corpus also contains 90,267 records from a DIFFERENT host (IPSERVER, 2021) as the haystack.",
+ "totals": {
+  "files": 106,
+  "on_disk_bytes": 94860114,
+  "lines": 100917
+ },
+ "line_numbering": "Proof line numbers are 1-based PHYSICAL line numbers in the file as written by prepare-corpus.sh, and every file ends with a trailing newline, so `wc -l` agrees with the `lines` field below. *.jsonl: one EVTX record per line, in the order evtx_dump emits it -- the line number is NOT the EventRecordID, and records inside a channel are NOT in time order (Security.jsonl line 1 is 2021-06-01T18:36:04Z and line 34,916 is 18:35:48Z), because EVTX stores chunks. *.tsv: line 1 is a column header, so a data row is at line index+1. In pcap/frames.tsv frame F is at line F+1 (frames 1..4797 are contiguous); in pcap/tds-batches.tsv batch B is at line B+1; in pcap/tcp-streams.tsv stream S is at line S+2 (streams 0..1200, sorted numerically). pcap/http.tsv and pcap/dns.tsv are in frame order with no such arithmetic. toolkit/* are the carved artefacts byte-for-byte, with `.txt` appended to the `.ps1` names so that citecheck's plausible() recognises a citation to them at all.",
+ "files": [
+  {
+   "path": "evtx/host/Application.jsonl",
+   "lines": 2942,
+   "uncompressed_bytes": 2577714,
+   "on_disk_bytes": 2577714,
+   "sha256": "c20f44295ab736110dc96499d37a2eaa5332f79d689dae797318d4c38463c1f7"
+  },
+  {
+   "path": "evtx/host/Microsoft-Client-Licensing-Platform-Admin.jsonl",
+   "lines": 309,
+   "uncompressed_bytes": 217344,
+   "on_disk_bytes": 217344,
+   "sha256": "6d715cd630ee0f0eed8441ec8f8f205271c731d0fd104aa76e897aabf4deb456"
+  },
+  {
+   "path": "evtx/host/Microsoft-Windows-AAD-Operational.jsonl",
+   "lines": 4,
+   "uncompressed_bytes": 3656,
+   "on_disk_bytes": 3656,
+   "sha256": "a64c771ac5c86f548443c9f69cc045b1f267d4a01836ef05c9cb6589575fd97b"
+  },
+  {
+   "path": "evtx/host/Microsoft-Windows-AppModel-Runtime-Admin.jsonl",
+   "lines": 332,
+   "uncompressed_bytes": 281378,
+   "on_disk_bytes": 281378,
+   "sha256": "29921774cd7fc19ff024918e21e0916efd9af34ecbab7cb440cd2aa46cb3a119"
+  },
+  {
+   "path": "evtx/host/Microsoft-Windows-AppReadiness-Admin.jsonl",
+   "lines": 472,
+   "uncompressed_bytes": 338160,
+   "on_disk_bytes": 338160,
+   "sha256": "aacb03dd0fef3f770473bf86485417ee666b9d2cf66299ded7b8ae0ab56d56f3"
+  },
+  {
+   "path": "evtx/host/Microsoft-Windows-AppReadiness-Operational.jsonl",
+   "lines": 182,
+   "uncompressed_bytes": 127474,
+   "on_disk_bytes": 127474,
+   "sha256": "0302a934a1be203538422016a92dc25eeee022e8f7880a6c9b5772abf1935f22"
+  },
+  {
+   "path": "evtx/host/Microsoft-Windows-AppXDeployment-Operational.jsonl",
+   "lines": 1250,
+   "uncompressed_bytes": 973503,
+   "on_disk_bytes": 973503,
+   "sha256": "d19a8b8cba26f5248e2a810f50f39f20ba529750ad89a15b3a32f818f9135774"
+  },
+  {
+   "path": "evtx/host/Microsoft-Windows-AppXDeploymentServer-Operational.jsonl",
+   "lines": 4194,
+   "uncompressed_bytes": 4706576,
+   "on_disk_bytes": 4706576,
+   "sha256": "881bc194683aeba9f1eab2f26c133938de2bf1c8143ad4010d3dc38a91d76a17"
+  },
+  {
+   "path": "evtx/host/Microsoft-Windows-Application-Experience-Program-Compatibility-Assistant.jsonl",
+   "lines": 1,
+   "uncompressed_bytes": 880,
+   "on_disk_bytes": 880,
+   "sha256": "a3c89eef19a900e3881fa0921912dbbf6109a6b4be0e99dbcb14c59178de0115"
+  },
+  {
+   "path": "evtx/host/Microsoft-Windows-Application-Experience-Program-Telemetry.jsonl",
+   "lines": 4,
+   "uncompressed_bytes": 4025,
+   "on_disk_bytes": 4025,
+   "sha256": "93cb8f3311e7a4273f40120dea91c6179fcec8bbd862be4655b2fbc320c32884"
+  },
+  {
+   "path": "evtx/host/Microsoft-Windows-AppxPackaging-Operational.jsonl",
+   "lines": 1328,
+   "uncompressed_bytes": 1006990,
+   "on_disk_bytes": 1006990,
+   "sha256": "cdd4d1be6835022ff85203fc4530bb4f6944d9ad96a84e7b7a3d082f85563e7f"
+  },
+  {
+   "path": "evtx/host/Microsoft-Windows-Biometrics-Operational.jsonl",
+   "lines": 4,
+   "uncompressed_bytes": 3903,
+   "on_disk_bytes": 3903,
+   "sha256": "3fdc04e9223f2ff22bfd20e850ace65b74aaae3ca7ecdaed73efb3ee46dc6cc5"
+  },
+  {
+   "path": "evtx/host/Microsoft-Windows-BitLocker-BitLocker-Management.jsonl",
+   "lines": 2,
+   "uncompressed_bytes": 1430,
+   "on_disk_bytes": 1430,
+   "sha256": "01fda6926bcbdfd5a7e90588ba8ef0b8855ea6c0c376ee65e9fba60e8c0740e0"
+  },
+  {
+   "path": "evtx/host/Microsoft-Windows-Bits-Client-Operational.jsonl",
+   "lines": 218,
+   "uncompressed_bytes": 197516,
+   "on_disk_bytes": 197516,
+   "sha256": "6024e4b0eaf45d8b6d3287b42bec69951e8920515d0ed98dae3be1a887298403"
+  },
+  {
+   "path": "evtx/host/Microsoft-Windows-CloudStore-Operational.jsonl",
+   "lines": 13,
+   "uncompressed_bytes": 10345,
+   "on_disk_bytes": 10345,
+   "sha256": "c858c440140eb2e3df65c0375ce6218c7c48d050c9b1d961e979b2c8bafd980e"
+  },
+  {
+   "path": "evtx/host/Microsoft-Windows-CodeIntegrity-Operational.jsonl",
+   "lines": 3,
+   "uncompressed_bytes": 2151,
+   "on_disk_bytes": 2151,
+   "sha256": "7091a285336e7de67b939def468b9b68d2387e850961c88032c80851add8722d"
+  },
+  {
+   "path": "evtx/host/Microsoft-Windows-Containers-BindFlt-Operational.jsonl",
+   "lines": 3,
+   "uncompressed_bytes": 1889,
+   "on_disk_bytes": 1889,
+   "sha256": "2d674e3877c07cfb4ff40cdb9156326bf5acdd150ddeb3f8066df63e6c4d9302"
+  },
+  {
+   "path": "evtx/host/Microsoft-Windows-Containers-Wcifs-Operational.jsonl",
+   "lines": 3,
+   "uncompressed_bytes": 1878,
+   "on_disk_bytes": 1878,
+   "sha256": "9a4ba518eb5a849becd8fe4b6f452c8cd68976529f1efe434b33bf46d7e283e7"
+  },
+  {
+   "path": "evtx/host/Microsoft-Windows-CoreSystem-SmsRouter-Events-Operational.jsonl",
+   "lines": 16,
+   "uncompressed_bytes": 10359,
+   "on_disk_bytes": 10359,
+   "sha256": "56dd0368b351bd6e8dd17207b2015773eeb6558132a2038dc76d104c7badadc3"
+  },
+  {
+   "path": "evtx/host/Microsoft-Windows-Crypto-DPAPI-Operational.jsonl",
+   "lines": 26,
+   "uncompressed_bytes": 22143,
+   "on_disk_bytes": 22143,
+   "sha256": "b5f18394a38186336f524b8c4eccae8e2a3e2196bd8c474ca8ce6e3c36e8c37a"
+  },
+  {
+   "path": "evtx/host/Microsoft-Windows-Crypto-NCrypt-Operational.jsonl",
+   "lines": 17,
+   "uncompressed_bytes": 14047,
+   "on_disk_bytes": 14047,
+   "sha256": "e13431610f8c8a0086bdaa65b532191b5df164082e64674b2f2b9e42763262ca"
+  },
+  {
+   "path": "evtx/host/Microsoft-Windows-DeviceManagement-Enterprise-Diagnostics-Provider-Admin.jsonl",
+   "lines": 67,
+   "uncompressed_bytes": 52002,
+   "on_disk_bytes": 52002,
+   "sha256": "fcee6b3f473b937c93344bd65f457bd326bc6c007e31bbaafe886a5b3aa1bca7"
+  },
+  {
+   "path": "evtx/host/Microsoft-Windows-DeviceManagement-Enterprise-Diagnostics-Provider-Operational.jsonl",
+   "lines": 56,
+   "uncompressed_bytes": 39169,
+   "on_disk_bytes": 39169,
+   "sha256": "52d9f50d6f219cb1283cfb4093ce91afd731c4bd612bff9bf622f0529869f3f7"
+  },
+  {
+   "path": "evtx/host/Microsoft-Windows-DeviceSetupManager-Admin.jsonl",
+   "lines": 204,
+   "uncompressed_bytes": 148962,
+   "on_disk_bytes": 148962,
+   "sha256": "f6e75e6e29b74b7b6d2eab5f4be927aa84ef6415a0b311b82165a004bef76d19"
+  },
+  {
+   "path": "evtx/host/Microsoft-Windows-DeviceSetupManager-Operational.jsonl",
+   "lines": 111,
+   "uncompressed_bytes": 77143,
+   "on_disk_bytes": 77143,
+   "sha256": "ed258309e879db80e79ae7d8f45fdef8728c1a6ceb056361a93c61832ed3c453"
+  },
+  {
+   "path": "evtx/host/Microsoft-Windows-Diagnosis-DPS-Operational.jsonl",
+   "lines": 9,
+   "uncompressed_bytes": 8885,
+   "on_disk_bytes": 8885,
+   "sha256": "a68526db618fe71c4d5c83224c4599a3e7c8b532f4dd77533e4f41dfa402c5fd"
+  },
+  {
+   "path": "evtx/host/Microsoft-Windows-GroupPolicy-Operational.jsonl",
+   "lines": 507,
+   "uncompressed_bytes": 345601,
+   "on_disk_bytes": 345601,
+   "sha256": "0d3781deb32818f5bab3e94befae931fdaf7bd4a90f70db276d8a15cb95ffdd9"
+  },
+  {
+   "path": "evtx/host/Microsoft-Windows-HelloForBusiness-Operational.jsonl",
+   "lines": 7,
+   "uncompressed_bytes": 4642,
+   "on_disk_bytes": 4642,
+   "sha256": "323a796eac0a58b234121673f4f27e93a284854530fb1663c1b2094b206a7f96"
+  },
+  {
+   "path": "evtx/host/Microsoft-Windows-Kernel-Boot-Operational.jsonl",
+   "lines": 12,
+   "uncompressed_bytes": 8240,
+   "on_disk_bytes": 8240,
+   "sha256": "ae135f17f4dabffaa0da5f5c9c4008b63d9e13615f7783544dccac2cd1ae112e"
+  },
+  {
+   "path": "evtx/host/Microsoft-Windows-Kernel-EventTracing-Admin.jsonl",
+   "lines": 10,
+   "uncompressed_bytes": 7308,
+   "on_disk_bytes": 7308,
+   "sha256": "84a38fbaa45cce800fe9c8ad8df58fb2d98d74fef3c193d44737e052c2051a1b"
+  },
+  {
+   "path": "evtx/host/Microsoft-Windows-Kernel-PnP-Configuration.jsonl",
+   "lines": 330,
+   "uncompressed_bytes": 304009,
+   "on_disk_bytes": 304009,
+   "sha256": "d5ba2d2483891d2d765e046aafe06d9d961ff9eee512d1b7bf8f4b8a7339fd2f"
+  },
+  {
+   "path": "evtx/host/Microsoft-Windows-Kernel-ShimEngine-Operational.jsonl",
+   "lines": 1,
+   "uncompressed_bytes": 736,
+   "on_disk_bytes": 736,
+   "sha256": "68cda5104c444ef4bb382f2516ac9788a4eaddb4bfc8762a1c3d82cf723941df"
+  },
+  {
+   "path": "evtx/host/Microsoft-Windows-Kernel-WHEA-Operational.jsonl",
+   "lines": 12,
+   "uncompressed_bytes": 79125,
+   "on_disk_bytes": 79125,
+   "sha256": "ded327bcfadc66138f33ad8d1d4d4f8397fcf2aca9a98ab6f1bed095f8d335bb"
+  },
+  {
+   "path": "evtx/host/Microsoft-Windows-Known-Folders-API-Service.jsonl",
+   "lines": 61,
+   "uncompressed_bytes": 48724,
+   "on_disk_bytes": 48724,
+   "sha256": "3976f3ac76b860c3f9d8cd898d38276ab333d9b454667b2893947193cd63d882"
+  },
+  {
+   "path": "evtx/host/Microsoft-Windows-LanguagePackSetup-Operational.jsonl",
+   "lines": 18,
+   "uncompressed_bytes": 11449,
+   "on_disk_bytes": 11449,
+   "sha256": "6b6a8a9fc8060bc2c0badb1bc71b9a7cac02a8f193f5256aa0c5fa524d10f2f4"
+  },
+  {
+   "path": "evtx/host/Microsoft-Windows-LiveId-Operational.jsonl",
+   "lines": 675,
+   "uncompressed_bytes": 1138460,
+   "on_disk_bytes": 1138460,
+   "sha256": "464cc149b8951ae3705e040663f7196fa3e4af0f74474ec83116f82ef7434113"
+  },
+  {
+   "path": "evtx/host/Microsoft-Windows-MUI-Operational.jsonl",
+   "lines": 29,
+   "uncompressed_bytes": 20454,
+   "on_disk_bytes": 20454,
+   "sha256": "1ffe412131de918956a772d0db6628cbf9b793217fa4a6ef83309b610db62559"
+  },
+  {
+   "path": "evtx/host/Microsoft-Windows-NCSI-Operational.jsonl",
+   "lines": 4,
+   "uncompressed_bytes": 3053,
+   "on_disk_bytes": 3053,
+   "sha256": "ced3338e22ba9e01eb5c8f0dcd640c5ad8e2d0424b5e7b6dbc04d2d7d4c12af2"
+  },
+  {
+   "path": "evtx/host/Microsoft-Windows-NetworkProfile-Operational.jsonl",
+   "lines": 14,
+   "uncompressed_bytes": 11100,
+   "on_disk_bytes": 11100,
+   "sha256": "fe01a49f0b4611e1ceb6c9aa27f458a5bd0f82684ebe1d880646a331486ce6fc"
+  },
+  {
+   "path": "evtx/host/Microsoft-Windows-Ntfs-Operational.jsonl",
+   "lines": 2768,
+   "uncompressed_bytes": 4206897,
+   "on_disk_bytes": 4206897,
+   "sha256": "6bd5dc4561105aa999cd54aac426619a4f4b225b434edca8ee4abcf6f64b4ea6"
+  },
+  {
+   "path": "evtx/host/Microsoft-Windows-Ntfs-WHC.jsonl",
+   "lines": 3,
+   "uncompressed_bytes": 1818,
+   "on_disk_bytes": 1818,
+   "sha256": "31132d95cb1c0f534bee232e36c9ec23af6b6c52159a5bcbec01191088d981b7"
+  },
+  {
+   "path": "evtx/host/Microsoft-Windows-Partition-Diagnostic.jsonl",
+   "lines": 7,
+   "uncompressed_bytes": 52674,
+   "on_disk_bytes": 52674,
+   "sha256": "308ef93963ffeadfc47b1d302782030e674fae7510a6c08548376bef504169a2"
+  },
+  {
+   "path": "evtx/host/Microsoft-Windows-PowerShell-Operational.jsonl",
+   "lines": 75,
+   "uncompressed_bytes": 51555,
+   "on_disk_bytes": 51555,
+   "sha256": "89d8479de0db5612705207ead9e76a582631069f0796ecf9840540acc0a9d4a5"
+  },
+  {
+   "path": "evtx/host/Microsoft-Windows-PrintService-Admin.jsonl",
+   "lines": 8,
+   "uncompressed_bytes": 7597,
+   "on_disk_bytes": 7597,
+   "sha256": "0351a93cbd025f88ce7e32974af537a72e2edc21fd7e363c42686ddf3d3436ef"
+  },
+  {
+   "path": "evtx/host/Microsoft-Windows-Privacy-Auditing-Operational.jsonl",
+   "lines": 104,
+   "uncompressed_bytes": 91231,
+   "on_disk_bytes": 91231,
+   "sha256": "d5865b70ab789179398acbd6b38766263c2243cc79d5b3c06e730b18e7123506"
+  },
+  {
+   "path": "evtx/host/Microsoft-Windows-Provisioning-Diagnostics-Provider-Admin.jsonl",
+   "lines": 47,
+   "uncompressed_bytes": 37866,
+   "on_disk_bytes": 37866,
+   "sha256": "78e79e819c5c39c4b225e4d7133e4e14b59954cad39c7e2c8ed7cc6d867a273f"
+  },
+  {
+   "path": "evtx/host/Microsoft-Windows-PushNotification-Platform-Operational.jsonl",
+   "lines": 1683,
+   "uncompressed_bytes": 1582685,
+   "on_disk_bytes": 1582685,
+   "sha256": "eb329affe275d457c456e3e871d9bfabda361c9be9617dedeb368197852d278b"
+  },
+  {
+   "path": "evtx/host/Microsoft-Windows-ReadyBoost-Operational.jsonl",
+   "lines": 23,
+   "uncompressed_bytes": 16827,
+   "on_disk_bytes": 16827,
+   "sha256": "246f089f9d0cec72f034f290ecbec28ad39080ea69e193caebae6f7b1cfd0f43"
+  },
+  {
+   "path": "evtx/host/Microsoft-Windows-RemoteDesktopServices-RdpCoreTS-Operational.jsonl",
+   "lines": 2082,
+   "uncompressed_bytes": 1601720,
+   "on_disk_bytes": 1601720,
+   "sha256": "089539af738606972cc9eafc0a3931ba264c483319522549ac2b9aec1a6b6e0e"
+  },
+  {
+   "path": "evtx/host/Microsoft-Windows-Resource-Exhaustion-Detector-Operational.jsonl",
+   "lines": 3,
+   "uncompressed_bytes": 1974,
+   "on_disk_bytes": 1974,
+   "sha256": "41ba7c07cb46e4273e8027d6bcd0ad2a27ab9963ba2fd4382000878d28642caa"
+  },
+  {
+   "path": "evtx/host/Microsoft-Windows-SMBServer-Operational.jsonl",
+   "lines": 12,
+   "uncompressed_bytes": 9213,
+   "on_disk_bytes": 9213,
+   "sha256": "aa1453f2a5ce4c9a579c73c7fb47a2e5208aa4f87fb92992ba58ec873241911c"
+  },
+  {
+   "path": "evtx/host/Microsoft-Windows-Security-Mitigations-KernelMode.jsonl",
+   "lines": 45,
+   "uncompressed_bytes": 74437,
+   "on_disk_bytes": 74437,
+   "sha256": "f43ac74ce60af452aea5f8d913d2d482de695034affdfb94ae84046b3e11dc3a"
+  },
+  {
+   "path": "evtx/host/Microsoft-Windows-Security-SPP-UX-Notifications-ActionCenter.jsonl",
+   "lines": 1,
+   "uncompressed_bytes": 671,
+   "on_disk_bytes": 671,
+   "sha256": "dea404841413dafadd8b3471c8d1bc34f4c89e0d164796baba45b65f0b0f8132"
+  },
+  {
+   "path": "evtx/host/Microsoft-Windows-SettingSync-Debug.jsonl",
+   "lines": 20,
+   "uncompressed_bytes": 17132,
+   "on_disk_bytes": 17132,
+   "sha256": "c9d0353856f76ab50d9603af3ef7202a125e5ac5120cf2257d29a9a654ec5115"
+  },
+  {
+   "path": "evtx/host/Microsoft-Windows-Shell-Core-AppDefaults.jsonl",
+   "lines": 102,
+   "uncompressed_bytes": 78684,
+   "on_disk_bytes": 78684,
+   "sha256": "5d2c3133700253d1eeda95a1c552b65229e431a00ad17b9848f289e5337a2928"
+  },
+  {
+   "path": "evtx/host/Microsoft-Windows-Shell-Core-Operational.jsonl",
+   "lines": 389,
+   "uncompressed_bytes": 294201,
+   "on_disk_bytes": 294201,
+   "sha256": "a9f36784f421b34feda8798f216d03491d2645605275416b029840c689a055c9"
+  },
+  {
+   "path": "evtx/host/Microsoft-Windows-ShellCommon-StartLayoutPopulation-Operational.jsonl",
+   "lines": 21,
+   "uncompressed_bytes": 16623,
+   "on_disk_bytes": 16623,
+   "sha256": "da1d5ba56f2286d399e77b4321eb6a76c03d88cb845d2ae0833a6db0b0ca4b35"
+  },
+  {
+   "path": "evtx/host/Microsoft-Windows-SmartCard-DeviceEnum-Operational.jsonl",
+   "lines": 32,
+   "uncompressed_bytes": 21336,
+   "on_disk_bytes": 21336,
+   "sha256": "d7db3c3fb096c10c32705e47a9bcee7baebd1fe8c8bb9746fb3afcad9f14ade8"
+  },
+  {
+   "path": "evtx/host/Microsoft-Windows-SmbClient-Connectivity.jsonl",
+   "lines": 6,
+   "uncompressed_bytes": 4056,
+   "on_disk_bytes": 4056,
+   "sha256": "07cfb951be87c8f1d6d09ef3d8bb8d8828d63eaa23c1c980b2c8150d0867d348"
+  },
+  {
+   "path": "evtx/host/Microsoft-Windows-StateRepository-Operational.jsonl",
+   "lines": 1088,
+   "uncompressed_bytes": 801648,
+   "on_disk_bytes": 801648,
+   "sha256": "3b54963ca24b9dbf8f2f467bf8f50d40b76d6d485b3728dbc9ec9234ad0513c4"
+  },
+  {
+   "path": "evtx/host/Microsoft-Windows-Storage-Storport-Operational.jsonl",
+   "lines": 566,
+   "uncompressed_bytes": 1371794,
+   "on_disk_bytes": 1371794,
+   "sha256": "272d20348517ab67a7efe2ffdbb79f4f00b7612eb4002bc850a0188c4841c813"
+  },
+  {
+   "path": "evtx/host/Microsoft-Windows-StorageSpaces-Driver-Operational.jsonl",
+   "lines": 3,
+   "uncompressed_bytes": 2448,
+   "on_disk_bytes": 2448,
+   "sha256": "4e8b8dac6ea0a5502f05034eee3a3bb71c33e1105a6dce41709bd6fdaf069c42"
+  },
+  {
+   "path": "evtx/host/Microsoft-Windows-Store-Operational.jsonl",
+   "lines": 23900,
+   "uncompressed_bytes": 22905283,
+   "on_disk_bytes": 22905283,
+   "sha256": "ca84ddc5ba3da48c3f4dfaee77ad207ae8e4deece97d9bd2e78fe169f0949cfc"
+  },
+  {
+   "path": "evtx/host/Microsoft-Windows-Storsvc-Diagnostic.jsonl",
+   "lines": 27,
+   "uncompressed_bytes": 27514,
+   "on_disk_bytes": 27514,
+   "sha256": "49607d4c108bc77f21b579a502404a4d63d9193cc7271abe23427c0802992107"
+  },
+  {
+   "path": "evtx/host/Microsoft-Windows-TWinUI-Operational.jsonl",
+   "lines": 1,
+   "uncompressed_bytes": 661,
+   "on_disk_bytes": 661,
+   "sha256": "97830e7eb1c316babfa13bc3d0ec8c941086ab4cc5f375301da1492624cbb0c8"
+  },
+  {
+   "path": "evtx/host/Microsoft-Windows-TZSync-Operational.jsonl",
+   "lines": 8,
+   "uncompressed_bytes": 4880,
+   "on_disk_bytes": 4880,
+   "sha256": "3ef7d4370eb358337396e1dfd67f51a3479933533ee4fc3241b713378f97c805"
+  },
+  {
+   "path": "evtx/host/Microsoft-Windows-TaskScheduler-Maintenance.jsonl",
+   "lines": 202,
+   "uncompressed_bytes": 148990,
+   "on_disk_bytes": 148990,
+   "sha256": "185f048e85160deb722781e2a317f4712e0ed28e9a62920fea8f22e17704a8ae"
+  },
+  {
+   "path": "evtx/host/Microsoft-Windows-TerminalServices-LocalSessionManager-Operational.jsonl",
+   "lines": 105,
+   "uncompressed_bytes": 80582,
+   "on_disk_bytes": 80582,
+   "sha256": "c41e26dea4d51484321c2ca963f36e24ee1e65c071dc9b883632857a8f2c4eac"
+  },
+  {
+   "path": "evtx/host/Microsoft-Windows-TerminalServices-PnPDevices-Admin.jsonl",
+   "lines": 2,
+   "uncompressed_bytes": 1294,
+   "on_disk_bytes": 1294,
+   "sha256": "11bce6d3b872ec459fa4eef86c198c70ce244fb08be6a4d33ed0fe03b532fa0e"
+  },
+  {
+   "path": "evtx/host/Microsoft-Windows-TerminalServices-RemoteConnectionManager-Admin.jsonl",
+   "lines": 21,
+   "uncompressed_bytes": 16958,
+   "on_disk_bytes": 16958,
+   "sha256": "83120fcc85d4875f54973b550fc8037ed53e775a574cd5f7e6ddc9def7ba2231"
+  },
+  {
+   "path": "evtx/host/Microsoft-Windows-TerminalServices-RemoteConnectionManager-Operational.jsonl",
+   "lines": 1964,
+   "uncompressed_bytes": 1606552,
+   "on_disk_bytes": 1606552,
+   "sha256": "ab8555015c71059fc01332ccb3e161752e3173acf852939149000a1b5c98572a"
+  },
+  {
+   "path": "evtx/host/Microsoft-Windows-TerminalServices-ServerUSBDevices-Admin.jsonl",
+   "lines": 2,
+   "uncompressed_bytes": 1318,
+   "on_disk_bytes": 1318,
+   "sha256": "57f7d0fb8f2d2125d1722ee3d924836706bcbadee4d5bf9c202409b5b68a7b04"
+  },
+  {
+   "path": "evtx/host/Microsoft-Windows-Time-Service-Operational.jsonl",
+   "lines": 247,
+   "uncompressed_bytes": 246767,
+   "on_disk_bytes": 246767,
+   "sha256": "1c6ed6d920a9c7c9b118fa42d2fceb199a2175a50f124486865ce4ef845ab45c"
+  },
+  {
+   "path": "evtx/host/Microsoft-Windows-UniversalTelemetryClient-Operational.jsonl",
+   "lines": 479,
+   "uncompressed_bytes": 366224,
+   "on_disk_bytes": 366224,
+   "sha256": "ba291e66a9a10cfaf5dbdd5494d2f8d97899e283d106ada28f0130003dd5374e"
+  },
+  {
+   "path": "evtx/host/Microsoft-Windows-User-Device-Registration-Admin.jsonl",
+   "lines": 1,
+   "uncompressed_bytes": 1029,
+   "on_disk_bytes": 1029,
+   "sha256": "64b5a8863f2c6b09fb61c16c2ba105c70d1351c2967240abfa89d58d6701b602"
+  },
+  {
+   "path": "evtx/host/Microsoft-Windows-User-Profile-Service-Operational.jsonl",
+   "lines": 9,
+   "uncompressed_bytes": 6463,
+   "on_disk_bytes": 6463,
+   "sha256": "8e39e97792be868cc610b72cf3d0f04a4027c219761d8c20283da8e724140f50"
+  },
+  {
+   "path": "evtx/host/Microsoft-Windows-UserPnp-DeviceInstall.jsonl",
+   "lines": 10,
+   "uncompressed_bytes": 6742,
+   "on_disk_bytes": 6742,
+   "sha256": "b477973f9b6cc36f319a44342a42c705e97f86af75da886ae13b649591ed11f6"
+  },
+  {
+   "path": "evtx/host/Microsoft-Windows-VolumeSnapshot-Driver-Operational.jsonl",
+   "lines": 22,
+   "uncompressed_bytes": 16575,
+   "on_disk_bytes": 16575,
+   "sha256": "9090178480e796261a2b96d42c67df96f3e000e3ae9900f66639644cb2eb7e31"
+  },
+  {
+   "path": "evtx/host/Microsoft-Windows-WER-PayloadHealth-Operational.jsonl",
+   "lines": 8,
+   "uncompressed_bytes": 6793,
+   "on_disk_bytes": 6793,
+   "sha256": "10baacc81eff03747358edb60cfe3015f21a642d8d5d6d8eb3d81751c3855c7c"
+  },
+  {
+   "path": "evtx/host/Microsoft-Windows-WMI-Activity-Operational.jsonl",
+   "lines": 1774,
+   "uncompressed_bytes": 1594635,
+   "on_disk_bytes": 1594635,
+   "sha256": "973931952e57b4910d6c3b0da269daf08cc595a668817c6abd375f8d32661452"
+  },
+  {
+   "path": "evtx/host/Microsoft-Windows-Wcmsvc-Operational.jsonl",
+   "lines": 83,
+   "uncompressed_bytes": 52017,
+   "on_disk_bytes": 52017,
+   "sha256": "e89b6b2b9971da5817bccefd0a34d87b2234c048c29223fe5f635540cfbfac1f"
+  },
+  {
+   "path": "evtx/host/Microsoft-Windows-WebAuthN-Operational.jsonl",
+   "lines": 5,
+   "uncompressed_bytes": 3105,
+   "on_disk_bytes": 3105,
+   "sha256": "b42a1a8be2dc0e28f08a810ccad3666aa7e0f58bef46aff7ff7a87201ab6b0e5"
+  },
+  {
+   "path": "evtx/host/Microsoft-Windows-WinINet-Config-ProxyConfigChanged.jsonl",
+   "lines": 1,
+   "uncompressed_bytes": 776,
+   "on_disk_bytes": 776,
+   "sha256": "bba5ac97ab8a9be6af18338f79798788c24c363084a945d52640c7c4a3f84a67"
+  },
+  {
+   "path": "evtx/host/Microsoft-Windows-WinRM-Operational.jsonl",
+   "lines": 172,
+   "uncompressed_bytes": 157259,
+   "on_disk_bytes": 157259,
+   "sha256": "7ceee44c9676804bcc6a51e4f232fc1cd6d4ed4faf1d0d823a1909500b778149"
+  },
+  {
+   "path": "evtx/host/Microsoft-Windows-Windows-Defender-Operational.jsonl",
+   "lines": 1106,
+   "uncompressed_bytes": 1352874,
+   "on_disk_bytes": 1352874,
+   "sha256": "9c667d703528accd6110e0af53580717ff728a6329b7680e801e7c3173b4e67f"
+  },
+  {
+   "path": "evtx/host/Microsoft-Windows-Windows-Firewall-With-Advanced-Security-Firewall.jsonl",
+   "lines": 719,
+   "uncompressed_bytes": 902946,
+   "on_disk_bytes": 902946,
+   "sha256": "a4df7fb98e68c7a74d1f282553769c453cb25f9a01006ac3a7ae1f77fcedd388"
+  },
+  {
+   "path": "evtx/host/Microsoft-Windows-WindowsSystemAssessmentTool-Operational.jsonl",
+   "lines": 19,
+   "uncompressed_bytes": 13198,
+   "on_disk_bytes": 13198,
+   "sha256": "2f2787c81827496f12556851cbea638691b559389e6631c9831489f28760fb77"
+  },
+  {
+   "path": "evtx/host/Microsoft-Windows-WindowsUpdateClient-Operational.jsonl",
+   "lines": 323,
+   "uncompressed_bytes": 244316,
+   "on_disk_bytes": 244316,
+   "sha256": "6002703598bb635ad489e38a2313b58880922a07c6ccd5603ec3ae63886706ce"
+  },
+  {
+   "path": "evtx/host/Microsoft-Windows-Winlogon-Operational.jsonl",
+   "lines": 354,
+   "uncompressed_bytes": 237779,
+   "on_disk_bytes": 237779,
+   "sha256": "d60f4b131742b8be141e5492d22b4d5594881ae002bb29a3890a56663fd4cefb"
+  },
+  {
+   "path": "evtx/host/Security.jsonl",
+   "lines": 34916,
+   "uncompressed_bytes": 39000816,
+   "on_disk_bytes": 39000816,
+   "sha256": "8cb82ae13837de89ed3bd315bfa06e50663a80160cdac0d04133f5df97640ae1"
+  },
+  {
+   "path": "evtx/host/Setup.jsonl",
+   "lines": 13,
+   "uncompressed_bytes": 11334,
+   "on_disk_bytes": 11334,
+   "sha256": "59e78630d095356be7aa8d2c4842120709a2e332db6510d413b52c6cbecb7a41"
+  },
+  {
+   "path": "evtx/host/System.jsonl",
+   "lines": 1036,
+   "uncompressed_bytes": 815552,
+   "on_disk_bytes": 815552,
+   "sha256": "ccb4ef27f9054d8af0016c8f69e5cd47f43b0c32a5a9ea3d6031da35e1578d43"
+  },
+  {
+   "path": "evtx/host/Windows-PowerShell.jsonl",
+   "lines": 200,
+   "uncompressed_bytes": 207717,
+   "on_disk_bytes": 207717,
+   "sha256": "f0b6d8489d428ebe97e7c52fa912bd0d079b994d3d4cde88db4ba090fb2bf64e"
+  },
+  {
+   "path": "evtx/incident/BlueSkyRansomware.jsonl",
+   "lines": 469,
+   "uncompressed_bytes": 467262,
+   "on_disk_bytes": 467262,
+   "sha256": "28b73f0be7b2a6ed7d102c8a8ba86d7c186887e0b71fcacfb8f73dcb0e37ff58"
+  },
+  {
+   "path": "pcap/dns.tsv",
+   "lines": 335,
+   "uncompressed_bytes": 27982,
+   "on_disk_bytes": 27982,
+   "sha256": "24a1e699aabf076b6c2c9b714423f15ff4b066b0053332fea0718115170bd5c9"
+  },
+  {
+   "path": "pcap/frames.tsv",
+   "lines": 4798,
+   "uncompressed_bytes": 769545,
+   "on_disk_bytes": 769545,
+   "sha256": "4c6c89edc36b4e02bae59a205f4b756622fefbd769e9068cc8dcc406922d5cae"
+  },
+  {
+   "path": "pcap/http.tsv",
+   "lines": 47,
+   "uncompressed_bytes": 4786,
+   "on_disk_bytes": 4786,
+   "sha256": "1763c995647a837b1d286e27a12cc942f4bb813a284eb7e25071b48a495469a8"
+  },
+  {
+   "path": "pcap/tcp-streams.tsv",
+   "lines": 1202,
+   "uncompressed_bytes": 103991,
+   "on_disk_bytes": 103991,
+   "sha256": "b79344c65a51ba797ef79e52f9b387750ec36a7888961474ab358ea205e172f9"
+  },
+  {
+   "path": "pcap/tds-batches.tsv",
+   "lines": 71,
+   "uncompressed_bytes": 109437,
+   "on_disk_bytes": 109437,
+   "sha256": "e5fd6a960a45b42444b9c39b6858056de54b9d81bd617b7b2d4ca372a6504d1b"
+  },
+  {
+   "path": "toolkit/Invoke-PowerDump.ps1.txt",
+   "lines": 513,
+   "uncompressed_bytes": 22165,
+   "on_disk_bytes": 22165,
+   "sha256": "3b463c94b52414cfaad61ecdac64ca84eaea1ab4be69f75834aaa7701ab5e7d0"
+  },
+  {
+   "path": "toolkit/Invoke-SMBExec.ps1.txt",
+   "lines": 2949,
+   "uncompressed_bytes": 149645,
+   "on_disk_bytes": 149645,
+   "sha256": "2211a127a4467fb15a2112dd48ebe26df2660f97e6b8be95db57bbafab806412"
+  },
+  {
+   "path": "toolkit/c2-web-root-index.html",
+   "lines": 27,
+   "uncompressed_bytes": 844,
+   "on_disk_bytes": 844,
+   "sha256": "1777bef32e4b9553dc149466253262a83c0fe5c4d32ee9390737103d7b34d6f1"
+  },
+  {
+   "path": "toolkit/checking.ps1.txt",
+   "lines": 153,
+   "uncompressed_bytes": 5024,
+   "on_disk_bytes": 5024,
+   "sha256": "bb4d98715655d6a8c812c18c92eaab5cc57eec74eca581f2760ee4880baf74d2"
+  },
+  {
+   "path": "toolkit/del.ps1.txt",
+   "lines": 12,
+   "uncompressed_bytes": 343,
+   "on_disk_bytes": 343,
+   "sha256": "9136924205cf55fa3a3edbd0191cca190e559b1619c07743e6dd7a3cd022d33f"
+  },
+  {
+   "path": "toolkit/extracted_hosts.txt",
+   "lines": 4,
+   "uncompressed_bytes": 72,
+   "on_disk_bytes": 72,
+   "sha256": "8069cd67cc32c1ede26813777e749259137b983816c70aa8f28c77e203b20593"
+  },
+  {
+   "path": "toolkit/ichigo-lite.ps1.txt",
+   "lines": 70,
+   "uncompressed_bytes": 2559,
+   "on_disk_bytes": 2559,
+   "sha256": "38fe562136ade372fc4cedde67826aeea8404e93a54a4a4736ddb4c8c8d4c96d"
+  }
+ ],
+ "defects": [
+  {
+   "id": "D01",
+   "title": "Windows Defender put into SECURITY_PRODUCT_STATE_SNOOZED six minutes before the SQL brute force",
+   "difficulty": "single-format read (4 records in 469, in a channel whose keyword matches 1,106 decoy records)",
+   "requires": "single-format read",
+   "description": "Real-time protection on DESKTOP-7EQVM78 stops being active at 2024-04-23T09:54:01Z and never comes back in this log. Every later stage of the intrusion runs with the antivirus snoozed.",
+   "root_cause": "The SecurityCenter provider (Application channel, EventID 15) reports the product state of 'Windows Defender'. It reads SECURITY_PRODUCT_STATE_ON eight times up to 2024-04-23T09:52:59.188634Z (EventRecordID 3011) and then flips to SECURITY_PRODUCT_STATE_SNOOZED at 2024-04-23T09:54:01.302195Z (EventRecordID 3013), repeating SNOOZED three more times over the next 10 seconds. The 'sa' brute force starts 5 min 53 s later. Nothing in the log turns protection back on.",
+   "formats": [
+    "EVTX rendered as JSONL (Application channel, SecurityCenter provider)"
+   ],
+   "trap": "The literal string 'Defender' matches 1,106 records in evtx/host/Microsoft-Windows-Windows-Defender-Operational.jsonl and only 12 in the incident file, so a keyword search returns the 2021 decoy host first by two orders of magnitude. The state value is also inside an EventData.Data.#text ARRAY, not a sentence: there is no line anywhere that says 'protection disabled'.",
+   "confused_with": "D15 (the 2021 Defender-history purge) -- same keyword, different host, different year.",
+   "proof_locations": [
+    {
+     "file": "evtx/incident/BlueSkyRansomware.jsonl",
+     "line_start": 425,
+     "line_end": 425,
+     "note": "SECURITY_PRODUCT_STATE_SNOOZED -- the state change itself",
+     "anchor": "EventRecordID 3013, 2024-04-23T09:54:01.302195Z"
+    },
+    {
+     "file": "evtx/incident/BlueSkyRansomware.jsonl",
+     "line_start": 427,
+     "line_end": 429,
+     "note": "SNOOZED repeated three times over the next 10 s",
+     "anchor": "EventRecordID 3015, 3016, 3017"
+    },
+    {
+     "file": "evtx/incident/BlueSkyRansomware.jsonl",
+     "line_start": 423,
+     "line_end": 423,
+     "note": "the last SECURITY_PRODUCT_STATE_ON, 62 s earlier -- the before half of the pair",
+     "anchor": "EventRecordID 3011, 2024-04-23T09:52:59.188634Z"
+    }
+   ],
+   "proof_count": 3
+  },
+  {
+   "id": "D02",
+   "title": "22 failed 'sa' logins in 140 ms from 87.96.21.84 -- an automated MSSQL password attack",
+   "difficulty": "rate reasoning (22 records against a 33,456-record decoy of the same shape)",
+   "requires": "single-format read, rate reasoning",
+   "description": "SQL Server logs 22 consecutive login failures for the 'sa' account from one address inside 140 milliseconds, then a success.",
+   "root_cause": "MSSQLSERVER EventID 18456, EventData ['sa', ' Reason: Password did not match that for the login provided.', ' [CLIENT: 87.96.21.84]'], EventRecordID 3020 through 3041, from 2024-04-23T09:59:54.644152Z to 09:59:54.784581Z. 22 attempts in 140 ms is machine speed, not a person. The instance allows SQL authentication, 'sa' is enabled, and SQL Server has no lockout for it. The identical attack ran two days earlier (EventRecordID 2829-2850, 2024-04-21T04:51:02.988886Z-04:51:03.066977Z), so this is a repeat visit, not a first attempt.",
+   "formats": [
+    "EVTX rendered as JSONL (Application channel, MSSQLSERVER provider)"
+   ],
+   "trap": "Volume. 22 records look like nothing beside the 33,456 EventID 4625 records in evtx/host/Security.jsonl, and a report that ranks findings by count reports the wrong one. The discriminator is the 140 ms span and the success stamped at the same microsecond as the last failure -- not the number of attempts.",
+   "confused_with": "D12 (33,456 failed logons on a different host, three years earlier) -- the decoy built for exactly this.",
+   "proof_locations": [
+    {
+     "file": "evtx/incident/BlueSkyRansomware.jsonl",
+     "line_start": 432,
+     "line_end": 453,
+     "note": "the 22 failed 'sa' logins, 09:59:54.644152Z-09:59:54.784581Z, all [CLIENT: 87.96.21.84]",
+     "anchor": "EventRecordID 3020-3041"
+    },
+    {
+     "file": "evtx/incident/BlueSkyRansomware.jsonl",
+     "line_start": 164,
+     "line_end": 185,
+     "note": "the same 22-attempt burst two days earlier -- the first visit",
+     "anchor": "EventRecordID 2829-2850, 2024-04-21T04:51:02.988886Z"
+    }
+   ],
+   "proof_count": 2
+  },
+  {
+   "id": "D03",
+   "title": "The brute force succeeds: 'sa' logs in from 87.96.21.84 at the same microsecond as the last failure",
+   "difficulty": "single-format read (+ telling the attacker's success from the service account's)",
+   "requires": "single-format read",
+   "description": "The 22nd failure and the login success carry the same timestamp. The 'sa' account is compromised and is used twice more within 34 seconds.",
+   "root_cause": "MSSQLSERVER EventID 18454, EventData ['sa', ' [CLIENT: 87.96.21.84]'], EventRecordID 3042 at 2024-04-23T09:59:54.784581Z -- byte-identical timestamp to the last 18456 failure (EventRecordID 3041). Two further 'sa' logins from the same client follow at 10:00:11.878462Z (EventRecordID 3043) and 10:00:28.081526Z (EventRecordID 3046). The same success followed the 2024-04-21 burst (EventRecordID 2851).",
+   "formats": [
+    "EVTX rendered as JSONL (Application channel, MSSQLSERVER provider)"
+   ],
+   "trap": "EventID 18454 also fires for the local service account: EventRecordID 3014 and 3048 are ['NT SERVICE\\\\SQLTELEMETRY', ' [CLIENT: <local machine>]']. Counting 18454 events, or matching on 'Login succeeded' without reading the client, mixes benign local logins into the finding and blurs the moment of compromise.",
+   "confused_with": "D02 -- the failures are the noise; THIS is the compromise.",
+   "proof_locations": [
+    {
+     "file": "evtx/incident/BlueSkyRansomware.jsonl",
+     "line_start": 454,
+     "line_end": 454,
+     "note": "'sa' login succeeded from 87.96.21.84, same microsecond as the final failure",
+     "anchor": "EventRecordID 3042, 2024-04-23T09:59:54.784581Z"
+    },
+    {
+     "file": "evtx/incident/BlueSkyRansomware.jsonl",
+     "line_start": 455,
+     "line_end": 455,
+     "note": "second attacker 'sa' login 17 s later",
+     "anchor": "EventRecordID 3043, 2024-04-23T10:00:11.878462Z"
+    },
+    {
+     "file": "evtx/incident/BlueSkyRansomware.jsonl",
+     "line_start": 458,
+     "line_end": 458,
+     "note": "third attacker 'sa' login, after xp_cmdshell was enabled",
+     "anchor": "EventRecordID 3046, 2024-04-23T10:00:28.081526Z"
+    },
+    {
+     "file": "evtx/incident/BlueSkyRansomware.jsonl",
+     "line_start": 186,
+     "line_end": 186,
+     "note": "the 2024-04-21 success that closed the first burst",
+     "anchor": "EventRecordID 2851, 2024-04-21T04:51:03.066977Z"
+    }
+   ],
+   "proof_count": 4
+  },
+  {
+   "id": "D04",
+   "title": "xp_cmdshell switched on through sp_configure 18 seconds after the login -- SQL access becomes OS execution",
+   "difficulty": "single-format read + knowing what the three bare EventData fields mean",
+   "requires": "single-format read, domain knowledge",
+   "description": "Two configuration changes turn the compromised SQL login into arbitrary command execution on the host.",
+   "root_cause": "MSSQLSERVER EventID 15457 (a sp_configure change) fires twice: EventData ['show advanced options', '0', '1'] at 2024-04-23T10:00:12.238113Z (EventRecordID 3044) and ['xp_cmdshell', '0', '1'] 46 ms later (EventRecordID 3045). xp_cmdshell runs OS commands as the SQL Server service account, so from this moment the database session is a shell.",
+   "formats": [
+    "EVTX rendered as JSONL (Application channel, MSSQLSERVER provider)"
+   ],
+   "trap": "The evidence is three bare strings -- option name, old value, new value -- with no sentence around them. Searching for phrasings like 'xp_cmdshell enabled', 'configuration changed' or 'RECONFIGURE' finds nothing in the host log; only the literal token 'xp_cmdshell' hits. The pair also has to be read as a pair: 'show advanced options' alone is unremarkable.",
+   "confused_with": "D07 -- the same two statements appear in the 2024-04-28 capture as raw T-SQL, five days later. They are two runs, not one event seen twice.",
+   "proof_locations": [
+    {
+     "file": "evtx/incident/BlueSkyRansomware.jsonl",
+     "line_start": 456,
+     "line_end": 456,
+     "note": "'show advanced options' changed from 0 to 1",
+     "anchor": "EventRecordID 3044, 2024-04-23T10:00:12.238113Z"
+    },
+    {
+     "file": "evtx/incident/BlueSkyRansomware.jsonl",
+     "line_start": 457,
+     "line_end": 457,
+     "note": "'xp_cmdshell' changed from 0 to 1",
+     "anchor": "EventRecordID 3045, 2024-04-23T10:00:12.284576Z"
+    }
+   ],
+   "proof_count": 2
+  },
+  {
+   "id": "D05",
+   "title": "A PowerShell engine starts inside winlogon.exe under host 'MSFConsole' v0.1 -- Metasploit process injection",
+   "difficulty": "cross-format correlation + an escaped key=value payload inside a JSON string",
+   "requires": "escaped-payload read, cross-channel correlation",
+   "description": "65 seconds after xp_cmdshell is enabled, the Windows PowerShell channel records a PowerShell host that is not powershell.exe, running inside the logon process.",
+   "root_cause": "Windows PowerShell channel, EventID 600 x8 then EventID 400, EventRecordID 125-133, 2024-04-23T10:01:17.878505Z-10:01:18.144425Z. Every payload carries HostName=MSFConsole, HostVersion=0.1, HostApplication=winlogon.exe, HostId=1693e66c-ce22-41d0-8356-4245271c31e8. winlogon.exe never hosts PowerShell; 'MSFConsole' version 0.1 is Metasploit's PowerShell host. This is a Meterpreter session injected into winlogon.exe, launched through the xp_cmdshell foothold of D04.",
+   "formats": [
+    "EVTX rendered as JSONL (Windows PowerShell channel)",
+    "escaped \\r\\n\\t key=value blob inside a JSON string"
+   ],
+   "trap": "Two traps. (1) The Windows PowerShell channel restarts EventRecordID at 125 while the Application channel is at 3046, so ordering the file by EventRecordID drops this stage at the very beginning of the timeline, days before the breach; only TimeCreated orders it correctly. (2) The evidence lives inside a \\r\\n\\t-escaped blob in one JSON string, so 'HostName=MSFConsole' is only findable if the escaped form is searched -- and 124 earlier records in the same channel carry the benign HostName=ConsoleHost in exactly the same shape.",
+   "confused_with": "nothing in this corpus -- it is the one stage no decoy imitates, which is why a report that misses it missed the compromise itself.",
+   "proof_locations": [
+    {
+     "file": "evtx/incident/BlueSkyRansomware.jsonl",
+     "line_start": 459,
+     "line_end": 459,
+     "note": "first PowerShell provider-start under HostName=MSFConsole HostVersion=0.1 HostApplication=winlogon.exe",
+     "anchor": "EventRecordID 125, 2024-04-23T10:01:17.878505Z"
+    },
+    {
+     "file": "evtx/incident/BlueSkyRansomware.jsonl",
+     "line_start": 460,
+     "line_end": 466,
+     "note": "seven more provider starts in the same 32 ms, same HostId",
+     "anchor": "EventRecordID 126-132"
+    },
+    {
+     "file": "evtx/incident/BlueSkyRansomware.jsonl",
+     "line_start": 467,
+     "line_end": 467,
+     "note": "EventID 400 engine state None->Available, EngineVersion 5.1.19041.4291, same MSFConsole host",
+     "anchor": "EventRecordID 133, 2024-04-23T10:01:18.144425Z"
+    }
+   ],
+   "proof_count": 3
+  },
+  {
+   "id": "D06",
+   "title": "A 1,000-port TCP sweep of the victim from 87.96.21.84 opens the 2024-04-28 run",
+   "difficulty": "aggregate reasoning -- invisible one frame at a time",
+   "requires": "aggregation across 4,797 frames / 1,201 streams",
+   "description": "Three seconds into the capture the attacker SYN-scans a thousand ports on 87.96.21.81.",
+   "root_cause": "pcap/tcp-streams.tsv holds 1,201 TCP streams; 1,158 carry zero payload in both directions, and 1,138 of those are 87.96.21.84 -> 87.96.21.81 across 1,000 distinct destination ports from 1 to 65389 -- an nmap-style top-1000 sweep. The first SYN is frame 10 at 2024-04-28T00:29:56.336719Z (33344 -> 80); the SQL work starts on the same run 10 seconds later. The sweep is reconnaissance for everything that follows in the capture.",
+   "formats": [
+    "tshark field dump, one line per frame",
+    "tshark-derived per-stream summary"
+   ],
+   "trap": "No single line says 'port scan'. Read frame by frame it is 2,276 ordinary SYN/RST pairs scattered through the capture; it only becomes one object in pcap/tcp-streams.tsv, where the zero-payload streams sit next to each other and can be counted. A report working only from pcap/frames.tsv will not find it.",
+   "confused_with": "D14 -- both are 'lots of traffic to the attacker IP that carries no data'; the scan is inbound and real, the DNS is outbound and a decoy.",
+   "proof_locations": [
+    {
+     "file": "pcap/frames.tsv",
+     "line_start": 11,
+     "line_end": 11,
+     "note": "first SYN of the sweep, 33344 -> 80",
+     "anchor": "frame 10, 2024-04-28T00:29:56.336719Z"
+    },
+    {
+     "file": "pcap/tcp-streams.tsv",
+     "line_start": 2,
+     "line_end": 1159,
+     "note": "the zero-payload streams: 1,158 of 1,201, bytes_a_to_b and bytes_b_to_a both 0",
+     "anchor": "tcp.stream 0 through ~1157"
+    }
+   ],
+   "proof_count": 2
+  },
+  {
+   "id": "D07",
+   "title": "xp_cmdshell re-enabled over the wire on 2024-04-28 -- the same playbook, a second run, five days later",
+   "difficulty": "cross-artefact correlation (host log vs capture) + a rendering tshark itself does not produce",
+   "requires": "cross-format correlation",
+   "description": "The capture carries the T-SQL that turns xp_cmdshell on, sent from the attacker address to the victim's SQL Server.",
+   "root_cause": "pcap/tds-batches.tsv batch 1: \"EXEC sp_configure 'show advanced options', 1; RECONFIGURE; EXEC sp_configure 'xp_cmdshell', 1; RECONFIGURE;\" -- frame 2643, tcp.stream 1161, 87.96.21.84 -> 87.96.21.81, 2024-04-28T00:30:13.305902Z. It is the wire-level twin of D04, executed on a different day.",
+   "formats": [
+    "TDS SQLBatch reassembled from tcp.payload and decoded UTF-16LE"
+   ],
+   "trap": "The dates. The host evidence is 2024-04-21 and 2024-04-23; the capture is 2024-04-28. A report that merges them into one timeline invents an event sequence that never happened. They are two executions of one playbook against one victim.",
+   "confused_with": "D04 -- deliberately near-identical; the distinguishing field is the date, not the content.",
+   "proof_locations": [
+    {
+     "file": "pcap/tds-batches.tsv",
+     "line_start": 2,
+     "line_end": 2,
+     "note": "sp_configure show advanced options + xp_cmdshell, both to 1",
+     "anchor": "frame 2643, tcp.stream 1161, 2024-04-28T00:30:13.305902Z"
+    }
+   ],
+   "proof_count": 1
+  },
+  {
+   "id": "D08",
+   "title": "A PE staged into %TEMP% by 68 xp_cmdshell echo statements and launched by a VBScript base64 decoder",
+   "difficulty": "the payload is not in the packet dissection at all -- it needs TDS reassembly",
+   "requires": "protocol reassembly, cross-line aggregation",
+   "description": "Over 19 seconds the attacker writes a base64-encoded executable into a temp file one SQL statement at a time, then writes and runs a VBScript that decodes it to an .exe and starts it hidden.",
+   "root_cause": "pcap/tds-batches.tsv batches 2-68 are EXEC master..xp_cmdshell 'echo <base64 chunk> >>%TEMP%\\SBjzH.b64', frames 2678-3140, 2024-04-28T00:30:20.617081Z-00:30:39Z; the first chunk begins TVqQAAMAAAAEAAAA (the MZ DOS header) and the decoded stream's version resource names ApacheBench 2.2.14 / ab.exe / Apache Software Foundation -- a masquerade. Batch 69 (frame 3144) writes %TEMP%\\Gjmwb.vbs, a VBScript base64 decoder that does OpenTextFile(\"%TEMP%\\LkUYP.exe\", 2, True), ofs.Write data, and shell.run \"%TEMP%\\LkUYP.exe\", 0, false -- window mode 0, i.e. hidden. Batch 70 (frame 3149) ends with cscript //nologo %TEMP%\\Gjmwb.vbs, which executes it.",
+   "formats": [
+    "TDS SQLBatch reassembled from tcp.payload and decoded UTF-16LE",
+    "base64 inside T-SQL inside cmd.exe echo redirection",
+    "VBScript written line by line by echo"
+   ],
+   "trap": "tshark does not show this. pcap/frames.tsv's info column says only 'SQL batch' for all 70, and tshark's own -e tds.query returns 2 of the 70 because 68 batches open mid-segment after TCP desegmentation. tcp-streams.tsv shows only the first 160 bytes of the stream. Without the reassembled pcap/tds-batches.tsv the entire payload-delivery stage is invisible, and a report will describe the 443 channel (D09) as arriving from nowhere.",
+   "confused_with": "D10 -- the HTTP downloads are the OTHER delivery path, 90 seconds later and over port 80.",
+   "proof_locations": [
+    {
+     "file": "pcap/tds-batches.tsv",
+     "line_start": 3,
+     "line_end": 3,
+     "note": "first base64 chunk: 'echo TVqQAAMAAAAEAAAA...' -- the MZ header of the staged PE",
+     "anchor": "frame 2678, 2024-04-28T00:30:20.617081Z"
+    },
+    {
+     "file": "pcap/tds-batches.tsv",
+     "line_start": 4,
+     "line_end": 69,
+     "note": "66 further echo-append chunks into %TEMP%\\SBjzH.b64",
+     "anchor": "frames 2689-3140"
+    },
+    {
+     "file": "pcap/tds-batches.tsv",
+     "line_start": 70,
+     "line_end": 70,
+     "note": "the VBScript decoder: OpenTextFile(\"%TEMP%\\LkUYP.exe\"), shell.run hidden",
+     "anchor": "frame 3144, 2024-04-28T00:30:39.620756Z"
+    },
+    {
+     "file": "pcap/tds-batches.tsv",
+     "line_start": 71,
+     "line_end": 71,
+     "note": "cscript //nologo %TEMP%\\Gjmwb.vbs -- the execution",
+     "anchor": "frame 3149, 2024-04-28T00:30:39.921600Z"
+    }
+   ],
+   "proof_count": 4
+  },
+  {
+   "id": "D09",
+   "title": "The staged payload calls home on TCP/443 and the channel is not TLS -- 944,560 bytes of PE inbound",
+   "difficulty": "refuting the tool's own protocol label",
+   "requires": "cross-format correlation, reading bytes against a dissector's guess",
+   "description": "1.1 seconds after the VBScript runs, the victim opens an outbound connection to the attacker on port 443 and pulls just under a megabyte, and the payload is a Windows executable, not encrypted traffic.",
+   "root_cause": "pcap/tcp-streams.tsv stream 1168: 87.96.21.81:63317 -> 87.96.21.84:443, first frame 3162 at 2024-04-28T00:30:41.010850Z, 808 frames over 100.4 s, 55,866 bytes out and 944,560 bytes in. The inbound preview begins 'MZ' followed by 'This program cannot be run in DOS mode' -- a PE image, delivered in the clear. The victim sends no TLS ClientHello. This is the second-stage download of a staged reverse payload (Meterpreter-shaped: small first stage, ~920 KB second stage, long-lived session), started by %TEMP%\\LkUYP.exe from D08.",
+   "formats": [
+    "tshark-derived per-stream summary with a printable payload preview",
+    "tshark field dump, one line per frame"
+   ],
+   "trap": "pcap/frames.tsv labels these frames SSL, SSLv2 and TLSv1.2 -- Wireshark guesses from the port number. Believing the protocol column ends the analysis at 'encrypted HTTPS, nothing to see'. The corpus also contains a GENUINE TLS handshake, on port 1433 (frames 2245-2248, Client Hello / Server Hello / Certificate), which is ordinary SQL Server login encryption and is not this.",
+   "confused_with": "D14 (the other 'traffic to 87.96.21.84 that looks like C2' finding, which is a decoy).",
+   "proof_locations": [
+    {
+     "file": "pcap/tcp-streams.tsv",
+     "line_start": 1170,
+     "line_end": 1170,
+     "note": "stream 1168: 100 s to 87.96.21.84:443, 944,560 B inbound, preview starts MZ / 'This program cannot be run in DOS mode'",
+     "anchor": "tcp.stream 1168, first frame 3162"
+    },
+    {
+     "file": "pcap/frames.tsv",
+     "line_start": 3163,
+     "line_end": 3163,
+     "note": "the outbound SYN that opens the C2 channel, 1.1 s after the last SQL batch",
+     "anchor": "frame 3162, 2024-04-28T00:30:41.010850Z"
+    }
+   ],
+   "proof_count": 2
+  },
+  {
+   "id": "D10",
+   "title": "The attacker toolkit and the BlueSky ransomware pulled in cleartext HTTP from 87.96.21.84",
+   "difficulty": "single-format read; the trap is stopping here",
+   "requires": "single-format read + hash-level identification",
+   "description": "23 plaintext HTTP GETs fetch seven objects from the attacker's Python SimpleHTTP server, including a 72,704-byte executable named javaw.exe.",
+   "root_cause": "pcap/http.tsv records GET/200 pairs from 87.96.21.81 to http://87.96.21.84/ between 2024-04-28T00:32:10Z and 00:32:21Z (frames 4214-4782): checking.ps1, / (the C2's directory listing), del.ps1, ichigo-lite.ps1, Invoke-PowerDump.ps1, Invoke-SMBExec.ps1, extracted_hosts.txt and javaw.exe (application/x-msdos-program, 72,704 bytes, fetched twice). The carved objects are in toolkit/ with the hashes in MANIFEST.tsv; javaw.exe is sha256 3e035f2d7d30869ce53171ef5a0f761bfb9c14d94d9fe6da385e20b8d96dc2fb / md5 d8a44d2ed34b5fee7c8e24d998f805d9 -- the BlueSky ransomware, name-squatting the Java launcher. The server banner is SimpleHTTP/0.6 Python/3.11.8.",
+   "formats": [
+    "tshark-derived HTTP request/response table",
+    "carved HTTP objects as text",
+    "the C2's HTML directory listing"
+   ],
+   "trap": "It is the easiest thing in the capture to find -- plaintext, port 80, filenames in the URI -- and it invites a report to stop there and call the downloads 'the attack'. They are not the entry: they happen 90 seconds AFTER the 443 channel of D09 is already live, and 2 minutes after the SQL payload of D08. toolkit/c2-web-root-index.html also lists six files that were never fetched in this capture (32.exe, 64.exe, dropper.ps1, Invoke-Mimikatz.ps1, Invoke-TheHash.ps1, rx.exe) -- naming them as used is asserting evidence that does not exist.",
+   "confused_with": "D08 -- the two delivery paths are separate; conflating them collapses a 2-minute sequence into one event.",
+   "proof_locations": [
+    {
+     "file": "pcap/http.tsv",
+     "line_start": 15,
+     "line_end": 16,
+     "note": "GET /checking.ps1 and its 200 -- the first cleartext pull",
+     "anchor": "frames 4214 / 4221, 2024-04-28T00:32:10Z"
+    },
+    {
+     "file": "pcap/http.tsv",
+     "line_start": 32,
+     "line_end": 33,
+     "note": "GET /javaw.exe and its 200, application/x-msdos-program, 72,704 bytes",
+     "anchor": "frames 4469 / 4523, 2024-04-28T00:32:14Z"
+    },
+    {
+     "file": "toolkit/c2-web-root-index.html",
+     "line_start": 1,
+     "line_end": 27,
+     "note": "the C2 web root listing, including six files never fetched in this capture",
+     "anchor": "sha256 1777bef32e4b9553dc149466253262a83c0fe5c4d32ee9390737103d7b34d6f1"
+    }
+   ],
+   "proof_count": 3
+  },
+  {
+   "id": "D11",
+   "title": "The toolkit's own logic: SAM dump -> pass-the-hash spread -> payload -- and the encryption call is commented out",
+   "difficulty": "source reading, and a NEGATIVE finding the whole case-name pushes against",
+   "requires": "source reading, negative evidence",
+   "description": "ichigo-lite.ps1 is the orchestrator: it dumps local hashes, reads a target list, moves laterally by pass-the-hash and downloads the ransomware. The line that would execute the ransomware is commented out, so no encryption happens in this evidence.",
+   "root_cause": "toolkit/ichigo-lite.ps1.txt in-memory-loads Invoke-PowerDump.ps1 and Invoke-SMBExec.ps1 from http://87.96.21.84/ (lines 2-3), fetches the target list (line 5), reads the dumped hashes from C:\\ProgramData\\hashes.txt (line 17), and calls Invoke-SMBExec -Target $targetHost -Username $username -Hash $password per host (line 38). The targets are toolkit/extracted_hosts.txt: 87.96.21.71, .75, .80, .81. It then downloads http://87.96.21.84/javaw.exe to C:\\ProgramData\\javaw.exe (lines 61-62) -- and line 67 is '# Start-Process -FilePath $downloadDestination -ArgumentList \"/silent\" -NoNewWindow -Wait', COMMENTED OUT. toolkit/del.ps1.txt is the anti-forensics half: it removes every WMI __FilterToConsumerBinding (line 1) and kills nine analysis tools including ProcessHacker, procexp and Procmon (line 3), then kills itself (line 12).",
+   "formats": [
+    "PowerShell source",
+    "plain-text host list"
+   ],
+   "trap": "The case is called ransomware, so 'files were encrypted' writes itself -- and it would be false. The only proof is one commented-out line, and the supporting negative is that no encryption, no ransom note and no mass file-rename appears anywhere in the 469 incident records or the 4,797 frames. Reporting encryption is a fabrication the corpus can refute.",
+   "confused_with": "D10 -- downloading the ransomware and running it are different claims, and only the first is supported.",
+   "proof_locations": [
+    {
+     "file": "toolkit/ichigo-lite.ps1.txt",
+     "line_start": 2,
+     "line_end": 3,
+     "note": "in-memory load of Invoke-PowerDump.ps1 and Invoke-SMBExec.ps1 from the C2",
+     "anchor": "sha256 38fe562136ade372fc4cedde67826aeea8404e93a54a4a4736ddb4c8c8d4c96d"
+    },
+    {
+     "file": "toolkit/ichigo-lite.ps1.txt",
+     "line_start": 38,
+     "line_end": 38,
+     "note": "Invoke-SMBExec -Target $targetHost -Username $username -Hash $password -- pass-the-hash lateral movement",
+     "anchor": "ichigo-lite.ps1 line 38"
+    },
+    {
+     "file": "toolkit/ichigo-lite.ps1.txt",
+     "line_start": 61,
+     "line_end": 67,
+     "note": "javaw.exe downloaded to C:\\ProgramData -- and the Start-Process that would run it is commented out on line 67",
+     "anchor": "ichigo-lite.ps1 line 67"
+    },
+    {
+     "file": "toolkit/extracted_hosts.txt",
+     "line_start": 1,
+     "line_end": 4,
+     "note": "the spread list: 87.96.21.71, .75, .80, .81",
+     "anchor": "sha256 8069cd67cc32c1ede26813777e749259137b983816c70aa8f28c77e203b20593"
+    },
+    {
+     "file": "toolkit/del.ps1.txt",
+     "line_start": 1,
+     "line_end": 12,
+     "note": "WMI subscription wipe + nine analysis tools killed + self-terminate",
+     "anchor": "sha256 9136924205cf55fa3a3edbd0191cca190e559b1619c07743e6dd7a3cd022d33f"
+    }
+   ],
+   "proof_count": 5
+  },
+  {
+   "id": "D12",
+   "title": "RED HERRING: 33,456 failed logons in Security.jsonl",
+   "difficulty": "red herring",
+   "requires": "reading two System fields to REFUTE",
+   "description": "The Security channel is 34,916 records and 33,456 of them are EventID 4625, logon failures, from internet addresses against Administrator-flavoured usernames. It is by far the loudest thing in the corpus.",
+   "root_cause": "NOT A CAUSE of anything in this case. Every one of these records has Computer=IPSERVER, not DESKTOP-7EQVM78, and TimeCreated between 2021-06-01T00:09:15Z and 2021-06-02T21:11:10Z -- almost three years before the BlueSky intrusion. All 33,456 are LogonType 3 NTLM, and the attack NEVER SUCCEEDED: the same file holds 185 EventID 4624 records and not one is LogonType 3 or 10. The whole evtx/host/ tree (93 channels, 90,267 records, 89 % of the corpus by line count) belongs to that unrelated 2021 host.",
+   "formats": [
+    "EVTX rendered as JSONL (Security channel)"
+   ],
+   "trap": "It is 1,520 times larger than the real brute force (33,456 vs 22) and it is in Security.evtx, the first file every Windows-IR playbook opens. It is also spread over 8+ source IPs with Cyrillic usernames (АДМИНИСТРАТОР, 8,027 attempts), which reads as a targeted campaign. Refuting it needs two fields nobody re-reads once the count is that big -- Computer and TimeCreated -- plus the absence of any matching 4624.",
+   "confused_with": "D02 and D03 -- this is exactly what they are meant to be mistaken for.",
+   "proof_locations": [
+    {
+     "file": "evtx/host/Security.jsonl",
+     "line_start": 1,
+     "line_end": 1,
+     "note": "RED HERRING: EventID 4625 on Computer=IPSERVER at 2021-06-01T18:36:04.949933Z, TargetUserName ADMINI, IpAddress 45.168.116.98, LogonType 3",
+     "anchor": "EventRecordID 417258"
+    },
+    {
+     "file": "evtx/host/Security.jsonl",
+     "line_start": 13,
+     "line_end": 13,
+     "note": "RED HERRING: the same spray from 91.220.163.170, which accounts for 5,267 of the failures",
+     "anchor": "EventRecordID 417270"
+    },
+    {
+     "file": "evtx/incident/BlueSkyRansomware.jsonl",
+     "line_start": 1,
+     "line_end": 1,
+     "note": "the contrast that refutes it: the incident file's own first record is Computer=DESKTOP-7EQVM78 in 2024",
+     "anchor": "EventRecordID 1, 2024-04-21T00:32:42.803382Z"
+    }
+   ],
+   "proof_count": 3
+  },
+  {
+   "id": "D13",
+   "title": "RED HERRING: an RDP connection storm from dozens of internet addresses",
+   "difficulty": "red herring",
+   "requires": "cross-format correlation to REFUTE",
+   "description": "The RdpCoreTS channel records 283 inbound RDP connection events from many different public IPs inside eight minutes, and the RemoteConnectionManager channel adds 1,964 more records over the same evening.",
+   "root_cause": "NOT A CAUSE. Same unrelated host and year as D12: Computer=IPSERVER, 2021-06-02T19:16:46Z-21:11:34Z. RDP plays no part in the BlueSky intrusion at all -- the entry vector is MSSQL on 1433 (EventID 18456/18454), the escalation is xp_cmdshell, and the only remote-execution tooling anywhere in the evidence is SMB pass-the-hash (Invoke-SMBExec). Neither the incident EVTX nor the capture contains a single RDP event or a single packet on 3389.",
+   "formats": [
+    "EVTX rendered as JSONL (RdpCoreTS Operational channel)"
+   ],
+   "trap": "'The attacker came in over RDP' is the most common opening sentence in a Windows incident report, and this channel hands over 283 events that fit it, complete with attacker-looking source addresses. Refuting it requires noticing that 3389 never appears in pcap/frames.tsv and that these records are on the wrong host in the wrong year.",
+   "confused_with": "D02 and D03 -- an alternative, wrong entry vector.",
+   "proof_locations": [
+    {
+     "file": "evtx/host/Microsoft-Windows-RemoteDesktopServices-RdpCoreTS-Operational.jsonl",
+     "line_start": 3,
+     "line_end": 3,
+     "note": "RED HERRING: EventID 131 inbound RDP from 5.53.118.90:52817 on IPSERVER, 2021-06-02T21:05:45.023348Z",
+     "anchor": "EventRecordID 6216651"
+    },
+    {
+     "file": "evtx/host/Microsoft-Windows-RemoteDesktopServices-RdpCoreTS-Operational.jsonl",
+     "line_start": 18,
+     "line_end": 18,
+     "note": "RED HERRING: the same minute, a different public IP -- 81.177.122.21:40130",
+     "anchor": "EventRecordID 6216666"
+    }
+   ],
+   "proof_count": 2
+  },
+  {
+   "id": "D14",
+   "title": "RED HERRING: 199 DNS queries sent from the victim to the C2 address",
+   "difficulty": "red herring",
+   "requires": "cross-column reasoning to REFUTE",
+   "description": "Throughout the capture the victim sends DNS queries straight to 87.96.21.84 -- the same address that runs the C2 -- which looks exactly like DNS-tunnelled command and control or exfiltration.",
+   "root_cause": "NOT A CAUSE and not exfiltration. There are only five distinct query names in the whole capture and every one is ordinary Microsoft telemetry: slscr.update.microsoft.com (132), g.live.com (105), config.edge.skype.com (33), www.msftconnecttest.com (32), dns.msftncsi.com (32). None encodes data -- no long random labels, no base32 subdomains. And nothing was ever answered: all 334 DNS rows are queries (is_response is False on every one) and 87.96.21.84 replies to them with 135 ICMP 'Destination unreachable (Port unreachable)' frames. 87.96.21.84 is simply the address configured as the victim's resolver in this lab, and no resolver is listening on it.",
+   "formats": [
+    "tshark-derived DNS table",
+    "tshark field dump, one line per frame"
+   ],
+   "trap": "The destination is the strongest indicator in the entire case, so 'DNS tunnelling to the C2' writes itself from the dst column alone. Refuting it needs two other columns -- the query names and the ICMP replies -- and the discipline to notice that a channel that returns port-unreachable moved zero bytes.",
+   "confused_with": "D09 -- the real covert channel, which is on TCP/443 and carries 944,560 bytes.",
+   "proof_locations": [
+    {
+     "file": "pcap/dns.tsv",
+     "line_start": 2,
+     "line_end": 2,
+     "note": "RED HERRING: query for g.live.com sent to 87.96.21.84 -- a Microsoft name, not an exfil label",
+     "anchor": "frame 1, 2024-04-28T00:29:53.510572Z"
+    },
+    {
+     "file": "pcap/dns.tsv",
+     "line_start": 53,
+     "line_end": 53,
+     "note": "RED HERRING: www.msftconnecttest.com, the Windows connectivity probe, to the same address",
+     "anchor": "frame 2665, 2024-04-28T00:30:19.274247Z"
+    },
+    {
+     "file": "pcap/frames.tsv",
+     "line_start": 3,
+     "line_end": 3,
+     "note": "the refutation: 87.96.21.84 answers with ICMP port-unreachable -- one of 135 such frames",
+     "anchor": "frame 2, 2024-04-28T00:29:53.510996Z"
+    }
+   ],
+   "proof_count": 3
+  },
+  {
+   "id": "D15",
+   "title": "RED HERRING: Windows Defender deleted its malware history",
+   "difficulty": "red herring",
+   "requires": "rate reasoning to REFUTE",
+   "description": "Defender's Operational channel records that the history of malware and other potentially unwanted software was removed -- which reads as an attacker covering their tracks.",
+   "root_cause": "NOT A CAUSE. EventID 1013 is Defender's routine history purge and it fires 12 times on a fixed daily cadence, always within a tenth of a second of 23:48:58, always as NT AUTHORITY\\SYSTEM, on IPSERVER in May-June 2021. A constant daily rate is the definition of background. The 1,106 records in this channel also contain no detection at all: the EventIDs present are 1150/1151 (health reports), 1000/1002 (scan started/finished) and 1013 -- nothing was ever found or quarantined. The Defender event that matters in this case is a product-state change to SNOOZED on a different host, in a different channel, in 2024 (D01).",
+   "formats": [
+    "EVTX rendered as JSONL (Windows Defender Operational channel), Russian product strings"
+   ],
+   "trap": "'Defender history removed' is textbook anti-forensics, and it sits in the one file whose name matches the real finding's keyword -- so a keyword-first investigation lands here instead of on D01. The record text is in Russian ('Антивирусная программа Microsoft Defender'), which discourages a second look.",
+   "confused_with": "D01 -- same product name, opposite significance.",
+   "proof_locations": [
+    {
+     "file": "evtx/host/Microsoft-Windows-Windows-Defender-Operational.jsonl",
+     "line_start": 34,
+     "line_end": 34,
+     "note": "RED HERRING: EventID 1013 history purge at 2021-05-29T23:48:58.041947Z on IPSERVER",
+     "anchor": "EventRecordID 1176"
+    },
+    {
+     "file": "evtx/host/Microsoft-Windows-Windows-Defender-Operational.jsonl",
+     "line_start": 91,
+     "line_end": 91,
+     "note": "RED HERRING: the same purge exactly 24 h later, same second",
+     "anchor": "EventRecordID 1233, 2021-05-30T23:48:58.038828Z"
+    },
+    {
+     "file": "evtx/host/Microsoft-Windows-Windows-Defender-Operational.jsonl",
+     "line_start": 144,
+     "line_end": 144,
+     "note": "RED HERRING: and again the next day -- the cadence that refutes it",
+     "anchor": "EventRecordID 1286, 2021-05-31T23:48:58.058600Z"
+    }
+   ],
+   "proof_count": 3
+  },
+  {
+   "id": "D16",
+   "title": "RED HERRING: services stopping, restarting and VSS shutting down in the minutes before the breach",
+   "difficulty": "red herring",
+   "requires": "reading an opaque Binary field to REFUTE",
+   "description": "In the eight minutes before Defender is snoozed, the victim's own Application log shows an update service stopping, a burst of licensing-policy events, a Restart Manager session, and the Volume Shadow Copy service shutting down 15 seconds before the snooze.",
+   "root_cause": "NOT A CAUSE. All of it is Windows housekeeping on the real victim, inside the real window -- which is what makes it the sharpest decoy in the corpus. VSS EventID 8224 is the shadow-copy service stopping after its idle timeout, not vssadmin deleting shadow copies: the record's Binary blob decodes to '- CMD: C:\\Windows\\system32\\vssvc.exe - User: Name: NT AUTHORITY\\SYSTEM, SID:S-1-5-18', and the identical event also fired on 2024-04-21T04:39:10Z when nothing was happening. Security-SPP EventID 1034 x10 in 250 ms is licence-policy caching ('AAD-BlockAADWorkplaceJoin-Default'). RestartManager 10000/10010/10005/10001 brackets an ordinary installer session. edgeupdate 'Service stopped' occurs 3 times on 2024-04-23 and 66 more times in the 2021 tree. None of it touches SQL Server, PowerShell, the network or Defender's state.",
+   "formats": [
+    "EVTX rendered as JSONL (Application channel; VSS, Security-SPP, RestartManager, edgeupdate providers)",
+    "hex-encoded Binary payload"
+   ],
+   "trap": "Every other decoy here is refuted by 'wrong host' or 'wrong year'. This one is on the right host, in the right file, in the right eight minutes, so those discriminators do not fire. And 'ransomware deletes shadow copies' is the single most expected finding in a BlueSky case, so VSS/8224 at 09:53:46Z -- fifteen seconds before the Defender snooze -- is almost irresistible. Refuting it means hex-decoding the record's Binary field, which no keyword search will do for you.",
+   "confused_with": "D01 -- adjacent in time to the real first stage, which is what sells it.",
+   "proof_locations": [
+    {
+     "file": "evtx/incident/BlueSkyRansomware.jsonl",
+     "line_start": 424,
+     "line_end": 424,
+     "note": "RED HERRING: VSS EventID 8224, 15 s before the Defender snooze -- idle-timeout shutdown of vssvc.exe, not shadow-copy deletion",
+     "anchor": "EventRecordID 3012, 2024-04-23T09:53:46.516724Z"
+    },
+    {
+     "file": "evtx/incident/BlueSkyRansomware.jsonl",
+     "line_start": 142,
+     "line_end": 142,
+     "note": "the refutation: the identical VSS 8224 event two days earlier, on a quiet system",
+     "anchor": "EventRecordID 2807, 2024-04-21T04:39:10.631495Z"
+    },
+    {
+     "file": "evtx/incident/BlueSkyRansomware.jsonl",
+     "line_start": 404,
+     "line_end": 404,
+     "note": "RED HERRING: edgeupdate 'Service stopped' four minutes before the snooze",
+     "anchor": "EventRecordID 2992, 2024-04-23T09:50:06.594889Z"
+    },
+    {
+     "file": "evtx/incident/BlueSkyRansomware.jsonl",
+     "line_start": 406,
+     "line_end": 415,
+     "note": "RED HERRING: ten Security-SPP 1034 licence-policy events in 250 ms",
+     "anchor": "EventRecordID 2994-3003, 2024-04-23T09:50:50.782496Z"
+    },
+    {
+     "file": "evtx/incident/BlueSkyRansomware.jsonl",
+     "line_start": 417,
+     "line_end": 420,
+     "note": "RED HERRING: a Restart Manager session, 10000/10010/10005/10001",
+     "anchor": "EventRecordID 3005-3008, 2024-04-23T09:51:14.891406Z"
+    }
+   ],
+   "proof_count": 5
+  },
+  {
+   "id": "D17",
+   "title": "RED HERRING: a 'failed logon' (EventID 4625) on the victim two days before the breach",
+   "difficulty": "red herring",
+   "requires": "provider-aware reading to REFUTE",
+   "description": "The incident log contains exactly one record with EventID 4625 -- the Windows failed-logon code -- on DESKTOP-7EQVM78 on 2024-04-21, which looks like the first probe of the intrusion.",
+   "root_cause": "NOT A CAUSE and NOT A LOGON. The record's Provider is Microsoft-Windows-EventSystem, its Channel is Application, and its EventData is {param1: '86400', param2: 'SuppressDuplicateDuration', param3: 'Software\\\\Microsoft\\\\EventSystem\\\\EventLog'} -- the COM+ Event System reporting its duplicate-suppression interval. EventID numbers are unique only per provider: 4625 means 'logon failure' only under Microsoft-Windows-Security-Auditing, and the incident EVTX has no Security channel at all, so no logon auditing exists in it in either direction.",
+   "formats": [
+    "EVTX rendered as JSONL (Application channel, Microsoft-Windows-EventSystem provider)"
+   ],
+   "trap": "'grep 4625' is the first command in every Windows IR cheat sheet. On this corpus it returns 33,456 hits in the decoy host tree (D12) and exactly one inside the incident file -- and that one hit, on the right host, near the right dates, is far more tempting than the 2021 flood. Calling it 'a failed logon on DESKTOP-7EQVM78' takes no further reading and is wrong on the provider, the meaning and the relevance.",
+   "confused_with": "D02 and D12 -- the same four digits, three different meanings.",
+   "proof_locations": [
+    {
+     "file": "evtx/incident/BlueSkyRansomware.jsonl",
+     "line_start": 55,
+     "line_end": 55,
+     "note": "RED HERRING: EventID 4625 whose provider is Microsoft-Windows-EventSystem -- a COM+ configuration report, not a logon",
+     "anchor": "EventRecordID 2720, 2024-04-21T04:36:03.260381Z"
+    }
+   ],
+   "proof_count": 1
+  }
+ ],
+ "dirtiness": [
+  "TWO UNRELATED HOSTS IN ONE TREE. evtx/host/** is Computer=IPSERVER, 2021-05-08..2021-06-02, 93 channels, 90,267 records -- 89 % of the corpus by line count and none of it belongs to this intrusion. evtx/incident/** is Computer=DESKTOP-7EQVM78, 2024-04-21..23, 469 records. Five of the six decoys live in the host tree; one global insight ('wrong host, wrong year') refutes all five at once, which makes D16 and D17 -- the two decoys INSIDE the incident file -- the real discrimination test.",
+  "THREE TIME BASES, NO SKEW. Host tree 2021, incident EVTX 2024-04-21/23, capture 2024-04-28. Everything is UTC and every clock is honest; the trap is the five-day gap between the host chain and the network chain. They are two runs of one playbook, not one event seen twice.",
+  "EVENTRECORDID IS PER-CHANNEL AND IS NOT A CLOCK. The final stage's PowerShell records are EventRecordID 125-133 while the Application records beside them are 3044-3046. Sorting the incident file by EventRecordID puts the Meterpreter session at the very start of the timeline.",
+  "EVENTID COLLIDES ACROSS PROVIDERS. 4625 in the incident file is Microsoft-Windows-EventSystem reporting a COM+ setting, not a logon failure (D17). 15 is SecurityCenter's product-state event here, and 18454/18456 mean nothing outside MSSQLSERVER.",
+  "THE PROTOCOL COLUMN LIES. Wireshark labels the C2 channel SSL / SSLv2 / TLSv1.2 from the port number alone; the bytes are a raw PE (D09). The corpus also has a genuine TLS handshake on 1433, which is ordinary SQL Server login encryption and is not evidence of anything.",
+  "LOUDNESS IS ANTI-CORRELATED WITH RELEVANCE. The real brute force is 22 records; the decoy brute force is 33,456. Any ranking by volume inverts the answer.",
+  "MIXED LANGUAGES INSIDE SINGLE RECORDS. Russian Windows strings ('Антивирусная программа Microsoft Defender', 'драйвер режима ядра', 'СИСТЕМА', 'Нет данных') sit inside an otherwise English tree, and 8,027 of the sprayed usernames are Cyrillic (АДМИНИСТРАТОР).",
+  "THE PAYLOAD IS AN ESCAPED BLOB INSIDE A JSON STRING. PowerShell 600/400 records carry a \\r\\n\\t key=value block in one string field, so 'HostName=MSFConsole' is only findable in its escaped form -- and 124 benign records in the same channel have the identical shape with HostName=ConsoleHost.",
+  "THE T-SQL IS NOT IN THE PACKET DISSECTION. tshark's own -e tds.query recovers 2 of the 70 SQLBatch statements because 68 open mid-segment after TCP desegmentation, and frames.tsv's info column says only 'SQL batch'. pcap/tds-batches.tsv exists because of that; without it the whole payload-staging stage (D08) is invisible.",
+  "BASE64 INSIDE T-SQL INSIDE CMD REDIRECTION. The staged PE arrives as 68 separate `echo <chunk> >>%TEMP%\\SBjzH.b64` statements. No single line contains a recognisable executable, and the PE's own version resource claims to be ApacheBench 2.2.14."
+ ],
+ "correlation_id_map": {
+  "logical_actor": "attacker and C2, 87.96.21.84 -- the pivot that ties the host log to the capture",
+  "spellings": {
+   "evtx/incident/BlueSkyRansomware.jsonl": "\" [CLIENT: 87.96.21.84]\" -- a trailing element of the EventData.Data.#text array, with a leading space",
+   "pcap/frames.tsv": "bare address in the src or dst column",
+   "pcap/http.tsv": "\"http://87.96.21.84/<object>\" in the uri column of a request row; bare address in src/dst",
+   "pcap/tcp-streams.tsv": "\"87.96.21.84:<port>\" in endpoint_a or endpoint_b",
+   "pcap/tds-batches.tsv": "bare address in the src column",
+   "pcap/dns.tsv": "in the dst column -- as the victim's configured RESOLVER, which is the D14 trap",
+   "toolkit/ichigo-lite.ps1.txt": "'http://87.96.21.84/...' inside single-quoted PowerShell URLs",
+   "toolkit/checking.ps1.txt": "'http://87.96.21.84/...' inside single-quoted PowerShell URLs",
+   "toolkit/c2-web-root-index.html": "ABSENT -- the listing uses relative hrefs, so the C2's own page never names it",
+   "toolkit/extracted_hosts.txt": "ABSENT -- this file lists the TARGETS 87.96.21.71/.75/.80/.81, and 87.96.21.81 in it is the victim, not the attacker",
+   "evtx/host/**": "ABSENT -- 87.96.21.84 appears nowhere in the 90,267-record host tree, which is the cheapest proof that tree is unrelated"
+  },
+  "victim": {
+   "host": "DESKTOP-7EQVM78 = 87.96.21.81",
+   "spellings": {
+    "evtx/incident/BlueSkyRansomware.jsonl": "System.Computer = \"DESKTOP-7EQVM78\"; the IP never appears",
+    "pcap/*": "87.96.21.81; the hostname never appears"
+   }
+  }
+ },
+ "dataset": "bluesky",
+ "verdict": "compromised",
+ "verdict_rationale": "MSSQL `sa` brute force from 87.96.21.84 succeeded, xp_cmdshell was enabled, and a Metasploit PowerShell stage ran inside winlogon.exe. Access by an outside party is proven from the host`s own logs, so the answer is the first of the three. Note that the ransomware never encrypted anything — the launch line is commented out — so \"compromised\" must NOT be argued from impact. A report that reaches the right verdict via \"files were encrypted\" is right by accident."
+}

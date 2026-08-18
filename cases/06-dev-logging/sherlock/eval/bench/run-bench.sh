@@ -61,9 +61,29 @@ if [ "$ARM" != "none" ]; then
   cp -r "$SKILLS/$ARM" "$W/.qwen/skills/log-rca" || exit 1
 fi
 
-PROMPT="Продакшн деградировал. Логи со всей платформы лежат в $CORPUS.
+# THE PROMPT IS A PROPERTY OF THE CORPUS, NOT OF THE RUNNER.
+# It was hard-coded to «Продакшн деградировал» — a production-outage RCA. Pointed
+# at an intrusion corpus that asks the model the wrong question and then scores
+# the answer, which is a defect the numbers cannot show. Resolution order:
+#   1. $SHERLOCK_PROMPT_FILE           — explicit, wins
+#   2. $HERE/prompts/$DATASET.txt      — per-corpus, committed next to the key
+#   3. the historical outage prompt    — kept ONLY for dataset bench649
+DATASET="${SHERLOCK_DATASET:-bench649}"
+PROMPT_FILE="${SHERLOCK_PROMPT_FILE:-$HERE/prompts/$DATASET.txt}"
+if [ -f "$PROMPT_FILE" ]; then
+  PROMPT="$(cat "$PROMPT_FILE")"
+  PROMPT="${PROMPT//\$CORPUS/$CORPUS}"
+  PROMPT="$(printf '%s' "$PROMPT" | sed "s|{CORPUS}|$CORPUS|g")"
+elif [ "$DATASET" = "bench649" ]; then
+  PROMPT="Продакшн деградировал. Логи со всей платформы лежат в $CORPUS.
 Найди ВСЕ проблемы и инциденты, определи корневую причину каждой и предложи,
 что делать. Ссылайся на конкретные строки в формате файл:строка."
+else
+  echo "✗ dataset=$DATASET has no prompt: expected $PROMPT_FILE" >&2
+  echo "  A corpus without its own question would be scored against an answer" >&2
+  echo "  to a different question. Write the prompt file first." >&2
+  exit 1
+fi
 
 # THE SAME UPSTREAM LANE AS run-case.sh. This runner used to talk to linkapi
 # directly, which cost it two things: no row could be attributed to an upstream
@@ -77,7 +97,7 @@ upstream_lane_start "$BASE_URL" "$TRACE.upstream.jsonl" "$STAMP" "$MODEL"
 BASE_URL="$LANE_BASE_URL"
 CLIENT_MODEL="$LANE_CLIENT_MODEL"
 
-echo "▶ bench arm=$ARM  corpus=$(du -sh "$CORPUS" | cut -f1)  model=$MODEL"
+echo "▶ bench arm=$ARM  dataset=$DATASET  corpus=$(du -sh "$CORPUS" | cut -f1)  model=$MODEL"
 START=$(date +%s)
 # key via environment, never argv (visible in ps; this box has a guest account)
 ( cd "$W" && OPENAI_API_KEY="$SHERLOCK_API_KEY" OPENAI_BASE_URL="$BASE_URL" \
@@ -87,9 +107,9 @@ START=$(date +%s)
 ELAPSED=$(( $(date +%s) - START ))
 
 python3 - "$W/out.json" "$ARM" "$ELAPSED" "$CORPUS" "$LEDGER" "$TRACE" "$MODEL" \
-         "$W" "$MEASURE_DIR" <<'PY'
+         "$W" "$MEASURE_DIR" "$DATASET" <<'PY'
 import importlib.util, json, os, re, sys
-out, arm, elapsed, corpus, ledger, trace, model, workroot, measure = sys.argv[1:10]
+out, arm, elapsed, corpus, ledger, trace, model, workroot, measure, dataset = sys.argv[1:11]
 
 # ONE definition of "what the run produced", shared with score-bench.py. A second
 # copy of this rule is how one measurement becomes two incomparable scales.
@@ -168,7 +188,11 @@ rec = {"arm": arm, "model": model, "client_model": sysr.get("model"),
        "delivered_in": delivered_in, "artifact_only": artifact_only,
        "files_in_corpus": len(rels), "files_cited": len(cited),
        "cited_files": sorted(cited),
-       "line_refs": len(re.findall(r":\d+", deliverable)), "dataset": "bench649",
+       "line_refs": len(re.findall(r":\d+", deliverable)),
+       # was the literal "bench649" on EVERY row, whatever corpus ran. A run
+       # against an intrusion corpus filed under the dev corpus is a number
+       # attributed to the wrong evidence.
+       "dataset": dataset, "corpus_dir": corpus,
        "trace_dir": trace, "answer": t, "artifact": art}
 with open(ledger, "a", encoding="utf-8") as f:
     f.write(json.dumps(rec, ensure_ascii=False) + "\n")

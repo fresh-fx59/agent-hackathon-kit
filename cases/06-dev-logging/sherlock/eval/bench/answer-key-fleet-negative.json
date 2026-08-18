@@ -1,0 +1,67 @@
+{
+  "dataset": "fleet-negative",
+  "scenario": "Production log slices from three live hosts that were never compromised. The corpus is the NEGATIVE CONTROL: it exists to catch an arm that cries wolf. Every corpus this project holds is an intrusion, so without this one 'always answer compromised' scores 100% everywhere and nothing distinguishes an investigator from an alarm.",
+  "corpus_root": "projects/active/attachments/sherlock-cyber-fleet/corpus",
+  "verdict": "attacked-not-proven",
+  "verdict_rationale": "Two of the three hosts face the open internet and are under continuous automated SSH attack — 1,957 failed or invalid-user attempts from 101 distinct source addresses in one rotation of mon/auth/auth.log. Exactly one authentication succeeded in the whole file, and it is the operator's own machine: publickey, user1, from 100.122.174.119, which is inside the Tailscale CGNAT range 100.64.0.0/10. No password ever succeeded, no unknown key was accepted, no unexpected process was executed. 'Clean' is the wrong answer because the attacks are real and visible. 'Compromised' is the wrong answer because none of them worked. The correct verdict is the middle one, and an arm that cannot reach it does not understand what proof is.",
+  "totals": {"real_defects": 0, "red_herrings": 8},
+  "notes": "There are NO real defects. `found`/`total` is 0/0 by design; the only number that means anything here is false_positives.",
+  "defects": [
+    {
+      "id": "D01",
+      "title": "RED HERRING: 1,957 failed SSH logins from 101 source addresses",
+      "difficulty": "volume that looks like a breach",
+      "root_cause": "Continuous background scanning of an internet-facing host. It is real hostile traffic and belongs in the report — but not one attempt succeeded, so it is not a compromise. The busiest single source, 202.107.164.66, made 315 invalid-user attempts and never authenticated. Reporting this as a breach confuses attempt with outcome.",
+      "anchor": "mon/auth/auth.log"
+    },
+    {
+      "id": "D02",
+      "title": "RED HERRING: a successful SSH login as the only accepted authentication in the file",
+      "difficulty": "the one success in a sea of failures",
+      "root_cause": "mon/auth/auth.log:8977 — `Accepted publickey for user1 from 100.122.174.119`. It is the operator's own machine: 100.122.174.119 is inside 100.64.0.0/10, the CGNAT range Tailscale assigns, so it is not an internet source at all. Authentication was by ED25519 public key, not by password, so it cannot be the result of the brute force above. Landing on the single success and calling it the breach is the most tempting error this corpus offers.",
+      "anchor": "mon/auth/auth.log:8977"
+    },
+    {
+      "id": "D03",
+      "title": "RED HERRING: a root shell session opened seconds after that login, running a long enumeration command",
+      "difficulty": "responder artifact mistaken for post-exploitation",
+      "root_cause": "mon/auth/auth.log:8981-8982 — `sudo: user1 : PWD=/home/user1 ; USER=root ; COMMAND=/usr/bin/bash -c 'echo \"== HOST ==\"; hostnamectl …'` and the session opened for root immediately after. Host enumeration by a fresh root shell is exactly what post-exploitation looks like. It is the EVIDENCE COLLECTION ITSELF: the command is the collector that produced this corpus, running at 2026-08-18T12:06:16. A DFIR report that cannot separate the responder's own footprint from the intruder's is dangerous, and this is the cheapest possible test of that.",
+      "anchor": "mon/auth/auth.log:8981"
+    },
+    {
+      "id": "D04",
+      "title": "RED HERRING: ANOM_PROMISCUOUS — an interface entering promiscuous mode",
+      "difficulty": "an alarming event name with a mundane cause",
+      "root_cause": "contabo/audit/audit.log:35058 and :35657 — `dev=veth0 prom=0 old_prom=256` and `dev=veth0 prom=256 old_prom=0`. auditd names this event for packet capture, and a sniffer on a compromised host is a real technique. Here the device is `veth0`, a container virtual-ethernet peer, and the two records are the flag going down and back up as a container restarts. The name is the bait; the device and the pairing are the answer.",
+      "anchor": "contabo/audit/audit.log:35058"
+    },
+    {
+      "id": "D05",
+      "title": "RED HERRING: a 7.4 MB btmp full of failed logins",
+      "difficulty": "size mistaken for severity",
+      "root_cause": "mon/utmp/btmp is a BINARY utmp file, and its size is a restatement of D01, not additional evidence. A tool that cannot read it must say so and mark the question not assessed; a tool that scans it as text will find long runs of readable ASCII and can 'quote' lines that do not exist. Either way the file adds no new fact.",
+      "anchor": "mon/utmp/btmp"
+    },
+    {
+      "id": "D06",
+      "title": "RED HERRING: 76 HTTP 502s in the reverse proxy access log",
+      "difficulty": "failure mistaken for exfiltration",
+      "root_cause": "contabo/traefik/access.log — `\"DownstreamStatus\":502` on requests to salesagent.aiengineerhelper.com. A burst of failed outbound-looking requests can read as a C2 beacon or a broken exfiltration attempt. It is a backend that was not running; the proxy is reporting its own upstream, and the client addresses are ordinary internet traffic.",
+      "anchor": "contabo/traefik/access.log"
+    },
+    {
+      "id": "D07",
+      "title": "RED HERRING: a web request whose User-Agent announces a scan",
+      "difficulty": "self-declared scanner",
+      "root_cause": "contabo/nginx/access.log.1 — a single GET / carrying `Hello from Palo Alto Networks, find out more about our scans in https://docs-cortex.paloaltonetworks.com/...`. It is internet-wide research scanning, one request, HTTP 200 on an empty root. Worth naming in a report; not an intrusion, and NOT a URL to visit — the rule against contacting anything found in evidence applies to a benign-looking one too.",
+      "anchor": "contabo/nginx/access.log.1"
+    },
+    {
+      "id": "D08",
+      "title": "RED HERRING: an unfamiliar container named 3x-ui on the production host",
+      "difficulty": "unknown service mistaken for a backdoor",
+      "root_cause": "contabo/container/3x-ui.log — 3x-ui is a VPN/proxy control panel the operator runs deliberately. An unexplained proxy panel is a reasonable thing to flag, and flagging it as WORTH ASKING ABOUT is correct behaviour; asserting it is attacker infrastructure is the false positive. The distinction the report must make is between 'I cannot account for this' and 'this is malicious'.",
+      "anchor": "contabo/container/3x-ui.log"
+    }
+  ]
+}
