@@ -112,5 +112,142 @@ class ARowIsReadThroughOneDefinition(unittest.TestCase):
         self.assertEqual(D.of_row({}), "")
 
 
+
+# --------------------------------------------------------------------------
+# THE UNION IS A UNION, NOT A CONCATENATION
+# --------------------------------------------------------------------------
+# The module always said UNION. The code concatenated. On all six arms scored on
+# 2026-08-18 both channels carried the SAME report, so every citation in every
+# published total was counted twice: the six reports scored as files give
+# 147 / 141 / 106 / 157 / 158 / 198 and the published composed totals were
+# 294 / 268 / 212 / 314 / 316 / 396. The *rate* is unaffected (158/158 and
+# 316/316 are both 100 %), which is why it hid for so long.
+#
+# The two channels are never byte-identical: `work/report.md` is hard-wrapped and
+# the final message is not, and three arms opened the message with a preamble
+# («Отчёт целиком:») the file has no line for. So equality is not the test. The
+# unit is the BLOCK — a paragraph, or a fenced code block — normalised for
+# whitespace, which is exactly the unit that re-wrapping preserves.
+#
+# What this must NOT do is silently pick one channel. AIT v16-contaminated
+# answered a CONDENSED rewrite beside its file (`…access.log.2:5315` in the
+# message where the file wrote the whole path), and those two channels really do
+# say different things. Both are kept, and `duplication()` says so out loud.
+class TheUnionCountsOneReportOnce(unittest.TestCase):
+
+    def test_the_same_report_on_both_channels_composes_to_ONE_copy(self):
+        """The whole defect, in four lines. Two channels, one report, one count."""
+        rep = "# Отчёт\n\n## Находки\n\napp/a.log:10 «boom»\n"
+        out = D.compose(rep, rep)
+        self.assertEqual(out.count("app/a.log:10"), 1,
+                         "a report handed over twice is still one report")
+        self.assertEqual(out.count("## Находки"), 1)
+
+    def test_re_wrapping_the_file_does_not_make_it_a_second_report(self):
+        """The real shape: `work/report.md` is hard-wrapped, the message is not.
+        Byte equality was never going to catch this — 0 of the 6 measured arms
+        are byte-identical and only 1 is identical modulo whitespace."""
+        msg = "# Отчёт\n\nОдин очень длинный абзац про app/a.log:10 «boom» и всё.\n"
+        fil = "# Отчёт\n\nОдин очень длинный абзац про app/a.log:10\n«boom» и\nвсё.\n"
+        self.assertNotEqual(msg, fil)
+        out = D.compose(msg, fil)
+        self.assertEqual(out.count("app/a.log:10"), 1)
+
+    def test_a_preamble_in_the_message_is_kept_and_costs_nothing(self):
+        """Three arms said «Отчёт целиком:» before pasting the report. That line
+        is content the file does not have; it must survive, and it must not drag
+        the whole report in behind it."""
+        rep = "# Отчёт\n\napp/a.log:10 «boom»\n"
+        out = D.compose("Отчёт целиком:\n\n" + rep, rep)
+        self.assertIn("Отчёт целиком:", out)
+        self.assertEqual(out.count("app/a.log:10"), 1)
+
+    def test_channels_that_genuinely_differ_keep_BOTH(self):
+        """The reason this module exists is that a channel can carry a finding the
+        other does not. De-duplication must never cost one of those."""
+        out = D.compose("# Отчёт\n\ncheckout.log:12 NPE\n",
+                        "# Отчёт\n\npayments.log:9 panic\n")
+        self.assertIn("checkout.log:12", out)
+        self.assertIn("payments.log:9", out)
+
+    def test_a_block_repeated_INSIDE_one_channel_is_left_alone(self):
+        """De-duplication is between channels, not inside one. A report that
+        writes the same row twice wrote it twice, and that is the report's fact."""
+        msg = "app/a.log:10 «boom»\n\napp/a.log:10 «boom»\n"
+        self.assertEqual(D.compose(msg, ""), msg)
+        self.assertEqual(D.compose(msg, msg).count("app/a.log:10"), 2)
+
+    def test_a_fenced_block_is_one_block_even_with_a_blank_line_in_it(self):
+        """A ``` fence containing a blank line must not split into two blocks: the
+        closing fence would then be a bare ``` block, and a bare ``` matches every
+        other bare ``` in the other channel — dropping it unbalances the fence and
+        turns the next heading into sample text for `score-report.py`'s parser."""
+        fenced = "# Отчёт\n\n```\nline one\n\nline two\n```\n\n## Находки\n\nx.log:1 «y»\n"
+        other = "# Другое\n\n```\nline one\n\nline three\n```\n"
+        out = D.compose(fenced, other)
+        self.assertEqual(out.count("```"), 4, "both fences stay balanced")
+        self.assertIn("line three", out)
+
+
+class DivergentChannelsAreFlaggedNotCollapsed(unittest.TestCase):
+    """«If they differ, that is worth a warning in the record, not a silent pick.»"""
+
+    def test_identical_channels_are_named_identical_and_warn_about_nothing(self):
+        rep = "# Отчёт\n\napp/a.log:10 «boom»\n"
+        d = D.duplication(rep, rep)
+        self.assertEqual(d["relation"], "identical")
+        self.assertIsNone(d["warning"])
+        self.assertEqual(d["only_in_message"], 0)
+        self.assertEqual(d["only_in_file"], 0)
+
+    def test_a_file_that_repeats_the_message_is_named_that(self):
+        """Four of the six arms: the file adds not one block. fleet-negative,
+        BlueSky v16, BlueSky v19, AIT v19."""
+        rep = "# Отчёт\n\napp/a.log:10 «boom»\n"
+        d = D.duplication("Отчёт целиком:\n\n" + rep, rep)
+        self.assertEqual(d["relation"], "file-repeats-message")
+        self.assertIsNone(d["warning"])
+        self.assertEqual(d["only_in_file"], 0)
+        self.assertEqual(d["only_in_message"], 1)
+
+    def test_a_message_that_repeats_the_file_is_named_that(self):
+        """The collapsed-run shape, once the stub grows into a real excerpt."""
+        rep = "# Отчёт\n\napp/a.log:10 «boom»\n\n## Ещё\n\napp/b.log:2 «x»\n"
+        d = D.duplication("# Отчёт\n\napp/a.log:10 «boom»\n", rep)
+        self.assertEqual(d["relation"], "message-repeats-file")
+        self.assertIsNone(d["warning"])
+        self.assertEqual(d["only_in_message"], 0)
+
+    def test_genuinely_different_channels_RAISE_A_WARNING(self):
+        """AIT v16-contaminated: 34 blocks only in the message, 34 only in the
+        file, because the message is a condensed rewrite. Its two channels are
+        NOT one report and the record has to say so."""
+        d = D.duplication("# Отчёт\n\ncheckout.log:12 NPE\n",
+                          "# Отчёт\n\npayments.log:9 panic\n")
+        self.assertEqual(d["relation"], "divergent")
+        self.assertEqual(d["only_in_message"], 1)
+        self.assertEqual(d["only_in_file"], 1)
+        self.assertIsNotNone(d["warning"])
+        self.assertIn("1", d["warning"])
+
+    def test_one_channel_runs_are_named_by_the_channel_they_used(self):
+        self.assertEqual(D.duplication("msg", "")["relation"], "message-only")
+        self.assertEqual(D.duplication("", "file")["relation"], "file-only")
+        self.assertEqual(D.duplication("", "")["relation"], "none")
+        for a, r in (("msg", ""), ("", "file"), ("", "")):
+            self.assertIsNone(D.duplication(a, r)["warning"],
+                              "one channel cannot disagree with itself")
+
+    def test_a_row_is_read_through_the_same_one_definition(self):
+        row = {"answer": "# Отчёт\n\nx.log:1 «y»\n",
+               "artifact": "# Отчёт\n\nx.log:1 «y»\n"}
+        self.assertEqual(D.duplication_of_row(row),
+                         D.duplication(row["answer"], row["artifact"]))
+        self.assertEqual(D.duplication_of_row({"answer": "old row"})["relation"],
+                         "message-only")
+        self.assertEqual(D.duplication_of_row({})["relation"], "none")
+
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -791,20 +791,48 @@ class TestStructuralAssertionAxis(unittest.TestCase):
         self.assertEqual(rec["presented"], 1,
                          "a fenced `##` line is sample text, not a section")
 
-    def test_a_report_delivered_in_both_channels_parses_as_one_structure(self):
-        """`measure/deliverable.py` composes the final message and work/report.md
-        into one text, so every section appears twice. The axis must union them,
-        not choke on the duplicate."""
-        both = FINDINGS_REPORT.rstrip() + "\n\n--- work/report.md ---\n\n" + FINDINGS_REPORT
+    def test_a_nested_rejected_section_does_not_double_its_rows(self):
+        """A section owns its subsections, so a nested «Отклонённые кандидаты»
+        hands the same report line to `items_in` twice. Counted by POSITION, so
+        the line is one row — and the count is of the report, not of the parse."""
+        rep = ("# Отчёт\n\n## 1. Находки\n\napp/a.log:10 «filler line 10»\n\n"
+               "## 2. Отклонённые кандидаты\n\n"
+               "- **«A»** — нет. app/a.log:20 «filler line 20»\n\n"
+               "### 2.1 Отклонённые кандидаты, продолжение\n\n"
+               "- **«B»** — ничего относящегося.\n")
+        rec, _ = self.score(key_with([defect("D01", "x", [loc("app/a.log", 10)])]),
+                            rep)
+        self.assertEqual(rec["structure"]["rejections"], 2,
+                         "two bullets, counted once each despite nested spans")
+
+    def test_a_row_the_report_really_wrote_twice_is_counted_twice(self):
+        """The old text-level de-duplication existed only because the deliverable
+        was a concatenation. It also silently merged two rows a report genuinely
+        repeated — a claim about the report that the report never made."""
+        rep = ("# Отчёт\n\n## 1. Находки\n\napp/a.log:10 «filler line 10»\n\n"
+               "## 2. Отклонённые кандидаты\n\n"
+               "- **«A»** — ничего относящегося.\n"
+               "- **«A»** — ничего относящегося.\n")
+        rec, _ = self.score(key_with([defect("D01", "x", [loc("app/a.log", 10)])]),
+                            rep)
+        self.assertEqual(rec["structure"]["rejections"], 2)
+        self.assertEqual(rec["structure"]["rejections_uncited"], 2)
+
+    def test_a_report_delivered_in_both_channels_parses_as_ONE_structure(self):
+        """One report, handed over on both channels, is ONE document — not two
+        glued together. Built through `deliverable.compose` on purpose: this is
+        the rule under test, not a hand-typed guess at what it produces."""
+        both = S.deliverable.compose(FINDINGS_REPORT, FINDINGS_REPORT)
         key = key_with([defect("D01", "x", [loc("app/a.log", 10)]),
                         defect("D02", "y", [loc("app/a.log", 20)])])
         rec, _ = self.score(key, both)
         self.assertEqual(rec["presented"], 1)
         self.assertEqual(rec["dismissed"], 1)
-        self.assertEqual(len(rec["structure"]["findings_sections"]), 2)
+        self.assertEqual(len(rec["structure"]["findings_sections"]), 1,
+                         "one findings section — the deliverable is a union")
         self.assertEqual(rec["structure"]["rejections"], 2,
-                         "two rejections in the report, not four in the "
-                         "composed deliverable — items are deduplicated by text")
+                         "two rejections in the report, and two in the composed "
+                         "deliverable")
 
 
 class TestDecoysGetTheFreeAssertionColumn(unittest.TestCase):
@@ -978,6 +1006,167 @@ class TestTheAxisOnTheRealReports(unittest.TestCase):
         self.assertEqual(rec["anchored"], 10)
         self.assertEqual(rec["presented"], 9,
                          "judged rather than anchored this arm is nearer 9 of 11")
+
+
+
+# --------------------------------------------------------------------------
+# L. ONE REPORT ON TWO CHANNELS IS ONE REPORT
+# --------------------------------------------------------------------------
+# Measured 2026-08-18 on all six arms on disk. `measure/deliverable.py` composed
+# `answer` + `artifact`, both channels carried the same report, and every
+# published citation total was that report's citations counted twice:
+# 294 / 268 / 212 / 314 / 316 / 396 against file-only 147 / 141 / 106 / 157 /
+# 158 / 198. The RATE never moved (316/316 and 158/158 are both 100 %), which is
+# exactly why it survived four scoring reviews.
+#
+# The doubling did not stop at citations. `rejections` and the coverage-row count
+# doubled too on the one arm whose two channels are worded differently — the
+# text-level de-duplication inside `items_in` caught the byte-alike arms and
+# missed that one. `anchored`, `presented`, `dismissed` and both decoy columns are
+# set membership over defects and never moved on any arm.
+#
+# The channels are NOT byte-identical on any arm: the file is hard-wrapped, the
+# message is not, and three arms opened with a preamble. So the fix is in the
+# unit, not in an equality test — see `measure/deliverable.py`.
+class TestOneReportOnTwoChannelsIsCountedOnce(unittest.TestCase):
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        build_corpus(self.tmp, {"app/a.log": numbered(50),
+                                "app/b.log": numbered(50)})
+        self.key = key_with([defect("D01", "x", [loc("app/a.log", 10)]),
+                             defect("D02", "y", [loc("app/a.log", 20)])])
+
+    def score(self, report):
+        with redirect_stdout(io.StringIO()):
+            return S.score(self.key, report, self.tmp, call=None)
+
+    @staticmethod
+    def hard_wrap(text, width=40):
+        """What `work/report.md` is and the final message is not."""
+        out = []
+        for para in text.split("\n\n"):
+            words, line, lines = para.split(), "", []
+            for w in words:
+                if line and len(line) + 1 + len(w) > width:
+                    lines.append(line)
+                    line = w
+                else:
+                    line = (line + " " + w).strip()
+            if line:
+                lines.append(line)
+            out.append("\n".join(lines))
+        return "\n\n".join(out)
+
+    def test_the_same_report_on_both_channels_does_not_double_the_citations(self):
+        """THE defect. Six arms, every published total, exactly this."""
+        one = self.score(FINDINGS_REPORT)
+        both = self.score(S.deliverable.compose(FINDINGS_REPORT, FINDINGS_REPORT))
+        self.assertEqual(both["citecheck"]["total"], one["citecheck"]["total"],
+                         "a report handed over on two channels is one report")
+        self.assertEqual(both["citecheck"]["ok"], one["citecheck"]["ok"])
+        self.assertEqual(both["report_chars"], one["report_chars"])
+
+    def test_a_hard_wrapped_file_beside_the_same_message_does_not_double_either(self):
+        """The measured shape. Byte equality would have caught 0 of 6 arms."""
+        wrapped = self.hard_wrap(FINDINGS_REPORT)
+        self.assertNotEqual(wrapped, FINDINGS_REPORT)
+        one = self.score(FINDINGS_REPORT)
+        both = self.score(S.deliverable.compose(FINDINGS_REPORT, wrapped))
+        self.assertEqual(both["citecheck"]["total"], one["citecheck"]["total"])
+
+    def test_the_disposal_counts_do_not_double_either(self):
+        """`rejections` and the coverage rows went 7 -> 13 and 24 -> 33 on the AIT
+        v16-contaminated arm, because its two channels are worded differently.
+        The count is of the REPORT's disposals, not of the delivery."""
+        one = self.score(FINDINGS_REPORT)
+        both = self.score(S.deliverable.compose(FINDINGS_REPORT,
+                                                self.hard_wrap(FINDINGS_REPORT)))
+        self.assertEqual(both["structure"]["rejections"],
+                         one["structure"]["rejections"])
+        self.assertEqual(both["structure"]["coverage_rows"],
+                         one["structure"]["coverage_rows"])
+        self.assertEqual(both["structure"]["rejections_uncited"],
+                         one["structure"]["rejections_uncited"])
+
+    def test_the_findings_columns_are_unmoved_either_way(self):
+        """They never doubled — they are set membership over defects. Asserted
+        here so a future "fix" cannot quietly move them while chasing the total."""
+        one = self.score(FINDINGS_REPORT)
+        both = self.score(S.deliverable.compose(FINDINGS_REPORT, FINDINGS_REPORT))
+        for col in ("anchored", "anchorable", "presented", "dismissed",
+                    "decoys_anchored", "decoys_presented"):
+            self.assertEqual(both[col], one[col], col)
+
+    def test_channels_that_genuinely_DIFFER_are_both_scored(self):
+        """The whole reason the union exists: the message can carry a finding the
+        file does not. De-duplicating must not cost that finding."""
+        msg = FINDINGS_REPORT
+        fil = FINDINGS_REPORT.replace("app/a.log:10 «filler line 10»",
+                                      "app/b.log:30 «filler line 30»")
+        rec = self.score(S.deliverable.compose(msg, fil))
+        self.assertGreater(rec["citecheck"]["total"],
+                           self.score(msg)["citecheck"]["total"],
+                           "a block only the file wrote must still be counted")
+
+
+class TestDivergentChannelsAreFlaggedNotCollapsed(unittest.TestCase):
+    """A silent pick between two channels that disagree is the same class of
+    error as counting them twice: a fact about delivery, printed as a fact about
+    the analysis. The record says which one happened."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        build_corpus(self.tmp, {"app/a.log": numbered(50),
+                                "app/b.log": numbered(50)})
+        self.dir = tempfile.mkdtemp()
+        self.keyfile = os.path.join(self.dir, "key.json")
+        with open(self.keyfile, "w", encoding="utf-8") as fh:
+            json.dump(key_with([defect("D01", "x", [loc("app/a.log", 10)])],
+                               dataset="unit"), fh)
+        self.out = os.path.join(self.dir, "scores.jsonl")
+
+    def run_main(self, answer, artifact):
+        ledger = os.path.join(self.dir, "runs.jsonl")
+        with open(ledger, "w", encoding="utf-8") as fh:
+            fh.write(json.dumps({"dataset": "unit", "arm": "vX",
+                                 "trace_dir": "/tmp/t1", "answer": answer,
+                                 "artifact": artifact}, ensure_ascii=False) + "\n")
+        argv = sys.argv
+        sys.argv = ["score-report.py", "--key", self.keyfile, "--corpus", self.tmp,
+                    "--ledger", ledger, "--dataset", "unit", "--out", self.out]
+        buf = io.StringIO()
+        try:
+            with redirect_stdout(buf):
+                S.main()
+        finally:
+            sys.argv = argv
+        rec = [json.loads(l) for l in open(self.out, encoding="utf-8") if l.strip()][-1]
+        return rec, buf.getvalue()
+
+    def test_the_same_report_on_both_channels_records_no_divergence(self):
+        rec, out = self.run_main(FINDINGS_REPORT, FINDINGS_REPORT)
+        self.assertEqual(rec["duplication"]["relation"], "identical")
+        self.assertIsNone(rec["duplication"]["warning"])
+        self.assertNotIn("CHANNELS DIVERGE", out)
+
+    def test_channels_that_differ_are_recorded_AND_printed(self):
+        fil = FINDINGS_REPORT.replace("app/a.log:10 «filler line 10»",
+                                      "app/b.log:30 «filler line 30»")
+        rec, out = self.run_main(FINDINGS_REPORT, fil)
+        d = rec["duplication"]
+        self.assertEqual(d["relation"], "divergent")
+        self.assertGreaterEqual(d["only_in_message"], 1)
+        self.assertGreaterEqual(d["only_in_file"], 1)
+        self.assertIsNotNone(d["warning"])
+        self.assertIn("CHANNELS DIVERGE", out,
+                      "a silent pick between disagreeing channels is the defect")
+
+    def test_a_message_only_run_records_the_channel_and_no_warning(self):
+        rec, out = self.run_main(FINDINGS_REPORT, "")
+        self.assertEqual(rec["duplication"]["relation"], "message-only")
+        self.assertIsNone(rec["duplication"]["warning"])
+        self.assertNotIn("CHANNELS DIVERGE", out)
 
 
 if __name__ == "__main__":

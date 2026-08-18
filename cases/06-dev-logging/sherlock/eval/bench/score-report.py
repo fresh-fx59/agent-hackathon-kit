@@ -88,6 +88,19 @@ COMPUTED in `build-answer-key-ait.py` — same timestamp, message body identical
 byte for byte once the syslog PID is removed, and nothing else normalised — never
 asserted here. Keys without the field are unaffected.
 
+ONE REPORT ON TWO CHANNELS IS ONE REPORT. Every citation total this project
+published was doubled: `measure/deliverable.py` CONCATENATED the final message
+and `work/report.md`, and on all six arms on disk both channels carried the same
+report. Published 294 / 268 / 212 / 314 / 316 / 396 against file-only
+147 / 141 / 106 / 157 / 158 / 198. The RATE never moved — 316/316 and 158/158 are
+both 100 % — which is why it survived every review of this file. The fix is in
+`deliverable.py` (2026-08-19), where the union became a union, block by block;
+this scorer keeps importing it rather than de-duplicating locally. Where the two
+channels genuinely disagree (AIT v16-contaminated answered a condensed rewrite
+beside its file) BOTH are scored and `duplication` on the record says so — a
+silent pick between disagreeing channels is the same class of error as counting
+them twice.
+
 REUSE, DON'T FORK. `score-verdict.py` decides the verdict, `score-bench.py`
 decides the judged column (including the inverted decoy prompt), `deliverable.py`
 decides what a run actually handed over, and `skills/<current>/tools/citecheck.py`
@@ -429,20 +442,22 @@ def items_in(report, spans):
             elif cur is not None and line.strip():
                 cur[1].append(line)
         # a markdown table's first row is its header, not a disposal
-    # Deduplicated by text. `measure/deliverable.py` composes the final message
-    # and work/report.md into one deliverable, and on every arm measured so far
-    # the two channels carry the SAME report — so every section, and every row in
-    # it, appears twice. Counting 24 rejections in a report that wrote 12 would be
-    # a fact about the delivery channel wearing the costume of a fact about the
-    # analysis.
+    # De-duplicated BY POSITION, not by text. A section owns its subsections, so
+    # a «Отклонённые кандидаты» heading nested under another one hands the same
+    # report line to this function twice; counting it twice would be a fact about
+    # the parse. Position is exact — and unlike the text-level de-duplication this
+    # replaced, it does not quietly merge two rows a report really did write twice.
+    #
+    # That text-level rule existed because `measure/deliverable.py` CONCATENATED
+    # the final message and work/report.md, so every row arrived twice. It is now
+    # a union (2026-08-19), the duplicate never reaches here, and the six arms
+    # re-score identically without it — so the second copy of the rule goes.
     seen, rows = set(), []
     for i, ls in out:
-        text = "\n".join(ls)
-        norm = " ".join(text.split())
-        if norm in seen:
+        if i in seen:
             continue
-        seen.add(norm)
-        rows.append((i, text))
+        seen.add(i)
+        rows.append((i, "\n".join(ls)))
     return rows
 
 
@@ -949,7 +964,7 @@ def main():
         text = (sys.stdin.read() if a.report == "-"
                 else open(a.report, encoding="utf-8", errors="replace").read())
         source = {"report_path": a.report, "arm": a.arm, "trace_dir": None,
-                  "delivered_in": None}
+                  "delivered_in": None, "duplication": None}
     elif a.ledger:
         rows = [json.loads(l) for l in open(a.ledger, encoding="utf-8") if l.strip()]
         if not rows:
@@ -958,13 +973,27 @@ def main():
                                      a.dataset or raw_key.get("dataset"))
         score_bench.check_key_matches_dataset(raw_key, run)
         text = deliverable.of_row(run)
+        dup = deliverable.duplication_of_row(run)
         source = {"report_path": None, "arm": run.get("arm"),
                   "trace_dir": run.get("trace_dir"),
-                  "delivered_in": deliverable.channel_of_row(run)}
+                  "delivered_in": deliverable.channel_of_row(run),
+                  "duplication": dup}
         if source["delivered_in"] == "file":
             print("⚠ DELIVERY: this run's report is in work/report.md, not in its "
                   "final message. The scores below measure the REPORT; delivery "
                   "is a separate, open defect.")
+        # A run that hands the SAME report to both channels is scored once —
+        # `deliverable.compose` is a union, not a concatenation. When the two
+        # channels genuinely disagree, both are scored and the disagreement is
+        # printed rather than resolved here: which half was "the report" is not a
+        # question a scorer may answer silently.
+        if dup["warning"]:
+            print("⚠ %s" % dup["warning"])
+        elif dup["relation"] in ("identical", "file-repeats-message",
+                                 "message-repeats-file"):
+            print("note: both channels carried the same report (%s, %d of %d "
+                  "file block(s) already in the message) — scored ONCE."
+                  % (dup["relation"], dup["shared_blocks"], dup["file_blocks"]))
     else:
         sys.exit("give either --report or --ledger")
 
