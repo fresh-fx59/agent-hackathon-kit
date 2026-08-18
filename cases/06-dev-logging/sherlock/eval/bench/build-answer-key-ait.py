@@ -93,6 +93,7 @@ import argparse
 import collections
 import json
 import os
+import re
 import sys
 
 # 22 label names → 6 phases. `attacker`, `attacker_http`, `foothold` are
@@ -121,6 +122,109 @@ TITLE = {
     "cracking": "Offline password cracking",
     "exfil": "DNS-tunnelled data exfiltration",
 }
+
+
+# --------------------------------------------------------------------------
+# THE SAME EVENT ON A SECOND MACHINE
+# --------------------------------------------------------------------------
+# AIT labels ONE host's copy of traffic that two hosts logged. `inet-firewall`
+# and `inet-dns` are a forwarding pair: every query that crossed the firewall
+# also crossed the resolver, and the labels are only on the firewall. An analyst
+# who proved the DNS story from `inet-dns/logs/dnsmasq.log` was right and scored
+# a miss.
+#
+# The fix is COMPUTED, never asserted. Two lines are the same event if, and only
+# if, their timestamp and their message body match byte for byte after removing
+# the ONE field that can never match across machines: the syslog PID, which
+# identifies a daemon instance on one box. Nothing else is normalised — the
+# hostname least of all.
+#
+# That last sentence is the safety property and it is load-bearing. This testbed
+# provisioned itself with `useradd[493]: new user: name=ait` in the SAME SECOND on
+# 21 machines. A rule that also dropped the hostname would have called those 21
+# lines one event and handed every `auth.log` defect twenty free alternates —
+# exactly the key-loosening this pass exists to avoid. Because the hostname stays,
+# `logs/auth.log` (present on ten hosts) gains NOTHING, and the only pair that
+# matches is the one whose log format carries no hostname at all.
+SYSLOG_TS_RE = re.compile(r"^([A-Z][a-z]{2}\s+\d{1,2} \d\d:\d\d:\d\d) (.*)$")
+PID_RE = re.compile(r"\[\d+\]:")
+
+
+def event_key(line):
+    """(timestamp, message-body-without-the-pid), or None if this is not a
+    syslog-framed line. `None` means "cannot be compared", never "no match"."""
+    m = SYSLOG_TS_RE.match(line.rstrip("\n"))
+    if not m:
+        return None
+    return (m.group(1), PID_RE.sub(":", m.group(2), count=1))
+
+
+def host_twins(root, rel):
+    """Files at the same path under a DIFFERENT host directory.
+
+    `inet-firewall/logs/dnsmasq.log` -> `inet-dns/logs/dnsmasq.log`. Path
+    arithmetic, not a list of pairs somebody wrote down.
+    """
+    gather = os.path.join(root, "gather")
+    host, _sep, tail = rel.partition("/")
+    if not tail:
+        return []
+    out = []
+    for other in sorted(os.listdir(gather)) if os.path.isdir(gather) else []:
+        if other == host:
+            continue
+        p = os.path.join(gather, other, tail)
+        if os.path.isfile(p):
+            out.append(other + "/" + tail)
+    return out
+
+
+def index_events(root, rel, cache):
+    """{event_key: [line numbers]} for one file, read once."""
+    if rel not in cache:
+        idx = collections.defaultdict(list)
+        p = os.path.join(root, "gather", rel)
+        try:
+            with open(p, errors="replace") as fh:
+                for i, line in enumerate(fh, 1):
+                    k = event_key(line)
+                    if k:
+                        idx[k].append(i)
+        except OSError:
+            pass
+        cache[rel] = idx
+    return cache[rel]
+
+
+def alternates_for(root, rel, lines, cache):
+    """-> {other_rel: sorted line numbers} that hold the SAME events."""
+    twins = host_twins(root, rel)
+    if not twins:
+        return {}
+    own = {}
+    p = os.path.join(root, "gather", rel)
+    want = set(lines)
+    try:
+        with open(p, errors="replace") as fh:
+            for i, line in enumerate(fh, 1):
+                if i in want:
+                    k = event_key(line)
+                    if k:
+                        own[i] = k
+    except OSError:
+        return {}
+    if not own:
+        return {}
+    keys = set(own.values())
+    out = {}
+    for t in twins:
+        idx = index_events(root, t, cache)
+        hit = set()
+        for k in keys:
+            hit |= set(idx.get(k, ()))
+        if hit:
+            out[t] = sorted(hit)
+    return out
 
 
 def load_labels(root):
@@ -251,9 +355,19 @@ def build(root, corpus, dataset):
     groups.sort(key=lambda g: (ORDER[g["phase"]], g["file"]))
 
     defects = []
+    ev_cache = {}
+    alt_defects = alt_lines = 0
     for i, g in enumerate(groups, 1):
         rs = runs_of(g["lines"])
         first = rs[0][0]
+        alts = alternates_for(root, g["file"], g["lines"], ev_cache)
+        alt_locs = []
+        for other in sorted(alts):
+            for lo, hi in runs_of(alts[other]):
+                alt_locs.append({"file": other, "line_start": lo, "line_end": hi})
+        if alt_locs:
+            alt_defects += 1
+            alt_lines += sum(len(v) for v in alts.values())
         defects.append({
             "id": "A%02d" % i,
             "title": "%s — %s" % (" + ".join(TITLE[p] for p in g["phases"]),
@@ -277,6 +391,10 @@ def build(root, corpus, dataset):
             "first_labelled_line_preview": preview(root, g["file"], first),
             "proof_locations": [{"file": g["file"], "line_start": lo,
                                  "line_end": hi} for lo, hi in rs],
+            # The SAME events on another machine's copy — computed, not asserted.
+            # Empty is a statement too: it means no other host logged this, or
+            # logged it in a format the rule cannot compare.
+            "alternate_proof_locations": alt_locs,
         })
 
     key = {
@@ -319,6 +437,37 @@ def build(root, corpus, dataset):
                           "another phase's is folded into it (fixpoint)",
             "merges": merges,
             "proof_rule": "maximal contiguous runs of labelled lines",
+            "cross_host_rule": (
+                "AIT labels ONE host's copy of traffic two hosts logged. A second "
+                "location is credited only where the SAME EVENT is provable: same "
+                "timestamp, and message body byte-identical after removing the "
+                "syslog PID `[N]` — the one field that cannot match across "
+                "machines by construction. NOTHING else is normalised, the "
+                "hostname least of all: this testbed wrote `useradd[493]: new "
+                "user: name=ait` in the same second on 21 hosts, and a rule that "
+                "dropped the hostname would have called those one event. "
+                "Candidate files are found by path arithmetic (<other-host>/<same "
+                "tail>), not from a list."),
+            "alternate_defects": alt_defects,
+            "alternate_lines": alt_lines,
+            "known_limitations": [
+                "audit.log: its lines are `type=SYSCALL msg=audit(<epoch>:<id>)` "
+                "and carry no syslog timestamp, so `event_key` returns None for "
+                "every one of them. `logs/audit/audit.log` exists on seven hosts "
+                "and A07/A11 gain nothing — not because the events are unique, "
+                "but because this rule cannot compare them. Not widened: an epoch "
+                "-plus-serial identifier is per-host state, and matching on the "
+                "message alone would drop the timestamp requirement entirely.",
+                "apache access.log/error.log: `[24/Jan/2022:03:56:47 +0000]` is "
+                "not the syslog timestamp form either, so A02/A03/A06 are "
+                "uncomparable. They have no same-tail twin on another host in "
+                "this corpus anyway (the path carries the vhost name), so nothing "
+                "is lost today — but a corpus where two hosts served the same "
+                "vhost would need the rule extended.",
+                "The rule is line-for-line and one-directional per defect: it "
+                "credits the other host's copy of a LABELLED line. It says "
+                "nothing about lines the other host logged and this one did not.",
+            ],
             "decoys": "none — see `notes`",
         },
         "defects": defects,
@@ -343,16 +492,23 @@ def main():
     print("  defects: %d   red herrings: %d   labelled lines: %d   label files: %d"
           % (key["totals"]["real_defects"], key["totals"]["red_herrings"],
              key["derivation"]["labelled_lines"], key["derivation"]["label_files"]))
+    print("  cross-host alternates: %d defect(s), %d line(s) — same timestamp, "
+          "same message body, PID removed and nothing else"
+          % (key["derivation"]["alternate_defects"],
+             key["derivation"]["alternate_lines"]))
     for m in key["derivation"]["merges"]:
         print("  merged %s(%d) into %s(%d)%s in %s"
               % (m["absorbed"], m["absorbed_lines"], m["into"], m["into_lines"],
                  " [identical]" if m["identical"] else " [subset]", m["file"]))
     print()
-    print("  %-4s %-9s %-9s %-52s %s" % ("id", "phase", "lines", "file", "proofs"))
+    print("  %-4s %-9s %-9s %-52s %-7s %s"
+          % ("id", "phase", "lines", "file", "proofs", "alt"))
     for d in key["defects"]:
-        print("  %-4s %-9s %-9d %-52s %d"
+        alt = d["alternate_proof_locations"]
+        print("  %-4s %-9s %-9d %-52s %-7d %s"
               % (d["id"], d["phase"], d["labelled_lines"], d["file"],
-                 len(d["proof_locations"])))
+                 len(d["proof_locations"]),
+                 ("%d run(s) in %s" % (len(alt), alt[0]["file"])) if alt else "—"))
     return 0
 
 
