@@ -204,16 +204,22 @@ class TheNegativeControlKey(unittest.TestCase):
         the key was decoys only, so `score-report.py` printed `anchored 0/0` and
         could score what a report should REFUSE and nothing it should OBSERVE.
         A negative control is not «a corpus with no findings» — it is a corpus with
-        no COMPROMISE. The ten real findings are true observations about a fleet
+        no COMPROMISE. The twelve real findings are true observations about a fleet
         that was attacked and held, every one of them `provenance: counted`, and
         `test_no_real_finding_TITLES_a_compromise` in
-        test_answer_key_fleet_negative.py is what keeps that distinction honest."""
+        test_answer_key_fleet_negative.py is what keeps that distinction honest.
+
+        Ten became twelve later the same day. The first derivation ran under a
+        citation checker that called every gzipped text log a binary, so its own
+        binary gate refused to anchor anything in the corpus's seven `.gz` files —
+        109,708 lines, including the largest rotation of the SSH sweep. With v20's
+        fixed checker the key gained R11 and R12 and re-counted R01 and R04."""
         real = [d for d in self.k["defects"]
                 if not d["title"].upper().startswith("RED HERRING")]
         decoys = [d for d in self.k["defects"]
                   if d["title"].upper().startswith("RED HERRING")]
         self.assertEqual(len(decoys), 8)
-        self.assertEqual(len(real), 10)
+        self.assertEqual(len(real), 12)
         for d in real:
             self.assertEqual(d["provenance"], "counted", d["id"])
         self.assertEqual(self.k["totals"]["real_defects"], len(real))

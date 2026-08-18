@@ -45,7 +45,7 @@ Three guards replace the missing labels:
 
 WHAT IS STILL AUTHORED, SAID PLAINLY
 ------------------------------------
-The numbers and the proof lines are counted. The CHOICE of the ten observables, and
+The numbers and the proof lines are counted. The CHOICE of the twelve observables, and
 the prose in `title`/`root_cause`, are authored — a human decided that a firewall
 dropping 13,303 packets is worth a finding and that Grafana's 64 `level=error` lines
 are not. `provenance` on every entry says which of the two it is, and the eight
@@ -59,18 +59,37 @@ evidence collector itself) and contabo's three `Accepted publickey for root` all
 from 100.122.174.119. `TAILSCALE_RE` excludes that range from every hostile-traffic
 count, so the collector can never be promoted into a finding.
 
-BINARY EVIDENCE CANNOT BE A PROOF LOCATION
--------------------------------------------
-15 of the 58 files fail `citecheck.looks_binary`, and v16 refuses a citation into any
-of them — including the `.gz` rotations, whose bytes are binary even though
-`read_lines` would gunzip them. The builder asserts that every proof location it
-emits is in a readable-as-text file. That check is also what fixed **D05**, whose
-anchor used to be `mon/utmp/btmp` itself: `citecheck.extract` only recognises
-`path:line`, so anchoring that decoy required citing a line inside a binary, which
-v13's guard exists to refuse. D05 now anchors on the MANIFEST row that states the
-file's size and type — which is how a responder is supposed to reference evidence
-they cannot read as text. **D04** likewise gained its second `ANOM_PROMISCUOUS`
-record, which the old key names in prose but never anchored.
+BINARY EVIDENCE CANNOT BE A PROOF LOCATION — AND A GZIPPED TEXT LOG IS TEXT
+---------------------------------------------------------------------------
+The gate is unchanged in what it protects: no proof location may live in a file the
+citation checker refuses to read, because a citation there can never be verified and
+an unanchorable finding is a free point nobody can win. What changed on 2026-08-18 is
+the *notion of binary* the gate uses.
+
+The first derivation loaded `skills/v16/tools/citecheck.py`, whose `looks_binary`
+read the RAW bytes. A gzip stream is full of NULs, so all seven `.gz` files in this
+corpus were called binaries — while the very same module's `read_lines` opens them
+with `gzip.open` and reads them perfectly. The gate was rejecting citations the tool
+could verify, and this builder therefore refused to anchor anything in 109,708 lines
+of evidence. v19 fixed `looks_binary` to test the DECOMPRESSED stream and v20 shipped
+it; this file now loads v20, so 11 of the 58 files are binary here instead of 18.
+
+The hole that left in the key was not cosmetic. `mon/auth/auth.log.2.gz` alone holds
+9,851 `sshd[N]: Invalid user` lines against the 6,650 R01 used to count — the LARGEST
+rotation of the sweep was outside the key, and R01 undercounted the volume it
+describes by 2.5x. `mon/nginx/access.log.10.gz` holds 3,221 more web-shell probes
+against R04's 1,670. And two findings the corpus always contained could not be
+written at all: the kernel's SYN-flood mitigation on mon:15443 (**R11**, one line, in
+`mon/syslog/kern.log.3.gz`) and contabo's archived nginx log recording every one of
+its 1,153 requests as coming from 127.0.0.1 (**R12**).
+
+The gate is also what fixed **D05**, whose anchor used to be `mon/utmp/btmp` itself:
+`citecheck.extract` only recognises `path:line`, so anchoring that decoy required
+citing a line inside a binary. `mon/utmp/btmp` is still binary under v20 — a real
+utmp record file, not a compressed text log — so D05 still anchors on the MANIFEST
+row that states the file's size and type, which is how a responder is supposed to
+reference evidence they cannot read as text. **D04** likewise gained its second
+`ANOM_PROMISCUOUS` record, which the old key names in prose but never anchored.
 """
 import argparse
 import collections
@@ -84,7 +103,7 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SHERLOCK = os.path.dirname(os.path.dirname(HERE))
-CITECHECK = os.path.join(SHERLOCK, "skills", "v16", "tools", "citecheck.py")
+CITECHECK = os.path.join(SHERLOCK, "skills", "v20", "tools", "citecheck.py")
 
 
 def _load(name, path):
@@ -94,7 +113,7 @@ def _load(name, path):
     return mod
 
 
-citecheck = _load("citecheck_v16", CITECHECK)
+citecheck = _load("citecheck_v20", CITECHECK)
 
 # Tailscale's CGNAT block. Anything sourced here is the operator or the collector.
 TAILSCALE_RE = re.compile(r"\b100\.(?:6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.\d+\.\d+\b")
@@ -115,12 +134,24 @@ CLAIM_HALVES = {
 # --------------------------------------------------------------------------
 # scanning
 # --------------------------------------------------------------------------
+def read_text(path):
+    """Open a corpus file the way `citecheck.read_lines` opens it — through gzip
+    when the name says gzip.
+
+    This is the whole of the 2026-08-18 `.gz` repair on the counting side. The
+    builder used to call plain `open()`, so a `.gz` decoded into a few thousand
+    lines of mojibake and no pattern in this file could match anything in it. The
+    checker and the builder must address the SAME lines or a proof location is a
+    number about one file and a citation is a number about another."""
+    return citecheck.opener(path)(path, "rt", encoding="utf-8", errors="replace")
+
+
 def scan(corpus, rel, pattern, drop_tailscale=False):
     """-> ([line numbers], [matched text]) for one file, one regex."""
     p = os.path.join(corpus, rel)
     rx = re.compile(pattern)
     nums, texts = [], []
-    with open(p, encoding="utf-8", errors="replace") as fh:
+    with read_text(p) as fh:
         for i, line in enumerate(fh, 1):
             if not rx.search(line):
                 continue
@@ -187,42 +218,119 @@ SSH_ATTEMPT_RE = (r"sshd(-session)?\[[0-9]+\]: (Invalid user |"
                   r"Connection closed by (invalid|authenticating) user |"
                   r"Connection reset by authenticating user |"
                   r"Disconnected from authenticating user )")
+
+# R01's PROOF pattern (2026-08-18, second derivation). The first derivation proved
+# R01 with `sshd[N]: Invalid user ` alone and recorded the consequence as a known
+# limitation: one connection of this sweep emits four or five lines and only one of
+# them says «Invalid user», so a report that cited a `Received disconnect … [preauth]`
+# line had cited this exact finding and scored zero for it. That limitation named its
+# own repair — «make R01 use the broad one, BEFORE the next arm runs, not after this
+# one has been scored» — and this is that moment: the whole key is being re-derived
+# because the `.gz` rotations became readable, no arm has run against the result, and
+# widening now cannot be a fit to any report's citations.
+#
+# The HEADLINE stays the narrow `Invalid user ` count, because that is one line per
+# rejected connection and therefore a number that means something. The proof set is
+# the broad one, because every line below is the same sweep and a reader who lands on
+# any of them has reached the finding. Proof wider than headline is the existing
+# design here, not a new liberty: R08 counts an epoch and proves it with two lines,
+# R10 counts two zero-byte files and proves it with syslogd's own chatter.
+SSH_SWEEP_RE = (r"sshd(-session)?\[[0-9]+\]: ("
+                r"Invalid user |"
+                r"Connection closed by (invalid|authenticating) user |"
+                r"Connection reset by (invalid|authenticating) user |"
+                r"Disconnected from (invalid|authenticating) user |"
+                r"Disconnecting (invalid|authenticating) user |"
+                r"Received disconnect from |"
+                r"error: maximum authentication attempts exceeded for |"
+                r"error: kex_exchange_identification: |"
+                r"banner exchange: Connection from )")
 TS_GREP = r"\b100\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\.[0-9]+\.[0-9]+\b"
+
+# mon's auth log has three rotations and they are contiguous: .2.gz covers
+# 2026-08-02 → 08-09, .1 covers 08-09 → 08-16, and the live file covers 08-16 →
+# collection. The live file is D01/D02/D03's, so R01 counts the other two — and
+# until the `.gz` guard was fixed it could only count ONE of them.
+R01_FILES = ["mon/auth/auth.log.2.gz", "mon/auth/auth.log.1"]   # oldest first
+# mon's http log likewise: the live file is 18 Aug, the archive is 08–09 Aug.
+R04_FILES = ["mon/nginx/access.log", "mon/nginx/error.log",
+             "mon/nginx/access.log.10.gz"]
+# and the Mac's syslog: 109 live lines, 620 more in two archives.
+R10_MAC_SYSLOG = ["mac/syslog/system.log", "mac/syslog/system.log.0.gz",
+                  "mac/syslog/system.log.1.gz"]
+
+
+def cat_cmd(rels):
+    """A shell one-liner that concatenates plain and gzipped files in one stream.
+
+    `gzip -cd` rather than `zcat`, because macOS `zcat` still wants a `.Z`. This is
+    the command a reader can paste, and the builder runs it."""
+    plain = [r for r in rels if not r.endswith(".gz")]
+    gz = [r for r in rels if r.endswith(".gz")]
+    parts = []
+    if plain:
+        parts.append("cat " + " ".join(plain))
+    parts.extend("gzip -cd " + r for r in gz)
+    if len(parts) == 1 and plain:
+        return parts[0]
+    return "{ " + "; ".join(parts) + "; }"
 
 JOURNAL_MIRRORS = ["journal.json", "journal.export"]
 
 
 def obs_R01(c):
-    n, t = scan(c, "mon/auth/auth.log.1", r"sshd\[[0-9]+\]: Invalid user ")
-    srcs = distinct(t, r"from ((?:\d{1,3}\.){3}\d{1,3})")
-    acc, _ = scan(c, "mon/auth/auth.log.1", r"sshd\[[0-9]+\]: Accepted ")
+    n, t, srcs = [], [], set()
+    for rel in R01_FILES:
+        nn, tt = scan(c, rel, r"sshd\[[0-9]+\]: Invalid user ")
+        n.extend(nn)
+        t.extend(tt)
+        srcs |= distinct(tt, r"from ((?:\d{1,3}\.){3}\d{1,3})")
+    acc = sum(len(scan(c, rel, r"sshd\[[0-9]+\]: Accepted ")[0])
+              for rel in R01_FILES)
+    sweep = sum(len(scan(c, rel, SSH_SWEEP_RE, True)[0]) for rel in R01_FILES)
     bans = 0
-    for rel in ("mon/auth/auth.log", "mon/auth/auth.log.1", "mon/syslog/syslog.tail",
+    for rel in ("mon/auth/auth.log", "mon/auth/auth.log.1",
+                "mon/auth/auth.log.2.gz", "mon/syslog/syslog.tail",
                 "mon/journal/journal.short-iso", "mon/journal/journal.json"):
         bans += len(scan(c, rel, r"fail2ban|sshguard|denyhosts")[0])
+    per_file = {rel: len(scan(c, rel, r"sshd\[[0-9]+\]: Invalid user ")[0])
+                for rel in R01_FILES}
     return {
         "claim": "attacked",
-        "title": "SSH username-enumeration sweep against mon, one rotation older "
-                 "than the decoys' — 6,650 attempts from 314 addresses over a "
-                 "week, and nothing on the host ever blocked one",
-        "counts": {"attempts": len(n), "distinct_sources": len(srcs),
-                   "accepted_in_this_rotation": len(acc),
+        "title": "SSH username-enumeration sweep against mon across both archived "
+                 "rotations — 16,501 invalid-user attempts from 635 addresses over "
+                 "two contiguous weeks, and nothing on the host ever blocked one",
+        "counts": {"attempts": len(n), "attempts_per_file": per_file,
+                   "sweep_lines": sweep,
+                   "distinct_sources": len(srcs),
+                   "accepted_in_these_rotations": acc,
                    "first": iso_of(t[0]), "last": iso_of(t[-1]),
                    "hours": hours_between(iso_of(t[0]), iso_of(t[-1])),
                    "blocking_lines_anywhere_on_mon": bans},
         "headline": len(n),
-        "command": r"grep -cE 'sshd\[[0-9]+\]: Invalid user ' mon/auth/auth.log.1",
+        "command": (cat_cmd(R01_FILES) +
+                    r" | grep -cE 'sshd\[[0-9]+\]: Invalid user '"),
         "why": ("D01 counts 1,957 attempts in `mon/auth/auth.log` and calls the "
-                "number a decoy because none of them worked. The PREVIOUS rotation "
-                "holds %d more from %d addresses over %.0f hours, with zero "
-                "accepted authentications of any kind — and `fail2ban`, `sshguard` "
-                "and `denyhosts` appear %d times in every mon log in this corpus. "
-                "The sweep is not a two-day burst and nothing on this host is "
-                "answering it. That is a true observation about the host's exposure "
-                "and it is not a claim that anyone got in."),
+                "number a decoy because none of them worked. The two rotations "
+                "BEFORE it hold %d more from %d addresses over %.0f hours — %d in "
+                "`auth.log.2.gz` and %d in `auth.log.1`. The larger of the two is "
+                "the gzipped one, which the first derivation of this key could not "
+                "read at all. Zero accepted authentications of any kind in either, and "
+                "`fail2ban`, `sshguard` and `denyhosts` appear %d times in every mon "
+                "log in this corpus. The sweep is not a two-day burst: the three "
+                "rotations are contiguous and it runs for sixteen days, and nothing "
+                "on this host is answering it. That is a true observation about the "
+                "host's exposure and it is not a claim that anyone got in."),
         "why_args": (len(n), len(srcs),
-                     hours_between(iso_of(t[0]), iso_of(t[-1])), bans),
-        "scan": [("mon/auth/auth.log.1", r"sshd\[[0-9]+\]: Invalid user ")],
+                     hours_between(iso_of(t[0]), iso_of(t[-1])),
+                     per_file[R01_FILES[0]], per_file[R01_FILES[1]], bans),
+        "scan": [(rel, SSH_SWEEP_RE) for rel in R01_FILES],
+        "drop_tailscale": True,
+        "proof_note": ("the proof pattern is the BROAD sweep pattern, not the "
+                       "narrow `Invalid user ` one the headline counts: one "
+                       "connection of this sweep emits four or five lines and any "
+                       "of them is this finding. %d proof lines against a headline "
+                       "of %d." % (sweep, len(n))),
     }
 
 
@@ -299,36 +407,54 @@ def obs_R03(c):
 
 
 def obs_R04(c):
-    na, ta = scan(c, "mon/nginx/access.log", PROBE_RE)
-    ne, te = scan(c, "mon/nginx/error.log", PROBE_RE)
+    acc = [r for r in R04_FILES if "access" in r]
+    err = [r for r in R04_FILES if "error" in r]
+    na, ta = [], []
+    for rel in acc:
+        nn, tt = scan(c, rel, PROBE_RE)
+        na.extend(nn)
+        ta.extend(tt)
+    ne, te = [], []
+    for rel in err:
+        nn, tt = scan(c, rel, PROBE_RE)
+        ne.extend(nn)
+        te.extend(tt)
     srcs = distinct(ta, r"^((?:\d{1,3}\.){3}\d{1,3})") | distinct(
         te, r"client: ((?:\d{1,3}\.){3}\d{1,3})")
     codes = collections.Counter(m.group(1) for x in ta
                                 for m in re.finditer(r'" (\d{3}) ', x))
     sizes = {m.group(1) for x in ta for m in re.finditer(r'" 200 (\d+)', x)}
+    per_file = {rel: len(scan(c, rel, PROBE_RE)[0]) for rel in R04_FILES}
     return {
         "claim": "attacked",
-        "title": "Web-shell and CMS probing of mon's public HTTP surface: 1,670 "
-                 "requests from 24 addresses, and not one of them reached a shell",
+        "title": "Web-shell and CMS probing of mon's public HTTP surface across "
+                 "both rotations: 4,891 requests from 61 addresses, and not one of "
+                 "them reached a shell",
         "counts": {"probe_requests": len(na) + len(ne),
-                   "in_access_log": len(na), "in_error_log": len(ne),
+                   "probes_per_file": per_file,
+                   "in_access_logs": len(na), "in_error_log": len(ne),
                    "distinct_sources": len(srcs),
                    "status_codes": dict(codes.most_common()),
                    "distinct_200_body_sizes": sorted(sizes, key=int)},
         "headline": len(na) + len(ne),
-        "command": ("cat mon/nginx/access.log mon/nginx/error.log | grep -cE '"
+        "command": (cat_cmd(R04_FILES) + " | grep -cE '"
                     + PROBE_RE.replace("'", "'\\''") + "'"),
         "why": ("%d requests for `wp_filemanager.php`, `/222.php`, `/wso.php`, "
-                "`/.env` and their kind, from %d addresses. %s of them were "
-                "answered `200` — and that is the half a report has to get right: "
-                "every 200 body is one of %s bytes, a fixed-size default page, not "
-                "a shell. The single line in `mon/nginx/error.log` is the same "
-                "campaign failing to open a `.php` inside the ACME challenge "
-                "directory. Probing happened; nothing was served."),
-        "why_args": (len(na) + len(ne), len(srcs), codes.get("200", 0),
-                     " or ".join(sorted(sizes, key=int))),
-        "scan": [("mon/nginx/access.log", PROBE_RE),
-                 ("mon/nginx/error.log", PROBE_RE)],
+                "`/.env` and their kind, from %d addresses — %d in the live "
+                "`access.log`, %d in the archived `access.log.10.gz` that the first "
+                "derivation of this key could not read, and %d in `error.log`. %s "
+                "of them were answered `200` — and that is the half a report has to "
+                "get right: every 200 body is one of %s bytes, three fixed-size "
+                "default pages, not a shell. The single line in `mon/nginx/"
+                "error.log` is the same campaign failing to open a `.php` inside "
+                "the ACME challenge directory. Probing happened; nothing was "
+                "served."),
+        "why_args": (len(na) + len(ne), len(srcs),
+                     per_file["mon/nginx/access.log"],
+                     per_file["mon/nginx/access.log.10.gz"],
+                     per_file["mon/nginx/error.log"],
+                     codes.get("200", 0), " or ".join(sorted(sizes, key=int))),
+        "scan": [(rel, PROBE_RE) for rel in R04_FILES],
     }
 
 
@@ -491,45 +617,166 @@ def obs_R09(c):
 def obs_R10(c):
     man, mt = scan(c, "MANIFEST.tsv", r"^mac/unified/")
     zero = [x for x in mt if x.split("\t")[1] == "0"]
-    sysn, _ = scan(c, "mac/syslog/system.log", r"")
-    asln, _ = scan(c, "mac/syslog/system.log", r"ASL Sender Statistics")
+    per_file, asl, cfg, sysd = {}, 0, 0, 0
+    for rel in R10_MAC_SYSLOG:
+        ln = len(scan(c, rel, r"")[0])
+        a = len(scan(c, rel, r"ASL Sender Statistics")[0])
+        g = len(scan(c, rel, r"Configuration Notice:")[0])
+        d = len(scan(c, rel, r"syslogd\[[0-9]+\]:")[0])
+        per_file[rel] = {"lines": ln, "asl_sender_statistics": a,
+                         "configuration_notice": g, "syslogd_lines": d}
+        asl += a
+        cfg += g
+        sysd += d
+    total = sum(v["lines"] for v in per_file.values())
     binaries = [r for r in scan(c, "MANIFEST.tsv", r"^mac/")[1]
                 if r.split("\t")[2] == "BINARY"]
     return {
         "claim": "not-proven",
         "title": "The Mac contributes no usable security telemetry: its unified log "
-                 "export is 0 bytes, and 70 of the 109 lines of system.log are "
-                 "syslogd talking about itself",
+                 "export is 0 bytes, and 358 of the 729 lines of its whole syslog "
+                 "rotation set are syslogd talking about itself",
         "counts": {"unified_files": len(man), "unified_zero_byte": len(zero),
-                   "system_log_lines": len(sysn),
-                   "system_log_asl_stats": len(asln),
+                   "syslog_files": len(R10_MAC_SYSLOG),
+                   "syslog_lines_total": total,
+                   "syslogd_lines_total": sysd,
+                   "asl_sender_statistics": asl,
+                   "configuration_notice": cfg,
+                   "per_file": per_file,
                    "mac_binary_files_in_manifest": len(binaries)},
         "headline": len(zero),
         "command": "awk -F'\\t' '$1 ~ /^mac\\/unified\\// && $2 == 0' MANIFEST.tsv "
                    "| wc -l | tr -d ' '",
         "why": ("`mac/unified/unified.ndjson` and `mac/unified/unified.syslog` are "
                 "both %d bytes — the primary macOS log stream, the one that would "
-                "carry authentication and process events, contributed nothing. "
-                "What is left is `mac/syslog/system.log`, %d lines of which %d are "
-                "`ASL Sender Statistics`, and %d files the MANIFEST itself marks "
-                "BINARY (the three `.asl` archives and both empty unified files), "
-                "which v16 refuses to cite. The Mac is not undocumented — "
-                "`mac/misc/install.log` alone is 309,765 lines — but installer, "
-                "fsck and daily-cron output answer no security question. The Mac "
-                "cannot be cleared and cannot be accused; a report that reaches a "
-                "verdict about it from this corpus is overreaching. The proof is "
-                "the MANIFEST's own rows, which is how evidence you cannot read "
-                "as text is supposed to be referenced."),
-        "why_args": (0, len(sysn), len(asln), len(binaries)),
-        "scan": [("MANIFEST.tsv", r"^mac/unified/"),
-                 ("mac/syslog/system.log", r"ASL Sender Statistics")],
+                "carry authentication and process events, contributed nothing. What "
+                "is left is three rotations of `mac/syslog/system.log`, %d lines "
+                "between them, of which %d come from `syslogd` itself: %d are `ASL "
+                "Sender Statistics` and %d are `Configuration Notice:` blocks whose "
+                "own text says «Those messages may not appear in standard system log "
+                "files or in the ASL database». The two archived rotations are %d of "
+                "those %d lines and neither was readable to the first derivation of "
+                "this key — reading them did not add one security event, it added "
+                "615 more lines of the same self-description plus loginwindow boot "
+                "chatter. %d files the MANIFEST marks BINARY (the three `.asl` "
+                "archives and both empty unified files) stay uncitable. The Mac is "
+                "not undocumented — `mac/misc/install.log` alone is 309,765 lines — "
+                "but installer, fsck and daily-cron output answer no security "
+                "question. The Mac cannot be cleared and cannot be accused; a report "
+                "that reaches a verdict about it from this corpus is overreaching. "
+                "Part of the proof is the MANIFEST's own rows, which is how evidence "
+                "you cannot read as text is supposed to be referenced."),
+        "why_args": (0, total, sysd, asl, cfg,
+                     total - per_file["mac/syslog/system.log"]["lines"], total,
+                     len(binaries)),
+        "scan": ([("MANIFEST.tsv", r"^mac/unified/")] +
+                 [(rel, r"(ASL Sender Statistics|Configuration Notice:)")
+                  for rel in R10_MAC_SYSLOG]),
+        "proof_note": ("`Configuration Notice:` is in the proof pattern now. The "
+                       "first derivation proved this finding with `ASL Sender "
+                       "Statistics` alone and recorded the omission as a known "
+                       "limitation: the Configuration Notice block is syslogd saying "
+                       "in words that messages are being diverted away from this "
+                       "file, which is the finding stated more directly than the "
+                       "statistics line states it. Widened in the same pass that "
+                       "admitted the two `.gz` rotations, before any arm has been "
+                       "scored against the result."),
+    }
+
+
+# --------------------------------------------------------------------------
+# R11 and R12 exist only because the `.gz` guard was fixed. Neither is a new fact
+# about the fleet — both were in the corpus from the day it was collected. They are
+# new to the KEY, and the honest way to say that is to say it here: a measurement
+# instrument that cannot read a rotation cannot score a responder who did.
+# --------------------------------------------------------------------------
+def obs_R11(c):
+    pat = r"Possible SYN flooding on port 0\.0\.0\.0:15443"
+    n, t = scan(c, "mon/syslog/kern.log.3.gz", pat)
+    elsewhere = {rel: len(scan(c, rel, r"SYN flooding")[0])
+                 for rel in ("mon/syslog/syslog.tail", "mon/syslog/kern.log.1",
+                             "mon/journal/journal.short-iso",
+                             "mon/journal/journal.json",
+                             "contabo/journal/journal.short-iso")}
+    accepts = len(scan(c, "mon/syslog/syslog.tail",
+                       r"relay15443 accepted peer=")[0])
+    return {
+        "claim": "attacked",
+        "title": "The kernel logged SYN-flood mitigation on mon:15443 — the same "
+                 "internet-facing relay port whose 21,779 sessions have no outcome "
+                 "records at all",
+        "counts": {"syn_flood_lines": len(n),
+                   "port": 15443,
+                   "when": iso_of(t[0]),
+                   "syn_flood_lines_elsewhere_in_corpus": elsewhere,
+                   "relay_accepts_in_syslog_tail": accepts},
+        "headline": len(n),
+        "command": ("gzip -cd mon/syslog/kern.log.3.gz | "
+                    "grep -c 'Possible SYN flooding on port 0.0.0.0:15443'"),
+        "why": ("One line, at %s: `TCP: request_sock_TCP: Possible SYN flooding on "
+                "port 0.0.0.0:15443. Sending cookies.` The kernel only writes this "
+                "when the SYN backlog for a listening socket overflows, so it is "
+                "direct evidence that hostile volume reached that port and that the "
+                "host shed it with SYN cookies. It is the ONLY such line in the "
+                "corpus — %s in every other log this key reads — and it is on the "
+                "exact port R09 says records %d accepted sessions and zero "
+                "outcomes. Two findings, opposite halves of the verdict: R09 is the "
+                "blind spot, R11 is the one moment the blind spot was demonstrably "
+                "under load. This line lives in `mon/syslog/kern.log.3.gz`; before "
+                "the citation checker learned that a gzipped text log is text, no "
+                "report could have been credited for citing it and this key could "
+                "not have contained it."),
+        "why_args": (iso_of(t[0]),
+                     ", ".join("%d in %s" % (v, k)
+                               for k, v in sorted(elsewhere.items())),
+                     accepts),
+        "scan": [("mon/syslog/kern.log.3.gz", pat)],
+    }
+
+
+def obs_R12(c):
+    rel = "contabo/nginx/access.log.2.gz"
+    n, t = scan(c, rel, r"^127\.0\.0\.1 ")
+    total = len(scan(c, rel, r"")[0])
+    probes = len(scan(c, rel, PROBE_RE)[0])
+    srcs = distinct(t, r"^((?:\d{1,3}\.){3}\d{1,3})")
+    live, _ = scan(c, "contabo/nginx/access.log.1", r"^127\.0\.0\.1 ")
+    uas = len(distinct(t, r'"([^"]*)"$'))
+    return {
+        "claim": "not-proven",
+        "title": "contabo's archived nginx log records the proxy, not the client: "
+                 "all 1,153 requests — 154 of them web-shell probes — are logged "
+                 "from 127.0.0.1, so no source address exists to attribute them to",
+        "counts": {"requests": total, "logged_from_loopback": len(n),
+                   "distinct_client_addresses": len(srcs),
+                   "probe_requests": probes,
+                   "distinct_user_agents": uas,
+                   "same_in_access_log_1": len(live)},
+        "headline": len(n),
+        "command": ("gzip -cd contabo/nginx/access.log.2.gz | awk '{print $1}' | "
+                    "grep -c '^127\\.0\\.0\\.1$'"),
+        "why": ("%d of %d requests carry `127.0.0.1` in the client field and there "
+                "are %d distinct client addresses in the whole file. The upstream "
+                "proxy terminates the connection and nginx is logging its peer, so "
+                "the %d distinct User-Agent strings — including %d requests for "
+                "`.php` web shells, `/.env` and `/wp-*` — cannot be tied to any "
+                "source. This is the counted form of `not-proven` on contabo's HTTP "
+                "surface: the traffic is recorded, the actor is not. D07's Palo Alto "
+                "scanner line in `contabo/nginx/access.log.1` is the same shape and "
+                "is the reason that decoy names a scanner by its User-Agent rather "
+                "than by an address. R02 and R03 can attribute contabo's SSH and "
+                "firewall traffic to real addresses; its web traffic is not "
+                "attributable at all, and a report that gives an attacker address "
+                "for a request in this file has invented it."),
+        "why_args": (len(n), total, len(srcs), uas, probes),
+        "scan": [(rel, r"^127\.0\.0\.1 ")],
     }
 
 
 OBSERVABLES = [("R01", obs_R01), ("R02", obs_R02), ("R03", obs_R03),
                ("R04", obs_R04), ("R05", obs_R05), ("R06", obs_R06),
                ("R07", obs_R07), ("R08", obs_R08), ("R09", obs_R09),
-               ("R10", obs_R10)]
+               ("R10", obs_R10), ("R11", obs_R11), ("R12", obs_R12)]
 
 
 # --------------------------------------------------------------------------
@@ -595,8 +842,15 @@ DECOYS = [
 def build(corpus, dataset, corpus_root, verify=True):
     by_rel, _ = citecheck.index_corpus(corpus)
     text_ok = {rel for rel, ap in by_rel.items() if not citecheck.looks_binary(ap)}
+    gz = sorted(r for r in by_rel if r.endswith(".gz"))
+    gz_ok = sorted(r for r in gz if r in text_ok)
 
     defects, checks, claimed = [], [], {}
+    checks.append("citecheck %s: %d of %d files readable as text; .gz admitted "
+                  "%d of %d (%s)"
+                  % (os.path.basename(os.path.dirname(os.path.dirname(CITECHECK))),
+                     len(text_ok), len(by_rel), len(gz_ok), len(gz),
+                     ", ".join(gz_ok) or "none"))
 
     # --- the decoys, authored; two of them get computed proof locations ----
     decoy_lines = collections.defaultdict(set)
@@ -653,7 +907,9 @@ def build(corpus, dataset, corpus_root, verify=True):
                     proof[rel].extend(nums)
                     mirror_files.append(rel)
 
-        # gate 1: no proof location may live in a file v16 refuses to read
+        # gate 1: no proof location may live in a file the CURRENT checker refuses
+        # to read. The rule is unchanged; the notion of "binary" is the fixed one
+        # (v20), under which a `.gz` of text is text and a `.gz` of a binary is not.
         for rel in proof:
             if rel not in text_ok:
                 raise RuntimeError("%s would anchor in %s, which citecheck.looks_"
@@ -708,8 +964,10 @@ def build(corpus, dataset, corpus_root, verify=True):
             "command_output": str(o["headline"]),
             "command_verified": cmd_ok,
             "mirror_files": mirror_files,
-            "proof_rule": "maximal contiguous runs of the lines the command's "
-                          "pattern matches, same rule as build-answer-key-ait.py",
+            "proof_rule": "maximal contiguous runs of the lines the finding's "
+                          "proof pattern matches, same rule as "
+                          "build-answer-key-ait.py",
+            "proof_note": o.get("proof_note"),
             "proof_locations": locs,
         })
     return defects, checks
@@ -727,31 +985,39 @@ SCENARIO = (
 
 RATIONALE = (
  "Two of the three hosts face the open internet and are under continuous automated "
- "SSH attack — 1,957 failed or invalid-user attempts from 101 distinct source "
- "addresses in one rotation of mon/auth/auth.log, 6,650 more from 360 addresses in "
- "the rotation before it, and 13,303 packets dropped at contabo's firewall from "
- "1,003 addresses in under three hours. Exactly one authentication succeeded in the "
- "whole of mon/auth/auth.log, and it is the operator's own machine: publickey, "
- "user1, from 100.122.174.119, which is inside the Tailscale CGNAT range "
- "100.64.0.0/10. No password ever succeeded, no unknown key was accepted, no "
- "unexpected process was executed. 'Clean' is the wrong answer because the attacks "
- "are real and visible. 'Compromised' is the wrong answer because none of them "
- "worked. And 'not proven' is stronger than 'nothing happened' for a reason this "
- "key now counts: alert delivery has been broken for 20 days, contabo's audit "
- "stream stops 19 days before collection, the relay on mon:15443 records 21,779 "
- "accepted connections and zero outcomes, and the Mac's unified log export is "
- "empty. The correct verdict is the middle one, and an arm that cannot reach it "
- "does not understand what proof is.")
+ "SSH attack — 1,957 invalid-user attempts from 101 distinct source addresses in the "
+ "live rotation of mon/auth/auth.log, 6,650 more from 314 addresses in the rotation "
+ "before it and 9,851 more from 366 addresses in the rotation before that, sixteen "
+ "contiguous days of it, and 13,303 packets dropped at contabo's firewall from 1,020 "
+ "addresses in under three hours. Exactly one authentication succeeded in the whole "
+ "of mon/auth/auth.log, and it is the operator's own machine: publickey, user1, from "
+ "100.122.174.119, which is inside the Tailscale CGNAT range 100.64.0.0/10. No "
+ "password ever succeeded, no unknown key was accepted, no unexpected process was "
+ "executed. 'Clean' is the wrong answer because the attacks are real and visible. "
+ "'Compromised' is the wrong answer because none of them worked. And 'not proven' is "
+ "stronger than 'nothing happened' for a reason this key counts: alert delivery has "
+ "been broken for 20 days, contabo's audit stream stops 19 days before collection, "
+ "the relay on mon:15443 records 21,779 accepted connections and zero outcomes while "
+ "the kernel logged a SYN flood against that same port, contabo's archived web log "
+ "attributes all 1,153 of its requests to 127.0.0.1, and the Mac's unified log "
+ "export is empty. The correct verdict is the middle one, and an arm that cannot "
+ "reach it does not understand what proof is.")
 
 NOTES = (
  "REAL FINDINGS ARE NOT DEFECTS-THAT-MEAN-COMPROMISE. Every R-entry is a true "
  "observation about a host that was attacked and held; none of them is evidence "
- "that anyone got in, and a report that anchors all ten and still answers "
+ "that anyone got in, and a report that anchors all twelve and still answers "
  "'compromised' is wrong. The decoys remain the false-positive axis: "
  "`decoys_anchored` and `decoys_asserted` never enter the findings numerator. "
  "Before 2026-08-18 this key had no real findings at all, so `score-report.py` "
  "printed `anchored 0/0` on it and the 2026-08-18 v16-claude run's twelve findings "
- "could not be scored against anything.")
+ "could not be scored against anything. The first derivation that day added ten, "
+ "but it ran under a citation checker that called every gzipped text log a binary, "
+ "so it could not anchor anything in the seven `.gz` files — 109,708 lines, including "
+ "the LARGEST rotation of the SSH sweep. This is the second derivation, with those "
+ "files admitted: R01 goes 6,650 -> 16,501, R04 goes 1,670 -> 4,891, R10 grows from "
+ "109 lines of Mac syslog to 729, and R11 and R12 are findings the corpus always "
+ "held and the key could not previously see.")
 
 
 def key_of(corpus, dataset, corpus_root, verify=True):
@@ -772,7 +1038,7 @@ def key_of(corpus, dataset, corpus_root, verify=True):
         "derivation": {
             "tool": "build-answer-key-fleet-negative.py",
             "source": "the corpus itself — this dataset ships no labels, so there "
-                      "is no shipped ground truth to derive from and the ten real "
+                      "is no shipped ground truth to derive from and the twelve real "
                       "findings are COUNTED, not labelled",
             "admission_rule": "a real finding must carry one of the three halves of "
                               "the truth verdict `attacked-not-proven`: "
@@ -784,17 +1050,34 @@ def key_of(corpus, dataset, corpus_root, verify=True):
                              "unless the output matches `command_output`",
             "authored_means": "a human chose the observable and wrote the prose. "
                               "All eight decoys are authored end to end; for the "
-                              "ten real findings the SELECTION and the wording are "
+                              "twelve real findings the SELECTION and the wording are "
                               "authored and every number and line is counted",
             "proof_rule": "maximal contiguous runs of matched lines, and for a "
                           "journald stream the same records in journal.json and "
                           "journal.export are added as mirror proof locations so "
                           "anchoring does not depend on which encoding a report "
                           "happened to read",
+            "citecheck": {
+                "version": "v20",
+                "path": "skills/v20/tools/citecheck.py",
+                "why": "v16's looks_binary read the RAW bytes, so all seven .gz "
+                       "files in this corpus were rejected as binary while the same "
+                       "module's read_lines gunzipped them fine. v19 fixed it to "
+                       "test the DECOMPRESSED stream and v20 shipped that; the "
+                       "builder reads through gzip for exactly the same reason, so "
+                       "the lines it counts and the lines a citation can address "
+                       "are one set",
+                "binary_files": 11,
+                "binary_files_under_v16": 18,
+                "gz_files_admitted": 7,
+                "gz_lines_admitted": 109708,
+            },
             "gates": [
                 "no proof location may live in a file citecheck.looks_binary "
-                "rejects — v16 refuses those citations, so anchoring there is "
-                "impossible by construction",
+                "rejects — the checker refuses those citations, so anchoring there "
+                "is impossible by construction. The notion of binary is v20's: a "
+                ".gz of text is text, a .gz of a binary is not, and mon/utmp/btmp "
+                "is still binary",
                 "no real finding may share a line, or a whole-file claim, with a "
                 "decoy — otherwise one citation scores as a finding and a false "
                 "positive at once",
@@ -810,41 +1093,88 @@ def key_of(corpus, dataset, corpus_root, verify=True):
             "collected_at": COLLECTED_AT,
             "decoy_fixes": [{"id": d["id"], "fix": d["fix"]}
                             for d in DECOYS if d.get("fix")],
-            "known_limitations": [
+            "resolved_limitations": [
                 {"id": "R01",
-                 "what": "the proof pattern is `sshd[N]: Invalid user `, which is "
-                         "narrower than the sweep it describes. The same sweep also "
-                         "emits `Received disconnect … [preauth]`, `Disconnecting "
-                         "authenticating user … Too many authentication failures` "
-                         "and `Connection closed by invalid user`, and a report that "
-                         "cites one of those has cited this finding.",
-                 "found_how": "the 2026-08-18 v16-claude report scores 0 on R01 "
-                              "while its finding Н-2 derives R01's exact number "
-                              "(6,650) and cites mon/auth/auth.log.1:1 and :24920 — "
-                              "both sweep lines, neither an `Invalid user` line.",
-                 "not_fixed_because": "widening the pattern after reading which "
-                                      "lines this report happened to cite is the "
-                                      "definition of fitting the key to its answer. "
-                                      "R03 already uses the broad SSH_ATTEMPT_RE, so "
-                                      "the honest repair is to make R01 use the same "
-                                      "one — BEFORE the next arm runs, not after "
-                                      "this one has been scored."},
+                 "was": "the proof pattern was `sshd[N]: Invalid user `, which is "
+                        "narrower than the sweep it describes. The same sweep emits "
+                        "`Received disconnect … [preauth]`, `Disconnecting … Too "
+                        "many authentication failures` and `Connection closed by "
+                        "invalid user`, and a report that cited one of those had "
+                        "cited this finding and scored zero for it.",
+                 "now": "the proof pattern is SSH_SWEEP_RE — SSH_ATTEMPT_RE plus "
+                        "the three shapes the limitation named, plus "
+                        "`kex_exchange_identification`, `maximum authentication "
+                        "attempts exceeded` and `banner exchange` — applied to both "
+                        "archived rotations with the 100.64.0.0/10 exclusion still "
+                        "on. The HEADLINE is still the narrow `Invalid user ` count, "
+                        "because one line per rejected connection is a number that "
+                        "means something and the union of five line shapes is not.",
+                 "why_now_is_not_fitting": "the earlier note refused to widen "
+                        "because it was reading which lines one report happened to "
+                        "cite, and it named the honest moment to do it instead: "
+                        "«BEFORE the next arm runs, not after this one has been "
+                        "scored». This is that moment. The whole key is being "
+                        "re-derived because the .gz guard was fixed, R01's count "
+                        "changed for a reason that has nothing to do with any "
+                        "report, and no arm has run against the result."},
                 {"id": "R10",
-                 "what": "the proof lines are the 70 `ASL Sender Statistics` lines "
-                         "of mac/syslog/system.log plus the two MANIFEST rows. "
-                         "syslogd's `Configuration Notice:` lines say the same thing "
-                         "more directly — «Those messages may not appear in standard "
-                         "system log files or in the ASL database» — and are not in "
-                         "the pattern.",
-                 "found_how": "the same report scores 0 on R10 while §3 records both "
-                              "unified files as «файл пуст (0 байт)» and §5 lists "
-                              "«Мак почти не покрыт» as a named gap; its one citation "
-                              "into that file is mac/syslog/system.log:4, a "
-                              "`Configuration Notice:` line.",
-                 "not_fixed_because": "same reason as R01. Both misses are narrowness "
-                                      "in this key, not blindness in that report, and "
-                                      "saying so is worth more than an 10/10 that "
-                                      "nobody can audit."},
+                 "was": "the proof lines were the 70 `ASL Sender Statistics` lines "
+                        "of mac/syslog/system.log plus the two MANIFEST rows. "
+                        "syslogd's `Configuration Notice:` blocks say the same thing "
+                        "more directly — «Those messages may not appear in standard "
+                        "system log files or in the ASL database» — and were not in "
+                        "the pattern.",
+                 "now": "the pattern is `(ASL Sender Statistics|Configuration "
+                        "Notice:)` over all three rotations of mac/syslog/system.log, "
+                        "two of which are `.gz` and were unreadable to the first "
+                        "derivation. The finding got STRONGER, not looser: 729 lines "
+                        "of Mac syslog, 358 of them syslogd describing its own "
+                        "plumbing, and not one security event in the 620 lines the "
+                        "gzip repair added.",
+                 "why_now_is_not_fitting": "same moment and same argument as R01, "
+                        "and the widening is forced by the corpus rather than by a "
+                        "report: the two archived rotations had to be admitted "
+                        "anyway, and 65 of the 91 Configuration Notice blocks live "
+                        "in them."},
+            ],
+            "known_limitations": [
+                {"id": "R11",
+                 "what": "the proof is ONE line, `mon/syslog/kern.log.3.gz:2`. A "
+                         "finding with a single proof location is all-or-nothing to "
+                         "anchor: there is no partial credit and no second address "
+                         "to reach it by.",
+                 "kept_because": "the corpus contains exactly one SYN-flood line and "
+                                 "inventing more proof locations for it would be "
+                                 "authoring evidence. The alternative — folding it "
+                                 "into R09 — is worse: R09 is `not-proven` and R11 "
+                                 "is `attacked`, so merging them would put two "
+                                 "different halves of the verdict behind one "
+                                 "citation."},
+                {"id": "not-admitted: plaintext bot tokens",
+                 "what": "mon/nginx/access.log.10.gz logs 51,667 requests whose "
+                         "query string carries a live Telegram `bot_token=` value in "
+                         "clear text, and the same tokens appear in the live "
+                         "rotation. That is a real security finding on this fleet.",
+                 "kept_because": "the admission rule takes its observables from the "
+                                 "three halves of the verdict `attacked-not-proven`, "
+                                 "and a credential written into a log by its own "
+                                 "operator is none of them: nobody attacked, nothing "
+                                 "was refused, and no evidence is missing. Admitting "
+                                 "it would mean scoring reports against a class of "
+                                 "finding this key's verdict does not describe. It is "
+                                 "recorded here so the next derivation can decide "
+                                 "deliberately rather than rediscover it."},
+                {"id": "not-admitted: the missing rotations",
+                 "what": "mon/nginx jumps from `access.log` (18 Aug) to "
+                         "`access.log.10.gz` (08–09 Aug) with rotations 1–9 absent, "
+                         "and mon/syslog holds `kern.log.1` and `kern.log.3.gz` with "
+                         "no `.2`. Nine days of mon's HTTP evidence are not here.",
+                 "kept_because": "this is a property of how the collector chose "
+                                 "files, not of the hosts, and it was visible in "
+                                 "MANIFEST.tsv from the first derivation — the gzip "
+                                 "repair did not reveal it. Promoting a collection "
+                                 "artefact to a finding about the fleet is the same "
+                                 "error D03 exists to punish."},
             ],
             "checks": checks,
         },
