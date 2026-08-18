@@ -312,15 +312,23 @@ class EmittedStringsCarryNoCorpusKnowledge(unittest.TestCase):
         multi-host bundle, and `map.txt` is a measured artefact of arms that are
         being scored while this lands — the same reason the frozen arms are not
         edited.  Pinned instead: the inventory may not grow, and the next arm
-        that re-measures the multi-host map owns the fix."""
+        that re-measures the multi-host map owns the fix.
+
+        2026-08-18, v21: that arm landed and the inventory is EMPTY — the
+        sentence is now a general statement of the same lesson with no tally.
+        The assertion is a SUBSET check rather than equality, which is what the
+        contract above always said ("may not grow"): equality would turn the fix
+        into a failure and force whoever fixed it to edit this test to be
+        allowed to.  `test_skill_integrity_v21.py` asserts the empty inventory
+        for arms from v21 on."""
         _names, roots = V19T.measured_corpora()
         if not roots:
             self.skipTest("no measured corpus on this machine")
         hits = leaks(UNDER_TEST, "emitted", ("CENSUS",))
         known = {("tools/logmap.py", "22 (ait-russellmitchell: machines)")}
         got = {(r, d) for _k, r, d, _n, _l in hits}
-        self.assertEqual(known, got,
-                         "the emitted-tally inventory moved:\n" + report(hits))
+        self.assertLessEqual(got, known,
+                             "the emitted-tally inventory grew:\n" + report(hits))
 
 
 # ===========================================================================
