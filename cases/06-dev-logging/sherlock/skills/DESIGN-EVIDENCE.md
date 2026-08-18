@@ -277,6 +277,21 @@ Three details of the rule, each measured:
   `toolkit/*`: three roots, three different signatures, two of them empty — so
   no partition, and its worklist stays byte for byte what v14 produced.
 
+**Relocated 2026-08-18 (v21).** Until v21 the multi-host preamble *printed* this
+measurement into `map.txt` — «250 строк на 22 хоста — это 11 строк на машину, и
+улика из восьми строк в файле на 272 строки в них не попадает» — from two sites,
+`hosts_block()` and `render_index()`. Three things wrong with that, and they are
+the reason this paragraph is here and not there: **22** is a tally of one testbed
+and false on any other bundle; **eight lines in a 272-line file** is the answer
+key's own `labelled_lines` / `file_total_lines` for A08, i.e. the shape of the
+needle handed to the model that is supposed to find it; and **250** was written
+as a literal next to the same paragraph's `%d`-formatted `--worklist-cap`, so a
+run with any other cap printed two different budgets, one of them false. The
+tools now state the property — a common cap divided among machines leaves each
+one a share too thin to hold a short piece of evidence inside a long file — and
+nothing else. Measured effect: `worklist.tsv` and `axis3.tsv` byte-identical on
+all three corpora; `map.txt` moves by exactly two lines of prose per bundle.
+
 ## E16 — key framing: one record happened at one instant
 
 **Rule in the source.** A correlation token is accepted as a record frame only
