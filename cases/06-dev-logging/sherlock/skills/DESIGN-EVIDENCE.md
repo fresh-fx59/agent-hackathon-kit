@@ -516,3 +516,76 @@ card was an entity **missing** where it had to be, and a model cannot notice a
 thing that is not there. One run asserted a pod↔IP relationship with zero
 co-occurrences anywhere in the corpus: two real citations bridged by a
 fabricated edge — `verdict: not-in-corpus` is the guard against that.
+
+---
+
+## v22 — a bulk dismissal is a rule with receipts, or it is nothing
+
+**What the tool does.** `skills/v22/tools/triagecheck.py` reads a worklist and a
+`work/rules.tsv`, sorts every CLOSED row into **поимённо** (its own `путь:N` with
+a quote, or a `D` pointing at a finding block), **по правилу** (`#R<k>`), or
+**без опоры**, and refuses (a) a rule condition it cannot evaluate, (b) a rule
+without the receipts it demands, (c) a receipt whose quote `citecheck` does not
+verify or whose address is not the row it receipts.
+
+**Why it is a tool and not a paragraph. Measured 2026-08-18 (v19), on AIT-LDS
+(russellmitchell), clean root `_blind/incident-alpha`, 21 hosts / 7 402 files.**
+Trace `eval/bench/runs/20260818T174158Z-v19-claude-ait`. The analyst disposed of
+**2 473 of 2 560 worklist rows — 96.6 %** in one Bash call, with a regex it had
+written at runtime over the worklist's own excerpt column; every row got
+`N фон: n=<count>; 0 совпадений с маркерами инцидента
+(nmap|3x6-.|kennedy|wp_meta|Successful su|192.168.230.122)`. Each of those rows
+therefore carried a verdict **and** a digit, so `citecheck --ledger` counted them
+closed and printed «можно отдавать отчёт». Two of the swallowed rows, `g1091` and
+`g1093`, address `internal_share/logs/audit/audit.log:667-668` and their excerpt
+column contains the literal `unit=put` — the exfiltration service, i.e. defect
+A11. **No tool result in the whole run ever contained `unit=put`; the file was
+never opened.** The report's rejected table said «ничего относящегося» with no
+line reference at all. v19's rejection rule and v21's assignment rule were both
+satisfied in form and defeated in substance, which is why v22 is an artefact
+rather than a fourth sentence.
+
+**Replay, 2026-08-18, on that run's own `work/` directory.**
+
+| branch | what was fed in | what `triagecheck` says |
+|---|---|---|
+| A — the run as it happened | its real `worklist.tsv`, no `rules.tsv` | `строк всего 2560 · поимённо 87 (3.4 %) · по правилу 0 · без опоры 2473 (96.6 %)`, exit 1 |
+| B — the marker list filed as a rule | `R1  запись!~*nmap\|3x6-.\|kennedy\|wp_meta\|Successful su\|192.168.230.122*` | refused: «правило не может опираться на текст записи» — `непроверяемых правил: 1`, exit 1 |
+| C — the same rows over an axis | `R1  ось=cat\|rare\|level\|edge\|burst\|bg\|rate\|code\|new\|peak`, all 2 473 rows tagged `#R1` | accepted, and it demands **72 receipts** (`k = max(3, ⌈√2473⌉=50, F=72)`), one per file the rule dismisses an excursion from — **2.9 % of the coverage** |
+
+Branch C is the number that matters. The 72 demanded rows span 72 distinct
+files, and `internal_share/logs/audit/audit.log` — the file the v19 run never
+opened — is one of them (`g1083`, line 85). **One of the 72 sits on a labelled
+attack line**: `g1735`, `monitoring/logs/logstash/intranet-server/2022-01-24-system.cpu.log:321`,
+the metric excursion of defect A09. Under a uniform draw of the same size the
+chance of at least one hit is 47 %; under excursion-first stratification the
+draw is not uniform, and the guarantee it does give is not probabilistic — every
+file the rule throws an excursion out of has to be opened and quoted once.
+
+**Why `k = min(N, max(3, ⌈√N⌉, F))` and not one citation per row.** 2 560
+citations is not a discipline, it is a different way to lose the run, and it
+would have been met the same way the marker list was. Sub-linear keeps bulk
+possible; the two properties that keep it honest are arithmetic:
+`m · √(N/m) = √(mN) ≥ √N`, so **splitting a wide rule into m narrow ones never
+costs fewer receipts**, and the `F` term makes the number of files a rule
+dismisses excursions from a lower bound on the reading it owes. On the branch-C
+rule the excursion pool is **789 of 2 473 rows** (`rare` 786, `new` 2, `peak` 1)
+across 72 files, and 17 of the 2 473 rows sit on labelled attack lines — a
+density of 0.69 %, which is exactly why a random sample is not the mechanism and
+the closed selector language is.
+
+**The regression, 2026-08-18, v22 against v21, same machine.** BlueSky
+(`_sanitized/bluesky`) and CAM-LDS scenario 1 (`cam-lds/s1`): **every file
+`logmap.py` writes is byte-identical**, so `worklist.tsv` 248 rows and
+`axis3.tsv` are unchanged by construction; BlueSky Step 1 against
+`answer-key-bluesky.json` is **W=50 real 8/11, anchors 14/31, decoys 6/6**
+(W=0 4/11, W=10 5/11), CAM-LDS is **617 rows, 62 config = 10.0 %**. AIT clean
+root: **8 of 8 labelled files, 59 of 61 862 lines, 2 560 rows** by
+`eval/bench/score-ait.py`. v22 adds one file — `tools/triagecheck.py` — and
+edits `SKILL.md` §5/§7/§8 and `reference/tools.md`; Step 1 is not touched.
+
+**The gap this does not close.** A rule may still be wide, wrong and cheap: one
+rule over every axis closes 96.6 % of the list for 72 receipts. What changed is
+that the shape is now printed as a number next to it — `самое широкое правило:
+R1 — 2473 строк (96.6 % закрытых)` — instead of living in a transcript, and that
+the 72 receipts are reads the run demonstrably did not do.
