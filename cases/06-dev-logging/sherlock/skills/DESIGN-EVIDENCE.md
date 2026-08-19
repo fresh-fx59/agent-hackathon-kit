@@ -720,3 +720,175 @@ skill and was not touched.
 **Delta.** v23 changes four files against v22 — `tools/logmap.py`,
 `tools/citecheck.py`, `SKILL.md`, `reference/tools.md` — and adds and removes
 none. `logjoin.py` and `triagecheck.py` are byte-identical.
+
+---
+
+## v24 — a finding states its outcome, and a bulk rule states a claim
+
+### The outcome of a finding (amends §E20 and the report format)
+
+**Rule in the source.** `citecheck.py` gains a closed three-word vocabulary
+(`OUTCOME_ORDER`), one line grammar (`OUTCOME_LINE_RE`), a per-block reader
+(`finding_outcomes`), the composition (`implied_verdict`) and the contradiction
+test against the report's own closing section (`stated_verdict`). A finding
+without an outcome, an outcome outside the vocabulary, and a register whose
+outcomes disagree with the stated verdict are each counted in the ledger and
+each keep the exit code non-zero.
+
+**Why the field did not exist and had to.** Measured across the eight v22
+convergence arms: **12 planted non-defects were written up as findings and 0
+were written up as refuted.** Every one of them was cited under «улики» — the
+evidence-FOR field — because that is the only field a finding block has for a
+line. A heading could say «успеха нет» in prose, but `reference/report-format.md`
+is **byte-identical across v16, v19 and v23** (`d19a98be30ab2b52fd30cceca3860169`)
+and mandates no per-finding outcome; the one field that sounds like it,
+«чем опровергал», is a METHOD field present in every block whatever the answer
+was, so it cannot discriminate. The consequence is that a report cannot separate
+«I found an intrusion» from «I checked this and it was nothing», and that
+separation is the field's headline metric — the public benchmark this project
+measures itself against reports the same model family at 100 % containment and a
+**92.5 % false-positive rate**, a number we could not compute about ourselves.
+
+**Why three words and not four.**
+
+| слово | means | verdict it implies |
+|---|---|---|
+| `успех` | the action reached its goal | `compromised` |
+| `попытка` | the action is visible AND shown not to have reached its goal | `attacked-not-proven` |
+| `норма` | checked, and explained by ordinary behaviour | `clean` |
+
+They are the report's own three answers one level down, which is what makes them
+compose: the report's answer is `max` over its findings under
+`норма < попытка < успех`, so a register of all-`норма` cannot end in
+«скомпрометирована» — and `citecheck` refuses the pair when it does. A fourth
+state for "suspicious" is deliberately absent: an escape hatch collects
+everything uncertain and the field stops discriminating.
+
+**Why the grammar is a whole line.** The fourth state comes back as a trailing
+clause — «успех, но не доказан» — so the line is the token and nothing else.
+Formatting is tolerated (bold, a list marker, a trailing period, case); a
+qualifier is refused and the tool prints the three legal lines. The three words
+are also pairwise non-containing, so a scorer regex cannot read one inside
+another; that alone rules out the otherwise natural pair «удался»/«не удался».
+
+**What a scorer must do.** Either import the module the skill ships —
+
+    cc = <load skills/v24/tools/citecheck.py>
+    cc.finding_outcomes(text)   # [{finding, outcome, report_line, bad}]
+    cc.implied_verdict(text)    # compromised | attacked-not-proven | clean | None
+    cc.finding_blocks(text)     # [(n, first line, last line)]
+
+— or apply `cc.OUTCOME_LINE_RE` line by line (group 1, lower-cased) and attribute
+each hit to the enclosing `Н-n` block. `--json` carries the same thing under
+`outcomes`: `findings`, `missing`, `invalid`, `implied`, `stated`,
+`contradiction`. The scoring join this enables: a finding whose outcome is
+`норма` and whose citation lands on a planted non-defect is a **refutation**, not
+a false positive; the same citation under `успех`/`попытка` is a false positive.
+
+### A bulk-closure rule must state a claim, and the claim is checked (amends §v22)
+
+**Rule in the source.** `triagecheck.py` reads a fourth column, the **claim**,
+in a closed language over three measurements of the **real line read from the
+file** (`CLAIM_FIELDS = токен, код, адрес`), evaluates it on **every** row the
+rule closes (`read_rows` + `check_claim`), and additionally demands a receipt on
+the **boundary row** — the row closest to breaking the claim. Rows on the two
+strongest excursion axes (`STRONG = new, peak`) cannot be closed by a rule at
+all.
+
+**Why receipts alone were not enough. Measured 2026-08-18 (v22), trace
+`eval/bench/runs/20260818T212406Z-v22-claude-ait`.** On that arm the v22 gate
+worked exactly as designed — **0 rows closed without support, exit 0, 192
+receipts all `ok`** — and the score fell. The mechanism of the fall is one rule:
+
+    R13   файл~dnsmasq.log*   N   штатный резолвинг
+
+It closed **46 rows**. `triagecheck` chose the receipts itself and asked for
+seven; the analyst quoted all seven and all seven verified `ok`. Every one of
+them is a `query[A]`/`forwarded`/`reply` record whose queried name carries a
+35-character random label — the exfiltration channel's own traffic. The report
+then disposed of the whole thing in an uncited coverage row. **Nothing in the
+pipeline ever compared a receipt's content against the rule's stated reason**,
+because the reason was prose and prose cannot be compared to anything.
+
+**Replay against v24, on that run's own `work/` directory, 3.9 s wall.**
+
+| branch | rules.tsv fed in | what v24 `triagecheck` says |
+|---|---|---|
+| A — as written | the real file, prose in column 4 | **all 15 rules refused** — «утверждение … — это не утверждение, а слова»; plus 2 `new` rows closed by a rule; exit 1 |
+| B — R13 with the claim «штатный резолвинг» actually makes | `R13 файл~dnsmasq.log* N токен<=24 штатный резолвинг` | **46 of 46 rows read, claim NOT HELD on 35 of them, `токен` макс 35**, each violating row printed with its own line — and **all 7 receipts the v22 arm filed and verified are among the 35** |
+| C — the bound raised to admit the blob | `… N токен<=40 …` | claim passes, and the summary prints `токен макс 35` next to «штатный резолвинг»; the boundary row `g839` is demanded as a receipt |
+
+Branch B is the whole gap: the seven lines that were read, quoted and verified
+under v22 are the seven lines that now fail the rule they were quoted to support.
+
+**Why this is not the predicate v22 refused.** v22 refuses a condition over the
+worklist's «запись» column and will keep refusing it, in the selector and in the
+claim alike. That column is a **projection**: a word that is not in your list
+scores zero at any file content, and the file is never opened. A claim is
+evaluated on the **line read out of the file**, by the same reader `citecheck`
+uses. Content over a projection is theatre; content over the file is a
+measurement. The claim reuses the selector's term grammar (`поле op значение`,
+`&&`, alternatives with `|`) and changes only the field table, so there is one
+language with two field sets rather than two languages.
+
+**Why the claim is checked on 100 % of coverage rather than on a sample.**
+Measured on the largest corpus this project holds: reading the real line behind
+every one of **2 546** addressed rows costs **3.07 s** across **388** files (index
+0.06 s, 0 references that resolve to more than one file), because the reader
+stops at the highest line asked for and makes one pass per file. Sampling was
+never the constraint. The receipts stay at `k = min(N, max(3, ⌈√N⌉, F))` and keep
+doing the job they were built for — making the ANALYST read — while the claim
+does the job receipts never could.
+
+**Why a boundary receipt, and why raising the bound is not an escape.** A claim
+can be made vacuous (`токен<=1000`), and a rule that states a vacuous claim is
+still strictly better than one that states prose, because the bound is written
+down, falsifiable, and printed next to the measured extreme. The boundary receipt
+closes the rest of the gap: for each claim field the tool takes the covered row
+with the highest measured value and adds it to the demanded set. The higher the
+bound, the more certainly the row it forces the analyst to open and quote is the
+outlier the bound was raised for. It costs at most one extra receipt per claim
+field per rule.
+
+**Why `new` and `peak` cannot be closed by a rule at all, and what it costs.**
+`rare` says "this record's shape is uncommon"; `new` says "this participant was
+absent from the first half of the stream" and `peak` says "this measurement went
+up threefold and came back". The last two are statements about time, not
+repeating shapes — there is no class, so there is no rule. Census on v23
+worklists, same machine:
+
+| corpus | rows | `new` | `peak` | share | files |
+|---|---|---|---|---|---|
+| BlueSky `_sanitized/bluesky` | 248 | 0 | 0 | 0 % | 0 |
+| CAM-LDS s1 | 617 | 2 | 0 | 0.32 % | 1 |
+| AIT clean root `_blind/incident-alpha` | 2 615 | 5 | 1 | 0.23 % | 6 |
+
+Six individual citations on a 2 615-row list. **Two of those six sit on labelled
+attack lines** — `monitoring/logs/logstash/intranet-server/2022-01-24-system.cpu.log:321`
+(`escalate`, `crack_passwords`) and `vpn/logs/openvpn.log:4331` (`attacker_vpn`,
+`foothold`) — a **33 % hit rate against the 0.69 % attack density inside a bulk
+closure measured in §v22**, i.e. a 48× enrichment for six reads.
+
+**What was measured and rejected.** Raising the receipt count is not the fix and
+was not tried again: §v22 already measured the attack density inside the bulk
+closure at **17 of 2 473 rows (0.69 %)**, so a uniform draw of 50 expects zero
+hits — and on this arm the receipts that DID land on the proof were quoted
+accurately and ignored anyway. The failure was never the sample size.
+
+### Regression, 2026-08-19, v24 against v23, same machine
+
+| corpus | Step 1 output | score |
+|---|---|---|
+| BlueSky `_sanitized/bluesky` | `worklist.tsv`/`map.txt`/`axis3.tsv` **byte-identical** | Step 1 W=50 real **8/11**, anchors 14/31, decoys 6/6, **248 rows** |
+| CAM-LDS s1 | **byte-identical** | **617 rows, 62 config = 10.0 %** |
+| AIT clean root `_blind/incident-alpha` | **byte-identical** | files touched **8/8**, lines covered **62 of 61 862**, **2 615 rows** |
+
+`logmap.py` and `logjoin.py` are byte-identical to v23 by test. v24 changes four
+files — `tools/citecheck.py`, `tools/triagecheck.py`, `SKILL.md`,
+`reference/report-format.md` — plus `reference/tools.md`, and adds and removes
+none.
+
+**The gap this does not close.** The claim language has three fields, and a rule
+whose real content is outside all three can still be stated vacuously and pass.
+What changed is that the vacuum is now a written number sitting next to a printed
+measurement, and that the row nearest to breaking it has to be read and quoted.
