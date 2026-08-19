@@ -892,3 +892,81 @@ none.
 whose real content is outside all three can still be stated vacuously and pass.
 What changed is that the vacuum is now a written number sitting next to a printed
 measurement, and that the row nearest to breaking it has to be read and quoted.
+
+## v25 — a finding block is opened by a heading, not by a wrapped sentence
+
+### Where a finding starts (amends §v24 and the report format)
+
+**Rule in the source.** `citecheck.FINDING_HEAD_RE` now requires the separator
+the report format has always prescribed. A head is
+
+    Н-n · заголовок
+
+— the number, the interpunct (`FINDING_HEAD_SEP` = `·`, `•`, `∙`: one glyph,
+three code points), then at least one non-space character of title. Everything
+the pattern tolerated **in front** of the number is unchanged: a markdown
+heading, a bullet, a quote marker, bold, indentation, or nothing at all. It has
+to stay that way — the format's own example is indented and carries no marker,
+so a markdown marker cannot be what makes a line a head. The separator can,
+because the format has demanded it since the section was written.
+
+**Why the old pattern was wrong.** It matched any line that STARTED with `Н-n`.
+Prose refers to a finding by its number constantly, and prose gets wrapped: a
+hand-over written to a file is hard-wrapped and the same report pasted into the
+final message is not. A cross-reference that lands at a line break in one
+channel therefore opened a phantom block in that channel and not in the other.
+
+**Measured, 2026-08-19, on every report this project holds** — both channels of
+all 9 scored arms in `eval/bench/runs-bench.jsonl`, plus all 16 `report.md` /
+`final-message.txt` / `answer.txt` files under `eval/bench/runs/`:
+
+| | v24 | v25 |
+|---|---|---|
+| arm-channels where the two channels disagree on block count | **1 of 9** | **0 of 9** |
+| the disagreement | message 12, file 13 | 12 and 12 |
+| every other arm-channel and on-disk file | — | **unchanged** |
+
+The thirteenth block was one line: a wrapped cross-reference, two spaces of
+continuation indent, opening `Н-3: …`. Across the same corpus of reports there
+are **203 real finding heads and every one of them uses ` · `**; the single line
+that is not a head uses `: `. That is the whole empirical basis for making the
+interpunct the discriminator — it is not punctuation a sentence uses, so a line
+carrying it in that position was written as a title.
+
+**Why this is an outcome-axis defect and not a cosmetic miscount.** §v24 makes a
+missing «исход:» line a delivery defect. A sentence is not a finding, so a
+phantom block carries no outcome line, so it is counted as a block that forgot
+one: `outcome_missing` is inflated and a report that stated the outcome of every
+finding it actually wrote is told it did not. One phantom is one false defect on
+the exact axis the arm is being measured on.
+
+**The tripwire, and where it lives.** A report handed over twice is one report,
+so its two channels must parse the same findings. That equality is asserted over
+the real ledger in `tools/tests/test_finding_block_parse_v25.py`
+(`TheTwoChannelsOfEveryRealReportAgree`) and over a synthetic wrap in the same
+file, and from the scorer's side in `tools/tests/test_score_report.py`
+(`TestTheBlockParseIsCitechecks`, which until now pinned the opposite
+behaviour under the name `TestTheBlockParseIsCitechecksWarts`). The parse is
+**not** forked into the scorer: one place decides where a finding starts, and a
+second copy of that rule would be a second, incomparable scale.
+
+**What did not move.** v25 is v24 with one file changed. `logmap.py`,
+`logjoin.py`, `triagecheck.py`, `SKILL.md` and all three `reference/*.md` are
+byte-identical (asserted by `V25IsV24PlusOneChange`), no file is added or
+removed, and Step-1 output is byte-identical on a synthetic multi-host bundle
+and on three real corpora. Citation verdicts are unchanged: over the 18
+report-channels in the ledger scored against the corpora on disk, **0 of 18**
+summaries or per-citation verdict lists differ from v24 — same `ok`,
+`wrong-content`, `ambiguous`, `binary-file`, `out-of-range`, `missing-file`,
+`не-ссылка` and the same `verified_pct`.
+
+**The residual risk, named.** A head written with some other separator —
+`Н-1 — заголовок`, `Н-1. заголовок` — would now not open a block, where v24
+would have opened one. Nothing on disk does this (203 of 203), and the format
+prescribes the interpunct, so the rule matches the instruction and not more.
+The failure is also not silent in the direction that matters: if a report were
+to open **no** block at all, the ledger prints «находок без строки «исход»: 0 из
+0» and a scorer reads `finding_blocks = 0`, which reads as «no finding block in
+this report» rather than as a passing report. Widening the separator set is the
+wrong reflex: `:` and `—` are exactly the characters a wrapped sentence uses,
+which is how the phantom got in.
