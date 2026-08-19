@@ -2088,5 +2088,545 @@ class TestDeliveryOnTheNegativeControl(unittest.TestCase):
                          "the near-identical table counted twice")
 
 
+# --------------------------------------------------------------------------
+# N. THE OUTCOME AXIS — the field that turns a citation into a false positive
+# --------------------------------------------------------------------------
+# `presented` says a decoy's proof was written inside «Находки». The «Улики» /
+# «Чем опровергал» split above says which mandated FIELD it sat under. Neither
+# can say what the report CONCLUDED about the thing, because until v24 no field
+# carried that: a block reading «I checked this and it was nothing» is written
+# in exactly the same fields as one reading «I found an intrusion», and the
+# difference lived in prose. Measured across all nine arms on disk: 12 planted
+# non-defects presented, 0 refuted — every one of them under «Улики», because
+# «Улики» was the only field that could hold them.
+#
+# `skills/v24` makes every finding carry a closed-vocabulary outcome:
+#
+#     исход: успех     — действие достигло цели
+#     исход: попытка   — действие видно, и видно, что цели оно НЕ достигло
+#     исход: норма     — проверено и объяснено штатным поведением
+#
+# So the join is one line of arithmetic this scorer could not do before:
+#
+#     a decoy cited inside a finding marked успех/попытка   = A FALSE POSITIVE
+#     the same decoy cited inside a finding marked норма    = A REFUTATION
+#     a REAL defect cited inside a finding marked норма     = a miss dressed
+#                                                             as diligence
+#
+# THE PARSE IS NOT REIMPLEMENTED. `citecheck.finding_blocks`,
+# `finding_outcomes` and `implied_verdict` own the grammar — including the rule
+# that a trailing qualifier («успех, но не доказан») is refused SEPARATELY from
+# a missing line, because those are different failures. This file joins their
+# output to the anchoring arithmetic and grades; it does not re-decide.
+#
+# FAIL LOUD ON A REPORT THAT PREDATES THE FIELD. Every report on disk was
+# written before v24 existed, so every finding block is `missing`. The axis has
+# to read as «this question did not exist yet» and NEVER as «this report
+# refuted nothing» — the second is a claim about the report, and it would
+# silently rewrite eight historical scores into zeros.
+OUTCOME_REPORT = """# Отчёт
+
+## 1. Находки
+
+### Н-1 · Настоящий дефект
+
+**Улики.**
+* `app/a.log:10` → «filler line 10»
+
+**Исход:** успех
+
+**Чем опровергал.** Обратная версия: `app/a.log:30` → «filler line 30».
+
+### Н-2 · Шум с соседней машины
+
+**Улики.**
+* `app/b.log:10` → «filler line 10»
+
+исход: норма
+
+### Н-3 · Видно, но цели не достигло
+
+**Улики.**
+* `app/b.log:40` → «filler line 40»
+
+исход: попытка
+
+### Н-4 · Блок без строки исхода
+
+**Улики.**
+* `app/c.log:20` → «filler line 20»
+
+## 2. Отклонённые кандидаты
+
+- **«Третье»** — нет. `app/b.log:20` «filler line 20» — это фон.
+
+## 3. Покрытие
+
+| путь | что искал | вердикт |
+|---|---|---|
+| app/c.log | всё | ничего относящегося |
+
+## ВЕРДИКТ
+
+Сбор улик шёл через `app/c.log:5` «filler line 5».
+
+compromised
+"""
+
+
+class TestTheOutcomeAxis(unittest.TestCase):
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        build_corpus(self.tmp, {"app/a.log": numbered(50),
+                                "app/b.log": numbered(50),
+                                "app/c.log": numbered(50)})
+
+    def score(self, key, report=OUTCOME_REPORT):
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            rec = S.score(key, report, self.tmp, call=None)
+        return rec, buf.getvalue()
+
+    def row(self, rec, cid):
+        return [r for r in rec["per_defect"] if r["defect"] == cid][0]
+
+    # --- the join, on decoys ---------------------------------------------
+    def test_a_decoy_inside_a_uspeh_finding_is_a_false_positive(self):
+        """`app/a.log:10` sits in Н-1, whose outcome is «успех». A planted
+        non-defect written up as a thing that reached its goal is the failure
+        the field benchmarks count."""
+        key = key_with([herring("D01", [loc("app/a.log", 10)])])
+        rec, _ = self.score(key)
+        o = rec["outcomes"]
+        self.assertTrue(o["measured"])
+        self.assertEqual(o["decoys_false_positive"], 1)
+        self.assertEqual(o["decoys_refutation"], 0)
+        self.assertEqual(self.row(rec, "D01")["outcome"], "успех")
+        self.assertEqual(self.row(rec, "D01")["outcome_zone"], "incident")
+
+    def test_a_decoy_inside_a_popytka_finding_is_also_a_false_positive(self):
+        """«попытка» is «visible, and shown to have failed» — still a claim that
+        something happened. `норма` is the only outcome that is not."""
+        key = key_with([herring("D01", [loc("app/b.log", 40)])])
+        rec, _ = self.score(key)
+        self.assertEqual(rec["outcomes"]["decoys_false_positive"], 1)
+        self.assertEqual(rec["outcomes"]["decoys_refutation"], 0)
+        self.assertEqual(self.row(rec, "D01")["outcome"], "попытка")
+
+    def test_a_decoy_inside_a_norma_finding_is_a_refutation(self):
+        """THE POINT OF THE WHOLE AXIS. The same citation, in the same section,
+        under the same «Улики» field — and the report says it is ordinary
+        behaviour. That is an investigation, not a false positive."""
+        key = key_with([herring("D01", [loc("app/b.log", 10)])])
+        rec, _ = self.score(key)
+        o = rec["outcomes"]
+        self.assertEqual(o["decoys_refutation"], 1)
+        self.assertEqual(o["decoys_false_positive"], 0)
+        self.assertEqual(self.row(rec, "D01")["outcome"], "норма")
+        self.assertEqual(self.row(rec, "D01")["outcome_zone"], "normal")
+
+    def test_the_field_split_and_the_outcome_split_disagree_and_both_stay(self):
+        """`app/b.log:10` is under «Улики» of Н-2 — `decoys_asserted_as_incident`
+        counts it, because that column reads the FIELD. Н-2's outcome is «норма»,
+        so the outcome axis calls it a refutation. Both readings are true about
+        different questions and neither may overwrite the other."""
+        key = key_with([herring("D01", [loc("app/b.log", 10)])])
+        rec, _ = self.score(key)
+        self.assertEqual(rec["decoys_presented"], 1)
+        self.assertEqual(rec["decoys_asserted_as_incident"], 1)
+        self.assertEqual(rec["decoys_presented_refuted"], 0)
+        self.assertEqual(rec["outcomes"]["decoys_refutation"], 1)
+
+    def test_a_decoy_only_in_the_rejected_section_is_dismissed(self):
+        key = key_with([herring("D01", [loc("app/b.log", 20)])])
+        rec, _ = self.score(key)
+        o = rec["outcomes"]
+        self.assertEqual(o["decoys_dismissed"], 1)
+        self.assertEqual(o["decoys_false_positive"], 0)
+        self.assertEqual(o["decoys_refutation"], 0)
+        self.assertEqual(self.row(rec, "D01")["outcome_zone"], "dismissed")
+
+    def test_a_decoy_anchored_in_the_verdict_is_elsewhere(self):
+        key = key_with([herring("D01", [loc("app/c.log", 5)])])
+        rec, _ = self.score(key)
+        self.assertEqual(rec["outcomes"]["decoys_elsewhere"], 1)
+        self.assertEqual(self.row(rec, "D01")["outcome_zone"], "elsewhere")
+
+    def test_a_decoy_in_a_finding_that_states_no_outcome_is_unlabelled(self):
+        """Н-4 writes no `исход:` line. The decoy is presented, and what the
+        report concluded about it is UNREADABLE — not a refutation, and not
+        provably a false positive either."""
+        key = key_with([herring("D01", [loc("app/c.log", 20)])])
+        rec, _ = self.score(key)
+        o = rec["outcomes"]
+        self.assertEqual(o["decoys_unlabelled"], 1)
+        self.assertEqual(o["decoys_false_positive"], 0)
+        self.assertEqual(o["decoys_refutation"], 0)
+        self.assertIsNone(self.row(rec, "D01")["outcome"])
+        self.assertEqual(self.row(rec, "D01")["outcome_zone"], "unlabelled")
+
+    def test_a_decoy_nobody_cited_is_never_anchored_and_never_a_bucket(self):
+        key = key_with([herring("D01", [loc("app/a.log", 44)])])
+        rec, _ = self.score(key)
+        o = rec["outcomes"]
+        self.assertEqual(o["decoys_not_anchored"], 1)
+        self.assertIsNone(self.row(rec, "D01")["outcome_zone"])
+
+    def test_the_five_buckets_partition_every_decoy(self):
+        """A split that does not add up to its denominator is a third number
+        nobody can check. Every decoy in the key lands in exactly one bucket."""
+        key = key_with([herring("D01", [loc("app/a.log", 10)]),
+                        herring("D02", [loc("app/b.log", 10)]),
+                        herring("D03", [loc("app/b.log", 20)]),
+                        herring("D04", [loc("app/c.log", 5)]),
+                        herring("D05", [loc("app/c.log", 20)]),
+                        herring("D06", [loc("app/a.log", 44)])])
+        rec, _ = self.score(key)
+        o = rec["outcomes"]
+        self.assertEqual((o["decoys_false_positive"], o["decoys_refutation"],
+                          o["decoys_dismissed"], o["decoys_elsewhere"],
+                          o["decoys_unlabelled"], o["decoys_not_anchored"]),
+                         (1, 1, 1, 1, 1, 1))
+        self.assertEqual(o["decoys_false_positive"] + o["decoys_refutation"]
+                         + o["decoys_dismissed"] + o["decoys_elsewhere"]
+                         + o["decoys_unlabelled"] + o["decoys_not_anchored"],
+                         o["decoys"])
+        self.assertEqual(o["decoys"], rec["decoys"],
+                         "the same denominator as every other decoy column")
+
+    def test_the_strongest_outcome_wins_when_one_decoy_is_cited_twice(self):
+        """A decoy cited both under a «норма» finding and under a «успех» one
+        was still entered as evidence for something that happened. The strict
+        reading is the honest one — the other direction lets an unlabelled or
+        refuted block launder a false positive."""
+        key = key_with([herring("D01", [loc("app/b.log", 10),
+                                        loc("app/a.log", 10)])])
+        rec, _ = self.score(key)
+        self.assertEqual(rec["outcomes"]["decoys_false_positive"], 1)
+        self.assertEqual(rec["outcomes"]["decoys_refutation"], 0)
+        self.assertEqual(self.row(rec, "D01")["outcome"], "успех")
+
+    # --- the same join, on real defects -----------------------------------
+    def test_a_real_defect_marked_norma_is_a_miss_dressed_as_diligence(self):
+        """The report found the right line, filed it as a finding, and concluded
+        it was ordinary behaviour. `anchored` and `presented` both score it, and
+        neither can see that the reader was told nothing happened."""
+        key = key_with([defect("D01", "real", [loc("app/b.log", 10)])])
+        rec, _ = self.score(key)
+        o = rec["outcomes"]
+        self.assertEqual(rec["anchored"], 1)
+        self.assertEqual(rec["presented"], 1)
+        self.assertEqual(o["real_marked_normal"], 1)
+        self.assertEqual(o["real_asserted_as_incident"], 0)
+        self.assertEqual(self.row(rec, "D01")["outcome_zone"], "normal")
+
+    def test_a_real_defect_marked_uspeh_is_asserted_as_an_incident(self):
+        key = key_with([defect("D01", "real", [loc("app/a.log", 10)])])
+        rec, _ = self.score(key)
+        self.assertEqual(rec["outcomes"]["real_asserted_as_incident"], 1)
+        self.assertEqual(rec["outcomes"]["real_marked_normal"], 0)
+
+    def test_the_real_buckets_partition_the_anchorable_denominator(self):
+        key = key_with([defect("D01", "real", [loc("app/a.log", 10)]),
+                        defect("D02", "real", [loc("app/b.log", 10)]),
+                        defect("D03", "real", [loc("app/b.log", 20)]),
+                        defect("D04", "real", [loc("app/c.log", 5)]),
+                        defect("D05", "real", [loc("app/c.log", 20)]),
+                        defect("D06", "real", [loc("app/a.log", 44)])])
+        rec, _ = self.score(key)
+        o = rec["outcomes"]
+        self.assertEqual((o["real_asserted_as_incident"], o["real_marked_normal"],
+                          o["real_dismissed"], o["real_elsewhere"],
+                          o["real_unlabelled"], o["real_not_anchored"]),
+                         (1, 1, 1, 1, 1, 1))
+        self.assertEqual(o["real_anchorable"], rec["anchorable"])
+        self.assertEqual(sum((o["real_asserted_as_incident"],
+                              o["real_marked_normal"], o["real_dismissed"],
+                              o["real_elsewhere"], o["real_unlabelled"],
+                              o["real_not_anchored"])), o["real_anchorable"])
+
+    # --- the outcome-line health, as delivery facts ------------------------
+    def test_the_health_block_counts_blocks_missing_and_invalid(self):
+        key = key_with([defect("D01", "real", [loc("app/a.log", 10)])])
+        rec, _ = self.score(key)
+        o = rec["outcomes"]
+        self.assertEqual(o["finding_blocks"], 4)
+        self.assertEqual(o["outcomes_stated"], 3)
+        self.assertEqual(o["outcome_missing"], 1)
+        self.assertEqual(o["outcome_missing_findings"], ["4"])
+        self.assertEqual(o["outcome_invalid"], 0)
+
+    def test_a_trailing_qualifier_is_invalid_not_missing(self):
+        """v24 refuses «успех, но не доказан» SEPARATELY from a forgotten line:
+        one is a forgotten field, the other is an argument with the vocabulary,
+        and a scorer that folds them together cannot tell a skill which to fix."""
+        rep = OUTCOME_REPORT.replace("**Исход:** успех",
+                                     "**Исход:** успех, но не доказан")
+        key = key_with([defect("D01", "real", [loc("app/a.log", 10)])])
+        rec, _ = self.score(key, rep)
+        o = rec["outcomes"]
+        self.assertEqual(o["outcome_invalid"], 1)
+        self.assertEqual(o["outcome_missing"], 1, "Н-4 is still the only "
+                                                  "block that forgot the line")
+        self.assertEqual(o["outcome_invalid_findings"][0]["finding"], "1")
+        self.assertIn("но не доказан", o["outcome_invalid_findings"][0]["text"])
+
+    def test_the_implied_verdict_is_read_beside_the_stated_one(self):
+        key = key_with([defect("D01", "real", [loc("app/a.log", 10)])])
+        rec, _ = self.score(key)
+        o = rec["outcomes"]
+        self.assertEqual(o["implied_verdict"], "compromised")
+        self.assertEqual(o["stated_verdict"], "compromised")
+        self.assertFalse(o["contradiction"])
+
+    def test_a_register_that_does_not_add_up_to_the_verdict_is_a_contradiction(self):
+        """Every finding says «норма» and the report ends «compromised». One of
+        the two is wrong, and a delivery that contradicts itself is a defect
+        exactly as a missing verdict section is."""
+        rep = (OUTCOME_REPORT.replace("**Исход:** успех", "исход: норма")
+                             .replace("исход: попытка", "исход: норма"))
+        key = key_with([defect("D01", "real", [loc("app/a.log", 10)])])
+        rec, out = self.score(key, rep)
+        o = rec["outcomes"]
+        self.assertEqual(o["implied_verdict"], "clean")
+        self.assertEqual(o["stated_verdict"], "compromised")
+        self.assertTrue(o["contradiction"])
+        self.assertIn("ПРОТИВОРЕЧИЕ", out)
+
+    def test_the_health_block_is_read_even_when_no_defect_is_anchored(self):
+        """The outcome-line count is a fact about the DOCUMENT. It does not need
+        a key, a corpus hit or a single anchored defect to be true."""
+        key = key_with([defect("D01", "real", [loc("app/a.log", 44)])])
+        rec, _ = self.score(key)
+        self.assertEqual(rec["outcomes"]["finding_blocks"], 4)
+        self.assertEqual(rec["outcomes"]["outcomes_stated"], 3)
+
+    # --- FAIL LOUD on a report that predates the field ---------------------
+    def test_a_pre_v24_report_scores_none_on_every_join_column_not_zero(self):
+        """FIELDED_REPORT has Н-1 and Н-2, «Улики», «Чем опровергал» — and no
+        `исход:` line anywhere, because it was written before the field existed.
+        Zero refutations here would read as «this report refuted nothing»,
+        which is a claim about the report instead of about the field."""
+        key = key_with([herring("D01", [loc("app/b.log", 10)])])
+        rec, out = self.score(key, FIELDED_REPORT)
+        o = rec["outcomes"]
+        self.assertFalse(o["measured"])
+        for k in ("decoys_false_positive", "decoys_refutation",
+                  "decoys_dismissed", "decoys_elsewhere", "decoys_unlabelled",
+                  "real_asserted_as_incident", "real_marked_normal"):
+            self.assertIsNone(o[k], "%s must be None, not 0, on a pre-v24 "
+                                    "report" % k)
+        self.assertIsNone(self.row(rec, "D01")["outcome_zone"])
+        self.assertIn("NOT MEASURED", out)
+
+    def test_the_refusal_says_the_field_did_not_exist_yet(self):
+        key = key_with([herring("D01", [loc("app/b.log", 10)])])
+        rec, _ = self.score(key, FIELDED_REPORT)
+        why = rec["outcomes"]["why"]
+        self.assertIn("исход", why.lower())
+        self.assertIn("None, NOT 0", why)
+        self.assertIn("v24", why)
+
+    def test_the_health_block_still_reads_on_a_pre_v24_report(self):
+        """«This axis did not exist yet» is itself measured, not assumed: the
+        blocks are counted and every one of them is reported as missing."""
+        key = key_with([herring("D01", [loc("app/b.log", 10)])])
+        rec, _ = self.score(key, FIELDED_REPORT)
+        o = rec["outcomes"]
+        self.assertEqual(o["finding_blocks"], 2)
+        self.assertEqual(o["outcomes_stated"], 0)
+        self.assertEqual(o["outcome_missing"], 2)
+        self.assertIsNone(o["implied_verdict"])
+        self.assertEqual(o["stated_verdict"], "compromised")
+        self.assertIsNone(o["contradiction"],
+                          "a verdict cannot contradict a register that states "
+                          "nothing — that is None, not False")
+
+    def test_a_report_with_no_finding_blocks_at_all_reads_none_everywhere(self):
+        key = key_with([herring("D01", [loc("app/a.log", 10)])])
+        rec, _ = self.score(key, "app/a.log:10 «filler line 10»")
+        o = rec["outcomes"]
+        self.assertFalse(o["measured"])
+        self.assertIsNone(o["finding_blocks"])
+        self.assertIsNone(o["outcome_missing"])
+        self.assertIn("Н-n", o["why"])
+
+    def test_one_labelled_block_is_enough_to_open_the_axis(self):
+        """The gate is «did anybody state an outcome», not «did everybody». A
+        report that labels three of four blocks supports the join for those
+        three, and the fourth is visible as `unlabelled` rather than silently
+        scored as a refutation."""
+        key = key_with([herring("D01", [loc("app/c.log", 20)])])
+        rec, _ = self.score(key)
+        self.assertTrue(rec["outcomes"]["measured"])
+        self.assertEqual(rec["outcomes"]["decoys_unlabelled"], 1)
+
+    # --- the record everything else already published stays put ------------
+    def test_no_pre_existing_column_moves(self):
+        """The project's rule: axes are never summed and never silently
+        replaced. This one is additive — a new nested block, and every column an
+        old ledger row published reads exactly as before."""
+        key = key_with([herring("D01", [loc("app/b.log", 10)]),
+                        defect("D02", "real", [loc("app/a.log", 10)])])
+        rec, _ = self.score(key)
+        self.assertEqual(rec["anchored"], 1)
+        self.assertEqual(rec["anchorable"], 1)
+        self.assertEqual(rec["presented"], 1)
+        self.assertEqual(rec["decoys"], 1)
+        self.assertEqual(rec["decoys_anchored"], 1)
+        self.assertEqual(rec["decoys_presented"], 1)
+        self.assertEqual(rec["decoys_asserted_as_incident"], 1)
+        self.assertEqual(rec["decoys_presented_refuted"], 0)
+
+    def test_the_axis_is_printed_beside_the_others(self):
+        key = key_with([herring("D01", [loc("app/b.log", 10)]),
+                        defect("D02", "real", [loc("app/a.log", 10)])])
+        _rec, out = self.score(key)
+        self.assertIn("outcomes  :", out)
+        self.assertIn("false positive", out)
+        self.assertIn("refutation", out)
+
+    def test_the_axis_costs_nothing(self):
+        key = key_with([herring("D01", [loc("app/b.log", 10)])])
+        saved = (S.score_case.http_call, S.score_bench.score)
+        S.score_case.http_call = Tripwire("score_case.http_call")
+        S.score_bench.score = Tripwire("score_bench.score")
+        try:
+            with redirect_stdout(io.StringIO()):
+                rec = S.score(key, OUTCOME_REPORT, self.tmp, call=None)
+        finally:
+            S.score_case.http_call, S.score_bench.score = saved
+        self.assertEqual(rec["outcomes"]["decoys_refutation"], 1)
+
+    def test_the_parse_is_citechecks_and_is_receipted(self):
+        """A second copy of the outcome grammar is a second, incomparable scale.
+        The tokens come from citecheck's own vocabulary, and the record already
+        receipts which citecheck was loaded."""
+        self.assertEqual(tuple(S.citecheck.OUTCOME_ORDER),
+                         ("норма", "попытка", "успех"))
+        key = key_with([herring("D01", [loc("app/b.log", 10)])])
+        rec, _ = self.score(key)
+        self.assertEqual(rec["outcomes"]["vocabulary"],
+                         list(S.citecheck.OUTCOME_ORDER))
+        self.assertEqual(rec["outcomes"]["citecheck_version"],
+                         rec["citecheck_version"])
+
+
+class TestOutcomeHealthIsADeliveryFact(unittest.TestCase):
+    """A missing outcome line is a delivery defect exactly as a missing verdict
+    section is — and the two channels can disagree about it, so each is read on
+    its own beside the union."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        build_corpus(self.tmp, {"app/a.log": numbered(50),
+                                "app/b.log": numbered(50),
+                                "app/c.log": numbered(50)})
+
+    def test_each_channel_carries_its_own_outcome_health(self):
+        handover = OUTCOME_REPORT.replace("**Исход:** успех", "").replace(
+            "исход: норма", "").replace("исход: попытка", "")
+        key = key_with([defect("D01", "real", [loc("app/a.log", 10)])])
+        with redirect_stdout(io.StringIO()):
+            rec = S.score(key, S.deliverable.compose(handover, OUTCOME_REPORT),
+                          self.tmp, call=None,
+                          answer=handover, artifact=OUTCOME_REPORT)
+        ch = rec["delivery"]["channels"]
+        self.assertEqual(ch["file"]["outcomes"]["outcomes_stated"], 3)
+        self.assertEqual(ch["message"]["outcomes"]["outcomes_stated"], 0)
+        self.assertEqual(ch["message"]["outcomes"]["outcome_missing"], 4,
+                         "the hand-over dropped every outcome line the draft "
+                         "carried, and the composed record cannot see that")
+
+    def test_the_per_channel_health_is_printed_not_only_recorded(self):
+        handover = OUTCOME_REPORT.replace("**Исход:** успех", "")
+        key = key_with([defect("D01", "real", [loc("app/a.log", 10)])])
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            S.score(key, S.deliverable.compose(handover, OUTCOME_REPORT),
+                    self.tmp, call=None,
+                    answer=handover, artifact=OUTCOME_REPORT)
+        self.assertIn("outcomes 2 of 4 finding block(s)", buf.getvalue())
+        self.assertIn("outcomes 3 of 4 finding block(s)", buf.getvalue())
+
+    def test_the_composed_record_is_not_replaced_by_the_per_channel_one(self):
+        handover = OUTCOME_REPORT.replace("**Исход:** успех", "")
+        key = key_with([defect("D01", "real", [loc("app/a.log", 10)])])
+        with redirect_stdout(io.StringIO()):
+            rec = S.score(key, S.deliverable.compose(handover, OUTCOME_REPORT),
+                          self.tmp, call=None,
+                          answer=handover, artifact=OUTCOME_REPORT)
+        self.assertIsNotNone(rec["outcomes"]["finding_blocks"])
+        self.assertTrue(rec["outcomes"]["measured"])
+
+
+class TestTheBlockParseIsCitechecksWarts(unittest.TestCase):
+    """A CHARACTERISATION, not an endorsement — and deliberately not fixed here.
+
+    `citecheck.FINDING_HEAD_RE` matches any line that STARTS with `Н-n`, with no
+    heading marker required. `work/report.md` is hard-wrapped and the final
+    message is not, so a wrapped cross-reference — «… событие —\nН-3: `ppid=1`,
+    …» — starts a line and reads as a thirteenth finding block. Measured on the
+    fleet v16 arm: the message parses 12 blocks and the file 13, and the extra
+    one is that sentence.
+
+    It matters here because a phantom block has no outcome line and therefore
+    inflates `outcome_missing`. It is pinned rather than worked around: the parse
+    lives in `skills/**`, one place decides where a finding starts, and a second
+    copy of that rule inside the scorer would be a second, incomparable scale.
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        build_corpus(self.tmp, {"app/a.log": numbered(50),
+                                "app/b.log": numbered(50),
+                                "app/c.log": numbered(50)})
+
+    def test_a_wrapped_cross_reference_reads_as_a_finding_block(self):
+        rep = OUTCOME_REPORT.replace(
+            "## 2. Отклонённые кандидаты",
+            "Тот же процесс описан выше, событие —\n"
+            "Н-3: `ppid=1`, соседние остановки юнитов.\n\n"
+            "## 2. Отклонённые кандидаты")
+        key = key_with([defect("D01", "real", [loc("app/a.log", 10)])])
+        with redirect_stdout(io.StringIO()):
+            rec = S.score(key, rep, self.tmp, call=None)
+        o = rec["outcomes"]
+        self.assertEqual(o["finding_blocks"], 5,
+                         "four real blocks plus the wrapped reference")
+        self.assertEqual(o["outcome_missing"], 2,
+                         "Н-4 forgot its line; the phantom never had one")
+        self.assertTrue(o["measured"],
+                        "the join still opens — one phantom block does not "
+                        "delete an axis three real blocks support")
+
+
+class TestTheOutcomeAxisOnTheRealReports(unittest.TestCase):
+    """Gitignored trajectories: skip where absent, run where the evidence is.
+
+    Every arm on disk predates v24. The axis must say so."""
+
+    BS22 = "20260818T212500Z-v22-claude-bluesky"
+
+    @unittest.skipUnless(_run_report(BS22) and os.path.isdir(BLUESKY_CORPUS),
+                         "BlueSky v22 trajectory or corpus not on this machine")
+    def test_bluesky_v22_reads_as_unavailable_not_as_zero_refutations(self):
+        key = json.load(open(os.path.join(BENCH, "answer-key-bluesky.json"),
+                             encoding="utf-8"))
+        rep = open(_run_report(self.BS22), encoding="utf-8").read()
+        with redirect_stdout(io.StringIO()):
+            rec = S.score(key, rep, BLUESKY_CORPUS, call=None)
+        o = rec["outcomes"]
+        self.assertEqual(rec["decoys_presented"], 2,
+                         "the pre-existing column is unmoved")
+        self.assertFalse(o["measured"])
+        self.assertIsNone(o["decoys_refutation"])
+        self.assertIsNone(o["decoys_false_positive"])
+        self.assertEqual(o["outcome_missing"], o["finding_blocks"],
+                         "every finding block on this arm is missing the line")
+        self.assertIsNone(o["implied_verdict"])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
