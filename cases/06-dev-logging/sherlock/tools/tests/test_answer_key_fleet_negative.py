@@ -36,6 +36,30 @@ held and the key could not previously see. The tests below therefore load v20 an
 assert the `.gz` half explicitly, so nobody can quietly re-pin the builder to a
 checker that cannot read half its evidence.
 
+THE 2026-08-19 THIRD DERIVATION — THE SECOND RENDERING, COMPUTED
+----------------------------------------------------------------
+The corpus deliberately ships three renderings of one journald stream. The key used
+to reach the other two through `JOURNAL_MIRRORS` — an ASSERTED list of two filenames
+re-scanned with a hand-written regex, hard-coded to `contabo/journal/` and applied to
+three findings. It was wrong in every direction it could be: it never covered `mon/`
+at all, so R09's proof lived only in `mon/syslog/syslog.tail` and the v22 arm that
+found R09 correctly while citing `mon/journal/journal.short-iso:23` scored a miss; its
+regex under-counted R03 (284 of 334 records) and double-counted R05 (64 physical lines
+for 32 events) because `journal.export` writes ONE event as MANY lines.
+
+It is replaced by `rendering_alternates_for` from `build-answer-key-ait.py`, which
+COMPUTES the equivalence: the key is (second, host, `ident[pid]: message`), the one
+normalisation is timestamp precision, and the loosening is paid for by an
+equal-multiplicity gate that refuses rather than guesses. `journal.export` is out of
+scope by construction — a citation addresses one physical line and an export block
+is not one — so it leaves the key rather than being argued out of it.
+
+An alternate is a CANDIDATE, never an entitlement: it is admitted only if it passes
+the same three gates a primary passes, and every rejection is counted in the key.
+The gate the decoys need is new and is asserted below — D02's `Accepted publickey`
+line HAS a second rendering in `mon/journal/`, two files R09's alternates also land
+in, so the decoys' rendered lines are claimed territory that no finding may take.
+
 `test_regenerating_reproduces_the_committed_key` needs the corpus and skips without
 it; everything else runs anywhere.
 
@@ -340,6 +364,162 @@ class TheGzRotationsAreInTheKey(unittest.TestCase):
         self.assertEqual(d["proof_locations"][0]["file"], "MANIFEST.tsv")
         self.assertIn("a .gz of text is text", " ".join(
             K["derivation"]["gates"]))
+
+
+class TheSecondRenderingIsComputedNotAsserted(unittest.TestCase):
+    """The 2026-08-19 third derivation. None of this needs the corpus: the key
+    records which files each finding reaches and by what rule."""
+
+    SRC = open(BUILDER, encoding="utf-8").read()
+    # `.get` so a key that predates this derivation fails these tests one by
+    # one instead of aborting the module and hiding the other 31.
+    RE = K["derivation"].get("rendering_equivalence", {})
+
+    def test_the_key_carries_a_rendering_equivalence_block_at_all(self):
+        self.assertTrue(self.RE, "derivation.rendering_equivalence is absent")
+
+    def test_the_asserted_mirror_regex_is_gone_from_the_builder(self):
+        """A hard-coded list of two filenames plus a hand-written re-scan is an
+        assertion about the corpus. Deleting it is the point of this derivation, so
+        it is asserted rather than remembered."""
+        self.assertNotIn("JOURNAL_MIRRORS = ", self.SRC)   # the list
+        self.assertNotIn('"mirror":', self.SRC)             # the three uses
+        # The NAME must survive, in the docstring: a deletion nobody can read the
+        # reason for is how the next derivation reinvents it.
+        self.assertIn("JOURNAL_MIRRORS", self.SRC)
+
+    def test_the_builder_calls_the_computed_rule_rather_than_copying_it(self):
+        """Copied code is a second implementation that drifts. The rule has ONE
+        home and this builder imports it."""
+        self.assertIn("build-answer-key-ait.py", self.SRC)
+        self.assertIn("rendering_alternates_for", self.SRC)
+
+    def test_the_key_says_which_rule_produced_the_alternates(self):
+        for f in ("rule", "source", "key", "normalisation", "multiplicity_gate",
+                  "limitations", "replaced"):
+            self.assertTrue(str(self.RE[f]).strip(), f)
+        self.assertIn("build-answer-key-ait.py", self.RE["source"])
+        self.assertIn("JOURNAL_MIRRORS", self.RE["replaced"])
+
+    def test_the_export_rendering_left_the_key_and_the_key_says_why(self):
+        """`journalctl -o export` writes one event as many physical lines, so a
+        citation cannot address the event. The asserted mirror anchored there
+        anyway — R05 got 64 physical lines for 32 records."""
+        for d in K["defects"]:
+            for pl in (d.get("proof_locations") or []):
+                self.assertNotIn("journal.export", pl["file"], d["id"])
+        self.assertTrue([x for x in self.RE["limitations"] if "export" in x])
+
+    def test_R09_now_reaches_both_journald_renderings(self):
+        """The defect this derivation exists for: the v22 arm found R09 and cited
+        `mon/journal/journal.short-iso`, a render of the same stream, against a key
+        whose only proof was the syslog render."""
+        r09 = [d for d in REAL if d["id"] == "R09"][0]
+        self.assertEqual({pl["file"] for pl in r09["proof_locations"]},
+                         {"mon/syslog/syslog.tail",
+                          "mon/journal/journal.short-iso",
+                          "mon/journal/journal.json"})
+        self.assertEqual(r09["rendering_files"],
+                         ["mon/journal/journal.json",
+                          "mon/journal/journal.short-iso"])
+
+    def test_the_contabo_findings_kept_their_json_rendering(self):
+        """R02/R03/R05 reached `journal.json` under the asserted rule too. The
+        computed rule must not lose them — it is replacing a mirror, not removing
+        one."""
+        for cid in ("R02", "R03", "R05"):
+            d = [x for x in REAL if x["id"] == cid][0]
+            self.assertEqual(d["rendering_files"],
+                             ["contabo/journal/journal.json"], cid)
+
+    def test_every_finding_declares_its_renderings_and_nothing_else_claims_any(self):
+        """`rendering_files` must be exactly the files a finding reaches that its
+        own scan does not — otherwise the field is decoration."""
+        for d in REAL:
+            files = {pl["file"] for pl in d["proof_locations"]}
+            self.assertEqual(sorted(d["rendering_files"]),
+                             d["rendering_files"], d["id"])
+            for rel in d["rendering_files"]:
+                self.assertIn(rel, files, d["id"])
+
+    def test_the_findings_that_have_no_second_rendering_say_so_as_a_number(self):
+        """Eight of the twelve gain nothing. An empty list is a measurement here,
+        not a missing field, so every finding carries one."""
+        got = {d["id"]: len(d["rendering_files"]) for d in REAL}
+        self.assertEqual(len(got), 12)
+        self.assertEqual(sorted(k for k, v in got.items() if v),
+                         ["R02", "R03", "R05", "R09"])
+
+    def test_an_alternate_is_a_candidate_that_must_pass_the_same_gates(self):
+        """The one way this change could WEAKEN the instrument is by letting a
+        rendering smuggle in a line a primary would have been refused."""
+        self.assertTrue(self.RE["admission"].strip())
+        self.assertIn("rejected", self.RE)
+        for k in ("binary", "decoy", "another_finding"):
+            self.assertIn(k, self.RE["rejected"], k)
+
+    def test_the_decoys_rendered_lines_are_recorded(self):
+        """Computed, not assumed: the key stores what each decoy looks like in a
+        second rendering so the next derivation can see it without re-deriving."""
+        dr = {x["id"]: x for x in self.RE["decoy_renderings"]}
+        self.assertEqual(sorted(dr), ["D0%d" % i for i in range(1, 9)])
+        for x in dr.values():
+            self.assertTrue(x["treatment"].strip(), x["id"])
+
+    def test_the_operator_login_HAS_a_second_rendering_and_no_finding_took_it(self):
+        """THE LOUD ONE. D02 is the corpus's single successful authentication and
+        the most tempting false positive it offers. It is written into
+        `mon/journal/` as well as into `mon/auth/auth.log`, and those are two of the
+        three files R09's alternates land in. Nothing collided — but only because
+        the gate ran, so the gate is asserted here rather than trusted."""
+        d02 = [x for x in self.RE["decoy_renderings"] if x["id"] == "D02"][0]
+        self.assertEqual(d02["rendered_at"],
+                         ["mon/journal/journal.json:18603",
+                          "mon/journal/journal.short-iso:18552"])
+        taken = set()
+        for d in REAL:
+            for (f, lo, hi) in SR.proof_spans(d):
+                taken |= {"%s:%d" % (f, n) for n in range(lo, hi + 1)}
+        for ref in d02["rendered_at"]:
+            self.assertNotIn(ref, taken,
+                             "a finding took D02's rendered line %s" % ref)
+
+    def test_the_evidence_collector_has_no_second_address_at_all(self):
+        """D03 is the root shell that produced this corpus. It renders nowhere, so
+        there is no second way to reach it — the property the negative control most
+        needs, stated as a fact rather than hoped for."""
+        d03 = [x for x in self.RE["decoy_renderings"] if x["id"] == "D03"][0]
+        self.assertEqual(d03["rendered_at"], [])
+        blob = json.dumps(REAL, ensure_ascii=False)
+        self.assertNotIn("mon/auth/auth.log\"", blob)
+
+    def test_a_whole_file_decoy_claim_cannot_be_rendered_and_the_key_says_so(self):
+        """D01 claims `mon/auth/auth.log` whole. There is no line to map, so the
+        rule has nothing to say and the whole-file half of gate 2 is what protects
+        it. Saying that out loud is the point."""
+        d01 = [x for x in self.RE["decoy_renderings"] if x["id"] == "D01"][0]
+        self.assertEqual(d01["rendered_at"], [])
+        self.assertIn("whole", d01["treatment"].lower())
+
+    def test_the_decoys_did_not_gain_anchors_from_this_change(self):
+        """A rendering makes a decoy EASIER to cite. Adding it to the decoy's own
+        proof_locations would move the false-positive axis in the same commit that
+        moves the findings axis, and two moved numbers cannot be told apart."""
+        d02 = [x for x in DECOY if x["id"] == "D02"][0]
+        self.assertIsNone(d02.get("proof_locations"))
+        d04 = [x for x in DECOY if x["id"] == "D04"][0]
+        self.assertEqual({pl["file"] for pl in d04["proof_locations"]},
+                         {"contabo/audit/audit.log"})
+
+    def test_there_are_still_exactly_four_gates(self):
+        """The gate list is the key's own summary of what it enforces. Renderings
+        widened what gate 2 covers; they did not add a fifth rule."""
+        self.assertEqual(len(K["derivation"]["gates"]), 4)
+        self.assertIn("rendering", " ".join(K["derivation"]["gates"]).lower())
+
+    def test_the_proof_rule_no_longer_advertises_the_asserted_mirror(self):
+        self.assertNotIn("journal.export", K["derivation"]["proof_rule"])
+        self.assertIn("rendering", K["derivation"]["proof_rule"])
 
 
 class TheCorpusStillBacksIt(unittest.TestCase):
