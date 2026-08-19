@@ -144,6 +144,30 @@ def channel(answer, artifact):
     return "both" if len(a) >= 0.5 * len(r) else "file"
 
 
+def channels(answer, artifact):
+    """{name: text} — the PARTS of the deliverable, one entry per channel used.
+
+    `compose` says what the union is; this says what it was made of, in the same
+    vocabulary `channel()` already uses (`message`, `file`). It exists because
+    the union is an average once the two channels disagree: the v22 negative
+    control passed its own citation check 110/110 on `work/report.md` and handed
+    over a final message that scored 74/95, and the composed 198-at-89.4 %
+    describes neither document. Scoring the channels separately needs the parts —
+    and the parts have to come from here, or "which ledger field is which
+    channel" becomes a second definition living in the scorer.
+
+    An absent channel is ABSENT, not empty: a run that never wrote a file has one
+    channel, and an empty entry would make a scorer grade a document nobody
+    produced and record 0 citations, which reads as a report that cited nothing.
+    """
+    out = {}
+    if (answer or "").strip():
+        out["message"] = answer
+    if (artifact or "").strip():
+        out["file"] = artifact
+    return out
+
+
 def duplication(answer, artifact):
     """How much of the two channels is the SAME report — block by block.
 
@@ -213,3 +237,7 @@ def channel_of_row(row):
 
 def duplication_of_row(row):
     return duplication(row.get("answer"), row.get("artifact"))
+
+
+def channels_of_row(row):
+    return channels(row.get("answer"), row.get("artifact"))

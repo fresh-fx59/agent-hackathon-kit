@@ -249,5 +249,60 @@ class DivergentChannelsAreFlaggedNotCollapsed(unittest.TestCase):
 
 
 
+# --------------------------------------------------------------------------
+# The PARTS, not only the union — 2026-08-19
+# --------------------------------------------------------------------------
+# The v22 negative control passed `citecheck` 110/110 on `work/report.md` and
+# handed over a final message that scored 74/95 with 21 `wrong-content`, all
+# inside a condensed inventory it hand-wrote AFTER checking the draft. The
+# composed number is 198 citations at 89.4 % — an average that describes neither
+# document. To score the channels separately a reader needs the parts, and the
+# parts must come from the same module the union comes from: a scorer that reads
+# `row["answer"]` itself is a second definition of "which field is which
+# channel", and that is exactly how one measurement becomes two scales.
+class TheChannelsAreReadableSeparately(unittest.TestCase):
+
+    def test_both_channels_are_returned_under_the_names_channel_uses(self):
+        got = D.channels("msg", "file")
+        self.assertEqual(sorted(got), ["file", "message"])
+        self.assertEqual(got["message"], "msg")
+        self.assertEqual(got["file"], "file")
+
+    def test_the_names_are_the_same_vocabulary_as_channel(self):
+        """`channel()` already answers message|file|both|none. The parts must not
+        invent a third word for the same two things."""
+        self.assertEqual(set(D.channels("a", "b")), {"message", "file"})
+        self.assertEqual(D.channel("a", ""), "message")
+        self.assertEqual(D.channel("", "b"), "file")
+
+    def test_an_absent_channel_is_absent_not_empty(self):
+        """A run that never wrote a file has ONE channel. An empty string entry
+        would make a scorer grade a document nobody produced and report 0
+        citations, which reads as a report that cited nothing."""
+        self.assertEqual(list(D.channels("msg", "")), ["message"])
+        self.assertEqual(list(D.channels("msg", None)), ["message"])
+        self.assertEqual(list(D.channels("msg", "  \n ")), ["message"])
+        self.assertEqual(list(D.channels("", "file")), ["file"])
+        self.assertEqual(D.channels("", ""), {})
+
+    def test_a_row_is_split_through_the_same_one_definition(self):
+        row = {"answer": "msg", "artifact": "file"}
+        self.assertEqual(D.channels_of_row(row), {"message": "msg", "file": "file"})
+        self.assertEqual(D.channels_of_row({"answer": "msg"}), {"message": "msg"})
+        self.assertEqual(D.channels_of_row({}), {})
+
+    def test_the_parts_recompose_to_the_union(self):
+        """The one invariant that keeps the parts honest: nothing in either part
+        is invented, and the union of the parts is what `compose` returns."""
+        msg = "# Отчёт\n\napp/a.log:1 «x»"
+        fil = "# Отчёт\n\napp/b.log:2 «y»"
+        parts = D.channels(msg, fil)
+        union = D.compose(msg, fil)
+        for text in parts.values():
+            for b in D.blocks(text):
+                self.assertIn(" ".join(b.split()),
+                              [" ".join(u.split()) for u in D.blocks(union)])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

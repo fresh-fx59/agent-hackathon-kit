@@ -12,16 +12,42 @@
     python3 score-report.py --key answer-key.json --corpus … --ledger runs-bench.jsonl \
         --dataset bench649 --arm v11 --trace 20260802T221034Z
 
+    # the hand-over scored beside the artefact, outside a run ledger
+    python3 score-report.py --key … --corpus … --report work/report.md \
+        --delivered final-message.md
+
 Everything this project measured before now scored a WORKLIST — Step 1's 250-row
 attention budget. That is an upper bound on what the skill can find and says
 nothing about what it told the reader. The deliverable is a report; this scores
-one, on five axes that are deliberately never summed into a single number.
+one, on six axes that are deliberately never summed into a single number.
 
     verdict    compromised / attacked-not-proven / clean, or `absent`
     anchored   did the report CITE this defect's proof?      ← free, primary
     presented  did it cite it INSIDE its findings section?   ← free, structural
     asserted   did the report CLAIM this defect?             ← judged, optional
     citations  do the cited lines say what the report says?  ← free, citecheck
+    delivery   does the HAND-OVER say it too?                ← free, per channel
+
+WHY DELIVERY IS ITS OWN AXIS. The v22 negative control is the first arm whose
+citation integrity fell below 100 % (89.4 %), and the cause was not the
+investigation. Scored per channel: `work/report.md` alone is 110 / 110 ok; the
+final message alone is 74 / 95 with 21 `wrong-content`, all inside a condensed
+inventory the run hand-wrote AFTER checking the draft. The composed 198-at-89.4 %
+is an average describing NEITHER document, and `CHANNELS DIVERGE` was a printed
+warning nobody could put in a table. So each channel is scored on its own beside
+the union, and the divergence is integers: shared blocks, blocks unique to each
+side, and whether each divergent side's citations verify. The composed columns
+are unchanged — axes are never summed and never silently replaced, because a
+number that moves must be explainable to somebody reading an old ledger row.
+
+WHAT THE DELIVERY AXIS DOES NOT DO, because it was measured and rejected. «The
+delivered citations must be a subset of the verified ones» catches 1 of those 21:
+20 were citations ALREADY in the verified set, re-typed under a new sentence. A
+`(citation, claim)` pair test separates perfectly and raised 45 false alarms. The
+mechanism that works is re-checking the delivered text against the corpus, and
+both nets here are citecheck's own — `check()` and `not_in_checked()` — with
+`citecheck.delivery_failed` as the pass/fail, the same predicate `citecheck.py
+--delivered` exits non-zero on.
 
 WHY `anchored` IS THE PRIMARY FINDINGS NUMBER. Every real defect in the key
 carries `proof_locations`. Whether the report put one of them in front of the
@@ -230,6 +256,7 @@ def assert_ambiguity_capable(mod, name, path):
 
 
 CITECHECK_VERSION, CITECHECK_PATH = resolve_citecheck(SHERLOCK)
+CITECHECK_SHA = hashlib.sha1(open(CITECHECK_PATH, "rb").read()).hexdigest()
 citecheck = _load("citecheck_" + CITECHECK_VERSION.replace(".", "_"), CITECHECK_PATH)
 assert_ambiguity_capable(citecheck, CITECHECK_VERSION, CITECHECK_PATH)
 score_case = _load("score_case", os.path.join(SHERLOCK, "measure", "score_case.py"))
@@ -755,33 +782,20 @@ def anchor_hits(spans, proofs):
 
 
 # --------------------------------------------------------------------------
-# the record
+# the free findings columns, for ONE document
 # --------------------------------------------------------------------------
-def score(raw_key, report, root, call=None, min_overlap=0.34, min_tokens=3,
-          require_quote=False):
-    """One report + one key + one corpus -> one record. `call` is the judge, or None."""
-    if not os.path.isdir(root):
-        raise RuntimeError("no such corpus directory: %s" % root)
-    if not (report or "").strip():
-        raise RuntimeError("the report is empty — nothing to score. An empty "
-                           "deliverable is a delivery defect, and recording it as "
-                           "0-of-N findings would make it look like a bad "
-                           "investigation instead of an absent one.")
+def findings_of(key, report, root):
+    """One document + one key + one corpus -> every judge-free findings column.
 
-    key = score_bench.load_key(raw_key)
-    dataset = raw_key.get("dataset") if isinstance(raw_key, dict) else None
-
-    # --- axis 1: the verdict, delegated whole -----------------------------
-    truth = raw_key.get("verdict") if isinstance(raw_key, dict) else None
-    got, how = score_verdict.extract(report)
-    verdict = {"truth": truth, "reported": got, "read_from": how,
-               "correct": (got == truth) if truth else None}
-
-    # --- axis 2: anchoring, free ------------------------------------------
+    Lifted out of `score()` unchanged so the same arithmetic can be run over one
+    CHANNEL as well as over the union. `delivery_axis` grades the hand-over and
+    the checked artefact with exactly this function, which is why a per-channel
+    `anchored` means what the composed one means. A second copy of this loop is a
+    second scale — the defect this project has already shipped twice.
+    """
     cited = cited_spans(report, root)
     spans = cited["spans"]
 
-    # --- axis 2b: the STRUCTURAL assertion column, free -------------------
     st = structure_of(report, cited["by_rel"], cited["by_base"])
     parsed = st["parsed"]
 
@@ -842,6 +856,244 @@ def score(raw_key, report, root, call=None, min_overlap=0.34, min_tokens=3,
                              (zones and "findings" not in zones
                               and "rejected" not in zones)) else 0
 
+    return {"cited": cited, "structure": st, "per": per,
+            "unanchorable": unanchorable,
+            "missing_proof_files": missing_proof_files,
+            "anchored": anchored, "anchorable": anchorable,
+            "presented": presented, "dismissed": dismissed, "outside": outside,
+            "decoys": decoys, "decoys_anchored": decoys_anchored,
+            "decoys_presented": decoys_presented,
+            "decoys_dismissed": decoys_dismissed,
+            "decoys_asserted_as_incident": decoys_asserted_incident,
+            "decoys_presented_refuted": decoys_refuted,
+            "decoys_anchored_elsewhere": decoys_elsewhere}
+
+
+# --------------------------------------------------------------------------
+# axis 5: DELIVERY INTEGRITY — the hand-over, scored beside the artefact
+# --------------------------------------------------------------------------
+# The v22 negative control is the first arm whose citation integrity fell below
+# 100 %, and the cause was not the investigation. Scored per channel:
+# `work/report.md` alone is 110 / 110 ok; the final message alone is 74 / 95 with
+# 21 `wrong-content`, all inside a condensed inventory the run hand-wrote AFTER
+# checking the draft. The composed number — 198 citations, 89.4 % — is an average
+# that describes NEITHER document, and `CHANNELS DIVERGE` was a printed warning
+# nobody could put in a table.
+#
+# So the channels are scored separately as well as together, the divergence
+# becomes record fields (shared blocks, blocks unique to each side, and whether
+# each divergent side's citations verify), and the composed columns stay exactly
+# where they were: axes are never summed and never silently replaced, because a
+# number that moves has to be explainable to somebody reading an old ledger row.
+#
+# WHAT WAS ALREADY MEASURED AND REJECTED, so nobody rebuilds it. «The delivered
+# citations must be a subset of the verified ones» catches 1 of those 21, because
+# 20 were citations ALREADY in the verified set, re-typed under a new sentence. A
+# `(citation, claim)` pair test separates perfectly and raised 45 false alarms.
+# The mechanism that works is re-checking the delivered text against the corpus.
+# Both nets here are citecheck's own — `check()` and `not_in_checked()` — and the
+# pass/fail is `citecheck.delivery_failed`, the same predicate `citecheck.py
+# --delivered` exits non-zero on. This file grades; it does not re-decide.
+NOT_DELIVERABLE = (
+    "scored from a single document, so there is no hand-over to compare against "
+    "the checked artefact. Delivery integrity is measurable from a run ledger "
+    "(--ledger), or from --report plus --delivered.")
+
+DELIVERY_KEYS = ("channel", "relation", "diverged", "blocks", "channels",
+                 "divergent_sides", "divergent_side_verifies", "handover",
+                 "checked", "handover_verified", "handover_verified_pct",
+                 "handover_not_in_checked", "handover_not_in_checked_examples",
+                 "handover_failed", "warning")
+
+CHANNEL_FILE = {"message": "the final message", "file": "work/report.md"}
+
+
+def _no_delivery(why):
+    """The unmeasured shape — every field None, never 0, and it says why."""
+    rec = {k: None for k in DELIVERY_KEYS}
+    rec.update({"measured": False, "why": why, "channels": {},
+                "divergent_sides": None,
+                "citecheck_version": CITECHECK_VERSION,
+                "citecheck_path": CITECHECK_PATH,
+                "citecheck_sha": CITECHECK_SHA})
+    return rec
+
+
+def _channel_score(key, text, root, unique_blocks, min_overlap, min_tokens,
+                   require_quote):
+    """One channel, graded on its own -> (record, the raw citecheck result).
+
+    Same key, same corpus, same citecheck, same `findings_of` as the union: the
+    only thing that differs is the document, which is the whole point.
+    """
+    cc = citecheck.check(text, root, min_overlap, min_tokens, require_quote)
+    s = dict(cc["summary"])
+    f = findings_of(key, text, root)
+    parsed = f["structure"]["parsed"]
+    total = s.get("total", 0)
+    rec = {
+        "chars": len(text),
+        "blocks": len(deliverable.blocks(text)),
+        "unique_blocks": unique_blocks,
+        "citations": s,
+        "verified_pct": s.get("verified_pct"),
+        # None — never False — when the document cites nothing at all. A hand-over
+        # with no citations has not failed a check; it has skipped one, and those
+        # are different facts about a delivery.
+        "verified": (s.get("ok", 0) == total) if total else None,
+        "anchored": f["anchored"], "anchorable": f["anchorable"],
+        "anchored_pct": (round(100.0 * f["anchored"] / f["anchorable"], 1)
+                         if f["anchorable"] else None),
+        "presented": f["presented"] if parsed else None,
+        "presentable": f["anchorable"],
+        "presented_pct": (round(100.0 * f["presented"] / f["anchorable"], 1)
+                          if (parsed and f["anchorable"]) else None),
+        "decoys": f["decoys"], "decoys_anchored": f["decoys_anchored"],
+        "decoys_presented": f["decoys_presented"] if parsed else None,
+        "rejections": f["structure"]["rejections"],
+        "rejections_uncited": f["structure"]["rejections_uncited"],
+        "coverage_rows": f["structure"]["coverage_rows"],
+        "coverage_rows_uncited": f["structure"]["coverage_rows_uncited"],
+        "structure_parsed": parsed,
+    }
+    return rec, cc
+
+
+def delivery_axis(key, answer, artifact, root, min_overlap=0.34, min_tokens=3,
+                  require_quote=False):
+    """The two channels, scored apart, with the divergence as an integer.
+
+    `deliverable` owns what a channel IS and what the relation between two of
+    them is; this reads both and grades. Nothing about block identity, the union
+    or the `divergent` relation is decided here.
+    """
+    parts = deliverable.channels(answer, artifact)
+    if not parts:
+        return _no_delivery(NOT_DELIVERABLE)
+    dup = deliverable.duplication(answer, artifact)
+    uniq = {"message": dup["only_in_message"], "file": dup["only_in_file"]}
+    recs, checks = {}, {}
+    for name, text in parts.items():
+        recs[name], checks[name] = _channel_score(
+            key, text, root, uniq[name], min_overlap, min_tokens, require_quote)
+
+    # The hand-over is what the reader received. The final message is it when
+    # there is one — the collapsed 101-char run is why `channel()` exists — and
+    # `work/report.md` is a DRAFT the user never sees unless it is all there is.
+    handover = "message" if "message" in parts else "file"
+    checked = "file" if (handover == "message" and "file" in parts) else None
+
+    nic, examples, why = None, None, None
+    if checked is not None:
+        fn = getattr(citecheck, "not_in_checked", None)
+        if fn is None:
+            why = ("citecheck %s has no `not_in_checked`: the second net — a "
+                   "delivered citation that was never in the checked verified "
+                   "set — is NOT MEASURED here, and is None rather than 0."
+                   % CITECHECK_VERSION)
+        else:
+            rows = fn(checks[checked], checks[handover])
+            nic, examples = len(rows), rows[:6]
+
+    failed_fn = getattr(citecheck, "delivery_failed", None)
+    if failed_fn is None:
+        failed = None
+        why = ("citecheck %s has no `delivery_failed`: the pass/fail this scorer "
+               "refuses to re-derive is NOT MEASURED." % CITECHECK_VERSION)
+    else:
+        failed = bool(failed_fn({"summary": recs[handover]["citations"],
+                                 "not_in_checked": [None] * (nic or 0)}))
+
+    diverged = dup["relation"] == "divergent"
+    sides = ["message", "file"] if diverged else []
+    if not sides:
+        dsv = None
+    else:
+        verdicts = [recs[n]["verified"] for n in sides]
+        dsv = None if any(v is None for v in verdicts) else all(verdicts)
+
+    return {
+        "measured": True,
+        "why": why,
+        "channel": deliverable.channel(answer, artifact),
+        "relation": dup["relation"],
+        "diverged": diverged,
+        "blocks": {"message": dup["message_blocks"], "file": dup["file_blocks"],
+                   "shared": dup["shared_blocks"],
+                   "only_in_message": dup["only_in_message"],
+                   "only_in_file": dup["only_in_file"]},
+        "channels": recs,
+        "divergent_sides": sides,
+        "divergent_side_verifies": dsv,
+        "handover": handover,
+        "checked": checked,
+        "handover_verified": recs[handover]["verified"],
+        "handover_verified_pct": recs[handover]["verified_pct"],
+        "handover_not_in_checked": nic,
+        "handover_not_in_checked_examples": examples,
+        "handover_failed": failed,
+        "warning": dup["warning"],
+        "citecheck_version": CITECHECK_VERSION,
+        "citecheck_path": CITECHECK_PATH,
+        "citecheck_sha": CITECHECK_SHA,
+    }
+
+
+# --------------------------------------------------------------------------
+# the record
+# --------------------------------------------------------------------------
+def score(raw_key, report, root, call=None, min_overlap=0.34, min_tokens=3,
+          require_quote=False, answer=None, artifact=None):
+    """One report + one key + one corpus -> one record. `call` is the judge, or None.
+
+    `answer` and `artifact` are the two DELIVERY CHANNELS, when the caller has
+    them: the final message and `work/report.md`. `report` stays the union of the
+    two — every composed column keeps meaning exactly what it meant on every
+    ledger row already written — and axis 5 grades each channel on its own beside
+    it. Pass neither and the delivery axis records that it was not measurable.
+    """
+    if not os.path.isdir(root):
+        raise RuntimeError("no such corpus directory: %s" % root)
+    if not (report or "").strip():
+        raise RuntimeError("the report is empty — nothing to score. An empty "
+                           "deliverable is a delivery defect, and recording it as "
+                           "0-of-N findings would make it look like a bad "
+                           "investigation instead of an absent one.")
+    if answer is not None or artifact is not None:
+        # FAIL LOUD. A delivery block that describes two channels, printed beside
+        # a composed score taken from some third document, is a record that lies
+        # quietly — and the union is `deliverable`'s to define, not this file's.
+        if deliverable.compose(answer, artifact) != report:
+            raise RuntimeError(
+                "the report being scored is not the union of the two channels "
+                "handed in: len(report)=%d, len(compose(answer, artifact))=%d. "
+                "Score `deliverable.compose(answer, artifact)`, or pass no "
+                "channels at all."
+                % (len(report), len(deliverable.compose(answer, artifact))))
+
+    key = score_bench.load_key(raw_key)
+    dataset = raw_key.get("dataset") if isinstance(raw_key, dict) else None
+
+    # --- axis 1: the verdict, delegated whole -----------------------------
+    truth = raw_key.get("verdict") if isinstance(raw_key, dict) else None
+    got, how = score_verdict.extract(report)
+    verdict = {"truth": truth, "reported": got, "read_from": how,
+               "correct": (got == truth) if truth else None}
+
+    # --- axes 2 and 2b: anchoring and presentation, free ------------------
+    f = findings_of(key, report, root)
+    cited, st, per = f["cited"], f["structure"], f["per"]
+    parsed = st["parsed"]
+    unanchorable, missing_proof_files = f["unanchorable"], f["missing_proof_files"]
+    anchored, anchorable = f["anchored"], f["anchorable"]
+    presented, dismissed, outside = f["presented"], f["dismissed"], f["outside"]
+    decoys, decoys_anchored = f["decoys"], f["decoys_anchored"]
+    decoys_presented, decoys_dismissed = (f["decoys_presented"],
+                                          f["decoys_dismissed"])
+    decoys_asserted_incident = f["decoys_asserted_as_incident"]
+    decoys_refuted = f["decoys_presented_refuted"]
+    decoys_elsewhere = f["decoys_anchored_elsewhere"]
+
     # --- axis 3: citation integrity, free ---------------------------------
     cc = citecheck.check(report, root, min_overlap, min_tokens, require_quote)
     ccs = dict(cc["summary"])
@@ -865,6 +1117,10 @@ def score(raw_key, report, root, call=None, min_overlap=0.34, min_tokens=3,
                 per[r["defect"]]["why"] = r.get("why")
     else:
         total_real = sum(1 for cid in key if not score_bench.is_herring(key[cid]))
+
+    # --- axis 5: delivery integrity, free ---------------------------------
+    delivery = delivery_axis(key, answer, artifact, root, min_overlap,
+                             min_tokens, require_quote)
 
     rec = {
         "dataset": dataset,
@@ -926,13 +1182,15 @@ def score(raw_key, report, root, call=None, min_overlap=0.34, min_tokens=3,
         "citecheck": ccs,
         "citecheck_version": CITECHECK_VERSION,
         "citecheck_path": CITECHECK_PATH,
-        "citecheck_sha": hashlib.sha1(
-            open(CITECHECK_PATH, "rb").read()).hexdigest(),
+        "citecheck_sha": CITECHECK_SHA,
         "structure": {k: v for k, v in st.items() if k != "sections"},
         "judged": call is not None,
         "judge_model": score_case.JUDGE_MODEL if call is not None else None,
         "judge_prompt_limit": JUDGE_PROMPT_LIMIT if call is not None else None,
         "per_defect": [per[cid] for cid in sorted(per)],
+        # BESIDE every column above, never merged into one and never replacing
+        # one. `citecheck` above is the UNION's integrity; this is each channel's.
+        "delivery": delivery,
     }
     render(rec, cited)
     return rec
@@ -1036,6 +1294,60 @@ def render(rec, cited):
              s.get("binary-file", 0), s.get("unverifiable", 0),
              s.get("не-ссылка", 0)))
 
+    # THE DELIVERY HEADLINE. `citations` above is the UNION's integrity, which on
+    # a divergent run is an average describing neither document. This line says
+    # what each channel scored on its own, and turns `CHANNELS DIVERGE` from a
+    # warning into three integers plus a verdict per side.
+    d = rec["delivery"]
+    if not d.get("measured"):
+        print("delivery  : — NOT MEASURED (%s)" % d.get("why"))
+    else:
+        b = d["blocks"]
+        if d["diverged"]:
+            print("delivery  : two channels DIVERGE — %d shared block(s), %d only "
+                  "in the final message, %d only in work/report.md"
+                  % (b["shared"], b["only_in_message"], b["only_in_file"]))
+        elif len(d["channels"]) > 1:
+            print("delivery  : both channels carried the same report (%s) — %d of "
+                  "%d file block(s) already in the message, scored ONCE"
+                  % (d["relation"], b["shared"], b["file"]))
+        else:
+            print("delivery  : one channel (%s) — nothing to diverge from"
+                  % d["relation"])
+        for name in ("message", "file"):
+            c = d["channels"].get(name)
+            if not c:
+                continue
+            role = ("hand-over" if name == d["handover"] else "checked  ")
+            s2 = c["citations"]
+            vp = ("—" if c["verified_pct"] is None
+                  else "%.1f %%" % c["verified_pct"])
+            pres = "—" if c["presented"] is None else str(c["presented"])
+            print("            %s (%-16s): citations %d / %d ok (%s), "
+                  "wrong-content %d · anchored %d / %d · presented %s / %d · "
+                  "%d block(s) this channel alone"
+                  % (role, CHANNEL_FILE[name], s2.get("ok", 0),
+                     s2.get("total", 0), vp, s2.get("wrong-content", 0),
+                     c["anchored"], c["anchorable"], pres, c["presentable"],
+                     c["unique_blocks"]))
+        if d["handover_not_in_checked"] is None:
+            print("            delivered-but-never-checked: — NOT MEASURED (%s)"
+                  % (d["why"] or "there is no second channel to have checked it "
+                                 "against; None, not 0"))
+        else:
+            print("            delivered-but-never-checked: %d citation(s)"
+                  % d["handover_not_in_checked"])
+            for c in (d["handover_not_in_checked_examples"] or [])[:4]:
+                print("                %s (%s) — hand-over line %d"
+                      % (c["citation"], c["verdict"], c["report_line"]))
+        if d["handover_failed"]:
+            print("⚠ THE HAND-OVER DOES NOT PASS ITS OWN CHECK — `citecheck.py "
+                  "--delivered` exits non-zero on this. A re-typed citation is a "
+                  "new claim and needs its own check; being in the verified set "
+                  "catches 1 of 21.")
+        if d["warning"]:
+            print("⚠ %s" % d["warning"])
+
     # Everything below is a thing that was dropped, capped or could not be
     # scored. It prints even when it is zero-cost to ignore, because a cap the
     # reader cannot see is the same as no cap at all.
@@ -1121,6 +1433,10 @@ def main():
     ap.add_argument("--key", required=True)
     ap.add_argument("--corpus", help="corpus root; defaults to the key's corpus_root")
     ap.add_argument("--report", help="a report FILE, or - for stdin")
+    ap.add_argument("--delivered", metavar="handover.md",
+                    help="the HAND-OVER beside --report: the text the reader "
+                         "actually received. Scores both channels separately and "
+                         "fills the delivery axis; --ledger does this by itself.")
     ap.add_argument("--ledger", help="take the report from this run ledger instead")
     ap.add_argument("--arm")
     ap.add_argument("--trace", help="substring of trace_dir — score THAT run")
@@ -1153,11 +1469,26 @@ def main():
 
     if a.report and a.ledger:
         sys.exit("--report and --ledger are two different sources; pick one")
+    if a.delivered and not a.report:
+        sys.exit("--delivered is the hand-over BESIDE --report; --ledger already "
+                 "carries both channels")
     if a.report:
         text = (sys.stdin.read() if a.report == "-"
                 else open(a.report, encoding="utf-8", errors="replace").read())
+        answer, artifact = None, None
+        if a.delivered:
+            # `--report` is the checked artefact, `--delivered` the hand-over —
+            # the same two roles `citecheck.py --delivered` names. What gets
+            # scored stays the UNION of the two, so the composed columns mean
+            # what they mean everywhere else.
+            answer = open(a.delivered, encoding="utf-8", errors="replace").read()
+            artifact = text
+            text = deliverable.compose(answer, artifact)
         source = {"report_path": a.report, "arm": a.arm, "trace_dir": None,
-                  "delivered_in": None, "duplication": None}
+                  "delivered_in": (deliverable.channel(answer, artifact)
+                                   if a.delivered else None),
+                  "duplication": (deliverable.duplication(answer, artifact)
+                                  if a.delivered else None)}
     elif a.ledger:
         rows = [json.loads(l) for l in open(a.ledger, encoding="utf-8") if l.strip()]
         if not rows:
@@ -1167,6 +1498,8 @@ def main():
         score_bench.check_key_matches_dataset(raw_key, run)
         text = deliverable.of_row(run)
         dup = deliverable.duplication_of_row(run)
+        parts = deliverable.channels_of_row(run)
+        answer, artifact = parts.get("message"), parts.get("file")
         source = {"report_path": None, "arm": run.get("arm"),
                   "trace_dir": run.get("trace_dir"),
                   "delivered_in": deliverable.channel_of_row(run),
@@ -1174,19 +1507,13 @@ def main():
         if source["delivered_in"] == "file":
             print("⚠ DELIVERY: this run's report is in work/report.md, not in its "
                   "final message. The scores below measure the REPORT; delivery "
-                  "is a separate, open defect.")
+                  "is a separate, SCORED axis — see `delivery` below.")
         # A run that hands the SAME report to both channels is scored once —
         # `deliverable.compose` is a union, not a concatenation. When the two
-        # channels genuinely disagree, both are scored and the disagreement is
-        # printed rather than resolved here: which half was "the report" is not a
-        # question a scorer may answer silently.
-        if dup["warning"]:
-            print("⚠ %s" % dup["warning"])
-        elif dup["relation"] in ("identical", "file-repeats-message",
-                                 "message-repeats-file"):
-            print("note: both channels carried the same report (%s, %d of %d "
-                  "file block(s) already in the message) — scored ONCE."
-                  % (dup["relation"], dup["shared_blocks"], dup["file_blocks"]))
+        # channels genuinely disagree, both are scored, the disagreement is a
+        # record field rather than a resolved question, and `render` prints it:
+        # which half was "the report" is not something a scorer may answer
+        # silently.
     else:
         sys.exit("give either --report or --ledger")
 
@@ -1211,7 +1538,7 @@ def main():
             raise last
 
     rec = score(raw_key, text, root, call, a.min_overlap, a.min_tokens,
-                a.require_quote)
+                a.require_quote, answer=answer, artifact=artifact)
     rec.update(source)
     rec["key"] = os.path.abspath(a.key)
     rec["label"] = a.label
