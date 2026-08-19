@@ -83,6 +83,66 @@ written at all: the kernel's SYN-flood mitigation on mon:15443 (**R11**, one lin
 `mon/syslog/kern.log.3.gz`) and contabo's archived nginx log recording every one of
 its 1,153 requests as coming from 127.0.0.1 (**R12**).
 
+THE SAME EVENT IN A SECOND RENDERING — COMPUTED, NOT ASSERTED (2026-08-19)
+--------------------------------------------------------------------------
+This corpus deliberately ships THREE text renderings of one journald stream per
+Linux host: `journal.short-iso`, `journal.json` and, on mon, an rsyslog tail of the
+same events in `syslog/syslog.tail`. A report that finds the right event and cites
+the wrong render of it has not made a mistake, and until today this key scored it as
+one.
+
+The first two derivations reached the other renders through `JOURNAL_MIRRORS`: an
+ASSERTED list of two filenames, re-scanned with a second hand-written regex,
+hard-wired to the prefix `contabo/journal/` and switched on for three findings. It
+was wrong in every direction the shape allows:
+
+  * it never covered `mon/` at all, so **R09** — the relay finding — shipped with
+    `mirror_files: []` and its only proof in `mon/syslog/syslog.tail`. The v22 arm
+    found R09 correctly, cited `mon/journal/journal.short-iso:23`, and scored a miss;
+  * its regexes were a SECOND definition of each finding and drifted from the first:
+    R03's mirror pattern matched 284 of the 334 records R03's own pattern counts;
+  * it anchored in `journal.export`, where `journalctl` writes ONE event as MANY
+    physical lines — so R05's 32 records became 64 "proof lines", and a citation
+    there addresses a field, not an event.
+
+It is replaced by `rendering_alternates_for`, IMPORTED from `build-answer-key-ait.py`
+where the rule already lives with its own tests. That rule COMPUTES the equivalence:
+the key is (second, host, `ident[pid]: message`), the one normalisation is timestamp
+PRECISION, and the loosening is paid for by an equal-multiplicity gate that refuses
+wherever two renders disagree how often a second held an event. `journal.export` is
+out of scope by construction rather than by argument, and it leaves the key.
+
+The import is deliberate. A copy of that function here would be a second
+implementation of a safety rule, and the two would drift exactly the way the mirror
+regexes drifted from the finding patterns they were supposed to mirror.
+
+AN ALTERNATE IS A CANDIDATE, NOT AN ENTITLEMENT
+------------------------------------------------
+A second rendering can only ADD proof locations, which is the one way this change
+could quietly weaken the instrument. So an alternate is admitted only if it passes
+the same three gates a primary passes — not in a file the checker refuses, not on a
+decoy's evidence, not on another finding's line — and every rejection is counted
+into the key rather than dropped silently.
+
+The decoy half of that gate is not theoretical. **D02** is the corpus's single
+successful authentication, the operator arriving over Tailscale, and the most
+tempting false positive this corpus offers. It is written into `mon/journal/` as
+well as into `mon/auth/auth.log` — `journal.short-iso:18552` and `journal.json:18603`
+— which are two of the three files R09's alternates land in. Nothing collided, and
+the reason that is a FACT rather than luck is that the rule is run over the DECOYS
+too and their rendered lines are claimed territory no finding may take. **D03**, the
+root shell that collected this corpus, renders nowhere at all: it has no second
+address, which is the property the negative control most needs. **D01** claims
+`mon/auth/auth.log` whole, so there is no line to map and the whole-file half of
+gate 2 is what protects it.
+
+Those rendered lines are used DEFENSIVELY and are not added to the decoys' own
+`proof_locations`. A rendering makes a decoy easier to cite, so adopting it would
+move the false-positive axis in the same commit that moves the findings axis, and
+two numbers that move together cannot be told apart. They are recorded in
+`derivation.rendering_equivalence.decoy_renderings` so the next derivation decides
+deliberately rather than rediscovers.
+
 The gate is also what fixed **D05**, whose anchor used to be `mon/utmp/btmp` itself:
 `citecheck.extract` only recognises `path:line`, so anchoring that decoy required
 citing a line inside a binary. `mon/utmp/btmp` is still binary under v20 — a real
@@ -104,6 +164,9 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 SHERLOCK = os.path.dirname(os.path.dirname(HERE))
 CITECHECK = os.path.join(SHERLOCK, "skills", "v20", "tools", "citecheck.py")
+# The rendering rule has ONE home, next door. Importing it rather than copying
+# it is the whole reason the mirror regexes could drift and this cannot.
+AIT_BUILDER = os.path.join(HERE, "build-answer-key-ait.py")
 
 
 def _load(name, path):
@@ -114,6 +177,8 @@ def _load(name, path):
 
 
 citecheck = _load("citecheck_v20", CITECHECK)
+ait = _load("build_answer_key_ait", AIT_BUILDER)
+rendering_alternates_for = ait.rendering_alternates_for
 
 # Tailscale's CGNAT block. Anything sourced here is the operator or the collector.
 TAILSCALE_RE = re.compile(r"\b100\.(?:6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.\d+\.\d+\b")
@@ -275,8 +340,6 @@ def cat_cmd(rels):
         return parts[0]
     return "{ " + "; ".join(parts) + "; }"
 
-JOURNAL_MIRRORS = ["journal.json", "journal.export"]
-
 
 def obs_R01(c):
     n, t, srcs = [], [], set()
@@ -366,7 +429,6 @@ def obs_R02(c):
         "why_args": (len(n), len(srcs), len(srcs6), len(dpts),
                      hours_between(iso_of(t[0]), iso_of(t[-1]))),
         "scan": [("contabo/journal/journal.short-iso", pat)],
-        "mirror": ("contabo/journal/", JOURNAL_MIRRORS, r"refused connection: IN="),
     }
 
 
@@ -401,8 +463,6 @@ def obs_R03(c):
         "why_args": (len(n), len(srcs), len(pen), len(acc), len(off)),
         "scan": [("contabo/journal/journal.short-iso", SSH_ATTEMPT_RE)],
         "drop_tailscale": True,
-        "mirror": ("contabo/journal/", JOURNAL_MIRRORS,
-                   r"(Invalid user |authenticating user )"),
     }
 
 
@@ -485,7 +545,6 @@ def obs_R05(c):
                 "postures, both verifiable by counting."),
         "why_args": (len(found), len(ips), len(n), len(unban)),
         "scan": [("contabo/journal/journal.short-iso", pat)],
-        "mirror": ("contabo/journal/", JOURNAL_MIRRORS, r"NOTICE \[sshd\] Ban "),
     }
 
 
@@ -853,7 +912,11 @@ def build(corpus, dataset, corpus_root, verify=True):
                      ", ".join(gz_ok) or "none"))
 
     # --- the decoys, authored; two of them get computed proof locations ----
+    # `decoy_lines` is what gate 2 reads. `decoy_owned` keeps the same lines with
+    # the decoy that owns each one, because the rendering rule below has to be run
+    # per decoy and its answer recorded per decoy.
     decoy_lines = collections.defaultdict(set)
+    decoy_owned = collections.defaultdict(list)
     for d in DECOYS:
         e = {"id": d["id"], "provenance": "authored",
              "title": d["title"], "difficulty": d["difficulty"],
@@ -872,6 +935,7 @@ def build(corpus, dataset, corpus_root, verify=True):
                                     for lo, hi in runs_of(nums)]
             for n in nums:
                 decoy_lines[rel].add(n)
+                decoy_owned[d["id"]].append((rel, n))
             checks.append("%s proof recomputed: %s -> %s"
                           % (d["id"], rel, ",".join(str(n) for n in nums)))
         else:
@@ -879,11 +943,60 @@ def build(corpus, dataset, corpus_root, verify=True):
             head, sep, tail = s.rpartition(":")
             if sep and tail.isdigit():
                 decoy_lines[head].add(int(tail))
+                decoy_owned[d["id"]].append((head, int(tail)))
             else:
                 decoy_lines[s].add(None)      # whole-file claim
         defects.append(e)
 
-    # --- the real findings, counted -----------------------------------------
+    # --- what each DECOY looks like in a second rendering --------------------
+    # Run BEFORE any finding is admitted, because the answer is claimed territory:
+    # a finding's alternate may not land on the journald copy of a decoy's line any
+    # more than on the line itself. One citation must never score as a finding AND
+    # a false positive, and «the same event in another file» is still one citation.
+    #
+    # The result is NOT added to the decoys' own proof_locations — see the module
+    # docstring. Defensive, not offensive.
+    rcache = {}
+    decoy_renderings = []
+    for d in DECOYS:
+        owned = decoy_owned.get(d["id"]) or []
+        rendered = set()
+        for rel, n in owned:
+            for other, ns in rendering_alternates_for(corpus, rel, [n],
+                                                      rcache).items():
+                for m in ns:
+                    rendered.add((other, m))
+                    decoy_lines[other].add(m)
+        if not owned:
+            why = ("a whole-file claim has no line to map, so the rule has nothing "
+                   "to say about it; the whole-file half of gate 2 is what keeps a "
+                   "finding out of this file")
+        elif rendered:
+            why = ("claimed territory: these lines are the same events as the "
+                   "decoy's own anchor, so no real finding may take them. They are "
+                   "NOT added to this decoy's proof_locations — a rendering makes a "
+                   "decoy easier to cite, and moving the false-positive axis in the "
+                   "same commit that moves the findings axis would make the two "
+                   "impossible to tell apart")
+        else:
+            why = ("no second rendering exists for this decoy's evidence, so there "
+                   "is no second address by which it can be reached")
+        decoy_renderings.append({
+            "id": d["id"],
+            "anchor": d["anchor"],
+            "rendered_at": ["%s:%d" % kv for kv in sorted(rendered)],
+            "treatment": why,
+        })
+        if rendered:
+            checks.append("%s renders in a second file: %s (claimed, not anchored)"
+                          % (d["id"], ", ".join("%s:%d" % kv
+                                                for kv in sorted(rendered))))
+
+    # --- the real findings, PASS 1: the primaries ---------------------------
+    # Two passes, because an alternate has to be checked against EVERY primary and
+    # not just the ones computed before it. In one pass R09's alternate would be
+    # gated against R01..R08's lines and never against R10..R12's.
+    computed = []
     for cid, fn in OBSERVABLES:
         o = fn(corpus)
         proof = collections.defaultdict(list)
@@ -894,18 +1007,6 @@ def build(corpus, dataset, corpus_root, verify=True):
             proof[rel].extend(nums)
         for rel, nums in (o.get("explicit_lines") or {}).items():
             proof[rel].extend(nums)
-        mirror_files = []
-        if o.get("mirror"):
-            prefix, names, mpat = o["mirror"]
-            for fn2 in names:
-                rel = prefix + fn2
-                if rel not in text_ok:
-                    checks.append("%s mirror SKIPPED (binary): %s" % (cid, rel))
-                    continue
-                nums, _ = scan(corpus, rel, mpat, o.get("drop_tailscale", False))
-                if nums:
-                    proof[rel].extend(nums)
-                    mirror_files.append(rel)
 
         # gate 1: no proof location may live in a file the CURRENT checker refuses
         # to read. The rule is unchanged; the notion of "binary" is the fixed one
@@ -915,7 +1016,9 @@ def build(corpus, dataset, corpus_root, verify=True):
                 raise RuntimeError("%s would anchor in %s, which citecheck.looks_"
                                    "binary rejects — no report can ever cite it"
                                    % (cid, rel))
-        # gate 2: a real finding may not stand on a decoy's evidence
+        # gate 2: a real finding may not stand on a decoy's evidence — nor on the
+        # second RENDERING of a decoy's evidence, which is the same event and
+        # therefore the same citation.
         for rel, nums in proof.items():
             dl = decoy_lines.get(rel)
             if dl is None:
@@ -945,8 +1048,61 @@ def build(corpus, dataset, corpus_root, verify=True):
                                    % (cid, o["command"], got, str(o["headline"])))
             checks.append("%s command verified: %s -> %s"
                           % (cid, o["command"], got))
+        computed.append((cid, o, proof, cmd_ok))
 
-        vals = tuple(v for v in o["counts"].values())
+    # --- the real findings, PASS 2: the same events in a second rendering ----
+    # A primary that fails a gate is a BUG and raises. An alternate that fails one
+    # is a MEASUREMENT: the rule proposed a location the key may not use, and the
+    # honest response is to drop it and count it. Nothing here may widen what a
+    # finding is allowed to stand on — gates 1, 2 and 3 are re-run per candidate
+    # line, against all twelve primaries and against the decoys' rendered lines.
+    rejected = collections.Counter()
+    for cid, o, proof, _cmd_ok in computed:
+        primary = {rel: sorted(set(ns)) for rel, ns in proof.items()}
+        alt = collections.defaultdict(list)
+        for rel in sorted(primary):
+            for other, ns in sorted(rendering_alternates_for(
+                    corpus, rel, primary[rel], rcache).items()):
+                if other not in text_ok:            # gate 1
+                    rejected["binary"] += len(ns)
+                    checks.append("%s rendering REFUSED (binary): %s, %d line(s)"
+                                  % (cid, other, len(ns)))
+                    continue
+                dl = decoy_lines.get(other)
+                keep = []
+                for n in ns:
+                    if dl is not None and (None in dl or n in dl):   # gate 2
+                        rejected["decoy"] += 1
+                        checks.append("%s rendering REFUSED (decoy): %s:%d"
+                                      % (cid, other, n))
+                        continue
+                    owner = claimed.get((other, n))                  # gate 3
+                    if owner:
+                        rejected["another_finding"] += 1
+                        checks.append("%s rendering REFUSED (%s already claims "
+                                      "it): %s:%d" % (cid, owner, other, n))
+                        continue
+                    keep.append(n)
+                    claimed[(other, n)] = cid
+                if keep:
+                    alt[other].extend(keep)
+        for rel, ns in alt.items():
+            proof[rel].extend(ns)
+        o["rendering_files"] = sorted(alt)
+        o["rendering_lines"] = sum(len(v) for v in alt.values())
+        if alt:
+            checks.append("%s second rendering: %s"
+                          % (cid, ", ".join("%s +%d line(s)" % (r, len(alt[r]))
+                                            for r in sorted(alt))))
+        else:
+            checks.append("%s second rendering: none — the corpus ships one "
+                          "readable rendering of this finding's stream" % cid)
+    checks.append("rendering alternates rejected: %s"
+                  % (", ".join("%s %d" % kv for kv in sorted(rejected.items()))
+                     or "none — every candidate passed all three gates"))
+
+    # --- the real findings, emitted -----------------------------------------
+    for cid, o, proof, cmd_ok in computed:
         locs = []
         for rel in sorted(proof):
             locs.extend({"file": rel, "line_start": lo, "line_end": hi}
@@ -957,20 +1113,24 @@ def build(corpus, dataset, corpus_root, verify=True):
             "verdict_half_means": CLAIM_HALVES[o["claim"]],
             "title": o["title"],
             "difficulty": "%d proof line(s) across %d file(s)"
-                          % (sum(len(v) for v in proof.values()), len(proof)),
+                          % (sum(len(set(v)) for v in proof.values()), len(proof)),
             "root_cause": o["why"] % o["why_args"],
             "counts": o["counts"],
             "command": o["command"],
             "command_output": str(o["headline"]),
             "command_verified": cmd_ok,
-            "mirror_files": mirror_files,
+            "rendering_files": o["rendering_files"],
+            "rendering_lines": o["rendering_lines"],
             "proof_rule": "maximal contiguous runs of the lines the finding's "
                           "proof pattern matches, same rule as "
-                          "build-answer-key-ait.py",
+                          "build-answer-key-ait.py, plus the SAME EVENTS in every "
+                          "other rendering of the stream that rendering_alternates_"
+                          "for computes and all three gates admit",
             "proof_note": o.get("proof_note"),
             "proof_locations": locs,
         })
-    return defects, checks
+    return defects, checks, {"rejected": dict(rejected),
+                             "decoy_renderings": decoy_renderings}
 
 
 SCENARIO = (
@@ -1021,7 +1181,7 @@ NOTES = (
 
 
 def key_of(corpus, dataset, corpus_root, verify=True):
-    defects, checks = build(corpus, dataset, corpus_root, verify)
+    defects, checks, rend = build(corpus, dataset, corpus_root, verify)
     real = [d for d in defects if d["provenance"] == "counted"]
     herr = [d for d in defects if d["provenance"] == "authored"]
     halves = collections.Counter(d["verdict_half"] for d in real)
@@ -1052,11 +1212,13 @@ def key_of(corpus, dataset, corpus_root, verify=True):
                               "All eight decoys are authored end to end; for the "
                               "twelve real findings the SELECTION and the wording are "
                               "authored and every number and line is counted",
-            "proof_rule": "maximal contiguous runs of matched lines, and for a "
-                          "journald stream the same records in journal.json and "
-                          "journal.export are added as mirror proof locations so "
-                          "anchoring does not depend on which encoding a report "
-                          "happened to read",
+            "proof_rule": "maximal contiguous runs of matched lines, plus the "
+                          "SAME EVENTS in every other rendering of that stream, so "
+                          "anchoring does not depend on which render of one "
+                          "journald stream a report happened to read. The second "
+                          "rendering is COMPUTED by rendering_alternates_for, not "
+                          "asserted as a list of filenames — see "
+                          "derivation.rendering_equivalence",
             "citecheck": {
                 "version": "v20",
                 "path": "skills/v20/tools/citecheck.py",
@@ -1080,10 +1242,70 @@ def key_of(corpus, dataset, corpus_root, verify=True):
                 "is still binary",
                 "no real finding may share a line, or a whole-file claim, with a "
                 "decoy — otherwise one citation scores as a finding and a false "
-                "positive at once",
+                "positive at once. Since 2026-08-19 this covers the second "
+                "RENDERING of a decoy's line as well: the journald copy of D02's "
+                "`Accepted publickey` is the same event and therefore the same "
+                "citation, so it is claimed territory too",
                 "no two real findings may share a line",
                 "every `command` is executed and must reproduce `command_output`",
             ],
+            "rendering_equivalence": {
+                "rule": "a finding also anchors on the SAME EVENTS wherever the "
+                        "corpus renders that stream into another readable file. "
+                        "The negative-control corpus ships three renderings of one "
+                        "journald stream per Linux host, and a report that finds "
+                        "the right event and cites the wrong render of it has not "
+                        "made a mistake",
+                "source": "rendering_alternates_for, imported from "
+                          "build-answer-key-ait.py — the rule has one home and its "
+                          "own tests. A copy here would be a second implementation "
+                          "of a safety rule and would drift",
+                "key": "(second, host, `ident[pid]: message`), all three required. "
+                       "The PID is kept: across machines it cannot match, but "
+                       "across renderings of one machine's stream it must, so "
+                       "keeping it is free strictness",
+                "normalisation": "timestamp PRECISION only — `journalctl -o "
+                                 "short-iso` prints seconds and rsyslog prints "
+                                 "microseconds, so precision is a property of the "
+                                 "RENDERING and not of the event. Timezone offsets "
+                                 "resolve to a UTC second for the same reason",
+                "multiplicity_gate": "a key maps only where both files agree how "
+                                     "many times it occurred in that second, and "
+                                     "then rank maps to rank. Where they disagree "
+                                     "the rule refuses and counts the refusal — "
+                                     "nothing is guessed. This is what pays for the "
+                                     "precision loosening",
+                "admission": "an alternate is a CANDIDATE, not an entitlement. Each "
+                             "candidate line is re-checked against all three gates "
+                             "— not in a file citecheck refuses, not on a decoy's "
+                             "line or on the second rendering of one, not on "
+                             "another finding's line — and dropped and counted if "
+                             "it fails. A primary that fails a gate is a bug and "
+                             "raises; an alternate that fails one is a measurement",
+                "rejected": {"binary": rend["rejected"].get("binary", 0),
+                             "decoy": rend["rejected"].get("decoy", 0),
+                             "another_finding":
+                                 rend["rejected"].get("another_finding", 0)},
+                "limitations": ait.RENDERING_LIMITATIONS,
+                "replaced": "JOURNAL_MIRRORS — an ASSERTED list of two filenames "
+                            "(journal.json, journal.export) re-scanned with a "
+                            "second hand-written regex and hard-wired to the prefix "
+                            "`contabo/journal/`. It never covered mon/ at all, so "
+                            "R09 shipped with `mirror_files: []` and the 2026-08-18 "
+                            "v22 arm found R09 correctly, cited "
+                            "mon/journal/journal.short-iso, and scored a miss. Its "
+                            "regexes were a second definition of each finding and "
+                            "drifted from the first (R03: 284 of 334 records), and "
+                            "it anchored in journal.export where one event is many "
+                            "physical lines (R05: 64 lines for 32 records)",
+                "decoy_renderings": rend["decoy_renderings"],
+                "decoys_are_not_anchored_there": "the decoys' rendered lines are "
+                    "used DEFENSIVELY and are not added to their proof_locations. A "
+                    "rendering makes a decoy easier to cite, so adopting it would "
+                    "move the false-positive axis in the same commit that moves the "
+                    "findings axis and the two could not be told apart. Recorded "
+                    "here so the next derivation decides rather than rediscovers",
+            },
             "operator_exclusion": "100.64.0.0/10 (Tailscale CGNAT). Every accepted "
                                   "authentication in this corpus comes from "
                                   "100.122.174.119 and is the operator or the "
