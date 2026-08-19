@@ -560,7 +560,7 @@ def _drop_table_headers(report, spans, rows):
     return [(i, t) for (i, t) in rows if i not in heads]
 
 
-def structure_of(report, by_rel, by_base):
+def structure_of(report, by_rel, by_base, checked=None):
     """The report's own structure, or a refusal that says why.
 
     FAIL LOUD: if the findings section is not there, this axis returns
@@ -581,6 +581,26 @@ def structure_of(report, by_rel, by_base):
           "rejections": None, "rejections_uncited": None,
           "uncited_rejections": [],
           "coverage_rows": None, "coverage_rows_uncited": None,
+          "v26_report_evidence": None, "v26_report_evidence_blocking": None,
+          "v26_attribution_missing": None, "v26_attribution_invalid": None,
+          "v26_attribution_duplicate_ids": None,
+          "v26_rejected_missing_section": None,
+          "v26_rejected_empty_section": None,
+          "v26_rejected_duplicate_ids": None,
+          "v26_rejected_missing_outcome": None,
+          "v26_rejected_invalid_outcome": None,
+          "v26_coverage_missing_section": None,
+          "v26_coverage_empty_section": None,
+          "v26_coverage_unsupported_no_address": None,
+          "v26_coverage_content_claim_in_no_address": None,
+          "v26_coverage_invalid_no_address_detail": None,
+          "v26_coverage_mismatched_citation": None,
+          "v26_coverage_traversal_path": None,
+          "v26_coverage_ambiguous_path": None,
+          "v26_coverage_missing_path": None,
+          "v26_coverage_false_empty": None,
+          "v26_coverage_false_binary": None,
+          "v26_coverage_duplicate_paths": None,
           "finding_ids": [], "sections": secs,
           "fields_parsed": False, "why_fields": None, "field_labels": 0,
           "field_spans": []}
@@ -644,6 +664,32 @@ def structure_of(report, by_rel, by_base):
             if not hit:
                 out.append((i, " ".join(text.split())[:160]))
         return out
+
+    ev = None
+    if checked is not None and hasattr(citecheck, "report_evidence"):
+        ev = citecheck.report_evidence(report, checked)
+        st["v26_report_evidence"] = ev
+        st["v26_report_evidence_blocking"] = ev.get("blocking")
+        st["v26_attribution_missing"] = len(ev["attribution"].get("missing") or [])
+        st["v26_attribution_invalid"] = len(ev["attribution"].get("invalid") or [])
+        st["v26_attribution_duplicate_ids"] = len(ev["attribution"].get("duplicate_ids") or [])
+        st["v26_rejected_missing_section"] = bool(ev["rejected"].get("missing_section"))
+        st["v26_rejected_empty_section"] = bool(ev["rejected"].get("empty_section"))
+        st["v26_rejected_duplicate_ids"] = len(ev["rejected"].get("duplicate_ids") or [])
+        st["v26_rejected_missing_outcome"] = len(ev["rejected"].get("missing_outcome") or [])
+        st["v26_rejected_invalid_outcome"] = len(ev["rejected"].get("invalid_outcome") or [])
+        st["v26_coverage_missing_section"] = bool(ev["coverage"].get("missing_section"))
+        st["v26_coverage_empty_section"] = bool(ev["coverage"].get("empty_section"))
+        st["v26_coverage_unsupported_no_address"] = len(ev["coverage"].get("unsupported_no_address") or [])
+        st["v26_coverage_content_claim_in_no_address"] = len(ev["coverage"].get("content_claim_in_no_address") or [])
+        st["v26_coverage_invalid_no_address_detail"] = len(ev["coverage"].get("invalid_no_address_detail") or [])
+        st["v26_coverage_mismatched_citation"] = len(ev["coverage"].get("mismatched_citation") or [])
+        st["v26_coverage_traversal_path"] = len(ev["coverage"].get("traversal_path") or [])
+        st["v26_coverage_ambiguous_path"] = len(ev["coverage"].get("ambiguous_path") or [])
+        st["v26_coverage_missing_path"] = len(ev["coverage"].get("missing_path") or [])
+        st["v26_coverage_false_empty"] = len(ev["coverage"].get("false_empty") or [])
+        st["v26_coverage_false_binary"] = len(ev["coverage"].get("false_binary") or [])
+        st["v26_coverage_duplicate_paths"] = len(ev["coverage"].get("duplicate_paths") or [])
 
     if rejs:
         rows = items_in(report, st["rejected_spans"])
@@ -1044,7 +1090,8 @@ def findings_of(key, report, root):
     cited = cited_spans(report, root)
     spans = cited["spans"]
 
-    st = structure_of(report, cited["by_rel"], cited["by_base"])
+    checked = citecheck.check(report, root, require_quote=True)
+    st = structure_of(report, cited["by_rel"], cited["by_base"], checked)
     parsed = st["parsed"]
     oc = outcome_structure_of(report)
     # The join needs BOTH parses: which `Н-n` block owns the citation (v24's) and

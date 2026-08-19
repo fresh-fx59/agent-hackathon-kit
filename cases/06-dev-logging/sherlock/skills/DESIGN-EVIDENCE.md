@@ -970,3 +970,57 @@ to open **no** block at all, the ledger prints «находок без стро�
 this report» rather than as a passing report. Widening the separator set is the
 wrong reflex: `:` and `—` are exactly the characters a wrapped sentence uses,
 which is how the phantom got in.
+
+## E30 — каждое наблюдение остаётся проверяемым
+
+**Rule in the source.** v26 keeps the v25 `Н-n ·` finding-head grammar and the v24
+`исход: успех|попытка|норма` owner in `citecheck.py`, then extends the same owner
+instead of adding a second parser:
+
+* each finding carries exactly one closed attribution line,
+  `атрибуция: установлена|не установлена`;
+* each rejected candidate is a `К-n ·` block with exactly one `исход:` and at least
+  one `path:line` citation with a quote;
+* each coverage table row is parseable as `path | status | detail`; observed facts
+  require a quoted `path:line` from the same uniquely resolved path, while explicit
+  no-address statuses (`пусто`, `двоичный`, `нечитабельно`, `не смотрел`) may state
+  only an access limitation for a real uniquely resolved path;
+* `score-report.py` reads the current citecheck's `report_evidence` structure for
+  the new v26 counts while leaving the older historical score fields in place.
+
+**Synthetic tests 2026-08-19 (v26).** `test_report_evidence_v26.py` fixes the
+regressions this version is meant to prevent: false positives are separated from
+refutations by `исход`, unattributed observations stay in findings instead of
+being demoted, uncited rejected/coverage observations fail, a no-address coverage
+row cannot smuggle a content claim, and a coverage row cannot borrow another
+file's citation or invent its own path/status.
+
+**Receipt gate.** v26 receipt rows in `rules.tsv` have exactly five columns; the
+fifth is the closed decision `правило|кандидат`. `кандидат` fails the gate and tells the analyst to
+reclassify that worklist row as a finding, including when the receipt was not
+among the demanded rows. Every parsed receipt is accounted for: unknown rules,
+unknown rows, rows outside the rule coverage, wrong addresses, bad quotes and
+duplicate `rule+row` receipts all surface in text and JSON.
+
+**Closed report sections.** The documented nonempty rejected-candidate and coverage
+sections are now enforced by `report_evidence`. Finding blocks stop at the next
+real section boundary, so a valid final finding no longer swallows a following
+`К-n` outcome. Duplicate `К-n` ids fail closed because the candidate being
+refuted would otherwise be ambiguous.
+
+**No-address coverage.** The no-address branch no longer guesses from a blacklist of
+content words. It accepts only one whole-cell positive access-limit token documented
+in `reference/report-format.md` (`байт=0`, `формат=двоичный`, `ошибка=<код>`,
+`причина=<закрытая причина>`), so free prose such as a content-is-normal conclusion
+fails closed. It also resolves the row path, checks `пусто` against byte size and
+`двоичный` against the same binary probe that protects citations; traversal,
+ambiguity, missing paths and duplicate coverage paths are visible failures.
+
+**Delivery.** `--delivered` now gates on the delivered text's full v26
+`report_evidence`, not only legacy citation/outcome checks, and renders the same
+human diagnostic in the `ПОСТАВКА` block.
+
+**Leak correction.** v25 is left byte-for-byte historical evidence, but the current
+v26 skill replaces the old domain-shaped example phrase with neutral language.
+The v26 source-integrity tripwire forbids current shipped arms from reintroducing
+that phrase without banning broad security vocabulary used by legitimate guidance.
