@@ -99,6 +99,19 @@ EVIDENCE = os.path.join(SKILLS, "DESIGN-EVIDENCE.md")
 UNDER_TEST = os.environ.get("SHERLOCK_SKILL", V20)
 
 
+def arm_version(path):
+    m = re.match(r"^v(\d+)$", os.path.basename(os.path.normpath(path)))
+    return int(m.group(1)) if m else 0
+
+
+def current_arms_at_least(n):
+    out = []
+    for arm in sorted(glob.glob(os.path.join(SKILLS, "v*"))):
+        if os.path.isdir(arm) and arm_version(arm) >= n:
+            out.append(arm)
+    return out
+
+
 def load_module(path, name):
     spec = importlib.util.spec_from_file_location(name, path)
     mod = importlib.util.module_from_spec(spec)
@@ -383,9 +396,11 @@ class TheEvidenceWasRelocatedNotDeleted(unittest.TestCase):
         self.assertEqual(set(), want - have,
                          "the source points at sections that do not exist: %s"
                          % sorted(want - have))
-        self.assertEqual(set(), have - want,
-                         "the document holds sections nothing points at: %s"
-                         % sorted(have - want))
+        max_e = arm_version(UNDER_TEST)
+        future = {e for e in have if int(e[1:]) > max_e}
+        self.assertEqual(set(), (have - future) - want,
+                         "the document holds sections for this arm that nothing points at: %s"
+                         % sorted((have - future) - want))
 
     @staticmethod
     def _flat(text):
@@ -409,6 +424,27 @@ class TheEvidenceWasRelocatedNotDeleted(unittest.TestCase):
                 if not re.search(r"\b2026-\d{2}-\d{2}\b", s)]
         self.assertEqual([], thin,
                          "sections with no date: %s" % thin)
+
+
+class CurrentArmCarriesNoObservedSemanticHints(unittest.TestCase):
+    """v26 and later may describe the rule generically, but not ship the old
+    domain-shaped phrase that taught the model a solved-looking conclusion."""
+
+    SEMANTIC_HINTS = ("Штатный резолвинг", "штатный резолвинг")
+
+    def test_current_arms_do_not_reintroduce_the_v25_hint_phrase(self):
+        arms = current_arms_at_least(26)
+        if not arms:
+            self.skipTest("no v26+ arm in this checkout")
+        hits = []
+        for arm in arms:
+            for ch, rel, text in channels(arm):
+                for hint in self.SEMANTIC_HINTS:
+                    if hint in text:
+                        hits.append((os.path.basename(arm), ch, rel, hint))
+        self.assertEqual([], hits,
+                         "current shipped arms carry the v25 semantic hint phrase: %s"
+                         % hits)
 
 
 class NoDocstringIsEmitted(unittest.TestCase):
