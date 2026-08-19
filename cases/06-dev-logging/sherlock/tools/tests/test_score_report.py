@@ -2561,20 +2561,24 @@ class TestOutcomeHealthIsADeliveryFact(unittest.TestCase):
         self.assertTrue(rec["outcomes"]["measured"])
 
 
-class TestTheBlockParseIsCitechecksWarts(unittest.TestCase):
-    """A CHARACTERISATION, not an endorsement — and deliberately not fixed here.
+class TestTheBlockParseIsCitechecks(unittest.TestCase):
+    """The scorer inherits where a finding starts — it never re-decides it.
 
-    `citecheck.FINDING_HEAD_RE` matches any line that STARTS with `Н-n`, with no
-    heading marker required. `work/report.md` is hard-wrapped and the final
-    message is not, so a wrapped cross-reference — «… событие —\nН-3: `ppid=1`,
-    …» — starts a line and reads as a thirteenth finding block. Measured on the
-    fleet v16 arm: the message parses 12 blocks and the file 13, and the extra
-    one is that sentence.
+    Until `skills/v25` this class was `TestTheBlockParseIsCitechecksWarts` and
+    pinned the opposite behaviour: `citecheck.FINDING_HEAD_RE` matched any line
+    that STARTED with `Н-n` and required no heading marker at all. A hand-over
+    written to a file is hard-wrapped and the same report in the final message
+    is not, so a wrapped cross-reference — «… событие —\nН-3: `ppid=1`, …» —
+    started a line and read as one more finding block in one channel and not in
+    the other. Measured on the fleet arm: 12 blocks in the message, 13 in the
+    file, the thirteenth being that sentence.
 
-    It matters here because a phantom block has no outcome line and therefore
-    inflates `outcome_missing`. It is pinned rather than worked around: the parse
-    lives in `skills/**`, one place decides where a finding starts, and a second
-    copy of that rule inside the scorer would be a second, incomparable scale.
+    It was pinned rather than worked around because the parse lives in
+    `skills/**` — one place decides where a finding starts, and a second copy of
+    that rule inside the scorer would be a second, incomparable scale. v25 fixed
+    it there, by requiring what `reference/report-format.md` always prescribed:
+    `Н-n · заголовок`, the interpunct and a title. This class now holds the
+    fixed behaviour in place from the scorer's side.
     """
 
     def setUp(self):
@@ -2583,23 +2587,40 @@ class TestTheBlockParseIsCitechecksWarts(unittest.TestCase):
                                 "app/b.log": numbered(50),
                                 "app/c.log": numbered(50)})
 
-    def test_a_wrapped_cross_reference_reads_as_a_finding_block(self):
-        rep = OUTCOME_REPORT.replace(
+    def _wrapped(self):
+        return OUTCOME_REPORT.replace(
             "## 2. Отклонённые кандидаты",
             "Тот же процесс описан выше, событие —\n"
             "Н-3: `ppid=1`, соседние остановки юнитов.\n\n"
             "## 2. Отклонённые кандидаты")
+
+    def _outcomes(self, rep):
         key = key_with([defect("D01", "real", [loc("app/a.log", 10)])])
         with redirect_stdout(io.StringIO()):
             rec = S.score(key, rep, self.tmp, call=None)
-        o = rec["outcomes"]
-        self.assertEqual(o["finding_blocks"], 5,
-                         "four real blocks plus the wrapped reference")
-        self.assertEqual(o["outcome_missing"], 2,
-                         "Н-4 forgot its line; the phantom never had one")
-        self.assertTrue(o["measured"],
-                        "the join still opens — one phantom block does not "
-                        "delete an axis three real blocks support")
+        return rec["outcomes"]
+
+    def test_a_wrapped_cross_reference_does_not_read_as_a_finding_block(self):
+        o = self._outcomes(self._wrapped())
+        self.assertEqual(o["finding_blocks"], 4,
+                         "four real blocks; the wrapped reference is a sentence")
+        self.assertEqual(o["outcome_missing"], 1,
+                         "Н-4 forgot its line, and it is the only one")
+        self.assertTrue(o["measured"])
+
+    def test_wrapping_the_report_moves_no_outcome_number(self):
+        """The tripwire: the same report through two channels is one report."""
+        flat, wrapped = self._outcomes(OUTCOME_REPORT), self._outcomes(self._wrapped())
+        for field in ("finding_blocks", "outcomes_stated", "outcome_missing",
+                      "outcome_invalid", "implied_verdict"):
+            self.assertEqual(flat[field], wrapped[field],
+                             "%s moved when the report was wrapped" % field)
+
+    def test_the_scorer_reads_the_count_citecheck_reads(self):
+        rep = self._wrapped()
+        self.assertEqual(self._outcomes(rep)["finding_blocks"],
+                         len(S.citecheck.finding_blocks(rep)),
+                         "the scorer must not fork the block parse")
 
 
 class TestTheOutcomeAxisOnTheRealReports(unittest.TestCase):
