@@ -1024,3 +1024,37 @@ human diagnostic in the `ПОСТАВКА` block.
 v26 skill replaces the old domain-shaped example phrase with neutral language.
 The v26 source-integrity tripwire forbids current shipped arms from reintroducing
 that phrase without banning broad security vocabulary used by legitimate guidance.
+
+## E31 — the stop boundary is not a model-memory boundary
+
+**Rule in the source.** v27 puts a short state machine at the top of `SKILL.md`:
+MAP → TRIAGE → DRAFT → VERIFY → DELIVER. It names the exact files and commands,
+defers `reference/report-format.md` until DRAFT, standardizes the checked artifact
+as `work/report.md`, and ships an optional Qwen Code Stop hook that blocks only an
+active Sherlock run whose marker was written by a successful map.
+
+**Observed target failure 2026-08-19 (v26, Qwen Code 0.21.1 + deepseek-v4-flash,
+blind BlueSky corpus).** Qwen invoked the Sherlock skill first, read all 582
+`SKILL.md` lines plus `report-format.md` and `tools.md`, ran v26 `logmap`, and
+read `map.txt` plus `worklist.tsv`. It never read `axis3.tsv`, never updated a
+worklist verdict, never invoked `triagecheck` or `citecheck`, never wrote
+`rules.tsv`, and never wrote `report.md`. It then returned a narrative directly.
+The deterministic score had the compromised verdict and 7/11 anchors, but the v26
+structure was unmeasurable and only 20/68 citations verified. The root cause is
+not a missing instruction; it is that long-horizon instruction compliance is not a
+safe boundary for the deployment model.
+
+**Why the hook is optional enforcement, not a hard dependency.** R1 still wins:
+hooks disabled, unsupported, denied by policy, or failing to run cannot be the
+happy path's single point of failure. The prose state machine remains complete and
+useful on its own. The hook only observes local state (`.sherlock/active.json`,
+`work/worklist*.tsv`, `work/rules.tsv`, `work/report.md`) and re-runs the shipped
+stdlib checkers with argv arrays; it never parses corpus content as code and never
+requires an MCP server, service, install step, credential, model choice, or network
+call. The marker records the current mode and exact worklist manifest, so a reused
+`work/` directory cannot make stale `hosts.tsv` choose the stop path. Multi-host
+worklists are composed into one temporary ledger and checked once by `triagecheck`
+and once by `citecheck`; the Stop hook keeps its own total child-process budget
+below the Qwen default hook timeout instead of multiplying a timeout by host count.
+Passing the hook retires the marker so unrelated later turns are not blocked; a new
+successful `logmap` run reactivates enforcement for the next investigation.
