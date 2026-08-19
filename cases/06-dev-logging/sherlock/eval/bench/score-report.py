@@ -388,6 +388,41 @@ ITEM_RE = re.compile(r"^(?:[ \t]{0,3}(?:[-*+]|\d+[.)])[ \t]+|\*\*|\|)")
 FINDING_ID_RE = re.compile(r"[НH]-\s?(\d{1,3})")
 TABLE_SEP_RE = re.compile(r"^\s*\|?[\s:|-]+\|[\s:|-]*$")
 
+# --------------------------------------------------------------------------
+# WHERE INSIDE A FINDING — «Улики» vs «Чем опровергал», the split that separates
+# a false positive from an investigation.
+# --------------------------------------------------------------------------
+# `presented` says a decoy's proof sits inside «Находки». It cannot say whether
+# the report entered it as an INCIDENT or named it and refuted it in the same
+# breath, and those are different failures — the field benchmark this project
+# measures against (OpenSec: 100 % containment, 92.5 % false-positive rate)
+# counts only the first. A red herring that is silently ignored is also
+# indistinguishable from one that was never seen, so «named and refuted» may be
+# the correct behaviour rather than a defect.
+#
+# `reference/report-format.md` is byte-identical across v16, v19 and v22 and
+# mandates NO per-finding outcome field — so there is nothing cheaper to read.
+# What it does mandate is a fixed field ORDER inside every finding block, and two
+# of those fields have opposite polarity:
+#
+#     «улики»          — the evidence FOR this finding
+#     «чем опровергал» — the check that would have KILLED it, and what it returned
+#
+# So the split is read one level below the section parse above: which mandated
+# field is this citation under. Parsing, not judgement, and it costs nothing.
+#
+# The asymmetry is deliberate. REFUTED is the narrow half and must be earned: the
+# citation has to sit under «Чем опровергал». Everything else inside «Находки» —
+# «Улики», any other mandated field, or no label at all — counts as ASSERTED,
+# because a citation inside a finding block that is not in the refutation field
+# is evidence for that finding. Erring the other way would let an unparsed block
+# launder a false positive into a refutation.
+FIELD_LABEL_RE = re.compile(
+    r"^[ \t]{0,3}(?:[-*+][ \t]+)?\*{0,2}[ \t]*"
+    r"(улики|чем опроверг\w*|что сломано|корневая причина|что делать сейчас|"
+    r"правка)\b", re.I)
+FIELD_KIND = {"улики": "evidence"}
+
 
 def sections(report):
     """[{level, title, lineno, body_from, body_to}] over every ATX heading.
@@ -493,7 +528,9 @@ def structure_of(report, by_rel, by_base):
           "rejections": None, "rejections_uncited": None,
           "uncited_rejections": [],
           "coverage_rows": None, "coverage_rows_uncited": None,
-          "finding_ids": [], "sections": secs}
+          "finding_ids": [], "sections": secs,
+          "fields_parsed": False, "why_fields": None, "field_labels": 0,
+          "field_spans": []}
     if not finds:
         st["why"] = ("no findings section: none of the %d heading(s) matches "
                      "/находк|finding/ — saw %s. The structural assertion axis "
@@ -502,6 +539,30 @@ def structure_of(report, by_rel, by_base):
                                              for s in secs[:8]) or "no headings"))
         return st
     st["parsed"] = True
+
+    # --- the per-finding field parse, one level below the section parse ---
+    spans = fields_of(report, secs)
+    st["field_spans"] = spans
+    st["field_labels"] = len(spans)
+
+    def _in_findings(lo):
+        return any(a <= lo < b for (a, b) in st["findings_spans"])
+
+    kinds = {k for (lo, _hi, k) in spans if _in_findings(lo)}
+    if "evidence" in kinds and "refutation" in kinds:
+        st["fields_parsed"] = True
+    else:
+        missing = [n for n, k in (("«улики»", "evidence"),
+                                  ("«чем опровергал»", "refutation"))
+                   if k not in kinds]
+        st["why_fields"] = (
+            "the findings section carries no %s field label (%d mandated label(s) "
+            "found in the whole report). `report-format.md` mandates both, and "
+            "without the refutation field a decoy cited under a finding cannot be "
+            "told apart from one the report named and killed. The split is None, "
+            "NOT 0 — scoring 0 refutations here would be a claim about the report "
+            "instead of about the parse."
+            % (" and no ".join(missing), len(spans)))
 
     # Every finding id this report actually gave a heading to.
     finding_ids = set()
@@ -553,6 +614,54 @@ def structure_of(report, by_rel, by_base):
     return st
 
 
+def fields_of(report, secs):
+    """[(lo, hi, kind)] — every mandated per-finding field label, SCOPED.
+
+    A field runs from its label line to the next label line or to the end of the
+    heading section that owns it, whichever comes first. The scoping is
+    load-bearing: without it «Что делать сейчас», the last label of the first
+    finding, claims every citation in every later section of the report — the
+    verdict included — and the split becomes a fact about the parse.
+
+    Labels inside a fenced block are sample text, exactly as for headings.
+    """
+    lines = report.splitlines()
+    fence, marks = None, []
+    for i, line in enumerate(lines, 1):
+        m = FENCE_RE.match(line)
+        if m:
+            fence = None if fence else m.group(1)
+            continue
+        if fence:
+            continue
+        f = FIELD_LABEL_RE.match(line)
+        if f:
+            name = f.group(1).lower()
+            kind = ("refutation" if name.startswith("чем опроверг")
+                    else FIELD_KIND.get(name, "other"))
+            marks.append((i, kind))
+    out = []
+    for j, (i, kind) in enumerate(marks):
+        owner = None
+        for sec in secs:
+            if sec["body_from"] <= i < sec["body_to"]:
+                if owner is None or sec["level"] >= owner["level"]:
+                    owner = sec
+        end = owner["body_to"] if owner else len(lines) + 1
+        if j + 1 < len(marks):
+            end = min(end, marks[j + 1][0])
+        out.append((i, end, kind))
+    return out
+
+
+def field_of(st, lineno):
+    """evidence | refutation | other — which mandated field owns this line."""
+    for (lo, hi, kind) in st.get("field_spans") or []:
+        if lo <= lineno < hi:
+            return kind
+    return None
+
+
 def zone_of(st, lineno):
     """findings | rejected | other — where in the report this citation sits."""
     if not st.get("parsed"):
@@ -587,14 +696,14 @@ def _overlaps(span, plo, phi):
 
 
 def anchor_zones(placed, proofs, st):
-    """-> (zones, headings) for every citation of this defect's proof.
+    """-> (zones, headings, fields) for every citation of this defect's proof.
 
     Same overlap arithmetic as `anchor_hits`, carrying WHERE in the report the
     citation was written. A defect can be both presented and dismissed — a report
     that names it as a finding and also argues a piece of it away — and both are
     recorded rather than one overwriting the other.
     """
-    zones, heads = set(), []
+    zones, heads, fields = set(), [], set()
     for (f, plo, phi) in proofs:
         for c in placed:
             if c["rel"] != f:
@@ -604,10 +713,30 @@ def anchor_zones(placed, proofs, st):
             z = zone_of(st, c["lineno"])
             if z:
                 zones.add(z)
+            if z == "findings":
+                fields.add(field_of(st, c["lineno"]))
             h = heading_of(st, c["lineno"])
             if h and h not in heads:
                 heads.append(h)
-    return sorted(zones), heads
+    return sorted(zones), heads, fields
+
+
+def disposition_of(zones, fields, anchored, st):
+    """asserted | refuted | dismissed | elsewhere | None — what the report DID
+    with this defect, read off its own structure.
+
+    None means unreadable, never «nothing»: the defect was not anchored at all,
+    or the report wrote no mandated field labels to read the polarity from.
+    """
+    if not anchored:
+        return None
+    if "findings" in zones:
+        if not st.get("fields_parsed"):
+            return None
+        return "refuted" if fields == {"refutation"} else "asserted"
+    if "rejected" in zones:
+        return "dismissed"
+    return "elsewhere"
 
 
 def anchor_hits(spans, proofs):
@@ -661,6 +790,7 @@ def score(raw_key, report, root, call=None, min_overlap=0.34, min_tokens=3,
     anchored = anchorable = decoys_anchored = decoys = 0
     presented = dismissed = outside = 0
     decoys_presented = decoys_dismissed = 0
+    decoys_asserted_incident = decoys_refuted = decoys_elsewhere = 0
     for cid in sorted(key):
         d = dict(key[cid])
         d.setdefault("case_id", cid)
@@ -672,8 +802,10 @@ def score(raw_key, report, root, call=None, min_overlap=0.34, min_tokens=3,
         n_alt = len(_spans_of(d.get("alternate_proof_locations")))
         hits = anchor_hits(spans, proofs) if proofs else 0
         is_anchored = bool(proofs) and hits > 0
-        zones, heads = (anchor_zones(cited["placed"], proofs, st)
-                        if (proofs and parsed) else ([], []))
+        zones, heads, fields = (anchor_zones(cited["placed"], proofs, st)
+                                if (proofs and parsed) else ([], [], set()))
+        disp = (disposition_of(zones, fields, bool(proofs) and hits > 0, st)
+                if parsed else None)
         is_presented = ("findings" in zones) if parsed else None
         is_dismissed = (bool(zones) and "findings" not in zones
                         and "rejected" in zones) if parsed else None
@@ -685,6 +817,8 @@ def score(raw_key, report, root, call=None, min_overlap=0.34, min_tokens=3,
                     "anchored": is_anchored, "anchor_hits": hits,
                     "presented": is_presented, "dismissed": is_dismissed,
                     "anchored_zones": zones, "anchored_headings": heads,
+                    "anchored_fields": sorted(f for f in fields if f),
+                    "disposition": disp,
                     "asserted": None, "why": None}
         if herring:
             decoys += 1
@@ -692,6 +826,9 @@ def score(raw_key, report, root, call=None, min_overlap=0.34, min_tokens=3,
             if parsed:
                 decoys_presented += 1 if is_presented else 0
                 decoys_dismissed += 1 if is_dismissed else 0
+                decoys_asserted_incident += 1 if disp == "asserted" else 0
+                decoys_refuted += 1 if disp == "refuted" else 0
+                decoys_elsewhere += 1 if disp == "elsewhere" else 0
             continue
         if not proofs:
             unanchorable.append(cid)
@@ -756,6 +893,31 @@ def score(raw_key, report, root, call=None, min_overlap=0.34, min_tokens=3,
         "decoys_presented": decoys_presented if parsed else None,
         "decoys_dismissed": ((decoys_dismissed if st["rejected_spans"] else None)
                              if parsed else None),
+        # THE SPLIT OF `decoys_presented`, never a replacement for it. A decoy
+        # cited under «Улики» of a finding was entered in the findings register
+        # as an incident — the failure OpenSec's 92.5 % measures. A decoy cited
+        # only under the mandated «Чем опровергал» field was named and killed in
+        # the same breath, which is not that failure. Both are None — never 0 —
+        # when the report writes no mandated field labels to read.
+        "decoys_asserted_as_incident": (decoys_asserted_incident
+                                        if (parsed and st["fields_parsed"])
+                                        else None),
+        "decoys_presented_refuted": (decoys_refuted
+                                     if (parsed and st["fields_parsed"])
+                                     else None),
+        # The third outcome, which is neither half and is the GOOD one: the
+        # report anchored the decoy somewhere that claims nothing — a verdict, a
+        # coverage row, a register — and never filed it as a finding. The
+        # negative control's D03 (our own evidence collector) is this shape.
+        "decoys_anchored_elsewhere": decoys_elsewhere if parsed else None,
+        # `rejections_uncited` is rising as the skill closes more rows by rule
+        # (AIT v16 0/7 → v19 2/11 → v22 6/10) and the v22 Linux arm's sharpest
+        # loss sits in that gap. Top-level, beside `anchored`, not buried in
+        # `structure` where a reader has to go looking.
+        "rejections": st["rejections"],
+        "rejections_uncited": st["rejections_uncited"],
+        "coverage_rows": st["coverage_rows"],
+        "coverage_rows_uncited": st["coverage_rows_uncited"],
         "unanchorable": unanchorable,
         "proof_files_absent_from_corpus": sorted(missing_proof_files),
         "ambiguous_citations": len(cited["ambiguous"]),
@@ -827,14 +989,41 @@ def render(rec, cited):
           "asserted %s / %d   ← false positives, never in the numerator above"
           % (rec["decoys_anchored"], rec["decoys"], dp, rec["decoys"], dd,
              da, rec["decoys"]))
+    # The split of `decoys_presented`: reporting a benign thing AS AN INCIDENT is
+    # the failure the field measures; naming it and refuting it in the same
+    # breath is not, and a red herring that is silently ignored is
+    # indistinguishable from one that was never seen.
+    if rec["decoys_asserted_as_incident"] is None:
+        print("            of the presented: — asserted as incident · — with "
+              "refutation   ← NOT MEASURED (None, not 0)")
+        if st.get("why_fields"):
+            print("            %s" % st["why_fields"])
+    else:
+        print("            of the presented: %d asserted as incident (cited "
+              "under «Улики» of a finding) · %d presented with refutation "
+              "(cited only under «Чем опровергал»)"
+              % (rec["decoys_asserted_as_incident"],
+                 rec["decoys_presented_refuted"]))
+    if rec["decoys_anchored_elsewhere"] is not None:
+        print("            %d anchored elsewhere — verdict/coverage/register, "
+              "claimed by no finding and refuted by no rejection"
+              % rec["decoys_anchored_elsewhere"])
+    # THE UNCITED-DISPOSAL HEADLINE. Both counts, side by side, never summed: one
+    # is a rejected candidate nobody can check, the other is a whole file closed
+    # in a coverage row nobody can check, and the v22 Linux arm lost a whole
+    # exfiltration in the second kind.
+    def _un(n, d, what):
+        if d is None:
+            return "%s — / — (NOT MEASURED: no such section; None, not 0)" % what
+        pct = ("%.0f %%" % (100.0 * n / d)) if d else "—"
+        return "%s %d / %d (%s)" % (what, n, d, pct)
+    print("uncited   : %s · %s   ← a disposal nobody can check is not a judgement"
+          % (_un(st["rejections_uncited"], st["rejections"], "rejections"),
+             _un(st["coverage_rows_uncited"], st["coverage_rows"],
+                 "coverage rows")))
     if st["rejections"] is not None:
-        print("rejections: %d in «%s» — %d carry NO citation at all"
-              % (st["rejections"], (st["rejected_sections"] or ["—"])[0][:34],
-                 st["rejections_uncited"]))
-    if st["coverage_rows"] is not None:
-        print("            coverage rows %d — %d carry no citation (own count, "
-              "never merged with the above)"
-              % (st["coverage_rows"], st["coverage_rows_uncited"]))
+        print("            rejections read from «%s»"
+              % (st["rejected_sections"] or ["—"])[0][:34])
 
     s = rec["citecheck"]
     vp = "—" if s.get("verified_pct") is None else "%.1f %%" % s["verified_pct"]
@@ -884,8 +1073,9 @@ def render(rec, cited):
                  ", ".join(rec["proof_files_absent_from_corpus"][:6])))
 
     print()
-    print("%-5s %-6s %-9s %-10s %-9s %s"
-          % ("id", "kind", "anchored", "presented", "asserted", "title"))
+    print("%-5s %-6s %-9s %-10s %-9s %-11s %s"
+          % ("id", "kind", "anchored", "presented", "asserted", "disposition",
+             "title"))
     for r in rec["per_defect"]:
         kind = "DECOY" if r["herring"] else "real"
         if not r["anchorable"]:
@@ -906,8 +1096,11 @@ def render(rec, cited):
         asr = "—" if r["asserted"] is None else ("✓" if r["asserted"] else "·")
         if r["herring"] and r["asserted"]:
             asr = "✗ FP"
-        print("%-5s %-6s %-9s %-10s %-9s %s"
-              % (r["defect"], kind, anc, pre, asr, r["title"][:52]))
+        disp = r.get("disposition") or "—"
+        if r["herring"] and disp == "asserted":
+            disp = "✗ asserted"
+        print("%-5s %-6s %-9s %-10s %-9s %-11s %s"
+              % (r["defect"], kind, anc, pre, asr, disp, r["title"][:44]))
     # the D09 shape, printed rather than judged: WHERE each anchor landed.
     shown = [r for r in rec["per_defect"] if r.get("anchored_headings")]
     if shown:

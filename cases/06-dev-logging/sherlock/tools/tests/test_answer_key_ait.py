@@ -397,5 +397,253 @@ class TheAlternatesAreTrueOfTheCORPUS(unittest.TestCase):
         self.assertEqual(checked, 17637)
 
 
+
+# --------------------------------------------------------------------------
+# THE SAME EVENT IN A SECOND RENDERING
+# --------------------------------------------------------------------------
+# The cross-host rule above credits the OTHER MACHINE's copy of a labelled line.
+# The negative control exposed the other half of the same unfairness: one machine
+# writing one stream into SEVERAL FILES. `sherlock-cyber-fleet` ships three text
+# renderings of one journald stream — `mon/journal/journal.short-iso`,
+# `mon/journal/journal.json` and `mon/syslog/syslog.tail` — and the v22 arm made
+# finding R09 correctly while citing the journald render, against a key whose
+# proof lives in the syslog render. Right event, wrong file.
+#
+# The discipline is the one that made the cross-host fix safe, held verbatim:
+# COMPUTE the equivalence, never assert it. Two lines are the same event only if
+# the second they carry, the host they name and their message body all match. The
+# ONE normalisation is timestamp PRECISION — `journalctl -o short-iso` prints
+# seconds and rsyslog prints microseconds, so precision is a property of the
+# rendering, not of the event — and the equal-multiplicity gate is what keeps
+# that loosening tight: a key is mapped only where BOTH files agree how many
+# times it occurred in that second.
+#
+# The PID is NOT stripped here, and that is the difference from the cross-host
+# rule. Across machines a PID cannot match by construction; across renderings of
+# one machine's stream it must, so keeping it is free strictness.
+class RenderingEquivalenceIsComputed(unittest.TestCase):
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+
+    def write(self, rel, lines):
+        p = os.path.join(self.tmp, rel)
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        with open(p, "w", encoding="utf-8") as fh:
+            fh.write("\n".join(lines) + "\n")
+        return rel
+
+    # --- the parsers ------------------------------------------------------
+    def test_two_precisions_of_one_iso_line_produce_one_key(self):
+        a = BUILD.render_line(
+            "2026-08-18T10:14:13+03:00 boxy python3[308916]: relay accepted")
+        b = BUILD.render_line(
+            "2026-08-18T10:14:13.043117+03:00 boxy python3[308916]: relay accepted")
+        self.assertIsNotNone(a)
+        self.assertEqual(a, b, "microseconds are a rendering property")
+
+    def test_the_same_instant_in_two_zones_produces_one_key(self):
+        a = BUILD.render_line(
+            "2026-08-18T10:14:13+03:00 boxy python3[308916]: relay accepted")
+        b = BUILD.render_line(
+            "2026-08-18T07:14:13Z boxy python3[308916]: relay accepted")
+        self.assertEqual(a, b)
+
+    def test_journald_json_produces_the_same_key_as_the_short_iso_render(self):
+        line = json.dumps({"__REALTIME_TIMESTAMP": "1787037253043117",
+                           "_HOSTNAME": "boxy", "SYSLOG_IDENTIFIER": "python3",
+                           "_PID": "308916", "MESSAGE": "relay accepted"})
+        iso = BUILD.render_line(
+            "2026-08-18T07:14:13Z boxy python3[308916]: relay accepted")
+        self.assertEqual(BUILD.render_line(line), iso,
+                         "the JSON render and the text render are one event")
+
+    def test_a_line_in_no_recognised_rendering_is_none_not_a_miss(self):
+        for line in ('10.0.0.1 - - [24/Jan/2022:03:56:47 +0000] "GET / HTTP/1.1" 200',
+                     'type=SYSCALL msg=audit(1642996607.947:1860): arch=c000003e',
+                     'not a log line at all'):
+            self.assertIsNone(BUILD.render_line(line), line)
+
+    def test_a_bsd_syslog_line_is_parsed_but_kept_in_its_own_timebase(self):
+        """AIT's own form. It carries no year, so it can never be compared with
+        an epoch render — and saying so is the point."""
+        k = BUILD.render_line("Jan 24 03:56:47 intranet-server sudo[2377]: x")
+        self.assertIsNotNone(k)
+        self.assertEqual(k[0], "bsd")
+        self.assertEqual(BUILD.render_line(
+            "2022-01-24T03:56:47Z intranet-server sudo[2377]: x")[0], "epoch")
+
+    def test_the_pid_is_not_stripped(self):
+        a = BUILD.render_line("2026-08-18T10:14:13Z boxy sshd[100]: hello")
+        b = BUILD.render_line("2026-08-18T10:14:13Z boxy sshd[101]: hello")
+        self.assertNotEqual(a, b, "across renderings of ONE stream the pid must "
+                                  "match; only the cross-host rule may drop it")
+
+    def test_the_host_is_not_stripped_either(self):
+        a = BUILD.render_line("2026-08-18T10:14:13Z boxa sshd[100]: hello")
+        b = BUILD.render_line("2026-08-18T10:14:13Z boxb sshd[100]: hello")
+        self.assertNotEqual(a, b)
+
+    # --- the map ----------------------------------------------------------
+    def test_a_line_maps_to_its_copy_in_the_other_rendering(self):
+        self.write("h/a.log", [
+            "2026-08-18T10:00:01+00:00 boxy p[1]: one",
+            "2026-08-18T10:00:02+00:00 boxy p[1]: two",
+            "2026-08-18T10:00:03+00:00 boxy p[1]: three"])
+        self.write("h/b.log", [
+            "2026-08-18T10:00:02.500000+00:00 boxy p[1]: two",
+            "2026-08-18T10:00:03.100000+00:00 boxy p[1]: three"])
+        m = BUILD.rendering_map(self.tmp, "h/a.log", "h/b.log")
+        self.assertEqual(m["map"].get(2), [1])
+        self.assertEqual(m["map"].get(3), [2])
+        self.assertNotIn(1, m["map"], "an event only one file holds maps nowhere")
+
+    def test_unequal_multiplicity_refuses_rather_than_guesses(self):
+        """The gate. Two identical events in one second in A and one in B means
+        the files disagree about what happened; mapping either would be a guess."""
+        self.write("h/a.log", [
+            "2026-08-18T10:00:01+00:00 boxy p[1]: same",
+            "2026-08-18T10:00:01+00:00 boxy p[1]: same"])
+        self.write("h/b.log", ["2026-08-18T10:00:01+00:00 boxy p[1]: same"])
+        m = BUILD.rendering_map(self.tmp, "h/a.log", "h/b.log")
+        self.assertEqual(m["map"], {})
+        self.assertEqual(m["refused_keys"], 1)
+
+    def test_equal_multiplicity_maps_rank_to_rank(self):
+        self.write("h/a.log", [
+            "2026-08-18T10:00:01+00:00 boxy p[1]: same",
+            "2026-08-18T10:00:01+00:00 boxy p[1]: same"])
+        self.write("h/b.log", [
+            "2026-08-18T10:00:01.1+00:00 boxy p[1]: same",
+            "2026-08-18T10:00:01.9+00:00 boxy p[1]: same"])
+        m = BUILD.rendering_map(self.tmp, "h/a.log", "h/b.log")
+        self.assertEqual(m["map"], {1: [1], 2: [2]})
+        self.assertEqual(m["refused_keys"], 0)
+
+    def test_two_timebases_never_compare(self):
+        self.write("h/a.log", ["Jan 24 03:56:47 boxy p[1]: x"])
+        self.write("h/b.log", ["2022-01-24T03:56:47Z boxy p[1]: x"])
+        m = BUILD.rendering_map(self.tmp, "h/a.log", "h/b.log")
+        self.assertEqual(m["map"], {})
+        self.assertIsNotNone(m["why"])
+        self.assertIn("timebase", m["why"])
+
+    def test_an_unrecognised_file_is_refused_with_a_reason(self):
+        self.write("h/a.log", ["2026-08-18T10:00:01+00:00 boxy p[1]: x"])
+        self.write("h/b.log", ['10.0.0.1 - - [24/Jan/2022:03:56:47 +0000] "GET /"'])
+        m = BUILD.rendering_map(self.tmp, "h/a.log", "h/b.log")
+        self.assertEqual(m["map"], {})
+        self.assertIsNotNone(m["why"])
+
+    # --- candidate discovery is path arithmetic ---------------------------
+    def test_candidates_are_other_files_under_the_same_host(self):
+        self.write("h1/logs/a.log", ["2026-08-18T10:00:01+00:00 b p[1]: x"])
+        self.write("h1/logs/b.log", ["2026-08-18T10:00:01+00:00 b p[1]: x"])
+        self.write("h2/logs/c.log", ["2026-08-18T10:00:01+00:00 b p[1]: x"])
+        c = BUILD.rendering_twins(self.tmp, "h1/logs/a.log")
+        self.assertIn("h1/logs/b.log", c)
+        self.assertNotIn("h2/logs/c.log", c,
+                         "another host is the CROSS-HOST rule's business, and it "
+                         "has its own, stricter test")
+        self.assertNotIn("h1/logs/a.log", c)
+
+    def test_alternates_for_returns_runs_a_scorer_can_read(self):
+        self.write("h/a.log", ["2026-08-18T10:00:0%d+00:00 b p[1]: m%d" % (i, i)
+                               for i in range(1, 6)])
+        self.write("h/b.log", ["2026-08-18T10:00:0%d.5+00:00 b p[1]: m%d" % (i, i)
+                               for i in range(1, 6)])
+        got = BUILD.rendering_alternates_for(self.tmp, "h/a.log", [2, 3, 4])
+        self.assertEqual(got["h/b.log"], [2, 3, 4])
+
+    # --- multi-line renderings are declared, never faked ------------------
+    def test_a_multiline_export_render_is_a_recorded_limitation(self):
+        """`journalctl -o export` writes one event as MANY physical lines, and a
+        citation addresses ONE. Rather than pick a line and call it the event,
+        the rule declares the format out of scope."""
+        self.assertIn("export", " ".join(BUILD.RENDERING_LIMITATIONS).lower())
+        blob = ("__CURSOR=s=1;i=2\n__REALTIME_TIMESTAMP=1787037253043117\n"
+                "_HOSTNAME=boxy\nMESSAGE=relay accepted\n")
+        self.assertIsNone(BUILD.render_line(blob.splitlines()[1]))
+
+
+class TheAitKeyRecordsWhatTheRenderingRuleFound(unittest.TestCase):
+    """Measured on this corpus the rule moves NOTHING, and that is the result,
+    not a reason to loosen it: Debian keeps auth, kern, dnsmasq and syslog in
+    disjoint facilities, and the only journald copy AIT ships is a BINARY
+    `system.journal` that citecheck rejects and that has no line to cite."""
+
+    def setUp(self):
+        self.k = json.load(open(KEY, encoding="utf-8"))
+
+    def test_the_rule_is_written_into_the_key(self):
+        der = self.k["derivation"]
+        self.assertIn("rendering_rule", der)
+        self.assertIn("multiplicity", der["rendering_rule"])
+        self.assertIn("precision", der["rendering_rule"].lower())
+
+    def test_the_count_it_found_is_recorded_even_though_it_is_zero(self):
+        der = self.k["derivation"]
+        self.assertIn("rendering_alternates", der)
+        self.assertEqual(der["rendering_alternates"], 0)
+        self.assertEqual(der["rendering_alternate_lines"], 0)
+
+    def test_zero_is_explained_rather_than_left_to_read_as_a_bug(self):
+        lim = " ".join(self.k["derivation"]["known_limitations"])
+        self.assertIn("rendering", lim.lower())
+        self.assertIn("journal", lim.lower())
+
+    def test_the_alternates_still_only_hold_the_cross_host_copies(self):
+        """A rule that found nothing must not have changed anything."""
+        for d in self.k["defects"]:
+            for a in d["alternate_proof_locations"]:
+                self.assertTrue(a["file"].startswith("inet-dns/"), a["file"])
+
+
+class TheRenderingModeIsRunnableOnAnyKey(unittest.TestCase):
+    """The hand-over. `answer-key-fleet-negative.json` is another agent's file;
+    this mode computes what the rule would add to ANY key + corpus and writes a
+    patch, so the owner can read it before adopting it."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        for rel, lines in {
+            "mon/syslog/syslog.tail": [
+                "2026-08-18T10:00:0%d.111111+03:00 mon p[7]: relay %d" % (i, i)
+                for i in range(1, 6)],
+            "mon/journal/journal.short-iso": [
+                "2026-08-18T10:00:0%d+03:00 mon p[7]: relay %d" % (i, i)
+                for i in range(1, 6)],
+        }.items():
+            p = os.path.join(self.tmp, rel)
+            os.makedirs(os.path.dirname(p), exist_ok=True)
+            open(p, "w", encoding="utf-8").write("\n".join(lines) + "\n")
+        self.key = os.path.join(self.tmp, "key.json")
+        json.dump({"dataset": "t", "defects": [
+            {"id": "R09", "title": "relay", "root_cause": "x",
+             "proof_locations": [{"file": "mon/syslog/syslog.tail",
+                                  "line_start": 2, "line_end": 4}]}]},
+                  open(self.key, "w", encoding="utf-8"))
+
+    def test_it_reports_the_alternates_it_would_add(self):
+        out = os.path.join(self.tmp, "patch.json")
+        r = subprocess.run([sys.executable, BUILDER, "--renderings",
+                            "--corpus", self.tmp, "--key", self.key,
+                            "--out", out], capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        patch = json.load(open(out, encoding="utf-8"))
+        self.assertEqual(patch["R09"],
+                         [{"file": "mon/journal/journal.short-iso",
+                           "line_start": 2, "line_end": 4}])
+        self.assertIn("R09", r.stdout)
+
+    def test_it_writes_nothing_into_the_key_it_was_pointed_at(self):
+        before = open(self.key, encoding="utf-8").read()
+        subprocess.run([sys.executable, BUILDER, "--renderings",
+                        "--corpus", self.tmp, "--key", self.key,
+                        "--out", os.path.join(self.tmp, "p.json")],
+                       capture_output=True, text=True)
+        self.assertEqual(open(self.key, encoding="utf-8").read(), before,
+                         "another agent's key is never written by this tool")
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

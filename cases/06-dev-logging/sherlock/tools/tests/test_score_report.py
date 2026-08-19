@@ -1169,5 +1169,379 @@ class TestDivergentChannelsAreFlaggedNotCollapsed(unittest.TestCase):
         self.assertNotIn("CHANNELS DIVERGE", out)
 
 
+
+# --------------------------------------------------------------------------
+# J. «reported as an incident» and «reported and refuted» are not one number
+# --------------------------------------------------------------------------
+# The field benchmark this project measures itself against (OpenSec: Sonnet 4.6
+# at 100 % containment and 92.5 % FALSE-POSITIVE rate) counts one specific
+# failure: reporting a benign thing AS AN INCIDENT. A decoy that a report names
+# and refutes in the same breath is not that failure — it may be correct
+# investigative behaviour, because a red herring that is silently ignored is
+# indistinguishable from one that was never seen.
+#
+# `decoys_presented` could not tell those apart: it says WHERE a citation sits
+# (inside «Находки»), not what the sentence around it claims. The split below
+# goes one level deeper into structure the report format already mandates.
+# `reference/report-format.md` is byte-identical in v16, v19 and v22 and it
+# names the per-finding fields in a fixed order — «что сломано · корневая
+# причина · улики · чем опровергал · что делать сейчас». It mandates NO outcome
+# field, so there is nothing cheaper to read; what it does give is two fields
+# with opposite polarity:
+#
+#     «Улики»          — the evidence FOR this finding
+#     «Чем опровергал» — the check that would have KILLED it, and what it returned
+#
+# A decoy cited under «Улики» is asserted as an incident. A decoy cited only
+# under «Чем опровергал» is presented with its refutation attached. That is
+# parsing, one level below the section parse this file already defends, and it
+# costs nothing.
+#
+# FAIL LOUD. When a report writes no mandated field labels at all, the split is
+# None with a reason — never 0, which would read as «refuted nothing». And the
+# split never replaces `decoys_presented`: axes in this project are reported
+# beside each other, never summed.
+FIELDED_REPORT = """# Отчёт
+
+## 1. Находки
+
+### Н-1 · Настоящий дефект
+
+**Что сломано.** Ломается.
+
+**Улики.**
+* `app/a.log:10` → «filler line 10»
+
+**Чем опровергал.** Проверял обратную версию: `app/a.log:30` → «filler line 30» —
+не подтвердилась.
+
+**Что делать сейчас.** Починить.
+
+### Н-2 · Шум с соседней машины — успеха нет
+
+**Что сломано.** Шумно.
+
+**Улики.**
+* `app/b.log:10` → «filler line 10»
+
+**Чем опровергал.** Успеха нет: `app/b.log:40` → «filler line 40».
+
+## 2. Отклонённые кандидаты
+
+- **«Третье»** — нет. `app/b.log:20` «filler line 20» — это фон.
+
+## 3. Покрытие
+
+| путь | что искал | вердикт |
+|---|---|---|
+| app/c.log | всё | ничего относящегося |
+
+## ВЕРДИКТ
+
+Сбор улик шёл через `app/c.log:5` «filler line 5».
+
+compromised
+"""
+
+
+def herring(cid, locs):
+    """A decoy, in the shape `score_bench.is_herring` recognises."""
+    return {"id": cid, "title": "RED HERRING: %s" % cid,
+            "root_cause": "NOT A CAUSE", "proof_locations": locs}
+
+
+class TestDecoyDispositionSplit(unittest.TestCase):
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        build_corpus(self.tmp, {"app/a.log": numbered(50),
+                                "app/b.log": numbered(50),
+                                "app/c.log": numbered(50)})
+
+    def score(self, key, report=FIELDED_REPORT):
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            rec = S.score(key, report, self.tmp, call=None)
+        return rec, buf.getvalue()
+
+    def row(self, rec, cid):
+        return [r for r in rec["per_defect"] if r["defect"] == cid][0]
+
+    # --- the two halves --------------------------------------------------
+    def test_a_decoy_under_ulики_is_asserted_as_an_incident(self):
+        """`app/b.log:10` sits under «Улики» of Н-2 — the evidence-FOR field.
+        That is the OpenSec failure: a benign thing entered in the findings
+        register as evidence for a numbered finding."""
+        key = key_with([herring("D01", [loc("app/b.log", 10)])])
+        rec, _ = self.score(key)
+        self.assertEqual(rec["decoys_presented"], 1)
+        self.assertEqual(rec["decoys_asserted_as_incident"], 1)
+        self.assertEqual(rec["decoys_presented_refuted"], 0)
+        self.assertEqual(self.row(rec, "D01")["disposition"], "asserted")
+
+    def test_a_decoy_under_chem_oproverghal_is_presented_with_its_refutation(self):
+        """`app/b.log:40` sits under «Чем опровергал» of Н-2 — the mandated
+        refutation field. The report put the red herring in front of the reader
+        and said what killed it. Not a false positive."""
+        key = key_with([herring("D01", [loc("app/b.log", 40)])])
+        rec, _ = self.score(key)
+        self.assertEqual(rec["decoys_presented"], 1)
+        self.assertEqual(rec["decoys_asserted_as_incident"], 0)
+        self.assertEqual(rec["decoys_presented_refuted"], 1)
+        self.assertEqual(self.row(rec, "D01")["disposition"], "refuted")
+
+    def test_the_two_halves_partition_decoys_presented_and_never_replace_it(self):
+        key = key_with([herring("D01", [loc("app/b.log", 10)]),
+                        herring("D02", [loc("app/b.log", 40)])])
+        rec, _ = self.score(key)
+        self.assertEqual(rec["decoys_presented"], 2)
+        self.assertEqual(rec["decoys_asserted_as_incident"]
+                         + rec["decoys_presented_refuted"],
+                         rec["decoys_presented"],
+                         "the split is a partition of the existing column, and "
+                         "the existing column stays")
+
+    def test_evidence_wins_when_a_decoy_is_cited_in_both_fields(self):
+        """A decoy whose proof is under «Улики» AND under «Чем опровергал» was
+        still used as evidence for a finding. The stricter reading is the honest
+        one: a false positive that also gets argued about is a false positive."""
+        key = key_with([herring("D01", [loc("app/b.log", 10),
+                                        loc("app/b.log", 40)])])
+        rec, _ = self.score(key)
+        self.assertEqual(rec["decoys_asserted_as_incident"], 1)
+        self.assertEqual(rec["decoys_presented_refuted"], 0)
+
+    # --- the third outcome: anchored, claimed nowhere ---------------------
+    def test_a_decoy_anchored_only_in_the_verdict_is_neither_half(self):
+        """The negative control's D03 shape: the report anchors the decoy in its
+        verdict and names it correctly, and never files it as a finding. That is
+        the GOOD outcome and it must be visible as its own number, not hidden in
+        the gap between `decoys_anchored` and `decoys_presented`."""
+        key = key_with([herring("D01", [loc("app/c.log", 5)])])
+        rec, _ = self.score(key)
+        self.assertEqual(rec["decoys_anchored"], 1)
+        self.assertEqual(rec["decoys_presented"], 0)
+        self.assertEqual(rec["decoys_asserted_as_incident"], 0)
+        self.assertEqual(rec["decoys_presented_refuted"], 0)
+        self.assertEqual(rec["decoys_anchored_elsewhere"], 1)
+        self.assertEqual(self.row(rec, "D01")["disposition"], "elsewhere")
+
+    def test_a_decoy_only_in_the_rejected_section_is_dismissed_not_split(self):
+        """«Отклонённые кандидаты» already has its own column. The split is OF
+        `decoys_presented`, so a decoy that never entered the findings section
+        does not appear in either half."""
+        key = key_with([herring("D01", [loc("app/b.log", 20)])])
+        rec, _ = self.score(key)
+        self.assertEqual(rec["decoys_presented"], 0)
+        self.assertEqual(rec["decoys_dismissed"], 1)
+        self.assertEqual(rec["decoys_asserted_as_incident"], 0)
+        self.assertEqual(rec["decoys_presented_refuted"], 0)
+        self.assertEqual(self.row(rec, "D01")["disposition"], "dismissed")
+
+    def test_a_decoy_nobody_cited_has_no_disposition(self):
+        key = key_with([herring("D01", [loc("app/a.log", 44)])])
+        rec, _ = self.score(key)
+        self.assertEqual(rec["decoys_anchored"], 0)
+        self.assertIsNone(self.row(rec, "D01")["disposition"])
+        self.assertEqual(rec["decoys_anchored_elsewhere"], 0)
+
+    # --- the same reading, free, for real defects -------------------------
+    def test_real_defects_get_the_same_disposition_for_free(self):
+        key = key_with([defect("D01", "real", [loc("app/a.log", 10)]),
+                        defect("D02", "real", [loc("app/a.log", 30)])])
+        rec, _ = self.score(key)
+        self.assertEqual(self.row(rec, "D01")["disposition"], "asserted")
+        self.assertEqual(self.row(rec, "D02")["disposition"], "refuted",
+                         "a REAL defect whose only citation sits in the "
+                         "refutation field was argued away, and that is worth "
+                         "seeing too")
+        self.assertEqual(rec["anchored"], 2, "the split changes no denominator")
+        self.assertEqual(rec["presented"], 2)
+
+    # --- fail loud --------------------------------------------------------
+    def test_a_report_with_no_mandated_field_labels_scores_none_not_zero(self):
+        """FINDINGS_REPORT has a findings section and no «Улики»/«Чем опровергал»
+        labels anywhere. Reporting 0 refutations would be a claim about the
+        report; the truth is that the question cannot be read off it."""
+        key = key_with([herring("D01", [loc("app/a.log", 10)])])
+        rec, out = self.score(key, FINDINGS_REPORT)
+        self.assertEqual(rec["decoys_presented"], 1,
+                         "the coarser column is still readable")
+        self.assertIsNone(rec["decoys_asserted_as_incident"])
+        self.assertIsNone(rec["decoys_presented_refuted"])
+        self.assertIsNone(rec["structure"]["fields_parsed"] or None)
+        self.assertFalse(rec["structure"]["fields_parsed"])
+        self.assertIn("чем опровергал", rec["structure"]["why_fields"].lower())
+        self.assertIn("NOT MEASURED", out)
+
+    def test_the_refusal_names_the_field_it_looked_for(self):
+        key = key_with([herring("D01", [loc("app/a.log", 10)])])
+        rec, _ = self.score(key, FINDINGS_REPORT)
+        why = rec["structure"]["why_fields"]
+        self.assertIn("«чем опровергал»", why.lower())
+        self.assertIn("None, NOT 0", why,
+                      "the refusal has to say out loud that this is an unread "
+                      "question and not a measured zero")
+
+    def test_no_findings_section_leaves_the_split_none_as_well(self):
+        key = key_with([herring("D01", [loc("app/a.log", 10)])])
+        rec, _ = self.score(key, "app/a.log:10 «filler line 10»")
+        self.assertIsNone(rec["decoys_presented"])
+        self.assertIsNone(rec["decoys_asserted_as_incident"])
+        self.assertIsNone(rec["decoys_presented_refuted"])
+
+    # --- the parse itself -------------------------------------------------
+    def test_a_field_label_does_not_leak_past_its_own_heading(self):
+        """The bug this parse had to be corrected out of: «Что делать сейчас» is
+        the last label of Н-1, and without scoping it claimed every citation in
+        every later section of the report — including the verdict."""
+        key = key_with([herring("D01", [loc("app/c.log", 5)])])
+        rec, _ = self.score(key)
+        self.assertEqual(self.row(rec, "D01")["disposition"], "elsewhere",
+                         "app/c.log:5 is in the VERDICT, four headings after "
+                         "the last field label of Н-1")
+
+    def test_bare_labels_count_as_well_as_bold_ones(self):
+        """v19's BlueSky report writes `Улики:` and `Чем опровергал: …` with no
+        bold. Same mandated field, same parse."""
+        rep = FIELDED_REPORT.replace("**Улики.**", "Улики:").replace(
+            "**Чем опровергал.**", "Чем опровергал:")
+        key = key_with([herring("D01", [loc("app/b.log", 40)])])
+        rec, _ = self.score(key, rep)
+        self.assertTrue(rec["structure"]["fields_parsed"])
+        self.assertEqual(rec["decoys_presented_refuted"], 1)
+
+    def test_a_fenced_field_label_is_sample_text_not_structure(self):
+        rep = FIELDED_REPORT.replace(
+            "## 1. Находки",
+            "```\n**Улики.** app/b.log:40\n```\n\n## 1. Находки")
+        key = key_with([herring("D01", [loc("app/b.log", 40)])])
+        rec, _ = self.score(key, rep)
+        self.assertEqual(rec["decoys_presented_refuted"], 1)
+
+    def test_the_split_is_printed_beside_the_decoy_line_not_instead_of_it(self):
+        key = key_with([herring("D01", [loc("app/b.log", 10)]),
+                        herring("D02", [loc("app/b.log", 40)])])
+        _rec, out = self.score(key)
+        self.assertIn("decoys    :", out)
+        self.assertIn("asserted as incident", out)
+        self.assertIn("with refutation", out)
+
+    def test_the_split_costs_nothing(self):
+        key = key_with([herring("D01", [loc("app/b.log", 10)])])
+        saved = (S.score_case.http_call, S.score_bench.score)
+        S.score_case.http_call = Tripwire("score_case.http_call")
+        S.score_bench.score = Tripwire("score_bench.score")
+        try:
+            with redirect_stdout(io.StringIO()):
+                rec = S.score(key, FIELDED_REPORT, self.tmp, call=None)
+        finally:
+            S.score_case.http_call, S.score_bench.score = saved
+        self.assertEqual(rec["decoys_asserted_as_incident"], 1)
+
+
+# --------------------------------------------------------------------------
+# K. the uncited-disposal numbers are headlines, not fields you go looking for
+# --------------------------------------------------------------------------
+# `rejections_uncited` is rising as the skill closes more rows by rule — AIT v16
+# 0 of 7, v19 2 of 11, v22 6 of 10 — and the v22 Linux arm's sharpest single loss
+# happened in exactly that gap: a whole exfiltration disposed of in an UNCITED
+# coverage row while the tool's own receipts had quoted the labelled proof. A
+# number that behaves like that belongs in the summary, next to `anchored`.
+class TestUncitedDisposalsAreFirstClass(unittest.TestCase):
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        build_corpus(self.tmp, {"app/a.log": numbered(50),
+                                "app/b.log": numbered(50),
+                                "app/c.log": numbered(50)})
+
+    def score(self, report=FIELDED_REPORT, key=None):
+        key = key or key_with([defect("D01", "x", [loc("app/a.log", 10)])])
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            rec = S.score(key, report, self.tmp, call=None)
+        return rec, buf.getvalue()
+
+    def test_they_are_top_level_record_fields(self):
+        rec, _ = self.score()
+        self.assertEqual(rec["rejections"], 1)
+        self.assertEqual(rec["rejections_uncited"], 0)
+        self.assertEqual(rec["coverage_rows"], 1)
+        self.assertEqual(rec["coverage_rows_uncited"], 1)
+
+    def test_they_agree_with_the_structure_block_they_were_hiding_in(self):
+        rec, _ = self.score()
+        for k in ("rejections", "rejections_uncited", "coverage_rows",
+                  "coverage_rows_uncited"):
+            self.assertEqual(rec[k], rec["structure"][k],
+                             "%s must not be able to disagree with itself" % k)
+
+    def test_the_summary_prints_them_on_their_own_headline_line(self):
+        _rec, out = self.score()
+        line = [l for l in out.splitlines() if l.startswith("uncited")]
+        self.assertTrue(line, "expected an `uncited   :` headline line, got:\n%s"
+                        % out)
+        self.assertIn("rejection", line[0])
+        self.assertIn("coverage", line[0])
+
+    def test_the_percentages_are_printed_because_the_ratio_is_the_signal(self):
+        _rec, out = self.score()
+        line = [l for l in out.splitlines() if l.startswith("uncited")][0]
+        self.assertIn("%", line)
+
+    def test_a_report_with_no_rejected_section_reports_none_not_zero(self):
+        rep = FIELDED_REPORT.replace("## 2. Отклонённые кандидаты",
+                                     "## 2. Прочее")
+        rec, out = self.score(rep)
+        self.assertIsNone(rec["rejections"])
+        self.assertIsNone(rec["rejections_uncited"])
+        self.assertIn("uncited", out)
+        self.assertIn("NOT MEASURED", out)
+
+    def test_a_report_with_no_coverage_section_reports_none_not_zero(self):
+        rep = FIELDED_REPORT.replace("## 3. Покрытие", "## 3. Прочее")
+        rec, _ = self.score(rep)
+        self.assertIsNone(rec["coverage_rows"])
+        self.assertIsNone(rec["coverage_rows_uncited"])
+
+    def test_the_two_counts_are_never_summed(self):
+        """Same rule as every other axis here: they are printed beside each
+        other. A single «uncited disposals» number would hide that one of them
+        is a rejected candidate and the other is a whole file."""
+        _rec, out = self.score()
+        line = [l for l in out.splitlines() if l.startswith("uncited")][0]
+        self.assertNotIn("total", line.lower())
+
+
+# --------------------------------------------------------------------------
+# L. the split, on every report this project has on disk
+# --------------------------------------------------------------------------
+class TestTheSplitOnTheRealReports(unittest.TestCase):
+    """Gitignored trajectories: skip where absent, run where the evidence is."""
+
+    BS22 = "20260818T212500Z-v22-claude-bluesky"
+
+    @unittest.skipUnless(_run_report(BS22) and os.path.isdir(BLUESKY_CORPUS),
+                         "BlueSky v22 trajectory or corpus not on this machine")
+    def test_bluesky_v22_presents_both_decoys_as_evidence_for_a_finding(self):
+        """The claim this job existed to test: the arm's reading is that D12 and
+        D13 carry «успеха нет» and are therefore refutations. The report's own
+        structure says otherwise — both are cited under «Улики» of Н-12, the
+        evidence-FOR field. The heading carries the negative; the mandated field
+        that would have recorded it does not."""
+        key = json.load(open(os.path.join(BENCH, "answer-key-bluesky.json"),
+                             encoding="utf-8"))
+        rep = open(_run_report(self.BS22), encoding="utf-8").read()
+        with redirect_stdout(io.StringIO()):
+            rec = S.score(key, rep, BLUESKY_CORPUS, call=None)
+        self.assertTrue(rec["structure"]["fields_parsed"])
+        self.assertEqual(rec["decoys_presented"], 2)
+        self.assertEqual(rec["decoys_asserted_as_incident"], 2)
+        self.assertEqual(rec["decoys_presented_refuted"], 0)
+        for cid in ("D12", "D13"):
+            row = [r for r in rec["per_defect"] if r["defect"] == cid][0]
+            self.assertEqual(row["disposition"], "asserted")
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

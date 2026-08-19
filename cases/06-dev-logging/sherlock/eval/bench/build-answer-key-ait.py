@@ -90,6 +90,7 @@ CONSEQUENCE of the Jan-24 foothold has the causality backwards, and no axis in
 `grep -oE '^Jan [0-9]+|kennedy-mendoza\\.info from [0-9.]+' … | uniq-count`.
 """
 import argparse
+import calendar
 import collections
 import json
 import os
@@ -227,6 +228,231 @@ def alternates_for(root, rel, lines, cache):
     return out
 
 
+# --------------------------------------------------------------------------
+# THE SAME EVENT IN A SECOND RENDERING
+# --------------------------------------------------------------------------
+# `host_twins` above credits the OTHER MACHINE's copy of a labelled line. This is
+# the other half of the same unfairness: ONE machine writing ONE stream into
+# SEVERAL FILES. The negative-control corpus ships three text renderings of one
+# journald stream — `mon/journal/journal.short-iso`, `mon/journal/journal.json`
+# and `mon/syslog/syslog.tail` — and the v22 arm made finding R09 correctly while
+# citing the journald render against a key whose proof lives in the syslog
+# render. Right event, wrong file, scored as a miss.
+#
+# Same discipline as the cross-host rule, held verbatim: COMPUTE the equivalence,
+# never assert it.
+#
+#   * the key is (second, host, `ident[pid]: message`), all three required;
+#   * the ONE normalisation is timestamp PRECISION — `journalctl -o short-iso`
+#     prints seconds and rsyslog prints microseconds, so precision is a property
+#     of the RENDERING and not of the event. Timezone offsets are resolved to a
+#     UTC second for the same reason;
+#   * that loosening is paid for by the EQUAL-MULTIPLICITY GATE: a key maps only
+#     where both files agree how many times it occurred in that second, and then
+#     rank maps to rank. Where they disagree the rule refuses and counts the
+#     refusal. Nothing is guessed;
+#   * the PID is NOT stripped, unlike the cross-host rule. Across machines a PID
+#     cannot match by construction; across renderings of one machine's stream it
+#     MUST, so keeping it is free strictness;
+#   * two files in different TIMEBASES never compare. A BSD syslog line carries
+#     no year, so `Jan 24 03:56:47` and `2022-01-24T03:56:47Z` are refused rather
+#     than assumed to be the same January.
+#
+# What the rule cannot do is written down instead of worked around.
+RENDERING_LIMITATIONS = [
+    "journalctl -o export writes ONE event as MANY physical lines (a `__CURSOR=` "
+    "block, with binary fields carrying a raw length prefix). A citation "
+    "addresses one physical line, so crediting a block would mean picking a line "
+    "and calling it the event. The format is declared out of scope; a corpus "
+    "whose only second rendering is an export loses nothing it could have cited.",
+    "The rule is line-for-line and one-directional per defect: it credits the "
+    "other rendering's copy of a labelled line, and says nothing about lines that "
+    "rendering holds and this one does not.",
+    "A binary journal (`logs/journal/<machine-id>/system.journal`) is not a "
+    "rendering this rule can read, and citecheck refuses it as binary anyway — it "
+    "has no physical line for a report to cite.",
+]
+
+ISO_LINE_RE = re.compile(
+    r"^(\d{4})-(\d\d)-(\d\d)T(\d\d):(\d\d):(\d\d)(?:\.\d+)?"
+    r"(Z|[+-]\d\d:?\d\d)[ \t](\S+)[ \t](.*)$")
+BSD_LINE_RE = re.compile(r"^([A-Z][a-z]{2}\s+\d{1,2} \d\d:\d\d:\d\d) (\S+) (.*)$")
+
+
+def _utc_offset(tok):
+    if tok == "Z":
+        return 0
+    tok = tok.replace(":", "")
+    sign = 1 if tok[0] == "+" else -1
+    return sign * (int(tok[1:3]) * 3600 + int(tok[3:5]) * 60)
+
+
+def render_line(line):
+    """One physical line -> (timebase, second, host, body), or None.
+
+    `None` means "this line is in no rendering the rule can read" — never "no
+    match". Only formats that put ONE event on ONE physical line are recognised,
+    because that is the unit a citation addresses.
+    """
+    line = line.rstrip("\n")
+    m = ISO_LINE_RE.match(line)
+    if m:
+        sec = calendar.timegm((int(m.group(1)), int(m.group(2)), int(m.group(3)),
+                               int(m.group(4)), int(m.group(5)), int(m.group(6)),
+                               0, 0, 0)) - _utc_offset(m.group(7))
+        return ("epoch", sec, m.group(8), m.group(9))
+    m = BSD_LINE_RE.match(line)
+    if m:
+        # No year in this form, so it gets its own timebase and can never be
+        # compared with an epoch one. Saying that out loud is the point.
+        return ("bsd", m.group(1), m.group(2), m.group(3))
+    if line[:1] == "{":
+        try:
+            d = json.loads(line)
+        except ValueError:
+            return None
+        ts, msg = d.get("__REALTIME_TIMESTAMP"), d.get("MESSAGE")
+        if ts is None or msg is None:
+            return None
+        if not isinstance(msg, str):          # journald renders binary as a list
+            return None
+        ident = d.get("SYSLOG_IDENTIFIER") or d.get("_COMM") or ""
+        pid = d.get("_PID")
+        body = ("%s[%s]: %s" % (ident, pid, msg)) if pid else ("%s: %s"
+                                                               % (ident, msg))
+        return ("epoch", int(ts) // 1000000, d.get("_HOSTNAME"), body)
+    return None
+
+
+def render_stream(path, cache=None):
+    """-> (timebase, [key-or-None per physical line]) or (None, []) if the file
+    is in no recognised rendering. A file counts as recognised when a majority of
+    its non-blank lines parse AND they agree on one timebase."""
+    if cache is not None and path in cache:
+        return cache[path]
+    keys, bases, seen = [], collections.Counter(), 0
+    try:
+        with open(path, errors="replace") as fh:
+            for line in fh:
+                k = render_line(line)
+                keys.append(k)
+                if line.strip():
+                    seen += 1
+                if k:
+                    bases[k[0]] += 1
+    except OSError:
+        keys, bases, seen = [], collections.Counter(), 0
+    if not bases or sum(bases.values()) * 2 < seen or len(bases) > 1:
+        out = (None, [])
+    else:
+        out = (list(bases)[0], keys)
+    if cache is not None:
+        cache[path] = out
+    return out
+
+
+def rendering_map(base, rel_a, rel_b, cache=None):
+    """{line in A: [lines in B]} for the SAME events, plus why it refused.
+
+    The equal-multiplicity gate lives here, and it is the whole safety property.
+    """
+    ba, ka = render_stream(os.path.join(base, rel_a), cache)
+    bb, kb = render_stream(os.path.join(base, rel_b), cache)
+    if ba is None or bb is None:
+        which = rel_a if ba is None else rel_b
+        return {"map": {}, "refused_keys": 0,
+                "why": "%s is in no rendering this rule can read" % which}
+    if ba != bb:
+        return {"map": {}, "refused_keys": 0,
+                "why": "different timebase (%s vs %s): a BSD syslog line carries "
+                       "no year and cannot be compared with an epoch one" % (ba, bb)}
+    ia, ib = collections.defaultdict(list), collections.defaultdict(list)
+    for i, k in enumerate(ka, 1):
+        if k:
+            ia[k[1:]].append(i)
+    for i, k in enumerate(kb, 1):
+        if k:
+            ib[k[1:]].append(i)
+    out, refused = {}, 0
+    for k, rows in ia.items():
+        other = ib.get(k)
+        if not other:
+            continue
+        if len(other) != len(rows):
+            refused += 1
+            continue
+        for r, line in enumerate(rows):
+            out[line] = [other[r]]
+    return {"map": out, "refused_keys": refused, "why": None}
+
+
+def rendering_twins(base, rel):
+    """Other files under the SAME host directory. Path arithmetic, not a list.
+
+    A file under a DIFFERENT host is the cross-host rule's business and is left
+    to it: that rule is stricter (it drops the PID and must therefore keep the
+    hostname), and running both over one pair would credit a line twice.
+    """
+    host, _sep, tail = rel.partition("/")
+    if not tail:
+        return []
+    root = os.path.join(base, host)
+    out = []
+    for dp, _d, fs in os.walk(root):
+        for fn in sorted(fs):
+            p = os.path.join(dp, fn)
+            other = os.path.relpath(p, base).replace(os.sep, "/")
+            if other != rel:
+                out.append(other)
+    return sorted(out)
+
+
+PROBE_LINES = 400
+
+
+def render_probe(path, limit=PROBE_LINES):
+    """The timebase of a file's first `limit` lines, or None. A cheap door: a
+    641 MB suricata eve.json is JSON with no `__REALTIME_TIMESTAMP`, and reading
+    it whole to learn that costs a minute per host. The probe can only make the
+    rule read FEWER files, never map more of them — `rendering_map` re-reads and
+    re-decides for every candidate that gets through.
+    """
+    bases, seen = collections.Counter(), 0
+    try:
+        with open(path, errors="replace") as fh:
+            for i, line in enumerate(fh, 1):
+                if i > limit:
+                    break
+                if line.strip():
+                    seen += 1
+                k = render_line(line)
+                if k:
+                    bases[k[0]] += 1
+    except OSError:
+        return None
+    if not bases or sum(bases.values()) * 2 < seen or len(bases) > 1:
+        return None
+    return list(bases)[0]
+
+
+def rendering_alternates_for(base, rel, lines, cache=None):
+    """-> {other_rel: sorted line numbers} holding the SAME events."""
+    want = set(lines)
+    out = {}
+    mine = render_probe(os.path.join(base, rel))
+    if mine is None:
+        return out
+    for other in rendering_twins(base, rel):
+        if render_probe(os.path.join(base, other)) != mine:
+            continue
+        m = rendering_map(base, rel, other, cache)
+        hit = sorted({n for src, ns in m["map"].items() if src in want
+                      for n in ns})
+        if hit:
+            out[other] = hit
+    return out
+
+
 def load_labels(root):
     """-> {rel: {line: [labels]}} — one dict per shipped label file, verbatim."""
     out, lab = {}, os.path.join(root, "labels")
@@ -357,6 +583,7 @@ def build(root, corpus, dataset):
     defects = []
     ev_cache = {}
     alt_defects = alt_lines = 0
+    rend_cache, rend_defects, rend_lines = {}, 0, 0
     for i, g in enumerate(groups, 1):
         rs = runs_of(g["lines"])
         first = rs[0][0]
@@ -368,6 +595,17 @@ def build(root, corpus, dataset):
         if alt_locs:
             alt_defects += 1
             alt_lines += sum(len(v) for v in alts.values())
+        # THE SECOND RENDERING of this same host's stream. Same discipline,
+        # different unfairness — and on this corpus it finds nothing, which is
+        # recorded rather than treated as a reason to loosen the rule.
+        rends = rendering_alternates_for(os.path.join(root, "gather"),
+                                         g["file"], g["lines"], rend_cache)
+        for other in sorted(rends):
+            for lo, hi in runs_of(rends[other]):
+                alt_locs.append({"file": other, "line_start": lo, "line_end": hi})
+        if rends:
+            rend_defects += 1
+            rend_lines += sum(len(v) for v in rends.values())
         defects.append({
             "id": "A%02d" % i,
             "title": "%s — %s" % (" + ".join(TITLE[p] for p in g["phases"]),
@@ -450,6 +688,24 @@ def build(root, corpus, dataset):
                 "tail>), not from a list."),
             "alternate_defects": alt_defects,
             "alternate_lines": alt_lines,
+            "rendering_rule": (
+                "ONE machine can write ONE stream into SEVERAL FILES — journald "
+                "short-iso, journald JSON and an rsyslog tail are three renderings "
+                "of the same events, and a report that read the wrong one was "
+                "scoring a miss for a finding it had made. A second location is "
+                "credited only where the SAME EVENT is provable: same second, "
+                "same host, same `ident[pid]: message`. The ONE normalisation is "
+                "timestamp PRECISION — seconds versus microseconds is a property "
+                "of the rendering, not of the event — and it is paid for by an "
+                "equal-multiplicity gate: a key maps only where both files agree "
+                "how many times it occurred in that second, and then rank maps to "
+                "rank. The PID is NOT dropped here, unlike the cross-host rule: "
+                "across renderings of one machine's stream it must match. Files in "
+                "different timebases (a BSD syslog line carries no year) never "
+                "compare. Candidates are other files under the same host "
+                "directory, found by path arithmetic."),
+            "rendering_alternates": rend_defects,
+            "rendering_alternate_lines": rend_lines,
             "known_limitations": [
                 "audit.log: its lines are `type=SYSCALL msg=audit(<epoch>:<id>)` "
                 "and carry no syslog timestamp, so `event_key` returns None for "
@@ -467,7 +723,18 @@ def build(root, corpus, dataset):
                 "The rule is line-for-line and one-directional per defect: it "
                 "credits the other host's copy of a LABELLED line. It says "
                 "nothing about lines the other host logged and this one did not.",
-            ],
+                "SECOND RENDERINGS: the rendering rule finds NOTHING on this "
+                "corpus and that is the measurement, not a reason to loosen it. "
+                "Debian keeps auth, kern, dnsmasq and syslog in disjoint "
+                "facilities, so no two text files here hold the same event: "
+                "measured 0 of 275,900 dnsmasq.log lines in any of syslog.1-4, "
+                "kern.log or auth.log, and 0 of auth.log's 272 in syslog.1-4. The "
+                "only journald copy AIT ships is a BINARY "
+                "logs/journal/<machine-id>/system.journal, which has no physical "
+                "line for a report to cite and which citecheck rejects as binary. "
+                "The rule is exercised for real on the fleet corpus, where three "
+                "text renderings of one journald stream do exist.",
+            ] + RENDERING_LIMITATIONS[:1],
             "decoys": "none — see `notes`",
         },
         "defects": defects,
@@ -475,15 +742,77 @@ def build(root, corpus, dataset):
     return key
 
 
+def renderings_report(corpus, keypath, out=None):
+    """What the rendering rule would ADD to a key it does not own.
+
+    The hand-over path. `answer-key-fleet-negative.json` is another agent's file
+    and R09 is its defect; this computes the alternates for any key + corpus,
+    prints them and writes a patch. It never writes the key it was pointed at —
+    adopting the patch is the owner's call, and it should be their builder that
+    recomputes it rather than a one-off edit.
+    """
+    raw = json.load(open(keypath, encoding="utf-8"))
+    defects = raw.get("defects") or []
+    if isinstance(defects, dict):
+        defects = [dict(v, id=k) for k, v in defects.items()]
+    cache, patch = {}, {}
+    total_lines = 0
+    print("rendering equivalence — corpus %s" % os.path.abspath(corpus))
+    print("key %s (%d defect(s))" % (os.path.abspath(keypath), len(defects)))
+    for d in defects:
+        cid = d.get("id") or d.get("case_id")
+        byfile = collections.defaultdict(set)
+        for loc in (d.get("proof_locations") or []):
+            f = loc.get("file")
+            lo = loc.get("line_start")
+            hi = loc.get("line_end", lo)
+            if not f or lo is None:
+                continue
+            byfile[f] |= set(range(int(lo), int(hi) + 1))
+        locs = []
+        for rel in sorted(byfile):
+            got = rendering_alternates_for(corpus, rel, byfile[rel], cache)
+            for other in sorted(got):
+                for a, b in runs_of(got[other]):
+                    locs.append({"file": other, "line_start": a, "line_end": b})
+                total_lines += len(got[other])
+        if locs:
+            patch[cid] = locs
+            print("  %-6s +%d run(s) in %s"
+                  % (cid, len(locs), ", ".join(sorted({l["file"] for l in locs}))))
+    print("  %d of %d defect(s) gain a second rendering, %d line(s) in total"
+          % (len(patch), len(defects), total_lines))
+    if not patch:
+        print("  nothing to add — either the corpus ships one rendering per "
+              "stream, or the renderings are in a form this rule refuses "
+              "(see RENDERING_LIMITATIONS). That is a measurement, not a bug.")
+    if out:
+        with open(out, "w", encoding="utf-8") as fh:
+            json.dump(patch, fh, ensure_ascii=False, indent=1, sort_keys=True)
+            fh.write("\n")
+        print("wrote %s — the KEY was not touched" % out)
+    return 0
+
+
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--root", required=True, help="extracted AIT-LDS dir "
-                                                  "(has gather/ and labels/)")
+    ap.add_argument("--root", help="extracted AIT-LDS dir (has gather/ and labels/)")
     ap.add_argument("--corpus", required=True, help="sanitized corpus root the "
                                                     "analyst is pointed at")
     ap.add_argument("--dataset", default="ait-russellmitchell")
-    ap.add_argument("--out", required=True)
+    ap.add_argument("--out")
+    ap.add_argument("--renderings", action="store_true",
+                    help="do not build: compute what the rendering rule would add "
+                         "to --key against --corpus, print it and write a patch to "
+                         "--out. The key is never modified.")
+    ap.add_argument("--key", help="with --renderings: any answer key to report on")
     a = ap.parse_args()
+    if a.renderings:
+        if not a.key:
+            ap.error("--renderings needs --key")
+        return renderings_report(a.corpus, a.key, a.out)
+    if not a.root or not a.out:
+        ap.error("--root and --out are required to build the key")
     key = build(a.root, a.corpus, a.dataset)
     with open(a.out, "w", encoding="utf-8") as fh:
         json.dump(key, fh, ensure_ascii=False, indent=1, sort_keys=False)
@@ -496,6 +825,10 @@ def main():
           "same message body, PID removed and nothing else"
           % (key["derivation"]["alternate_defects"],
              key["derivation"]["alternate_lines"]))
+    print("  second renderings:     %d defect(s), %d line(s) — same second, same "
+          "host, same ident[pid]: message, equal multiplicity"
+          % (key["derivation"]["rendering_alternates"],
+             key["derivation"]["rendering_alternate_lines"]))
     for m in key["derivation"]["merges"]:
         print("  merged %s(%d) into %s(%d)%s in %s"
               % (m["absorbed"], m["absorbed_lines"], m["into"], m["into_lines"],
