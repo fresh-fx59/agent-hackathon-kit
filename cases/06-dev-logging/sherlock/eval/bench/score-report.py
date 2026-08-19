@@ -19,7 +19,7 @@
 Everything this project measured before now scored a WORKLIST — Step 1's 250-row
 attention budget. That is an upper bound on what the skill can find and says
 nothing about what it told the reader. The deliverable is a report; this scores
-one, on six axes that are deliberately never summed into a single number.
+one, on seven axes that are deliberately never summed into a single number.
 
     verdict    compromised / attacked-not-proven / clean, or `absent`
     anchored   did the report CITE this defect's proof?      ← free, primary
@@ -27,6 +27,32 @@ one, on six axes that are deliberately never summed into a single number.
     asserted   did the report CLAIM this defect?             ← judged, optional
     citations  do the cited lines say what the report says?  ← free, citecheck
     delivery   does the HAND-OVER say it too?                ← free, per channel
+    outcomes   did the finding say the thing HAPPENED?       ← free, v24 field
+
+WHY THE OUTCOME AXIS EXISTS, AND WHAT IT MEASURES THAT NOTHING ELSE COULD. Every
+axis above reads WHERE a citation was written. None of them reads what the report
+CONCLUDED, because until `skills/v24` no field carried that: «Улики» is the
+evidence for a finding and «Чем опровергал» is the method, which every block
+writes whatever the answer turned out to be. So «I checked this and it was
+nothing» and «I found an intrusion» are written in exactly the same fields.
+Measured across all nine arms on disk, the decoy split is 12 presented and 0
+refuted — not one report had a field that could record a refutation.
+
+v24 mandates one closed-vocabulary line per finding — `исход: успех|попытка|
+норма` — and that is the join this file was missing:
+
+    a decoy cited inside a finding marked успех/попытка   = A FALSE POSITIVE
+    the same decoy cited inside a finding marked норма    = A REFUTATION
+    a REAL defect cited inside a finding marked норма     = a miss dressed
+                                                            as diligence
+
+It is the project's first false-positive-rate axis, and it is free. It lives in a
+NESTED `outcomes` block so that not one column an old ledger row published
+changes name, place or value — measured: 3,667 baseline field values across the
+nine arms, zero moved. On every one of those arms it reads NOT MEASURED with a
+reason, because they all predate the field. That is the whole point: «0
+refutations» is a claim about the report, «not measurable» is the truth about the
+field, and scoring the first would silently rewrite eight historical scores.
 
 WHY DELIVERY IS ITS OWN AXIS. The v22 negative control is the first arm whose
 citation integrity fell below 100 % (89.4 %), and the cause was not the
@@ -723,14 +749,20 @@ def _overlaps(span, plo, phi):
 
 
 def anchor_zones(placed, proofs, st):
-    """-> (zones, headings, fields) for every citation of this defect's proof.
+    """-> (zones, headings, fields, linenos) for every citation of this defect's
+    proof.
 
     Same overlap arithmetic as `anchor_hits`, carrying WHERE in the report the
     citation was written. A defect can be both presented and dismissed — a report
     that names it as a finding and also argues a piece of it away — and both are
     recorded rather than one overwriting the other.
+
+    `linenos` are the report lines those citations were written on. The outcome
+    axis below needs them because its unit is one level lower again than the
+    field parse: not the section and not the mandated field, but which `Н-n`
+    BLOCK the citation landed in, and what that block said the outcome was.
     """
-    zones, heads, fields = set(), [], set()
+    zones, heads, fields, linenos = set(), [], set(), []
     for (f, plo, phi) in proofs:
         for c in placed:
             if c["rel"] != f:
@@ -745,7 +777,9 @@ def anchor_zones(placed, proofs, st):
             h = heading_of(st, c["lineno"])
             if h and h not in heads:
                 heads.append(h)
-    return sorted(zones), heads, fields
+            if c["lineno"] not in linenos:
+                linenos.append(c["lineno"])
+    return sorted(zones), heads, fields, sorted(linenos)
 
 
 def disposition_of(zones, fields, anchored, st):
@@ -766,6 +800,182 @@ def disposition_of(zones, fields, anchored, st):
     return "elsewhere"
 
 
+# --------------------------------------------------------------------------
+# axis 6: THE OUTCOME — what the report said HAPPENED, joined to the anchoring
+# --------------------------------------------------------------------------
+# Every axis above reads WHERE a citation was written. None of them can read
+# what the report concluded about the thing it points at, because until v24 no
+# field carried that. «Улики» is the evidence FOR a finding and «Чем опровергал»
+# is the method — which every block writes whatever the answer turned out to be
+# — so a block that means «I checked this and it was nothing» is written in
+# exactly the same fields as one that means «I found an intrusion», and the
+# difference lived only in prose. That is why, measured across all nine arms on
+# disk, the decoy split is 12 presented and 0 refuted: not one report had a
+# field that could record a refutation, so every presented decoy landed under
+# «Улики».
+#
+# `skills/v24` mandates a closed-vocabulary outcome line inside every `Н-n`
+# block, and the vocabulary is the verdict's own three answers one level down:
+#
+#     исход: успех     — действие достигло цели            (compromised)
+#     исход: попытка   — видно, и видно, что цели не достигло (attacked-not-proven)
+#     исход: норма     — проверено, объяснено штатным поведением (clean)
+#
+# So the join this file has been missing is one line of arithmetic:
+#
+#     a decoy cited inside a finding marked успех/попытка  = A FALSE POSITIVE
+#     the same decoy cited inside a finding marked норма   = A REFUTATION
+#     a REAL defect cited inside a finding marked норма    = a miss dressed as
+#                                                            diligence
+#
+# THE GRAMMAR IS NOT REIMPLEMENTED HERE. `citecheck.finding_blocks`,
+# `finding_outcomes`, `implied_verdict` and `stated_verdict` own it — including
+# the rule that a trailing qualifier («успех, но не доказан») is refused
+# SEPARATELY from a forgotten line, because a fourth state creeping back through
+# the tail of a sentence and a forgotten field are different defects and a skill
+# has to be told which one it has. A second copy of that grammar would be a
+# second, incomparable scale. This file joins and grades.
+#
+# THE STRONGEST OUTCOME WINS when one defect is cited from several blocks — the
+# same asymmetry the field split already uses. A decoy cited under a «норма»
+# finding AND under a «успех» one was still entered as evidence for something
+# that happened; erring the other way lets an unlabelled or refuted block
+# launder a false positive.
+#
+# FAIL LOUD ON A REPORT THAT PREDATES THE FIELD. Every report this project has
+# on disk was written before v24, so every block is `missing`. The axis returns
+# None with a reason and NEVER a zero: «0 refutations» is a claim about the
+# report, «not measurable» is the truth about the field, and scoring the first
+# would silently rewrite eight historical scores.
+OUTCOME_INCIDENT = ("успех", "попытка")
+OUTCOME_ZONE = {"успех": "incident", "попытка": "incident", "норма": "normal"}
+NO_OUTCOME_API = (
+    "citecheck %s has no `finding_outcomes`: the per-finding outcome line is a "
+    "v24 field and this checker predates it, so the false-positive / refutation "
+    "split IS NOT MEASURABLE and every column of it is None, NOT 0.")
+
+
+def outcome_structure_of(report):
+    """The v24 outcome parse of ONE document -> {available, why, blocks, ...}.
+
+    `blocks` is [(line_lo, line_hi, outcome_or_None, finding_id)], index-aligned
+    with citecheck's own block list. Everything else is the health of the outcome
+    lines themselves: how many blocks stated one, which forgot it, which argued
+    with the vocabulary, and whether the register adds up to the stated verdict.
+    """
+    out = {"available": False, "why": None, "blocks": [],
+           "finding_blocks": None, "outcomes_stated": None,
+           "outcome_missing": None, "outcome_missing_findings": [],
+           "outcome_invalid": None, "outcome_invalid_findings": [],
+           "implied_verdict": None, "stated_verdict": None,
+           "contradiction": None,
+           "vocabulary": None, "grammar": None}
+    blocks_fn = getattr(citecheck, "finding_blocks", None)
+    outcomes_fn = getattr(citecheck, "finding_outcomes", None)
+    if blocks_fn is None or outcomes_fn is None:
+        out["why"] = NO_OUTCOME_API % CITECHECK_VERSION
+        return out
+    out["vocabulary"] = list(citecheck.OUTCOME_ORDER)
+    out["grammar"] = "исход: " + "|".join(citecheck.OUTCOME_ORDER)
+    bounds = blocks_fn(report)
+    rows = outcomes_fn(report)
+    if len(bounds) != len(rows):
+        # FAIL LOUD rather than zip-shortest: the two lists are the same walk
+        # over the same blocks in citecheck, and if that ever stops being true
+        # every outcome would be attributed to the wrong finding.
+        raise RuntimeError(
+            "citecheck %s returned %d finding block(s) and %d outcome row(s) — "
+            "these must be the same walk over the same blocks, and joining them "
+            "positionally would attribute outcomes to the wrong findings."
+            % (CITECHECK_VERSION, len(bounds), len(rows)))
+    if not bounds:
+        out["why"] = ("no `Н-n` finding block in this report: the outcome is a "
+                      "per-finding field and there is no finding to read it "
+                      "from. Every outcome column is None, NOT 0.")
+        return out
+    out["blocks"] = [(lo, hi, r["outcome"], num)
+                     for (num, lo, hi), r in zip(bounds, rows)]
+    out["finding_blocks"] = len(bounds)
+    out["outcomes_stated"] = sum(1 for r in rows if r["outcome"])
+    out["outcome_missing_findings"] = [r["finding"] for r in rows
+                                       if not r["outcome"] and not r["bad"]]
+    out["outcome_missing"] = len(out["outcome_missing_findings"])
+    out["outcome_invalid_findings"] = [
+        {"finding": r["finding"], "text": r["bad"],
+         "report_line": r["report_line"]}
+        for r in rows if not r["outcome"] and r["bad"]]
+    out["outcome_invalid"] = len(out["outcome_invalid_findings"])
+    out["implied_verdict"] = citecheck.implied_verdict(report)
+    out["stated_verdict"] = citecheck.stated_verdict(report)
+    # None, not False, when either side is silent. A verdict cannot contradict a
+    # register that states nothing — that is a missing field, and it is already
+    # counted as one. `citecheck.outcomes_of` folds this to False because it
+    # gates a skill's own self-check; a SCORE has to keep the two apart.
+    if out["implied_verdict"] and out["stated_verdict"]:
+        out["contradiction"] = (out["implied_verdict"] != out["stated_verdict"])
+    if not out["outcomes_stated"]:
+        out["why"] = (
+            "no finding block states an «исход:» line — %d of %d block(s) are "
+            "missing it. This report predates the per-finding outcome field "
+            "(skills/v24), so the false-positive / refutation split IS NOT "
+            "MEASURABLE on it and every column of it is None, NOT 0. A zero "
+            "here would read as «this report refuted nothing», which is a claim "
+            "about the report instead of about the field."
+            % (out["outcome_missing"] + out["outcome_invalid"],
+               out["finding_blocks"]))
+        return out
+    out["available"] = True
+    return out
+
+
+def outcome_zone_of(oc, st, linenos, zones, anchored):
+    """-> (zone, outcome_token, finding_id) for one defect.
+
+    zone is incident | normal | unlabelled | dismissed | elsewhere | None.
+    None means the report never anchored this defect at all — never «the report
+    said nothing about it», which is what a zero would say.
+    """
+    if not anchored:
+        return None, None, None
+    seen = []
+    for ln in linenos:
+        if zone_of(st, ln) != "findings":
+            continue
+        for (lo, hi, tok, num) in oc["blocks"]:
+            if lo <= ln <= hi:
+                seen.append((tok, num))
+                break
+        else:
+            # inside «Находки» but owned by no `Н-n` block — a preamble, a
+            # summary table. Presented, and the outcome is unreadable.
+            seen.append((None, None))
+    if seen:
+        named = [(t, n) for (t, n) in seen if t]
+        if not named:
+            return "unlabelled", None, None
+        tok, num = max(named, key=lambda tn: citecheck.OUTCOME_ORDER.index(tn[0]))
+        return OUTCOME_ZONE[tok], tok, num
+    if "rejected" in zones:
+        return "dismissed", None, None
+    return "elsewhere", None, None
+
+
+OUTCOME_BUCKETS = ("incident", "normal", "unlabelled", "dismissed", "elsewhere",
+                   None)
+DECOY_BUCKET_FIELD = {"incident": "decoys_false_positive",
+                      "normal": "decoys_refutation",
+                      "unlabelled": "decoys_unlabelled",
+                      "dismissed": "decoys_dismissed",
+                      "elsewhere": "decoys_elsewhere",
+                      None: "decoys_not_anchored"}
+REAL_BUCKET_FIELD = {"incident": "real_asserted_as_incident",
+                     "normal": "real_marked_normal",
+                     "unlabelled": "real_unlabelled",
+                     "dismissed": "real_dismissed",
+                     "elsewhere": "real_elsewhere",
+                     None: "real_not_anchored"}
+
+
 def anchor_hits(spans, proofs):
     """How many of this defect's proof locations the report pointed at.
 
@@ -779,6 +989,44 @@ def anchor_hits(spans, proofs):
                for (rel, lo, hi) in spans):
             n += 1
     return n
+
+
+def outcomes_record(oc, measured, parsed, st, decoys, real_anchorable, buckets):
+    """The whole outcome axis for ONE document, health and join together.
+
+    HEALTH is a fact about the document and is read whenever the report has
+    `Н-n` blocks at all — including on every pre-v24 report, where it is exactly
+    the evidence that the axis did not exist yet. A block that forgot its
+    outcome line is a delivery defect in the same way a missing verdict section
+    is, so it is counted, not inferred.
+
+    THE JOIN is None — never 0 — unless some block actually stated an outcome
+    AND the report has a readable findings section. Both halves are needed and
+    the reason says which one is missing.
+    """
+    rec = {"measured": measured, "why": None,
+           "vocabulary": oc["vocabulary"], "grammar": oc["grammar"],
+           "citecheck_version": CITECHECK_VERSION,
+           "finding_blocks": oc["finding_blocks"],
+           "outcomes_stated": oc["outcomes_stated"],
+           "outcome_missing": oc["outcome_missing"],
+           "outcome_missing_findings": oc["outcome_missing_findings"],
+           "outcome_invalid": oc["outcome_invalid"],
+           "outcome_invalid_findings": oc["outcome_invalid_findings"],
+           "implied_verdict": oc["implied_verdict"],
+           "stated_verdict": oc["stated_verdict"],
+           "contradiction": oc["contradiction"],
+           "decoys": decoys, "real_anchorable": real_anchorable}
+    for bucket, field in DECOY_BUCKET_FIELD.items():
+        rec[field] = buckets["decoy"][bucket] if measured else None
+    for bucket, field in REAL_BUCKET_FIELD.items():
+        rec[field] = buckets["real"][bucket] if measured else None
+    if not measured:
+        rec["why"] = oc["why"] or (
+            "the findings section is unreadable, so a citation cannot be placed "
+            "inside or outside a finding at all: %s The outcome split is None, "
+            "NOT 0." % (st.get("why") or ""))
+    return rec
 
 
 # --------------------------------------------------------------------------
@@ -798,6 +1046,11 @@ def findings_of(key, report, root):
 
     st = structure_of(report, cited["by_rel"], cited["by_base"])
     parsed = st["parsed"]
+    oc = outcome_structure_of(report)
+    # The join needs BOTH parses: which `Н-n` block owns the citation (v24's) and
+    # whether that line is inside «Находки» at all (this file's). One without the
+    # other is not a measurement.
+    outcome_measured = bool(oc["available"] and parsed)
 
     per = {}
     unanchorable, missing_proof_files = [], set()
@@ -805,6 +1058,8 @@ def findings_of(key, report, root):
     presented = dismissed = outside = 0
     decoys_presented = decoys_dismissed = 0
     decoys_asserted_incident = decoys_refuted = decoys_elsewhere = 0
+    obuck = {"decoy": dict.fromkeys(OUTCOME_BUCKETS, 0),
+             "real": dict.fromkeys(OUTCOME_BUCKETS, 0)}
     for cid in sorted(key):
         d = dict(key[cid])
         d.setdefault("case_id", cid)
@@ -816,13 +1071,19 @@ def findings_of(key, report, root):
         n_alt = len(_spans_of(d.get("alternate_proof_locations")))
         hits = anchor_hits(spans, proofs) if proofs else 0
         is_anchored = bool(proofs) and hits > 0
-        zones, heads, fields = (anchor_zones(cited["placed"], proofs, st)
-                                if (proofs and parsed) else ([], [], set()))
+        zones, heads, fields, linenos = (
+            anchor_zones(cited["placed"], proofs, st)
+            if (proofs and parsed) else ([], [], set(), []))
         disp = (disposition_of(zones, fields, bool(proofs) and hits > 0, st)
                 if parsed else None)
         is_presented = ("findings" in zones) if parsed else None
         is_dismissed = (bool(zones) and "findings" not in zones
                         and "rejected" in zones) if parsed else None
+        ozone, otok, ofind = (
+            outcome_zone_of(oc, st, linenos, zones, is_anchored)
+            if outcome_measured else (None, None, None))
+        if outcome_measured:
+            obuck["decoy" if herring else "real"][ozone] += 1
         per[cid] = {"defect": cid, "herring": herring,
                     "title": d.get("title", ""),
                     "proof_locations": len(proofs) - n_alt,
@@ -833,6 +1094,13 @@ def findings_of(key, report, root):
                     "anchored_zones": zones, "anchored_headings": heads,
                     "anchored_fields": sorted(f for f in fields if f),
                     "disposition": disp,
+                    # axis 6, beside `disposition` and never merged with it: the
+                    # field parse reads which mandated field a citation sat
+                    # under, this reads what the finding said HAPPENED. On a
+                    # «норма» finding whose evidence field carries a decoy the
+                    # two disagree, and both readings are true.
+                    "outcome": otok, "outcome_finding": ofind,
+                    "outcome_zone": ozone,
                     "asserted": None, "why": None}
         if herring:
             decoys += 1
@@ -857,6 +1125,8 @@ def findings_of(key, report, root):
                               and "rejected" not in zones)) else 0
 
     return {"cited": cited, "structure": st, "per": per,
+            "outcomes": outcomes_record(oc, outcome_measured, parsed, st,
+                                        decoys, anchorable, obuck),
             "unanchorable": unanchorable,
             "missing_proof_files": missing_proof_files,
             "anchored": anchored, "anchorable": anchorable,
@@ -950,6 +1220,11 @@ def _channel_score(key, text, root, unique_blocks, min_overlap, min_tokens,
                           if (parsed and f["anchorable"]) else None),
         "decoys": f["decoys"], "decoys_anchored": f["decoys_anchored"],
         "decoys_presented": f["decoys_presented"] if parsed else None,
+        # A missing outcome line is a delivery defect exactly as a missing
+        # verdict section is, and the two channels can disagree about it: a
+        # condensed hand-over that drops the register keeps every citation and
+        # loses every outcome, and the composed record cannot see that.
+        "outcomes": f["outcomes"],
         "rejections": f["structure"]["rejections"],
         "rejections_uncited": f["structure"]["rejections_uncited"],
         "coverage_rows": f["structure"]["coverage_rows"],
@@ -1166,6 +1441,14 @@ def score(raw_key, report, root, call=None, min_overlap=0.34, min_tokens=3,
         # coverage row, a register — and never filed it as a finding. The
         # negative control's D03 (our own evidence collector) is this shape.
         "decoys_anchored_elsewhere": decoys_elsewhere if parsed else None,
+        # AXIS 6, a nested block of its own so that not one column an old ledger
+        # row published changes name, place or value. It is the first axis that
+        # can tell a false positive from a refutation: the SAME citation of the
+        # SAME planted non-defect is one or the other depending on whether the
+        # finding that carries it says «успех»/«попытка» or «норма». Everything
+        # in it is None — never 0 — on a report written before v24 mandated the
+        # field, which is every report this project has on disk.
+        "outcomes": f["outcomes"],
         # `rejections_uncited` is rising as the skill closes more rows by rule
         # (AIT v16 0/7 → v19 2/11 → v22 6/10) and the v22 Linux arm's sharpest
         # loss sits in that gap. Top-level, beside `anchored`, not buried in
@@ -1266,6 +1549,58 @@ def render(rec, cited):
         print("            %d anchored elsewhere — verdict/coverage/register, "
               "claimed by no finding and refuted by no rejection"
               % rec["decoys_anchored_elsewhere"])
+
+    # THE OUTCOME HEADLINE. Two lines of health — a block that forgot its
+    # outcome is a delivery defect, and a register that does not add up to the
+    # verdict is a report arguing with itself — and then the join that is the
+    # whole point: the same citation of the same planted non-defect is a false
+    # positive under «успех»/«попытка» and a refutation under «норма».
+    o = rec["outcomes"]
+    if o["finding_blocks"] is None:
+        print("outcomes  : — NOT MEASURED (%s)" % o["why"])
+    else:
+        print("outcomes  : %d finding block(s) — %d state «исход:», %d without "
+              "the line, %d outside the vocabulary"
+              % (o["finding_blocks"], o["outcomes_stated"],
+                 o["outcome_missing"], o["outcome_invalid"]))
+        agree = ("—" if o["contradiction"] is None
+                 else ("ПРОТИВОРЕЧИЕ" if o["contradiction"] else "agree"))
+        print("            the register implies «%s» · the ВЕРДИКТ section "
+              "states «%s» — %s"
+              % (o["implied_verdict"] or "—", o["stated_verdict"] or "—", agree))
+        for bad in o["outcome_invalid_findings"][:4]:
+            print("            Н-%s, line %s: %r — not in the vocabulary %s"
+                  % (bad["finding"], bad["report_line"], bad["text"][:70],
+                     o["grammar"]))
+    if not o["measured"]:
+        print("            decoy split (false positive / refutation): — NOT "
+              "MEASURED (None, not 0)")
+        print("            %s" % o["why"])
+    else:
+        print("            decoys: %d false positive (cited inside a finding "
+              "marked успех/попытка) · %d refutation (marked норма) · %d "
+              "dismissed · %d elsewhere · %d unlabelled · %d never anchored"
+              % (o["decoys_false_positive"], o["decoys_refutation"],
+                 o["decoys_dismissed"], o["decoys_elsewhere"],
+                 o["decoys_unlabelled"], o["decoys_not_anchored"]))
+        print("            real:   %d asserted as incident · %d marked «норма» "
+              "— a miss dressed as diligence · %d dismissed · %d elsewhere · "
+              "%d unlabelled · %d never anchored"
+              % (o["real_asserted_as_incident"], o["real_marked_normal"],
+                 o["real_dismissed"], o["real_elsewhere"],
+                 o["real_unlabelled"], o["real_not_anchored"]))
+    if o["contradiction"]:
+        print("⚠ ПРОТИВОРЕЧИЕ: the findings add up to «%s» and the ВЕРДИКТ "
+              "section says «%s». One of the two is wrong, and a hand-over that "
+              "contradicts itself is a delivery defect."
+              % (o["implied_verdict"], o["stated_verdict"]))
+    if o["outcome_missing"]:
+        print("⚠ %d finding block(s) state no outcome at all: %s. A reader "
+              "cannot tell «I found an intrusion» from «I checked this and it "
+              "was nothing» — both are written in the same fields."
+              % (o["outcome_missing"],
+                 ", ".join("Н-%s" % f
+                           for f in o["outcome_missing_findings"][:10])))
     # THE UNCITED-DISPOSAL HEADLINE. Both counts, side by side, never summed: one
     # is a rejected candidate nobody can check, the other is a whole file closed
     # in a coverage row nobody can check, and the v22 Linux arm lost a whole
@@ -1323,12 +1658,18 @@ def render(rec, cited):
             vp = ("—" if c["verified_pct"] is None
                   else "%.1f %%" % c["verified_pct"])
             pres = "—" if c["presented"] is None else str(c["presented"])
+            co = c["outcomes"]
             print("            %s (%-16s): citations %d / %d ok (%s), "
                   "wrong-content %d · anchored %d / %d · presented %s / %d · "
-                  "%d block(s) this channel alone"
+                  "outcomes %s of %s finding block(s) · %d block(s) this "
+                  "channel alone"
                   % (role, CHANNEL_FILE[name], s2.get("ok", 0),
                      s2.get("total", 0), vp, s2.get("wrong-content", 0),
                      c["anchored"], c["anchorable"], pres, c["presentable"],
+                     "—" if co["outcomes_stated"] is None
+                     else co["outcomes_stated"],
+                     "—" if co["finding_blocks"] is None
+                     else co["finding_blocks"],
                      c["unique_blocks"]))
         if d["handover_not_in_checked"] is None:
             print("            delivered-but-never-checked: — NOT MEASURED (%s)"
@@ -1385,9 +1726,9 @@ def render(rec, cited):
                  ", ".join(rec["proof_files_absent_from_corpus"][:6])))
 
     print()
-    print("%-5s %-6s %-9s %-10s %-9s %-11s %s"
+    print("%-5s %-6s %-9s %-10s %-9s %-11s %-12s %s"
           % ("id", "kind", "anchored", "presented", "asserted", "disposition",
-             "title"))
+             "outcome", "title"))
     for r in rec["per_defect"]:
         kind = "DECOY" if r["herring"] else "real"
         if not r["anchorable"]:
@@ -1411,8 +1752,21 @@ def render(rec, cited):
         disp = r.get("disposition") or "—"
         if r["herring"] and disp == "asserted":
             disp = "✗ asserted"
-        print("%-5s %-6s %-9s %-10s %-9s %-11s %s"
-              % (r["defect"], kind, anc, pre, asr, disp, r["title"][:44]))
+        # The word the report itself used, and what it means for THIS kind of
+        # defect: the same «норма» is a refutation on a decoy and a miss on a
+        # real one, so the mark differs and the token does not.
+        oz, otok = r.get("outcome_zone"), r.get("outcome")
+        if oz is None:
+            oc_col = "—"
+        elif oz == "incident":
+            oc_col = ("✗ FP %s" % otok) if r["herring"] else otok
+        elif oz == "normal":
+            oc_col = otok if r["herring"] else ("✗ %s" % otok)
+        else:
+            oc_col = "· " + oz
+        print("%-5s %-6s %-9s %-10s %-9s %-11s %-12s %s"
+              % (r["defect"], kind, anc, pre, asr, disp, oc_col,
+                 r["title"][:44]))
     # the D09 shape, printed rather than judged: WHERE each anchor landed.
     shown = [r for r in rec["per_defect"] if r.get("anchored_headings")]
     if shown:
