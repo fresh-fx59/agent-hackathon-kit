@@ -1543,5 +1543,550 @@ class TestTheSplitOnTheRealReports(unittest.TestCase):
             row = [r for r in rec["per_defect"] if r["defect"] == cid][0]
             self.assertEqual(row["disposition"], "asserted")
 
+
+# --------------------------------------------------------------------------
+# M. DELIVERY INTEGRITY IS AN AXIS, NOT A PRINTED WARNING
+# --------------------------------------------------------------------------
+# The v22 negative control is the first arm whose citation integrity fell below
+# 100 %, and the cause was not the investigation. Scored per channel:
+# `work/report.md` alone is 110 / 110 ok; the final message alone is 74 / 95
+# with 21 `wrong-content`, all inside a condensed inventory the run hand-wrote
+# AFTER checking the draft. `CHANNELS DIVERGE` fired — 34 shared blocks out of
+# 71 and 151 — and printed a warning nobody could put in a table.
+#
+# The composed number (198 citations, 89.4 %) is an average that describes
+# NEITHER document. So the channels are scored separately as well as together,
+# and the divergence itself becomes a record field: how many blocks are shared,
+# how many are unique to each side, and whether each side's citations verify.
+#
+# WHAT DOES NOT WORK, measured before this was written. «The delivered citations
+# must be a subset of the verified ones» catches 1 of the 21 failures, because 20
+# of them were citations already in the verified set, RE-TYPED under a new
+# sentence. The mechanism that works is re-checking the delivered text against
+# the corpus — the same check, the same corpus, the same citecheck the scorer
+# already loads and receipts. Both nets are `citecheck`'s (`check` and
+# `not_in_checked`); this file grades, it does not re-decide.
+#
+# THE COMPOSED NUMBER STAYS. Axes are never summed and never silently replaced:
+# a ledger row written before today must still mean what it said.
+# The draft the run checked: two findings, and every citation reads correctly.
+CHECKED_DRAFT = """# Отчёт
+
+## 0. Короткий ответ
+
+Что-то произошло. app/a.log:5 «filler line 5»
+
+## 1. Находки
+
+### Н-1 · Первое
+
+Вот доказательство: app/a.log:10 «filler line 10»
+
+### Н-2 · Второе
+
+И ещё одно: app/b.log:30 «filler line 30»
+
+## 2. Отклонённые кандидаты
+
+- **«Третье»** — нет. app/a.log:20 «filler line 20» — это фон.
+
+## ВЕРДИКТ
+
+compromised
+"""
+
+# The measured shape: a condensed inventory written AFTER the check. Both of its
+# citations are re-typed — same file, same line, already in the draft's verified
+# set — under quotes the line does not support. And the whole of
+# Н-2 is gone, which the composed number cannot see because the draft still
+# carries it.
+HANDOVER_RETYPED = """# Итог
+
+Кратко — что нашли, одной таблицей.
+
+## 1. Находки
+
+### Н-1 · Первое
+
+Сводка: app/a.log:10 «unexpected privilege escalation detected»
+
+Ещё строка: app/a.log:20 «outbound connection to unknown host»
+
+## ВЕРДИКТ
+
+compromised
+"""
+
+# A hand-over whose every citation reads correctly — and one of them was never
+# part of what the run actually checked.
+HANDOVER_UNCHECKED = """# Итог
+
+## 1. Находки
+
+### Н-1 · Первое
+
+Вот доказательство: app/a.log:10 «filler line 10»
+
+Ещё одно, впервые: app/b.log:31 «filler line 31»
+
+## ВЕРДИКТ
+
+compromised
+"""
+
+
+class TestDeliveryIntegrityIsScored(unittest.TestCase):
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        build_corpus(self.tmp, {"app/a.log": numbered(50),
+                                "app/b.log": numbered(50)})
+        self.key = key_with([defect("D01", "x", [loc("app/a.log", 10)]),
+                             defect("D02", "y", [loc("app/b.log", 30)])])
+
+    def score(self, answer, artifact):
+        text = S.deliverable.compose(answer, artifact)
+        with redirect_stdout(io.StringIO()):
+            return S.score(self.key, text, self.tmp, call=None,
+                           answer=answer, artifact=artifact)
+
+    def out_of(self, answer, artifact):
+        text = S.deliverable.compose(answer, artifact)
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            S.score(self.key, text, self.tmp, call=None,
+                    answer=answer, artifact=artifact)
+        return buf.getvalue()
+
+    # -- the two channels are scored separately --------------------------
+    def test_each_channel_gets_its_own_citation_score(self):
+        """THE measurement. 110/110 and 74/95 are two facts about two documents,
+        and the arm published one number that is neither."""
+        rec = self.score(HANDOVER_RETYPED, CHECKED_DRAFT)
+        ch = rec["delivery"]["channels"]
+        self.assertEqual(ch["file"]["citations"]["ok"],
+                         ch["file"]["citations"]["total"],
+                         "the draft verifies whole — that is the investigation")
+        self.assertGreater(ch["message"]["citations"]["wrong-content"], 0,
+                           "the hand-over does not — that is the delivery")
+        self.assertTrue(ch["file"]["verified"])
+        self.assertFalse(ch["message"]["verified"])
+
+    def test_the_investigation_and_the_handover_get_separate_findings_columns(self):
+        """«The investigation was sound, the hand-over was not» has to be a
+        statement the NUMBERS can make, not only the prose around them."""
+        rec = self.score(HANDOVER_RETYPED, CHECKED_DRAFT)
+        ch = rec["delivery"]["channels"]
+        self.assertEqual(ch["file"]["anchored"], 2)
+        self.assertEqual(ch["message"]["anchored"], 1,
+                         "the condensed hand-over dropped Н-2 entirely — and the "
+                         "composed number cannot see it, because the draft still "
+                         "carries the proof")
+        self.assertEqual(ch["file"]["anchorable"], ch["message"]["anchorable"],
+                         "same key, same denominator — only the document differs")
+
+    def test_the_composed_record_is_untouched_by_the_new_axis(self):
+        """Axes are never summed and never silently replaced. A number that moves
+        must be explainable to somebody reading an old ledger row, so the
+        pre-existing fields must be bit-for-bit what they were."""
+        text = S.deliverable.compose(HANDOVER_RETYPED, CHECKED_DRAFT)
+        with redirect_stdout(io.StringIO()):
+            plain = S.score(self.key, text, self.tmp, call=None)
+        with_axis = self.score(HANDOVER_RETYPED, CHECKED_DRAFT)
+        for k in plain:
+            if k == "delivery":
+                continue
+            self.assertEqual(with_axis[k], plain[k], k)
+        self.assertIsNone(plain["delivery"]["channel"],
+                          "no channels were handed in, so the axis says so")
+
+    def test_the_composed_citation_total_is_still_the_union(self):
+        rec = self.score(HANDOVER_RETYPED, CHECKED_DRAFT)
+        ch = rec["delivery"]["channels"]
+        self.assertGreater(rec["citecheck"]["total"], ch["file"]["citations"]["total"])
+        self.assertGreater(rec["citecheck"]["total"],
+                           ch["message"]["citations"]["total"])
+
+    # -- CHANNELS DIVERGE is a scored fact -------------------------------
+    def test_divergence_is_a_record_field_with_the_block_arithmetic(self):
+        rec = self.score(HANDOVER_RETYPED, CHECKED_DRAFT)
+        d = rec["delivery"]
+        self.assertTrue(d["diverged"])
+        self.assertEqual(d["relation"], "divergent")
+        b = d["blocks"]
+        for k in ("message", "file", "shared", "only_in_message", "only_in_file"):
+            self.assertIsInstance(b[k], int, k)
+        self.assertGreater(b["only_in_message"], 0)
+        self.assertGreater(b["only_in_file"], 0)
+
+    def test_the_block_arithmetic_is_deliverables_and_not_a_second_copy(self):
+        """`duplication()` already computes this relation. A second copy in the
+        scorer is a second scale."""
+        rec = self.score(HANDOVER_RETYPED, CHECKED_DRAFT)
+        dup = S.deliverable.duplication(HANDOVER_RETYPED, CHECKED_DRAFT)
+        b = rec["delivery"]["blocks"]
+        self.assertEqual(b["shared"], dup["shared_blocks"])
+        self.assertEqual(b["only_in_message"], dup["only_in_message"])
+        self.assertEqual(b["only_in_file"], dup["only_in_file"])
+        self.assertEqual(b["message"], dup["message_blocks"])
+        self.assertEqual(b["file"], dup["file_blocks"])
+
+    def test_whether_the_divergent_side_verifies_is_recorded(self):
+        rec = self.score(HANDOVER_RETYPED, CHECKED_DRAFT)
+        d = rec["delivery"]
+        self.assertEqual(d["divergent_sides"], ["message", "file"])
+        self.assertFalse(d["divergent_side_verifies"],
+                         "one of the two divergent documents does not verify")
+
+    def test_two_divergent_channels_that_both_verify_say_so(self):
+        """Divergence is not itself a citation defect: two documents can disagree
+        in content and both be honest about the corpus."""
+        clean = CHECKED_DRAFT.replace("app/a.log:5 «filler line 5»",
+                                      "app/b.log:31 «filler line 31»")
+        rec = self.score(clean, CHECKED_DRAFT)
+        d = rec["delivery"]
+        self.assertTrue(d["diverged"])
+        self.assertTrue(d["divergent_side_verifies"])
+
+    def test_channels_that_agree_are_not_divergent_and_the_question_is_none(self):
+        rec = self.score(CHECKED_DRAFT, CHECKED_DRAFT)
+        d = rec["delivery"]
+        self.assertFalse(d["diverged"])
+        self.assertEqual(d["relation"], "identical")
+        self.assertEqual(d["divergent_sides"], [])
+        self.assertIsNone(d["divergent_side_verifies"],
+                          "nothing diverged, so the question was not asked — "
+                          "None, never True")
+
+    def test_a_file_that_only_re_wraps_the_message_is_not_divergence(self):
+        wrapped = TestOneReportOnTwoChannelsIsCountedOnce.hard_wrap(CHECKED_DRAFT)
+        rec = self.score(CHECKED_DRAFT, wrapped)
+        self.assertFalse(rec["delivery"]["diverged"])
+        self.assertIn(rec["delivery"]["relation"],
+                      ("identical", "file-repeats-message"))
+
+    # -- the hand-over gate is citecheck's own ---------------------------
+    def test_a_retyped_citation_already_in_the_verified_set_still_fails(self):
+        """The measured lesson, encoded so nobody rebuilds subset arithmetic:
+        20 of the 21 failures were citations ALREADY in the verified set, re-typed
+        under a new sentence. The subset net sees nothing; re-checking the
+        delivered text against the corpus sees all of them."""
+        rec = self.score(HANDOVER_RETYPED, CHECKED_DRAFT)
+        d = rec["delivery"]
+        self.assertEqual(d["handover_not_in_checked"], 0,
+                         "every re-typed citation IS in the verified set — the "
+                         "subset test is blind to exactly this shape")
+        self.assertEqual(d["channels"]["message"]["citations"]["wrong-content"], 2)
+        self.assertTrue(d["handover_failed"])
+
+    def test_a_delivered_citation_the_draft_never_checked_is_named(self):
+        """The other net, and the 1 of 21 it catches: a line that exists and reads
+        right was still never part of what the run checked."""
+        rec = self.score(HANDOVER_UNCHECKED, CHECKED_DRAFT)
+        d = rec["delivery"]
+        self.assertTrue(d["channels"]["message"]["verified"],
+                        "every delivered citation reads correctly")
+        self.assertEqual(d["handover_not_in_checked"], 1)
+        self.assertIn("app/b.log:31",
+                      d["handover_not_in_checked_examples"][0]["citation"])
+        self.assertTrue(d["handover_failed"])
+
+    def test_the_pass_fail_predicate_is_citechecks_and_not_a_second_copy(self):
+        """`citecheck.delivery_failed` is what the skill exits non-zero on. The
+        scorer must agree with the tool by construction, not by coincidence."""
+        rec = self.score(HANDOVER_RETYPED, CHECKED_DRAFT)
+        d = rec["delivery"]
+        dd = {"summary": d["channels"]["message"]["citations"],
+              "not_in_checked": [1] * d["handover_not_in_checked"]}
+        self.assertEqual(d["handover_failed"], S.citecheck.delivery_failed(dd))
+
+    def test_a_clean_handover_does_not_fail(self):
+        rec = self.score(CHECKED_DRAFT, CHECKED_DRAFT)
+        self.assertFalse(rec["delivery"]["handover_failed"])
+        self.assertTrue(rec["delivery"]["channels"]["message"]["verified"])
+
+    def test_the_handover_is_the_message_and_the_checked_artefact_is_the_file(self):
+        rec = self.score(HANDOVER_RETYPED, CHECKED_DRAFT)
+        self.assertEqual(rec["delivery"]["handover"], "message")
+        self.assertEqual(rec["delivery"]["checked"], "file")
+
+    # -- one channel, no channel, and the receipt ------------------------
+    def test_a_message_only_run_has_one_channel_and_nothing_to_diverge_from(self):
+        rec = self.score(CHECKED_DRAFT, "")
+        d = rec["delivery"]
+        self.assertEqual(d["channel"], "message")
+        self.assertEqual(sorted(d["channels"]), ["message"])
+        self.assertFalse(d["diverged"])
+        self.assertIsNone(d["handover_not_in_checked"],
+                          "there is no second document to have checked — None, "
+                          "never 0")
+        self.assertEqual(d["checked"], None)
+
+    def test_a_file_only_run_names_the_file_as_the_handover(self):
+        rec = self.score("", CHECKED_DRAFT)
+        d = rec["delivery"]
+        self.assertEqual(d["channel"], "file")
+        self.assertEqual(d["handover"], "file")
+
+    def test_scoring_a_bare_document_says_the_axis_was_not_measurable(self):
+        with redirect_stdout(io.StringIO()):
+            rec = S.score(self.key, CHECKED_DRAFT, self.tmp, call=None)
+        d = rec["delivery"]
+        self.assertFalse(d["measured"])
+        self.assertIsNone(d["diverged"])
+        self.assertIsNone(d["handover_failed"])
+        self.assertTrue(d["why"])
+
+    def test_the_axis_carries_the_same_citecheck_receipt_as_the_record(self):
+        rec = self.score(HANDOVER_RETYPED, CHECKED_DRAFT)
+        self.assertEqual(rec["delivery"]["citecheck_version"],
+                         rec["citecheck_version"])
+        self.assertEqual(rec["delivery"]["citecheck_sha"], rec["citecheck_sha"])
+
+    def test_the_axis_sends_nothing_anywhere(self):
+        saved = (S.score_case.http_call, S.score_bench.score)
+        S.score_case.http_call = Tripwire("score_case.http_call")
+        S.score_bench.score = Tripwire("score_bench.score")
+        try:
+            rec = self.score(HANDOVER_RETYPED, CHECKED_DRAFT)
+        finally:
+            S.score_case.http_call, S.score_bench.score = saved
+        self.assertTrue(rec["delivery"]["measured"])
+
+    def test_a_report_that_is_not_the_union_of_the_channels_RAISES(self):
+        """Fail loud. A delivery block describing two channels beside a composed
+        score taken from some third document is a record that lies quietly."""
+        with self.assertRaises(RuntimeError) as cm:
+            with redirect_stdout(io.StringIO()):
+                S.score(self.key, CHECKED_DRAFT, self.tmp, call=None,
+                        answer=HANDOVER_RETYPED, artifact=CHECKED_DRAFT)
+        self.assertIn("union", str(cm.exception).lower())
+
+    # -- it is printed too, beside being scored --------------------------
+    def test_the_summary_prints_a_delivery_headline_line(self):
+        out = self.out_of(HANDOVER_RETYPED, CHECKED_DRAFT)
+        line = [l for l in out.splitlines() if l.startswith("delivery")]
+        self.assertTrue(line, "expected a `delivery  :` headline line, got:\n%s"
+                        % out)
+        self.assertIn("CHANNELS DIVERGE", out)
+
+    def test_the_headline_carries_both_channels_verified_rates(self):
+        out = self.out_of(HANDOVER_RETYPED, CHECKED_DRAFT)
+        block = [l for l in out.splitlines()
+                 if l.startswith("delivery") or l.startswith("          ")]
+        joined = "\n".join(block)
+        self.assertIn("100.0 %", joined)
+        self.assertRegex(joined, r"hand-over.*\d+ / \d+")
+
+    def test_a_single_channel_run_prints_no_divergence(self):
+        out = self.out_of(CHECKED_DRAFT, "")
+        self.assertNotIn("CHANNELS DIVERGE", out)
+        self.assertTrue([l for l in out.splitlines() if l.startswith("delivery")])
+
+
+class TestTheDeliveryAxisThroughTheCLI(unittest.TestCase):
+    """Both doors into the axis: a run ledger, which carries the two channels
+    already, and `--report` + `--delivered`, which is the same two roles
+    `citecheck.py --delivered` names."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        build_corpus(self.tmp, {"app/a.log": numbered(50),
+                                "app/b.log": numbered(50)})
+        self.dir = tempfile.mkdtemp()
+        self.keyfile = os.path.join(self.dir, "key.json")
+        with open(self.keyfile, "w", encoding="utf-8") as fh:
+            json.dump(key_with([defect("D01", "x", [loc("app/a.log", 10)]),
+                                defect("D02", "y", [loc("app/b.log", 30)])],
+                               dataset="unit"), fh)
+        self.out = os.path.join(self.dir, "scores.jsonl")
+
+    def _run(self, argv):
+        saved = sys.argv
+        sys.argv = ["score-report.py"] + argv
+        buf = io.StringIO()
+        try:
+            with redirect_stdout(buf):
+                S.main()
+        finally:
+            sys.argv = saved
+        rec = [json.loads(l) for l in open(self.out, encoding="utf-8")
+               if l.strip()][-1]
+        return rec, buf.getvalue()
+
+    def _file(self, name, text):
+        p = os.path.join(self.dir, name)
+        with open(p, "w", encoding="utf-8") as fh:
+            fh.write(text)
+        return p
+
+    def test_a_ledger_row_fills_the_axis_from_its_two_channels(self):
+        ledger = self._file("runs.jsonl", json.dumps(
+            {"dataset": "unit", "arm": "vX", "trace_dir": "/tmp/t1",
+             "answer": HANDOVER_RETYPED, "artifact": CHECKED_DRAFT},
+            ensure_ascii=False) + "\n")
+        rec, out = self._run(["--key", self.keyfile, "--corpus", self.tmp,
+                              "--ledger", ledger, "--dataset", "unit",
+                              "--out", self.out])
+        d = rec["delivery"]
+        self.assertTrue(d["measured"])
+        self.assertTrue(d["diverged"])
+        self.assertTrue(d["handover_failed"])
+        self.assertEqual(d["channels"]["file"]["citations"]["ok"], 4)
+        self.assertIn("CHANNELS DIVERGE", out)
+        self.assertIn("delivery  :", out)
+
+    def test_the_record_stays_json_serialisable_with_the_axis_on_it(self):
+        ledger = self._file("runs.jsonl", json.dumps(
+            {"dataset": "unit", "arm": "vX", "trace_dir": "/tmp/t1",
+             "answer": HANDOVER_RETYPED, "artifact": CHECKED_DRAFT},
+            ensure_ascii=False) + "\n")
+        rec, _ = self._run(["--key", self.keyfile, "--corpus", self.tmp,
+                            "--ledger", ledger, "--dataset", "unit",
+                            "--out", self.out])
+        json.dumps(rec, ensure_ascii=False)
+        self.assertEqual(rec["delivery"]["citecheck_version"],
+                         rec["citecheck_version"])
+
+    def test_report_plus_delivered_scores_the_union_and_both_channels(self):
+        draft = self._file("report.md", CHECKED_DRAFT)
+        hand = self._file("handover.md", HANDOVER_RETYPED)
+        rec, out = self._run(["--key", self.keyfile, "--corpus", self.tmp,
+                              "--report", draft, "--delivered", hand,
+                              "--out", self.out])
+        d = rec["delivery"]
+        self.assertTrue(d["measured"])
+        self.assertEqual(d["handover"], "message")
+        self.assertEqual(d["checked"], "file")
+        self.assertTrue(d["handover_failed"])
+        self.assertEqual(rec["report_chars"],
+                         len(S.deliverable.compose(HANDOVER_RETYPED,
+                                                   CHECKED_DRAFT)),
+                         "what is scored stays the UNION of the two channels")
+        self.assertEqual(rec["delivered_in"], "both")
+
+    def test_report_alone_says_the_axis_was_not_measurable(self):
+        draft = self._file("report.md", CHECKED_DRAFT)
+        rec, out = self._run(["--key", self.keyfile, "--corpus", self.tmp,
+                              "--report", draft, "--out", self.out])
+        self.assertFalse(rec["delivery"]["measured"])
+        self.assertIn("NOT MEASURED", out)
+        self.assertIsNone(rec["duplication"])
+
+    def test_delivered_without_report_is_refused(self):
+        hand = self._file("handover.md", HANDOVER_RETYPED)
+        saved = sys.argv
+        sys.argv = ["score-report.py", "--key", self.keyfile, "--corpus",
+                    self.tmp, "--delivered", hand, "--out", self.out]
+        try:
+            with redirect_stdout(io.StringIO()):
+                with self.assertRaises(SystemExit):
+                    S.main()
+        finally:
+            sys.argv = saved
+
+
+# --------------------------------------------------------------------------
+# N. the delivery axis on the run that forced it
+# --------------------------------------------------------------------------
+NEG_KEY = os.path.join(BENCH, "answer-key-fleet-negative.json")
+FLEET_CORPUS = os.path.join(
+    os.path.expanduser("~"), "Documents", "projects", "personal-os", "projects",
+    "active", "attachments", "sherlock-cyber-fleet", "corpus")
+LEDGER = os.path.join(BENCH, "runs-bench.jsonl")
+
+
+def _ledger_row(trace):
+    if not os.path.isfile(LEDGER):
+        return None
+    for line in open(LEDGER, encoding="utf-8"):
+        if not line.strip():
+            continue
+        r = json.loads(line)
+        if trace in (r.get("trace_dir") or ""):
+            return r
+    return None
+
+
+class TestDeliveryOnTheNegativeControl(unittest.TestCase):
+    """The ledger is committed; the 225 MB corpus is not. Skip where it is
+    absent, run where the evidence is."""
+
+    TRACE = "20260818T212438Z-v22-claude-fleetneg"
+
+    @unittest.skipUnless(_ledger_row(TRACE) and os.path.isdir(FLEET_CORPUS),
+                         "fleet-negative run row or corpus not on this machine")
+    def test_the_arm_that_shipped_21_bad_citations_splits_110_110_and_74_95(self):
+        row = _ledger_row(self.TRACE)
+        key = json.load(open(NEG_KEY, encoding="utf-8"))
+        parts = S.deliverable.channels_of_row(row)
+        with redirect_stdout(io.StringIO()):
+            rec = S.score(key, S.deliverable.of_row(row), FLEET_CORPUS, call=None,
+                          answer=parts.get("message"), artifact=parts.get("file"))
+        d = rec["delivery"]
+        self.assertTrue(d["diverged"])
+        self.assertEqual(d["blocks"]["shared"], 34)
+        self.assertEqual(d["blocks"]["message"], 71)
+        self.assertEqual(d["blocks"]["file"], 151)
+        f = d["channels"]["file"]["citations"]
+        m = d["channels"]["message"]["citations"]
+        self.assertEqual((f["ok"], f["total"]), (110, 110))
+        self.assertEqual((m["ok"], m["total"]), (74, 95))
+        self.assertEqual(m["wrong-content"], 21)
+        self.assertEqual(d["handover_not_in_checked"], 1)
+        self.assertTrue(d["handover_failed"])
+        self.assertFalse(d["divergent_side_verifies"])
+        # and the composed number the ledger already published is unmoved
+        self.assertEqual(rec["citecheck"]["total"], 198)
+        self.assertEqual(rec["citecheck"]["ok"], 177)
+
+    AIT22 = "20260818T212406Z-v22-claude-ait"
+    AIT_CORPUS = os.path.join(os.path.expanduser("~"), "hack", "sherlock-corpora",
+                              "_blind", "incident-alpha")
+
+    @unittest.skipUnless(_ledger_row(AIT22) and os.path.isdir(AIT_CORPUS),
+                         "AIT v22 run row or corpus not on this machine")
+    def test_ait_v22_is_the_arm_where_ONE_TYPO_doubled_a_33_citation_table(self):
+        """FOUND BY THIS AXIS, 2026-08-19, and left unfixed on purpose.
+
+        AIT v22 composes to 207 citations and BOTH channels score 174. The two
+        channels are 105 blocks each and differ in exactly one: an 8,806-char
+        timeline table that reads «То же скачивание» in the message and «Тот же
+        скачивание» in the file — one word, 0.999943 similar. Block identity is
+        whitespace-insensitive and nothing else, so the union kept both copies
+        and counted that table's 33 citations twice.
+
+        NOT FIXED HERE. The unit is the block precisely because the alternative
+        is a similarity threshold, and `deliverable.py` refuses one by name: a
+        threshold is a number nobody can defend at the edge. Changing the union
+        would move every published composed total, which is a different job from
+        this one. What this axis changes is that the residual is now VISIBLE —
+        174 beside 207 — instead of hiding inside a 100 %-verified headline."""
+        row = _ledger_row(self.AIT22)
+        key = json.load(open(os.path.join(BENCH,
+                                          "answer-key-ait-russellmitchell.json"),
+                             encoding="utf-8"))
+        parts = S.deliverable.channels_of_row(row)
+        with redirect_stdout(io.StringIO()):
+            rec = S.score(key, S.deliverable.of_row(row), self.AIT_CORPUS,
+                          call=None, answer=parts.get("message"),
+                          artifact=parts.get("file"))
+        d = rec["delivery"]
+        self.assertEqual(d["relation"], "divergent")
+        self.assertEqual((d["blocks"]["only_in_message"],
+                          d["blocks"]["only_in_file"]), (1, 1))
+        self.assertEqual(d["blocks"]["message"], d["blocks"]["file"])
+        for name in ("message", "file"):
+            c = d["channels"][name]["citations"]
+            self.assertEqual((c["ok"], c["total"]), (174, 174))
+        self.assertTrue(d["divergent_side_verifies"],
+                        "both documents are honest about the corpus — the "
+                        "divergence is a typo, not a citation defect")
+        self.assertFalse(d["handover_failed"])
+        self.assertEqual(rec["citecheck"]["total"], 207,
+                         "the composed total is 33 higher than either channel: "
+                         "the near-identical table counted twice")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
