@@ -589,3 +589,134 @@ rule over every axis closes 96.6 % of the list for 72 receipts. What changed is
 that the shape is now printed as a number next to it — `самое широкое правило:
 R1 — 2473 строк (96.6 % закрытых)` — instead of living in a transcript, and that
 the 72 receipts are reads the run demonstrably did not do.
+
+---
+
+## v23 — a record is a transaction, and what you deliver is what you checked
+
+### A correlation key must identify a transaction, not a moment (amends §E16)
+
+**Rule in the source.** `detect_key_framing()` rejects a candidate whose values
+stop being distinct once the timestamp is removed from them, and `probe()` frames
+a fully-parsed common-log-format line as `line` before the key search is ever
+reached.
+
+**Why E16 was not enough.** E16's decisive test is «the lines of one record
+happened at one instant», with the clock as the corroborating witness. When the
+candidate field IS the clock, that test is **1.00 by construction** — the witness
+and the accused are the same object, and all four tests pass on a timestamp:
+
+| test | on a one-request-per-line access log keyed by its own stamp |
+|---|---|
+| mean run ≥ 1.5 | passes — every request inside one second shares the value |
+| distinct ≥ 0.05·n | passes — one value per second is plenty of values |
+| every value one contiguous run | passes — an access log is written in time order |
+| lines of one record at one instant | **1.00, by construction** |
+
+**Measured 2026-08-19 (v23), fleet negative-control corpus.** One nginx combined
+log, strictly one line per request: `gzcat … | wc -l` = **1 153**. v22 framed it
+`key:ws:3` — whitespace field 3 is `[<dd>/<Mon>/<yyyy>:<hh>:<mm>:<ss>` — and
+reported **записей 292**, a 3.95× undercount. Every count derived from records
+followed it, and the analyst copied 292 into the report while the answer key
+counts 1,153. v23 reports **строк 1153 · записей 1153 · кадрирование line**.
+
+**The residue test, and the constant it broke.** The discriminator is
+`clock_residue(v)`: remove the timestamp `_axis_key()` would parse out of the
+value and re-ask the distinct-value question of what is left. A bare stamp
+leaves nothing; `<epoch>.<ms>:<serial>` leaves its serial. The first
+implementation **disarmed the auditd grouping E16 exists for**, because
+`field_candidates()` caps a value at `VALUE_MAX = 24` for histogram cost and a
+real audit id with a five-digit serial is 27 characters — the serial is
+truncated off, so a hundred consecutive events shared one residue. Frequency and
+identity were sharing a constant. `make_extractor(axis, cap=…)` separates them;
+the identity test reads the value whole at `IDENT_VALUE_MAX = 200`.
+
+**The single-line grammar gate.** `CLF_LINE_RE` requires a FULL parse — host,
+ident, user, bracketed stamp, quoted request line, status, size — and is
+consulted below `cri`/`block`/`anchor`, so it can only ever claim a file that
+would have fallen through to the last-resort key search. **Syslog is deliberately
+not in it**: `LEAD_TS_RE` already frames a strict `ts host proc[pid]: msg` line
+one record per line AND keeps the wrapped continuation lines a strict grammar
+would split off, so adding syslog here could only make that class worse. Both
+gates earn their keep — the four `key:ws:4` vhost access logs put a vhost name
+in front of the request line, so `CLF_LINE_RE` does not match them and only the
+residue test rejects their clock.
+
+**Blast radius, 2026-08-19, v22 vs v23 `logmap.py`, same box, same flags.**
+
+| corpus | files whose framing moved | worklist | score |
+|---|---|---|---|
+| BlueSky `_sanitized/bluesky` | **0** | `worklist.tsv`/`map.txt`/`axis3.tsv` **byte-identical** | Step 1 W=50 real **8/11**, anchors 14/31, decoys 6/6, **248 rows** — unchanged |
+| CAM-LDS s1 | **0** (its 4 key framings survive: 2× `kv:msg`, `ws:2`, `ws:9`) | **byte-identical** | **617 rows, 62 config = 10.0 %** — unchanged |
+| AIT clean root `_blind/incident-alpha` | **19 of 423**, every one an HTTP access log: 15× `key:ws:3` + 4× `key:ws:4` → `line` | 2 560 → **2 615** rows | files touched **8/8**, lines covered **59 → 62** |
+| fleet negative control | **1 of 37** | 252 → **252** rows, 3 changed | — |
+
+Every moved file lands exactly on its own line count. The three AIT key framings
+that survive are the ones with no clock in them (`kv:msg` 4 588 lines → 2 960
+records, `ws:0`, `ws:2`).
+
+**Justifying the AIT worklist move by line class.** The +55 is **+71 on the 19
+clock-keyed files and −16 on 17 neighbours** that lost the difference to the
+per-host 250-row budget; two hosts were **under** budget before and now fill it
+(217 → 248, 190 → 224). Axis mix: `rare` +69, `out` 0 → 15, `code` −12,
+`level` −15, `edge` −12, `burst` −9 — the fallback «опора» axes shrink because
+the shape axes finally have real shapes to rank. The distortion this removes is
+visible in one histogram: on `intranet_server/…-access.log.2` the method axis
+read **«GET 67.8 %, POST 17.0 %, OPTIONS 11.0 %»** over 264 fused records and now
+reads **«GET 96.2 %, POST 2.7 %, OPTIONS 0.7 %»** over 4 000. Grouping by the
+clock made rare things look common. Attack coverage moved with it: the file with
+the densest labelling (90.2 % of its lines) went from **1 to 4** covered lines
+while its worklist rows went 5 → 6, and no label was lost (`wpscan` 2 → 4,
+`attacker_http` 3 → 6, `foothold` 5 → 8; `dnsteal` 36, `escalate` 18,
+`exfiltration-service` 2 unchanged).
+
+### What you deliver is what you checked
+
+**What the tool does.** `citecheck.py --delivered <файл>` runs the SAME `check()`
+over the hand-over against the same corpus, and additionally names every
+delivered citation that was not in the report's verified set. Non-zero exit on
+either. Hand over the checked draft verbatim and the check passes by
+construction.
+
+**Why a subset test alone is not the mechanism. Measured 2026-08-19 on
+`eval/bench/runs/20260818T212438Z-v22-claude-fleetneg`.** That run was the first
+on this corpus to fall below 100 % citation integrity — **89.4 %** — and the two
+channels score very differently:
+
+| channel | citations | ok | wrong-content | не-ссылка |
+|---|---|---|---|---|
+| `report.md` — the artefact the run checked | 110 | **110** | 0 | 0 |
+| `final-message.txt` — the artefact it delivered | 95 | **74** | **21** | 3 |
+
+The brief for this version proposed the subset arithmetic: the delivered
+citations must be a subset of the verified ones. Computed on this run, that test
+catches **1 of 21**. The verified set holds 68 distinct `(path, line, range)`
+triples, and **20 of the 21 failing citations are already in it** — same file,
+same line, re-typed under a different sentence inside a condensed inventory
+section. What changed was the claim, not the citation.
+
+Extending the key to `(citation, claim)` separates perfectly — **0 of 21** bad
+pairs appear verbatim in the report — but only **29 of the 74 good** citations
+survive a verbatim-pair test, so it would raise **45 false alarms**. That is why
+the pair test is not shipped and the delivered text is simply re-checked instead:
+re-checking is the same arithmetic the draft already passes, and it grades a
+re-typed claim exactly as it grades a new one.
+
+**The gate on the real failure.** `citecheck.py report.md --corpus … --delivered
+final-message.txt` prints `итого: 110 ссылок — ok 110` and then
+`ПОСТАВКА … 95 ссылок — ok 74, wrong-content 21` plus
+`НЕ БЫЛО В ПРОВЕРЕННОМ НАБОРЕ: 1 — contabo/traefik/access.log:3-7`, and exits
+**1**. The same command with `--delivered report.md` exits **0**.
+
+**Where the rule lives.** `SKILL.md` §7 already said the last message is the
+hand-over and §8 already named point 5 as the one stopping condition no command
+checks. v23 makes half of point 5 checkable and leaves the other half — the act
+of pasting the text into the message — where it was, because nothing inside the
+skill can observe it. The scorer-side half already exists outside the skill:
+`measure/deliverable.py` prints `CHANNELS DIVERGE` when the two channels share
+too few blocks, which is how this defect was found. That file is not part of the
+skill and was not touched.
+
+**Delta.** v23 changes four files against v22 — `tools/logmap.py`,
+`tools/citecheck.py`, `SKILL.md`, `reference/tools.md` — and adds and removes
+none. `logjoin.py` and `triagecheck.py` are byte-identical.
