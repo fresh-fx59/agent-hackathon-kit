@@ -49,7 +49,9 @@ test "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["tools"]
 test -f "$TRACE/qwen-home/saved/11111111-1111-1111-1111-111111111111"
 test "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["resume_attempts"])' "$TRACE/recovery.json")" = 1
 test "$(wc -l < "$TRACE/attempts.jsonl" | tr -d '[:space:]')" = 2
-test "$(wc -l < "$TMP/ledger.jsonl" | tr -d '[:space:]')" = 1
+test ! -e "$TMP/ledger.jsonl"
+test -f "$TRACE/candidate.json"
+test -f "$TRACE/upstream-completed.jsonl"
 rg -q 'stream failed; preserving session 11111111-1111-1111-1111-111111111111' "$TMP/out.log"
 test -f "$TRACE/status.json"
 test -f "$TRACE/status-events.jsonl"
@@ -60,15 +62,22 @@ status = json.loads((trace / "status.json").read_text())
 assert status["phase"] == "FINISHED_UNCHECKED", status
 events = [json.loads(line) for line in (trace / "status-events.jsonl").read_text().splitlines()]
 names = [row["event"] for row in events]
-for event in ("STAGING", "QWEN_RUNNING", "VERIFYING", "FINISHED_UNCHECKED"):
+for event in ("STAGING", "QWEN_RUNNING", "FINISHED_UNCHECKED"):
     assert event in names, names
-assert names.index("STAGING") < names.index("QWEN_RUNNING") < names.index("VERIFYING") < names.index("FINISHED_UNCHECKED"), names
+assert names.index("STAGING") < names.index("QWEN_RUNNING") < names.index("FINISHED_UNCHECKED"), names
+assert "VERIFYING" not in names, names
 attempts = [row for row in events if row["event"] == "ATTEMPT_FINISHED"]
 assert len(attempts) == 2, attempts
 assert attempts[0]["attempt"] == 0 and attempts[0]["exit_code"] == "0", attempts
 assert attempts[1]["attempt"] == 1 and attempts[1]["session_id"] == "11111111-1111-1111-1111-111111111111", attempts
 assert all(row["duration_s"] is not None and row["upstream_log"] for row in attempts), attempts
 assert any(row["event"] == "RECOVERY_DECIDED" and row["reason"] == "broken_stream" for row in events), events
+candidate = json.loads((trace / "candidate.json").read_text())
+assert candidate == {"schema": 1, "run_tag": trace.name, "result_stream": "out.json",
+    "work_root": "work", "artifact": "work/report.md",
+    "upstream_completed": "upstream-completed.jsonl",
+    "transport": {"exit_code": None, "status": "success", "duration_s": None},
+    "usage": {"turns": 2, "input_tokens": None, "output_tokens": None}}, candidate
 PY
 OMIT_RESUME_SESSION=1 SHERLOCK_API_KEY=dummy SHERLOCK_CORPUS="$TMP/corpus" SHERLOCK_UPSTREAM_LOG=0 \
 SHERLOCK_RESUME_MAX_ATTEMPTS=1 SHERLOCK_RESUME_BACKOFF_S=0 QWEN_BIN="$TMP/fake-qwen" \
@@ -99,6 +108,7 @@ events = [json.loads(line) for line in (trace / "status-events.jsonl").read_text
 assert status["phase"] == "FINISHED_UNCHECKED" and status["session_id"].startswith("2222"), status
 assert [row["event"] for row in events].count("FINISHED_UNCHECKED") == 1, events
 assert next(row for row in events if row["event"] == "ATTEMPT_FINISHED")["session_id"].startswith("2222")
+assert (trace / "candidate.json").is_file()
 PY
 set +e
 SHERLOCK_API_KEY=dummy SHERLOCK_CORPUS="$TMP/corpus" SHERLOCK_UPSTREAM_LOG=0 SHERLOCK_DATASET=missing \
@@ -115,4 +125,17 @@ events = [json.loads(line) for line in (trace / "status-events.jsonl").read_text
 assert status["phase"] == "RUN_FAILED" and status["exit_code"] == "1", status
 assert [row["event"] for row in events].count("RUN_FAILED") == 1, events
 PY
+cat > "$TMP/fake-qwen-error" <<'SH'
+#!/usr/bin/env bash
+echo 'fixture stderr survived trace move' >&2
+printf 'BROKEN\n'
+SH
+chmod +x "$TMP/fake-qwen-error"
+set +e
+SHERLOCK_API_KEY=dummy SHERLOCK_CORPUS="$TMP/corpus" SHERLOCK_UPSTREAM_LOG=0 SHERLOCK_RESUME_MAX_ATTEMPTS=0 \
+QWEN_BIN="$TMP/fake-qwen-error" BENCH_RUNS="$TMP/runs-error" bash "$RUNNER" none > "$TMP/error.log" 2>&1
+ERROR_RC=$?
+set -e
+test "$ERROR_RC" = 2
+rg -q 'fixture stderr survived trace move' "$TMP/error.log"
 echo 'ok: preserves session and resumes after malformed stream'

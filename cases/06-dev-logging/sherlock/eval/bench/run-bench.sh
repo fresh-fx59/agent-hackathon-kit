@@ -10,13 +10,11 @@
 #     puts the same corpus in front of DeepSeek-V4-Flash, the corporate model;
 #   * it yields the organizers' «≥50 % дефектов» number against a real answer key.
 #
-# Writes to its OWN ledger (runs-bench.jsonl) so it never races the A/B ledger.
+# Produces a sealed candidate; validate-run.py exclusively owns accepted ledger rows.
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SKILLS="$(cd "$HERE/../.." && pwd)/skills"
 QWEN="${QWEN_BIN:-$HOME/.local/bin/qwen}"
-LEDGER="${BENCH_LEDGER:-$HERE/runs-bench.jsonl}"
-
 ARM="${1:-unknown}"
 CORPUS="${SHERLOCK_CORPUS:-}"
 BASE_URL="${SHERLOCK_BASE_URL:-https://linkapi.ai/v1}"
@@ -39,17 +37,93 @@ state_event STAGING --run-tag "$STAMP" --phase STAGING --dataset "$DATASET" --ar
 save_trace() {
   [ -n "$W" ] || return 0
   mkdir -p "$TRACE"
-  [ -f "$W/out.json" ] && cp "$W/out.json" "$TRACE/out.json"
+  if [ -n "${LANE_PROXY_PID:-}" ]; then
+    kill "$LANE_PROXY_PID" 2>/dev/null || true
+    wait "$LANE_PROXY_PID" 2>/dev/null || true
+    unset LANE_PROXY_PID
+  fi
+  if [ -f "$W/out.json" ]; then cp "$W/out.json" "$TRACE/out.json" || return 1; fi
   for partial in "$W"/out-attempt-*.json; do [ -f "$partial" ] && cp "$partial" "$TRACE/$(basename "$partial")"; done
   for partial in "$W"/err-attempt-*.txt "$W"/exit-attempt-*.txt; do [ -f "$partial" ] && cp "$partial" "$TRACE/$(basename "$partial")"; done
   [ -f "$W/attempts.jsonl" ] && cp "$W/attempts.jsonl" "$TRACE/attempts.jsonl"
   [ -f "$W/incomplete.json" ] && cp "$W/incomplete.json" "$TRACE/incomplete.json"
   [ -f "$W/err.txt" ] && cp "$W/err.txt" "$TRACE/err.txt"
   [ -f "$W/.qwen/settings.json" ] && cp "$W/.qwen/settings.json" "$TRACE/qwen-settings.json"
-  [ -d "$W/work" ] && cp -r "$W/work" "$TRACE/work"
+  if [ -d "$W/work" ]; then
+    [ ! -e "$TRACE/work" ] || return 1
+    work_copy="$(mktemp -d "$TRACE/.work.XXXXXX")" || return 1
+    cp -r "$W/work/." "$work_copy/" || return 1
+    mv "$work_copy" "$TRACE/work" || return 1
+  fi
+  if [ -f "$W/.sherlock/active.json" ]; then
+    mkdir -p "$TRACE/.sherlock"
+    python3 - "$W/.sherlock/active.json" "$TRACE/.sherlock/active.json" "$TRACE" "$CORPUS" "$SKILLS/$ARM" <<'PY'
+import json, os, sys, tempfile
+source, target, trace, corpus, skill = sys.argv[1:]
+with open(source, encoding="utf-8") as handle:
+    row = json.load(handle)
+row.update({"workspace": os.path.realpath(trace), "out": os.path.realpath(os.path.join(trace, "work")),
+            "corpus": os.path.realpath(corpus), "skill_root": os.path.realpath(skill)})
+directory = os.path.dirname(target)
+fd, temporary = tempfile.mkstemp(prefix=".active.", dir=directory)
+try:
+    with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        json.dump(row, handle, ensure_ascii=False, sort_keys=True); handle.write("\n")
+        handle.flush(); os.fsync(handle.fileno())
+    os.replace(temporary, target); os.chmod(target, 0o600)
+    directory_fd = os.open(directory, os.O_RDONLY)
+    try: os.fsync(directory_fd)
+    finally: os.close(directory_fd)
+finally:
+    if os.path.exists(temporary): os.unlink(temporary)
+PY
+  fi
   [ -n "${QWEN_HOME:-}" ] && [ -d "$QWEN_HOME" ] && cp -r "$QWEN_HOME" "$TRACE/qwen-home"
+  if [ -f "$TRACE.upstream.jsonl" ]; then
+    cp "$TRACE.upstream.jsonl" "$TRACE/upstream-completed.jsonl" || return 1
+  else
+    : > "$TRACE/upstream-completed.jsonl"
+  fi
+  sync || return 1
+  python3 - "$TRACE" "$STAMP" <<'PY' || return 1
+import json, os, sys, tempfile
+trace, run_tag = sys.argv[1:]
+out = os.path.join(trace, "out.json")
+try:
+    with open(out, encoding="utf-8") as handle: stream = json.load(handle)
+except (OSError, ValueError, TypeError):
+    sys.exit(0)
+rows = stream if isinstance(stream, list) else [stream]
+results = [(i, row) for i, row in enumerate(rows)
+           if isinstance(row, dict) and row.get("type") == "result"]
+if len(results) != 1 or results[0][0] != len(rows) - 1:
+    sys.exit(0)
+final = results[0][1]; text = final.get("result") or ""
+errored = (final.get("is_error") is True or text.lstrip().startswith("[API Error")
+           or ("[API Error" in text and len(text) < 400))
+usage = final.get("usage") if isinstance(final.get("usage"), dict) else {}
+candidate = {"schema": 1, "run_tag": run_tag, "result_stream": "out.json",
+             "work_root": "work", "artifact": "work/report.md",
+             "upstream_completed": "upstream-completed.jsonl",
+             "transport": {"exit_code": None, "status": "error" if errored else "success",
+                           "duration_s": None},
+             "usage": {"turns": None if errored else final.get("num_turns"),
+                       "input_tokens": None if errored else usage.get("input_tokens"),
+                       "output_tokens": None if errored else usage.get("output_tokens")}}
+fd, temporary = tempfile.mkstemp(prefix=".candidate.", dir=trace)
+try:
+    with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        json.dump(candidate, handle, ensure_ascii=False, sort_keys=True); handle.write("\n")
+        handle.flush(); os.fsync(handle.fileno())
+    os.link(temporary, os.path.join(trace, "candidate.json"), follow_symlinks=False)
+    directory = os.open(trace, os.O_RDONLY)
+    try: os.fsync(directory)
+    finally: os.close(directory)
+finally:
+    if os.path.exists(temporary): os.unlink(temporary)
+PY
   rm -rf "$W"
-  [ -n "${LANE_PROXY_PID:-}" ] && kill "$LANE_PROXY_PID" 2>/dev/null
+  W=""
 }
 on_exit() {
   local rc="$1"
@@ -255,125 +329,14 @@ while RESUME_SESSION="$(broken_session)" \
   sleep "$BACKOFF"
   run_qwen "$RESUME_ATTEMPTS" --resume "$RESUME_SESSION" -p "The previous provider stream failed. Continue the same investigation from saved state. Do not restart mapping; finish the unresolved worklist and deliver the report." || true
 done
-state_set --run-tag "$STAMP" --phase VERIFYING --dataset "$DATASET" --arm "$ARM" --trace-dir "$TRACE" \
-  --attempt "$RESUME_ATTEMPTS" --session-id "${LAST_SESSION:-$RESUME_SESSION}" --upstream-log "$TRACE.upstream.jsonl" \
-  --inflight-path "$TRACE/upstream-inflight.json"
-state_event VERIFYING --run-tag "$STAMP" --phase VERIFYING --dataset "$DATASET" --arm "$ARM" --trace-dir "$TRACE" \
-  --attempt "$RESUME_ATTEMPTS" --session-id "${LAST_SESSION:-$RESUME_SESSION}" --upstream-log "$TRACE.upstream.jsonl" \
-  --inflight-path "$TRACE/upstream-inflight.json"
 python3 - "$TRACE/recovery.json" "$RESUME_ATTEMPTS" "$RESUME_SESSION" <<'PY'
 import json, sys
 with open(sys.argv[1], "w", encoding="utf-8") as fh:
     json.dump({"resume_attempts": int(sys.argv[2]), "session_id": sys.argv[3]}, fh)
     fh.write("\n")
 PY
-ELAPSED=$(( $(date +%s) - START ))
-
-python3 - "$W/out.json" "$ARM" "$ELAPSED" "$CORPUS" "$LEDGER" "$TRACE" "$MODEL" \
-         "$W" "$MEASURE_DIR" "$DATASET" <<'PY'
-import importlib.util, json, os, re, sys
-out, arm, elapsed, corpus, ledger, trace, model, workroot, measure, dataset = sys.argv[1:11]
-
-# ONE definition of "what the run produced", shared with score-bench.py. A second
-# copy of this rule is how one measurement becomes two incomparable scales.
-_spec = importlib.util.spec_from_file_location(
-    "deliverable", os.path.join(measure, "deliverable.py"))
-D = importlib.util.module_from_spec(_spec); _spec.loader.exec_module(D)
-
-# ── A run delivers on TWO channels; this ledger used to see one ───────────────
-# 2026-08-02 (`runs/20260802T221034Z-v11`): citecheck green 45/45, «Теперь
-# финальный шаг — вывести отчёт полностью», `read_file(work/report.md)`, stop.
-# Final message 101 chars beside a complete 19,991-char report — 18,758,431
-# input tokens, no row. A tool result is not the `result` record, and no wording
-# fixes that: every phrasing of "output the report" is satisfiable by a tool the
-# model already has (two edits tried, `ebf39ca` and `6490599`, both failed).
-apath = os.path.join(workroot, "work", "report.md")
-art = ""
-if os.path.isfile(apath):
-    with open(apath, encoding="utf-8", errors="replace") as fh:
-        art = fh.read()
-
-raw = ""
-try:
-    with open(out, encoding="utf-8") as fh:
-        raw = fh.read()
-except OSError:
-    pass
-try:
-    d = json.loads(raw) if raw.strip() else []
-except ValueError:
-    d = []
-d = d if isinstance(d, list) else [d]
-final = next((r for r in d if isinstance(r, dict) and r.get("type") == "result"), None)
-sysr  = next((r for r in d if isinstance(r, dict) and r.get("type") == "system"), {})
-
-t = (final or {}).get("result") or ""
-broke = (final is None or final.get("is_error")
-         or t.lstrip().startswith("[API Error")
-         or ("[API Error" in t and len(t) < 400))
-artifact_only = False
-if broke:
-    # A killed or provider-errored run. It used to leave NO row at all, and ~33 %
-    # of this project's spend has bought exactly that. If a finished report
-    # survived, detection is still answerable — the COST is not, so every cost
-    # field stays null and never 0. → [[eval-must-measure-cost-not-just-quality]]
-    why = (final or {}).get("error") or t or "no final result record"
-    if not art.strip():
-        # Keep the failed outcome next to the trajectory. The quality ledger
-        # still excludes incomplete runs, so it cannot turn an outage into score.
-        with open(os.path.join(workroot, "incomplete.json"), "w", encoding="utf-8") as fh:
-            json.dump({"status": "incomplete", "reason": str(why)[:160]}, fh)
-            fh.write("\n")
-        print("  ✗ run produced neither an answer nor a report; saved incomplete result:",
-              str(why)[:160])
-        sys.exit(2)
-    print("  ⚠ run failed (%s) but work/report.md survived — ARTIFACT-ONLY row, "
-          "cost unknown" % str(why)[:80])
-    t, artifact_only = "", True
-
-deliverable = D.compose(t, art)
-delivered_in = D.channel(t, art)
-
-# Coverage: how many of the corpus's files does the run actually name?
-# Matched on the RELATIVE PATH, not the basename. Two files here are both called
-# `syslog`, so a basename count reported 30 files in a 31-file corpus and called
-# one citation two. Counted over BOTH channels — reading it off the final
-# message alone is what scored the collapsed run "0 of 31 files cited".
-rels = set()
-for root, _, fs in os.walk(corpus):
-    for f in fs:
-        rels.add(os.path.relpath(os.path.join(root, f), corpus).replace(os.sep, "/"))
-cited = {r for r in rels if r in deliverable}
-u = (final or {}).get("usage") or {}
-cost = (lambda k: None) if artifact_only else (lambda k: u.get(k))
-# `model` = what the PROVIDER was asked for (the alias); `client_model` = the
-# id the CLI reported, which is the one it sized its context window from.
-rec = {"arm": arm, "model": model, "client_model": sysr.get("model"),
-       "turns": None if artifact_only else (final or {}).get("num_turns"),
-       "duration_s": int(elapsed), "input_tokens": cost("input_tokens"),
-       "output_tokens": cost("output_tokens"), "answer_chars": len(t),
-       "artifact_chars": len(art), "deliverable_chars": len(deliverable),
-       "delivered_in": delivered_in, "artifact_only": artifact_only,
-       "files_in_corpus": len(rels), "files_cited": len(cited),
-       "cited_files": sorted(cited),
-       "line_refs": len(re.findall(r":\d+", deliverable)),
-       # was the literal "bench649" on EVERY row, whatever corpus ran. A run
-       # against an intrusion corpus filed under the dev corpus is a number
-       # attributed to the wrong evidence.
-       "dataset": dataset, "corpus_dir": corpus,
-       "trace_dir": trace, "answer": t, "artifact": art}
-with open(ledger, "a", encoding="utf-8") as f:
-    f.write(json.dumps(rec, ensure_ascii=False) + "\n")
-print("  ✓ turns=%s %ss in/out=%s/%s delivered_in=%s msg=%d file=%d "
-      "files_cited=%d/%d line_refs=%d"
-      % (rec["turns"], elapsed, rec["input_tokens"], rec["output_tokens"],
-         delivered_in, rec["answer_chars"], rec["artifact_chars"],
-         rec["files_cited"], rec["files_in_corpus"], rec["line_refs"]))
-if delivered_in == "file":
-    print("  ⚠ DELIVERY: the report is in work/report.md, not in the final message")
-print("  trajectory: %s" % trace)
-PY
-RC=$?
+save_trace
+[ -f "$TRACE/candidate.json" ] && RC=0 || RC=2
 if [ "$RC" -eq 0 ]; then
   state_set --run-tag "$STAMP" --phase FINISHED_UNCHECKED --dataset "$DATASET" --arm "$ARM" --trace-dir "$TRACE" \
     --attempt "$RESUME_ATTEMPTS" --session-id "${LAST_SESSION:-$RESUME_SESSION}" --upstream-log "$TRACE.upstream.jsonl" \
@@ -392,5 +355,5 @@ else
   TERMINAL_WRITTEN=1
 fi
 # the CLI's own stderr is the only clue when the run produced nothing
-[ "$RC" -ne 0 ] && [ -f "$W/err.txt" ] && sed -n '1,8p' "$W/err.txt"
+[ "$RC" -ne 0 ] && [ -f "$TRACE/err.txt" ] && sed -n '1,8p' "$TRACE/err.txt"
 exit "$RC"
