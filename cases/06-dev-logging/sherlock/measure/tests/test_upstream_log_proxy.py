@@ -98,6 +98,13 @@ class Stub(BaseHTTPRequestHandler):
                 self.wfile.flush()
             self.wfile.write(b"data: [DONE]\n\n")
             self.wfile.flush()
+        elif mode == "malformed_sse":
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.end_headers()
+            self.wfile.write(b'data: {"model":"DeepSeek-V4-Flash"}\n\n')
+            self.wfile.write(b'data: {"object":"chat.completioHTTP/1.1 502 Bad Gateway\n\n')
+            self.wfile.flush()
         elif mode == "error":
             payload = json.dumps({"error": {"message": "Upstream request failed"}}).encode()
             self.send_response(400)
@@ -236,6 +243,16 @@ class ItNamesWhatActuallyAnswered(ProxyCase):
         rec = self.lines()[0]
         self.assertEqual(rec["returned_model"], "DeepSeek-V4-Flash")
         self.assertTrue(rec["tool_call"])
+
+    def test_marks_a_malformed_200_sse_as_a_stream_failure(self):
+        self.start("malformed_sse")
+        code, _ = self.post()
+        self.assertEqual(code, 200)
+        rec = self.lines()[0]
+        self.assertEqual(rec["status"], 200)
+        self.assertEqual(rec["stream_parse_errors"], 1)
+        self.assertFalse(rec["stream_complete"])
+        self.assertEqual(rec["upstream_error"], "malformed_sse_embedded_http_status:502")
 
     def test_records_a_provider_error_instead_of_swallowing_it(self):
         self.start("error")
