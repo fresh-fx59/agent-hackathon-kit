@@ -5,6 +5,7 @@ import datetime as dt
 import errno
 import fcntl
 import hashlib
+import hmac
 import json
 import os
 from pathlib import Path, PurePosixPath
@@ -24,15 +25,19 @@ MAX_ID = 128
 MAX_PATH = 4096
 MAX_HEALTH_SECONDS = 15 * 60
 MAX_FUTURE_SKEW = 60
-COMMITMENT_KEYS = {"schema", "run_tag", "trace_dir", "manifest_sha256", "committed_at"}
+COMMITMENT_PAYLOAD_KEYS = {"schema", "run_tag", "trace_dir", "trace_identity_sha256",
+                           "manifest_sha256", "committed_at", "key_id"}
+COMMITMENT_KEYS = COMMITMENT_PAYLOAD_KEYS | {"hmac_sha256"}
 
 
 class ManifestError(ValueError):
-    pass
+    def __init__(self, code, message):
+        self.code = code
+        super().__init__("%s: %s" % (code, message))
 
 
 def fail(code, message):
-    raise ManifestError("%s: %s" % (code, message))
+    raise ManifestError(code, message)
 
 
 def digest(data):
@@ -231,15 +236,18 @@ def _scan_fd(root_fd, prefix):
     return found
 
 
-def load_json(path, code):
+def load_json(path, code, expected_sha256=None, digest_code=None):
     data, canonical_path = _read_path(path, code.replace("E_", ""))
+    asset = {"path": canonical_path, "bytes": len(data), "sha256": digest(data)}
+    if expected_sha256 is not None and asset["sha256"] != expected_sha256:
+        fail(digest_code or code, "bound artifact digest mismatch")
     try:
         value = json.loads(data.decode("utf-8"))
     except (UnicodeError, ValueError, TypeError):
         fail(code, "JSON input is unavailable or invalid")
     if not isinstance(value, dict):
         fail(code, "JSON input must be an object")
-    return value, canonical_path
+    return value, asset
 
 
 def forbidden(relative, supplied):
@@ -376,7 +384,7 @@ def utc(value):
 
 
 def validate_health(path, lane, provider, requested_model, returned_identity):
-    row, canonical_path = load_json(path, "E_HEALTH_JSON")
+    row, asset = load_json(path, "E_HEALTH_JSON")
     if isinstance(row.get("schema"), bool) or row.get("schema") != 1:
         fail("E_HEALTH_SCHEMA", "unsupported health receipt schema")
     for value in (row.get("lane"), row.get("provider"), row.get("requested_model")):
@@ -425,8 +433,7 @@ def validate_health(path, lane, provider, requested_model, returned_identity):
         fail("E_HEALTH_RETURNED_IDENTITY", "returned identity is empty or mixed")
     if not isinstance(row.get("verdict"), str) or row["verdict"] != "HEALTHY":
         fail("E_HEALTH_VERDICT", "health verdict is not HEALTHY")
-    data, _ = _read_path(canonical_path, "HEALTH_RECEIPT")
-    return {"path": canonical_path, "bytes": len(data), "sha256": digest(data)}
+    return asset
 
 
 def stage_corpus(source_corpus, answer_key, dataset, destination, forbid_paths=()):
@@ -499,6 +506,50 @@ def _commitment_fd(path, create=True):
     return fd, parent_fd, canonical_path
 
 
+def _commitment_key(path):
+    parent_fd, name, canonical_path = _open_parent(path, "COMMITMENT_KEY")
+    try:
+        try:
+            fd = os.open(name, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0), dir_fd=parent_fd)
+        except FileNotFoundError:
+            fail("E_COMMITMENT_KEY_MISSING", "commitment key is missing")
+        except OSError as error:
+            code = "SYMLINK" if error.errno in (errno.ELOOP, errno.ENOTDIR) else "OPEN"
+            fail("E_COMMITMENT_KEY_%s" % code, "commitment key path is unsafe")
+        try:
+            info = os.fstat(fd)
+            if not stat.S_ISREG(info.st_mode):
+                fail("E_COMMITMENT_KEY_TYPE", "commitment key must be a regular file")
+            if info.st_uid != os.geteuid():
+                fail("E_COMMITMENT_KEY_OWNER", "commitment key must be owned by controller euid")
+            if stat.S_IMODE(info.st_mode) != 0o600:
+                fail("E_COMMITMENT_KEY_MODE", "commitment key mode must be 0600")
+            if info.st_size < 32 or info.st_size > 4096:
+                fail("E_COMMITMENT_KEY_BOUNDS", "commitment key must contain 32-4096 bytes")
+            data = b""
+            while len(data) < info.st_size:
+                data += os.read(fd, min(4096, info.st_size - len(data)))
+            if len(data) != info.st_size or len(set(data)) < 16:
+                fail("E_COMMITMENT_KEY_ENTROPY", "commitment key lacks required entropy")
+            return data, digest(data), canonical_path
+        finally:
+            os.close(fd)
+    finally:
+        os.close(parent_fd)
+
+
+def _commitment_payload(row, committed_at, key_id):
+    trace = row["trace"]
+    return {"schema": 2, "run_tag": row["run_tag"], "trace_dir": trace["path"],
+            "trace_identity_sha256": trace["identity_sha256"],
+            "manifest_sha256": row["manifest_sha256"], "committed_at": committed_at,
+            "key_id": key_id}
+
+
+def _sign_commitment(payload, key):
+    return hmac.new(key, canonical(payload), hashlib.sha256).hexdigest()
+
+
 def _commitment_rows(fd):
     size = os.fstat(fd).st_size
     if size > 8 * 1024 * 1024:
@@ -515,7 +566,7 @@ def _commitment_rows(fd):
             row = json.loads(raw.decode("utf-8"))
         except (UnicodeError, ValueError, TypeError):
             fail("E_COMMITMENT_SCHEMA", "commitment row is invalid")
-        if not isinstance(row, dict) or set(row) != COMMITMENT_KEYS or row.get("schema") != 1:
+        if not isinstance(row, dict) or set(row) != COMMITMENT_KEYS or row.get("schema") != 2:
             fail("E_COMMITMENT_SCHEMA", "commitment row is invalid")
         try:
             identity(row.get("run_tag"))
@@ -523,21 +574,24 @@ def _commitment_rows(fd):
             utc(row.get("committed_at"))
         except ManifestError:
             fail("E_COMMITMENT_SCHEMA", "commitment row is invalid")
-        if not isinstance(row.get("manifest_sha256"), str) or not HEX64.fullmatch(row["manifest_sha256"]):
+        hashes = (row.get("trace_identity_sha256"), row.get("manifest_sha256"),
+                  row.get("key_id"), row.get("hmac_sha256"))
+        if any(not isinstance(value, str) or not HEX64.fullmatch(value) for value in hashes):
             fail("E_COMMITMENT_SCHEMA", "commitment row is invalid")
         rows.append(row)
     return rows
 
 
-def _write_manifest_and_commit(trace, commitment_file, row):
+def _write_manifest_and_commit(trace, commitment_file, row, key, key_id):
     fd, parent_fd, _ = _commitment_fd(commitment_file)
     try:
         fcntl.flock(fd, fcntl.LOCK_EX)
         if any(item["run_tag"] == row["run_tag"] for item in _commitment_rows(fd)):
             fail("E_COMMITMENT_DUPLICATE", "run tag already has a commitment")
         _atomic_manifest(trace, row)
-        commitment = {"schema": 1, "run_tag": row["run_tag"], "trace_dir": clean_abs(trace),
-                      "manifest_sha256": row["manifest_sha256"], "committed_at": now_text()}
+        payload = _commitment_payload(row, now_text(), key_id)
+        commitment = dict(payload)
+        commitment["hmac_sha256"] = _sign_commitment(payload, key)
         os.write(fd, canonical(commitment) + b"\n")
         os.fsync(fd)
         os.fsync(parent_fd)
@@ -547,7 +601,7 @@ def _write_manifest_and_commit(trace, commitment_file, row):
         os.close(parent_fd)
 
 
-def _verify_commitment(path, row, trace):
+def _verify_commitment(path, row, trace, key, key_id):
     fd, parent_fd, canonical_path = _commitment_fd(path, create=False)
     try:
         fcntl.flock(fd, fcntl.LOCK_SH)
@@ -561,8 +615,15 @@ def _verify_commitment(path, row, trace):
         fail("E_COMMITMENT_MISSING", "external manifest commitment is missing")
     if len(matches) != 1:
         fail("E_COMMITMENT_MISMATCH", "external manifest commitment does not match")
-    expected = (clean_abs(trace), row.get("manifest_sha256"))
-    if (matches[0]["trace_dir"], matches[0]["manifest_sha256"]) != expected:
+    commitment = matches[0]
+    payload = {name: commitment[name] for name in COMMITMENT_PAYLOAD_KEYS}
+    if (commitment["key_id"] != key_id or
+            not hmac.compare_digest(commitment["hmac_sha256"], _sign_commitment(payload, key))):
+        fail("E_COMMITMENT_AUTH", "external manifest commitment authentication failed")
+    expected = (clean_abs(trace), row.get("trace", {}).get("identity_sha256"),
+                row.get("manifest_sha256"))
+    if (commitment["trace_dir"], commitment["trace_identity_sha256"],
+            commitment["manifest_sha256"]) != expected:
         fail("E_COMMITMENT_MISMATCH", "external manifest commitment does not match")
     return canonical_path
 
@@ -571,13 +632,13 @@ def create_manifest(trace, run_tag, dataset, arm, source_corpus, answer_key, ren
                     prompt, skill_root, runner, scorer, triage_checker, stop_checker,
                     citation_checker, target_cli, target_version, requested_model, provider,
                     expected_returned_identity, lane, health_receipt, controller_parent,
-                    commitment_file, staged_corpus_destination, forbid_paths=()):
+                    commitment_file, commitment_key, staged_corpus_destination, forbid_paths=()):
     for value in (run_tag, dataset, arm, target_version, requested_model, provider,
                   expected_returned_identity, lane):
         identity(value)
     paths = (trace, source_corpus, answer_key, renderer, prompt, skill_root, runner, scorer,
              triage_checker, stop_checker, citation_checker, target_cli, health_receipt,
-             controller_parent, commitment_file, staged_corpus_destination)
+             controller_parent, commitment_file, commitment_key, staged_corpus_destination)
     for value in paths + tuple(forbid_paths):
         safe_text(value)
     trace, staged = clean_abs(trace), clean_abs(staged_corpus_destination)
@@ -585,14 +646,18 @@ def create_manifest(trace, run_tag, dataset, arm, source_corpus, answer_key, ren
         fail("E_KEY_TARGET_VISIBLE", "answer key is inside target workspace")
     if any(within(commitment_file, root) for root in (trace, source_corpus, staged, skill_root)):
         fail("E_COMMITMENT_LOCATION", "commitment file must remain controller-owned")
+    key_path = clean_abs(commitment_key)
+    key_roots = (trace, source_corpus, staged, skill_root, os.path.dirname(clean_abs(commitment_file)))
+    if any(within(key_path, root) for root in key_roots):
+        fail("E_COMMITMENT_KEY_LOCATION", "commitment key must remain controller-held")
     if not all(within(path, skill_root) for path in (triage_checker, stop_checker, citation_checker)):
         fail("E_CHECKER_NOT_VERSION_OWNED", "checker is outside selected skill version")
-    key, _ = load_json(answer_key, "E_ANSWER_KEY_JSON")
+    key, key_asset = load_json(answer_key, "E_ANSWER_KEY_JSON")
     source = inspect_corpus(source_corpus, key, dataset, forbid_paths=forbid_paths)
     staged_info = inspect_corpus(staged, key, dataset, "STAGED", forbid_paths)
     if source["manifest_sha256"] != staged_info["manifest_sha256"]:
         fail("E_STAGED_MANIFEST_MISMATCH", "staged corpus does not match source corpus")
-    artifacts = {"answer_key": file_asset(answer_key, "E_ANSWER_KEY_FILE"),
+    artifacts = {"answer_key": key_asset,
                  "renderer": file_asset(renderer, "E_RENDERER_FILE"),
                  "prompt": file_asset(prompt, "E_PROMPT_FILE"),
                  "runner": file_asset(runner, "E_RUNNER_FILE"),
@@ -604,6 +669,7 @@ def create_manifest(trace, run_tag, dataset, arm, source_corpus, answer_key, ren
                  "controller_parent": file_asset(controller_parent, "E_CONTROLLER_PARENT_FILE")}
     health = validate_health(health_receipt, lane, provider, requested_model,
                              expected_returned_identity)
+    key_bytes, key_id, _ = _commitment_key(key_path)
     target = {"version": target_version, "requested_model": requested_model,
               "expected_returned_identity": expected_returned_identity,
               "provider": provider, "lane": lane}
@@ -613,7 +679,7 @@ def create_manifest(trace, run_tag, dataset, arm, source_corpus, answer_key, ren
     row = {"schema": 2, "run_tag": run_tag, "dataset": dataset, "arm": arm,
            "trace": {"path": trace, "identity_sha256": digest(trace.encode())},
            "commitment": {"path": commitment_path,
-                          "identity_sha256": digest(commitment_path.encode())},
+                          "identity_sha256": digest(commitment_path.encode()), "key_id": key_id},
            "corpus": {"source_path": clean_abs(source_corpus), "staged_path": staged,
                       "files": source["files"], "source_manifest_sha256": source["manifest_sha256"],
                       "staged_manifest_sha256": staged_info["manifest_sha256"],
@@ -623,11 +689,12 @@ def create_manifest(trace, run_tag, dataset, arm, source_corpus, answer_key, ren
            "artifacts": artifacts, "skill": tree_asset(skill_root), "target": target,
            "health_receipt": health}
     row["manifest_sha256"] = digest(canonical(row))
-    _write_manifest_and_commit(trace, commitment_file, row)
+    _write_manifest_and_commit(trace, commitment_file, row, key_bytes, key_id)
     return row
 
 
-def verify_manifest(trace, commitment_file):
+def verify_manifest(trace, commitment_file, commitment_key):
+    safe_text(commitment_key)
     trace = clean_abs(trace)
     trace_fd = _open_dir(trace, "TRACE")
     try:
@@ -655,11 +722,25 @@ def verify_manifest(trace, commitment_file):
         fail("E_COMMITMENT_MISMATCH", "explicit commitment identity does not match")
     if trace_identity.get("path") != trace or trace_identity.get("identity_sha256") != digest(trace.encode()):
         fail("E_TRACE_IDENTITY_MISMATCH", "trace identity mismatch")
-    _verify_commitment(commitment_file, row, trace)
+    key_path = clean_abs(commitment_key)
+    key_roots = (trace, row.get("corpus", {}).get("source_path"),
+                 row.get("corpus", {}).get("staged_path"), row.get("skill", {}).get("path"),
+                 os.path.dirname(supplied_commitment))
+    if any(not isinstance(root, str) or within(key_path, root) for root in key_roots):
+        fail("E_COMMITMENT_KEY_LOCATION", "commitment key must remain controller-held")
+    key_bytes, key_id, _ = _commitment_key(key_path)
+    if commitment.get("key_id") != key_id:
+        fail("E_COMMITMENT_AUTH", "external manifest commitment authentication failed")
+    _verify_commitment(commitment_file, row, trace, key_bytes, key_id)
     artifacts = row.get("artifacts")
     if not isinstance(artifacts, dict):
         fail("E_MANIFEST_SCHEMA", "artifact inventory is invalid")
-    required = ("answer_key", "renderer", "prompt", "runner", "scorer", "triage_checker",
+    answer_asset = artifacts.get("answer_key")
+    if not isinstance(answer_asset, dict) or not isinstance(answer_asset.get("path"), str):
+        fail("E_MANIFEST_SCHEMA", "artifact inventory is invalid")
+    key, _ = load_json(answer_asset["path"], "E_ANSWER_KEY_JSON",
+                       answer_asset.get("sha256"), "E_ANSWER_KEY_DIGEST_MISMATCH")
+    required = ("renderer", "prompt", "runner", "scorer", "triage_checker",
                 "stop_checker", "citation_checker", "target_cli", "controller_parent")
     for name in required:
         asset = artifacts.get(name)
@@ -674,7 +755,6 @@ def verify_manifest(trace, commitment_file):
     skill = tree_asset(skill_row["path"])
     if (skill["sha256"], skill["git_commit"]) != (skill_row.get("sha256"), skill_row.get("git_commit")):
         fail("E_SKILL_DIGEST_MISMATCH", "bound skill identity mismatch")
-    key, _ = load_json(artifacts["answer_key"]["path"], "E_ANSWER_KEY_JSON")
     corpus = row.get("corpus")
     if not isinstance(corpus, dict):
         fail("E_MANIFEST_SCHEMA", "corpus identity is invalid")
@@ -722,7 +802,7 @@ def parser():
     for name in ("run-tag", "dataset", "arm", "source-corpus", "answer-key", "renderer", "prompt",
                  "skill-root", "runner", "scorer", "triage-checker", "stop-checker", "citation-checker",
                  "target-cli", "target-version", "requested-model", "provider", "expected-returned-identity",
-                 "lane", "health-receipt", "controller-parent", "commitment-file",
+                 "lane", "health-receipt", "controller-parent", "commitment-file", "commitment-key",
                  "staged-corpus-destination"):
         create.add_argument("--" + name, required=True)
     create.add_argument("--forbid-path", action="append", default=[])
@@ -730,6 +810,7 @@ def parser():
     verify = sub.add_parser("verify")
     verify.add_argument("trace")
     verify.add_argument("--commitment-file", required=True)
+    verify.add_argument("--commitment-key", required=True)
     verify.add_argument("--json", action="store_true")
     return ap
 

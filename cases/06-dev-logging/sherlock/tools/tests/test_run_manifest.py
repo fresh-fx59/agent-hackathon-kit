@@ -2,6 +2,7 @@
 """Provider-free contract tests for sealed benchmark manifests."""
 import datetime as dt
 import hashlib
+import hmac
 import importlib.util
 import json
 import os
@@ -63,7 +64,16 @@ class Fixture:
         self.citation = self._skill_file("citecheck.py", "cite\n")
         self.target_cli = self._file("qwen", "cli\n")
         self.parent = self._file("controller-parent.json", "{}\n")
-        self.commitment = self.root / "run-commitments.jsonl"
+        authority = self.root / "authority"
+        authority.mkdir()
+        records = authority / "records"
+        records.mkdir()
+        keys = authority / "keys"
+        keys.mkdir()
+        self.commitment = records / "run-commitments.jsonl"
+        self.commitment_key = keys / "commitment.key"
+        self.commitment_key.write_bytes(bytes(range(32)))
+        self.commitment_key.chmod(0o600)
         self.health = self.root / "health.json"
         self.write_health()
 
@@ -113,9 +123,16 @@ class Fixture:
                 "lane": "paid", "health_receipt": str(self.health),
                 "controller_parent": str(self.parent),
                 "commitment_file": str(self.commitment),
+                "commitment_key": str(self.commitment_key),
                 "staged_corpus_destination": str(self.staged), "forbid_paths": ()}
         args.update(updates)
         return MOD.create_manifest(**args)
+
+    def verify(self, **updates):
+        args = {"trace": str(self.trace), "commitment_file": str(self.commitment),
+                "commitment_key": str(self.commitment_key)}
+        args.update(updates)
+        return MOD.verify_manifest(**args)
 
 
 MOD = load_tool()
@@ -132,7 +149,7 @@ class RunManifestTests(unittest.TestCase):
     def valid_manifest(self):
         staged = self.fx.stage()
         manifest = self.fx.create()
-        verified = MOD.verify_manifest(str(self.fx.trace), str(self.fx.commitment))
+        verified = self.fx.verify()
         self.assertEqual(staged["included_count"], 2)
         self.assertEqual(manifest["expected"]["ids"], ["F-01", "F-02"])
         self.assertEqual(verified["manifest_sha256"], manifest["manifest_sha256"])
@@ -256,7 +273,7 @@ class RunManifestTests(unittest.TestCase):
         self.valid_manifest()
         (self.fx.staged / "b.log").write_text("omega\n", encoding="utf-8")
         with self.assertRaisesRegex(MOD.ManifestError, "E_STAGED_HASH_MISMATCH"):
-            MOD.verify_manifest(str(self.fx.trace), str(self.fx.commitment))
+            self.fx.verify()
 
     def test_artifact_tamper_is_rejected(self):
         targets = (("renderer", "E_RENDERER_DIGEST_MISMATCH"),
@@ -271,11 +288,11 @@ class RunManifestTests(unittest.TestCase):
                 fx = Fixture(self.root_for("tamper-" + attr)); fx.stage(); fx.create()
                 Path(getattr(fx, attr)).write_text("changed\n", encoding="utf-8")
                 with self.assertRaisesRegex(MOD.ManifestError, code):
-                    MOD.verify_manifest(str(fx.trace), str(fx.commitment))
+                    fx.verify()
         fx = Fixture(self.root_for("tamper-skill")); fx.stage(); fx.create()
         (fx.skill / "SKILL.md").write_text("changed\n", encoding="utf-8")
         with self.assertRaisesRegex(MOD.ManifestError, "E_SKILL_DIGEST_MISMATCH"):
-            MOD.verify_manifest(str(fx.trace), str(fx.commitment))
+            fx.verify()
 
     def test_answer_key_target_cli_parent_and_health_tamper_are_rejected(self):
         targets = (("key", "E_ANSWER_KEY_DIGEST_MISMATCH"),
@@ -292,7 +309,43 @@ class RunManifestTests(unittest.TestCase):
                 else:
                     path.write_text("changed\n", encoding="utf-8")
                 with self.assertRaisesRegex(MOD.ManifestError, code):
-                    MOD.verify_manifest(str(fx.trace), str(fx.commitment))
+                    fx.verify()
+
+    def test_answer_key_validation_and_digest_use_one_snapshot(self):
+        self.fx.stage()
+        original_bytes = self.fx.key.read_bytes()
+        original_read = MOD._read_path
+        reads = {"key": 0}
+        def alternate_second_read(path, prefix):
+            data, canonical_path = original_read(path, prefix)
+            if canonical_path == MOD.clean_abs(str(self.fx.key)):
+                reads["key"] += 1
+                if reads["key"] == 2:
+                    return b'{"dataset":"replacement"}', canonical_path
+            return data, canonical_path
+        with mock.patch.object(MOD, "_read_path", side_effect=alternate_second_read):
+            manifest = self.fx.create()
+        self.assertEqual(manifest["artifacts"]["answer_key"]["sha256"],
+                         hashlib.sha256(original_bytes).hexdigest())
+        self.fx.verify()
+
+    def test_health_validation_and_digest_use_one_snapshot(self):
+        self.fx.stage()
+        original_bytes = self.fx.health.read_bytes()
+        original_read = MOD._read_path
+        reads = {"health": 0}
+        def alternate_second_read(path, prefix):
+            data, canonical_path = original_read(path, prefix)
+            if canonical_path == MOD.clean_abs(str(self.fx.health)):
+                reads["health"] += 1
+                if reads["health"] == 2:
+                    return b'{"schema":1}', canonical_path
+            return data, canonical_path
+        with mock.patch.object(MOD, "_read_path", side_effect=alternate_second_read):
+            manifest = self.fx.create()
+        self.assertEqual(manifest["health_receipt"]["sha256"],
+                         hashlib.sha256(original_bytes).hexdigest())
+        self.fx.verify()
 
     def test_resealed_manifest_tamper_is_rejected_by_external_commitment(self):
         manifest = self.valid_manifest()
@@ -304,7 +357,72 @@ class RunManifestTests(unittest.TestCase):
                        separators=(",", ":")).encode()).hexdigest()
         path.write_text(json.dumps(manifest), encoding="utf-8")
         with self.assertRaisesRegex(MOD.ManifestError, "E_COMMITMENT_MISMATCH"):
-            MOD.verify_manifest(str(self.fx.trace), str(self.fx.commitment))
+            self.fx.verify()
+
+    def test_resealed_manifest_and_jsonl_without_key_is_rejected(self):
+        manifest = self.valid_manifest()
+        manifest["run_tag"] = "rebound-run"
+        unsigned = dict(manifest); unsigned.pop("manifest_sha256")
+        manifest["manifest_sha256"] = hashlib.sha256(
+            json.dumps(unsigned, ensure_ascii=False, sort_keys=True,
+                       separators=(",", ":")).encode()).hexdigest()
+        (self.fx.trace / "run-manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+        commitment = json.loads(self.fx.commitment.read_text())
+        commitment["run_tag"] = "rebound-run"
+        commitment["manifest_sha256"] = manifest["manifest_sha256"]
+        self.fx.commitment.write_text(json.dumps(commitment) + "\n", encoding="utf-8")
+        with self.assertRaisesRegex(MOD.ManifestError, "E_COMMITMENT_AUTH"):
+            self.fx.verify()
+
+    def test_wrong_and_tampered_commitment_keys_are_rejected(self):
+        self.valid_manifest()
+        wrong = self.fx.root / "wrong.key"
+        wrong.write_bytes(bytes(range(32, 64))); wrong.chmod(0o600)
+        with self.assertRaisesRegex(MOD.ManifestError, "E_COMMITMENT_AUTH"):
+            self.fx.verify(commitment_key=str(wrong))
+        self.fx.commitment_key.write_bytes(bytes(range(1, 33)))
+        with self.assertRaisesRegex(MOD.ManifestError, "E_COMMITMENT_AUTH"):
+            self.fx.verify()
+
+    def test_commitment_key_path_mode_and_entropy_are_enforced(self):
+        def key_at(path, data=bytes(range(32)), mode=0o600):
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(data); path.chmod(mode)
+            return str(path)
+
+        cases = []
+        for name, placement in (("source", lambda fx: fx.corpus / "controller.key"),
+                                ("trace", lambda fx: fx.trace / "controller.key"),
+                                ("stage", lambda fx: fx.staged / "controller.key"),
+                                ("skill", lambda fx: fx.skill / "controller.key"),
+                                ("commitment", lambda fx: fx.commitment.parent / "controller.key")):
+            cases.append((name, placement, "E_COMMITMENT_KEY_LOCATION"))
+        for index, (name, placement, code) in enumerate(cases):
+            with self.subTest(case=name):
+                fx = Fixture(self.root_for("key-location-%d" % index)); fx.stage()
+                with self.assertRaisesRegex(MOD.ManifestError, code):
+                    fx.create(commitment_key=key_at(placement(fx)))
+        fx = Fixture(self.root_for("key-mode")); fx.stage(); fx.commitment_key.chmod(0o644)
+        with self.assertRaisesRegex(MOD.ManifestError, "E_COMMITMENT_KEY_MODE"):
+            fx.create()
+        fx = Fixture(self.root_for("key-short")); fx.stage(); fx.commitment_key.write_bytes(b"short")
+        with self.assertRaisesRegex(MOD.ManifestError, "E_COMMITMENT_KEY_BOUNDS"):
+            fx.create()
+        fx = Fixture(self.root_for("key-weak")); fx.stage(); fx.commitment_key.write_bytes(b"x" * 32)
+        with self.assertRaisesRegex(MOD.ManifestError, "E_COMMITMENT_KEY_ENTROPY"):
+            fx.create()
+        fx = Fixture(self.root_for("key-symlink")); fx.stage()
+        real = fx.root / "real.key"; key_at(real)
+        linked = fx.root / "linked.key"; os.symlink(real, linked)
+        with self.assertRaisesRegex(MOD.ManifestError, "E_COMMITMENT_KEY_SYMLINK"):
+            fx.create(commitment_key=str(linked))
+
+    def test_commitment_key_is_not_persisted_or_emitted(self):
+        manifest = self.valid_manifest()
+        serialized = json.dumps(manifest) + self.fx.commitment.read_text()
+        self.assertNotIn(str(self.fx.commitment_key), serialized)
+        self.assertNotIn(self.fx.commitment_key.read_bytes().hex(), serialized)
+        self.assertRegex(json.loads(self.fx.commitment.read_text())["key_id"], r"^[0-9a-f]{64}$")
 
     def test_target_identity_seal_tamper_is_rejected(self):
         manifest = self.valid_manifest()
@@ -316,16 +434,22 @@ class RunManifestTests(unittest.TestCase):
         (self.fx.trace / "run-manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
         commitment = json.loads(self.fx.commitment.read_text())
         commitment["manifest_sha256"] = manifest["manifest_sha256"]
+        payload = dict(commitment); payload.pop("hmac_sha256")
+        commitment["hmac_sha256"] = hmac.new(
+            self.fx.commitment_key.read_bytes(),
+            json.dumps(payload, ensure_ascii=False, sort_keys=True,
+                       separators=(",", ":")).encode(), hashlib.sha256).hexdigest()
         self.fx.commitment.write_text(json.dumps(commitment) + "\n", encoding="utf-8")
         with self.assertRaisesRegex(MOD.ManifestError, "E_TARGET_IDENTITY_MISMATCH"):
-            MOD.verify_manifest(str(self.fx.trace), str(self.fx.commitment))
+            self.fx.verify()
 
     def test_commitment_tamper_and_duplicate_run_tag_are_refused(self):
         self.valid_manifest()
         self.fx.commitment.write_text("", encoding="utf-8")
         with self.assertRaisesRegex(MOD.ManifestError, "E_COMMITMENT_MISSING"):
-            MOD.verify_manifest(str(self.fx.trace), str(self.fx.commitment))
-        shared = self.fx.root / "shared-commitments.jsonl"
+            self.fx.verify()
+        shared_dir = Path(self.temp.name) / "shared-records"; shared_dir.mkdir()
+        shared = shared_dir / "shared-commitments.jsonl"
         one = Fixture(self.root_for("commit-one")); one.stage(); one.create(commitment_file=str(shared))
         two = Fixture(self.root_for("commit-two")); two.stage()
         with self.assertRaisesRegex(MOD.ManifestError, "E_COMMITMENT_DUPLICATE"):
@@ -335,8 +459,29 @@ class RunManifestTests(unittest.TestCase):
         self.valid_manifest()
         self.fx.commitment.unlink()
         with self.assertRaisesRegex(MOD.ManifestError, "E_COMMITMENT_MISSING"):
-            MOD.verify_manifest(str(self.fx.trace), str(self.fx.commitment))
+            self.fx.verify()
         self.assertFalse(self.fx.commitment.exists())
+
+    def test_missing_commitment_file_and_parent_have_stable_cli_error(self):
+        for missing_parent in (False, True):
+            with self.subTest(missing_parent=missing_parent):
+                fx = Fixture(self.root_for("missing-parent-%s" % missing_parent))
+                fx.stage(); fx.create(); fx.commitment.unlink()
+                if missing_parent:
+                    fx.commitment.parent.rmdir()
+                result = subprocess.run([
+                    sys.executable, str(TOOL), "verify", str(fx.trace),
+                    "--commitment-file", str(fx.commitment),
+                    "--commitment-key", str(fx.commitment_key)],
+                    text=True, capture_output=True)
+                self.assertEqual(result.returncode, 2, result.stderr)
+                self.assertRegex(result.stderr, r"^E_COMMITMENT_MISSING:")
+                self.assertNotIn("Traceback", result.stderr)
+
+    def test_manifest_error_has_structured_code(self):
+        with self.assertRaises(MOD.ManifestError) as caught:
+            self.fx.stage(dataset="wrong")
+        self.assertEqual(caught.exception.code, "E_DATASET_MISMATCH")
 
     def test_commitment_must_remain_outside_target_roots(self):
         self.fx.stage()
