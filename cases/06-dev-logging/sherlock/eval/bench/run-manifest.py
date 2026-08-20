@@ -464,27 +464,71 @@ def stage_corpus(source_corpus, answer_key, dataset, destination, forbid_paths=(
             "staged_manifest_sha256": staged["manifest_sha256"]}
 
 
-def _atomic_manifest(trace, row):
+def _prepare_manifest(trace, row):
     trace_fd = _open_dir(trace, "TRACE", create=True)
     temporary = ".run-manifest.%d.%s" % (os.getpid(), digest(os.urandom(16))[:16])
+    data = canonical(row) + b"\n"
     try:
-        fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600, dir_fd=trace_fd)
-        with os.fdopen(fd, "wb") as handle:
-            handle.write(canonical(row) + b"\n")
-            handle.flush()
-            os.fsync(handle.fileno())
         try:
-            os.link(temporary, "run-manifest.json", src_dir_fd=trace_fd,
-                    dst_dir_fd=trace_fd, follow_symlinks=False)
-        except FileExistsError:
-            fail("E_MANIFEST_EXISTS", "run manifest already exists")
-        os.fsync(trace_fd)
-    finally:
+            fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL |
+                         getattr(os, "O_NOFOLLOW", 0), 0o600, dir_fd=trace_fd)
+            with os.fdopen(fd, "wb") as handle:
+                handle.write(data)
+                handle.flush()
+                os.fsync(handle.fileno())
+        except OSError:
+            fail("E_MANIFEST_PREPARE", "run manifest could not be prepared")
+        return trace_fd, temporary, data
+    except Exception:
         try:
             os.unlink(temporary, dir_fd=trace_fd)
         except FileNotFoundError:
             pass
         os.close(trace_fd)
+        raise
+
+
+def _discard_prepared(trace_fd, temporary):
+    try:
+        os.unlink(temporary, dir_fd=trace_fd)
+    except FileNotFoundError:
+        pass
+    finally:
+        os.close(trace_fd)
+
+
+def _publish_prepared(trace_fd, temporary):
+    try:
+        os.link(temporary, "run-manifest.json", src_dir_fd=trace_fd,
+                dst_dir_fd=trace_fd, follow_symlinks=False)
+    except FileExistsError:
+        return False
+    except OSError:
+        fail("E_MANIFEST_PUBLISH", "run manifest could not be published")
+    try:
+        os.fsync(trace_fd)
+    except OSError:
+        fail("E_MANIFEST_PUBLISH", "run manifest directory could not be synchronized")
+    return True
+
+
+def _manifest_state(trace_fd, expected):
+    try:
+        existing = _read_relative(trace_fd, "run-manifest.json", "MANIFEST")
+    except ManifestError as error:
+        if error.code == "E_MANIFEST_FILE_MISSING":
+            return "missing"
+        fail("E_MANIFEST_CONFLICT", "run manifest path conflicts with prepared manifest")
+    return "exact" if existing == expected else "conflict"
+
+
+def _atomic_manifest(trace, row):
+    trace_fd, temporary, _ = _prepare_manifest(trace, row)
+    try:
+        if not _publish_prepared(trace_fd, temporary):
+            fail("E_MANIFEST_EXISTS", "run manifest already exists")
+    finally:
+        _discard_prepared(trace_fd, temporary)
 
 
 def _commitment_fd(path, create=True):
@@ -507,6 +551,12 @@ def _commitment_fd(path, create=True):
 
 
 def _commitment_key(path):
+    """Consume the controller's opaque, pre-provisioned 32-byte trust anchor.
+
+    Random generation and pinning belong to the trusted controller.  Byte content
+    cannot prove how a key was generated, and this tool never creates, chooses,
+    emits, persists, or copies the secret to another location.
+    """
     parent_fd, name, canonical_path = _open_parent(path, "COMMITMENT_KEY")
     try:
         try:
@@ -524,13 +574,13 @@ def _commitment_key(path):
                 fail("E_COMMITMENT_KEY_OWNER", "commitment key must be owned by controller euid")
             if stat.S_IMODE(info.st_mode) != 0o600:
                 fail("E_COMMITMENT_KEY_MODE", "commitment key mode must be 0600")
-            if info.st_size < 32 or info.st_size > 4096:
-                fail("E_COMMITMENT_KEY_BOUNDS", "commitment key must contain 32-4096 bytes")
+            if info.st_size != 32:
+                fail("E_COMMITMENT_KEY_BOUNDS", "commitment key must contain exactly 32 bytes")
             data = b""
             while len(data) < info.st_size:
                 data += os.read(fd, min(4096, info.st_size - len(data)))
-            if len(data) != info.st_size or len(set(data)) < 16:
-                fail("E_COMMITMENT_KEY_ENTROPY", "commitment key lacks required entropy")
+            if len(data) != info.st_size:
+                fail("E_COMMITMENT_KEY_READ", "commitment key could not be read completely")
             return data, digest(data), canonical_path
         finally:
             os.close(fd)
@@ -582,21 +632,84 @@ def _commitment_rows(fd):
     return rows
 
 
+def _authenticated_commitment(item, row, key, key_id):
+    payload = {name: item[name] for name in COMMITMENT_PAYLOAD_KEYS}
+    if (item["key_id"] != key_id or
+            not hmac.compare_digest(item["hmac_sha256"], _sign_commitment(payload, key))):
+        fail("E_COMMITMENT_AUTH", "external manifest commitment authentication failed")
+    expected = (2, row["run_tag"], row["trace"]["path"],
+                row["trace"]["identity_sha256"], row["manifest_sha256"], key_id)
+    actual = (item["schema"], item["run_tag"], item["trace_dir"],
+              item["trace_identity_sha256"], item["manifest_sha256"], item["key_id"])
+    if actual != expected:
+        fail("E_COMMITMENT_CONFLICT", "run tag has a conflicting commitment")
+
+
+def _append_commitment(fd, parent_fd, line):
+    """Append one complete durable row or restore the prior durable length."""
+    start = os.lseek(fd, 0, os.SEEK_END)
+    offset = 0
+    try:
+        while offset < len(line):
+            written = os.write(fd, line[offset:])
+            if not isinstance(written, int) or written <= 0:
+                raise OSError(errno.EIO, "commitment write made no progress")
+            offset += written
+        os.fsync(fd)
+        os.fsync(parent_fd)
+    except OSError:
+        try:
+            os.ftruncate(fd, start)
+            os.fsync(fd)
+            os.fsync(parent_fd)
+        except OSError:
+            fail("E_COMMITMENT_ROLLBACK", "commitment append rollback failed")
+        fail("E_COMMITMENT_WRITE", "commitment append failed")
+
+
 def _write_manifest_and_commit(trace, commitment_file, row, key, key_id):
     fd, parent_fd, _ = _commitment_fd(commitment_file)
+    trace_fd = temporary = None
     try:
         fcntl.flock(fd, fcntl.LOCK_EX)
-        if any(item["run_tag"] == row["run_tag"] for item in _commitment_rows(fd)):
-            fail("E_COMMITMENT_DUPLICATE", "run tag already has a commitment")
-        _atomic_manifest(trace, row)
+        trace_fd, temporary, manifest_bytes = _prepare_manifest(trace, row)
+        matches = [item for item in _commitment_rows(fd)
+                   if item["run_tag"] == row["run_tag"]]
+        state = _manifest_state(trace_fd, manifest_bytes)
+        if len(matches) > 1:
+            fail("E_COMMITMENT_CONFLICT", "run tag has multiple commitments")
+        if matches:
+            _authenticated_commitment(matches[0], row, key, key_id)
+            if state == "exact":
+                fail("E_COMMITMENT_DUPLICATE", "run tag already has a commitment")
+            if state == "conflict":
+                fail("E_MANIFEST_CONFLICT", "run manifest conflicts with commitment")
+            # A durable authenticated row is the recovery journal for a crash
+            # between ledger fsync and no-replace manifest publication.
+            if not _publish_prepared(trace_fd, temporary):
+                state = _manifest_state(trace_fd, manifest_bytes)
+                if state != "exact":
+                    fail("E_MANIFEST_CONFLICT", "run manifest publication lost a race")
+            return
+        if state == "conflict":
+            fail("E_MANIFEST_CONFLICT", "run manifest conflicts with prepared manifest")
         payload = _commitment_payload(row, now_text(), key_id)
         commitment = dict(payload)
         commitment["hmac_sha256"] = _sign_commitment(payload, key)
-        os.write(fd, canonical(commitment) + b"\n")
-        os.fsync(fd)
-        os.fsync(parent_fd)
+        _append_commitment(fd, parent_fd, canonical(commitment) + b"\n")
+        # If the exact manifest predates the ledger (the legacy partial order),
+        # the authenticated append above repairs it.  Otherwise publish last.
+        if state == "missing" and not _publish_prepared(trace_fd, temporary):
+            state = _manifest_state(trace_fd, manifest_bytes)
+            if state != "exact":
+                fail("E_MANIFEST_CONFLICT", "run manifest publication lost a race")
     finally:
-        fcntl.flock(fd, fcntl.LOCK_UN)
+        if trace_fd is not None:
+            _discard_prepared(trace_fd, temporary)
+        try:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+        except OSError:
+            pass
         os.close(fd)
         os.close(parent_fd)
 

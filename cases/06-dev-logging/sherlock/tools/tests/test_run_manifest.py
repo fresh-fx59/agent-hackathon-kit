@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 """Provider-free contract tests for sealed benchmark manifests."""
 import datetime as dt
+import errno
 import hashlib
 import hmac
 import importlib.util
 import json
 import os
 from pathlib import Path
+import secrets
 import subprocess
 import sys
 import tempfile
@@ -72,7 +74,7 @@ class Fixture:
         keys.mkdir()
         self.commitment = records / "run-commitments.jsonl"
         self.commitment_key = keys / "commitment.key"
-        self.commitment_key.write_bytes(bytes(range(32)))
+        self.commitment_key.write_bytes(secrets.token_bytes(32))
         self.commitment_key.chmod(0o600)
         self.health = self.root / "health.json"
         self.write_health()
@@ -384,10 +386,10 @@ class RunManifestTests(unittest.TestCase):
         with self.assertRaisesRegex(MOD.ManifestError, "E_COMMITMENT_AUTH"):
             self.fx.verify()
 
-    def test_commitment_key_path_mode_and_entropy_are_enforced(self):
-        def key_at(path, data=bytes(range(32)), mode=0o600):
+    def test_commitment_key_path_mode_and_size_are_enforced(self):
+        def key_at(path, data=None, mode=0o600):
             path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_bytes(data); path.chmod(mode)
+            path.write_bytes(data if data is not None else secrets.token_bytes(32)); path.chmod(mode)
             return str(path)
 
         cases = []
@@ -408,8 +410,8 @@ class RunManifestTests(unittest.TestCase):
         fx = Fixture(self.root_for("key-short")); fx.stage(); fx.commitment_key.write_bytes(b"short")
         with self.assertRaisesRegex(MOD.ManifestError, "E_COMMITMENT_KEY_BOUNDS"):
             fx.create()
-        fx = Fixture(self.root_for("key-weak")); fx.stage(); fx.commitment_key.write_bytes(b"x" * 32)
-        with self.assertRaisesRegex(MOD.ManifestError, "E_COMMITMENT_KEY_ENTROPY"):
+        fx = Fixture(self.root_for("key-long")); fx.stage(); fx.commitment_key.write_bytes(b"x" * 33)
+        with self.assertRaisesRegex(MOD.ManifestError, "E_COMMITMENT_KEY_BOUNDS"):
             fx.create()
         fx = Fixture(self.root_for("key-symlink")); fx.stage()
         real = fx.root / "real.key"; key_at(real)
@@ -423,6 +425,15 @@ class RunManifestTests(unittest.TestCase):
         self.assertNotIn(str(self.fx.commitment_key), serialized)
         self.assertNotIn(self.fx.commitment_key.read_bytes().hex(), serialized)
         self.assertRegex(json.loads(self.fx.commitment.read_text())["key_id"], r"^[0-9a-f]{64}$")
+
+    def test_commitment_key_bytes_are_opaque_controller_provisioning(self):
+        self.fx.commitment_key.write_bytes(b"x" * 32)
+        before = self.fx.commitment_key.read_bytes()
+        self.valid_manifest()
+        self.assertEqual(self.fx.commitment_key.read_bytes(), before)
+        for path in self.fx.root.rglob("*"):
+            if path.is_file() and path != self.fx.commitment_key:
+                self.assertNotIn(before, path.read_bytes(), str(path))
 
     def test_target_identity_seal_tamper_is_rejected(self):
         manifest = self.valid_manifest()
@@ -443,7 +454,7 @@ class RunManifestTests(unittest.TestCase):
         with self.assertRaisesRegex(MOD.ManifestError, "E_TARGET_IDENTITY_MISMATCH"):
             self.fx.verify()
 
-    def test_commitment_tamper_and_duplicate_run_tag_are_refused(self):
+    def test_commitment_tamper_and_conflicting_run_tag_are_refused(self):
         self.valid_manifest()
         self.fx.commitment.write_text("", encoding="utf-8")
         with self.assertRaisesRegex(MOD.ManifestError, "E_COMMITMENT_MISSING"):
@@ -452,7 +463,8 @@ class RunManifestTests(unittest.TestCase):
         shared = shared_dir / "shared-commitments.jsonl"
         one = Fixture(self.root_for("commit-one")); one.stage(); one.create(commitment_file=str(shared))
         two = Fixture(self.root_for("commit-two")); two.stage()
-        with self.assertRaisesRegex(MOD.ManifestError, "E_COMMITMENT_DUPLICATE"):
+        two.commitment_key.write_bytes(one.commitment_key.read_bytes())
+        with self.assertRaisesRegex(MOD.ManifestError, "E_COMMITMENT_CONFLICT"):
             two.create(commitment_file=str(shared))
 
     def test_missing_commitment_verify_does_not_create_it(self):
@@ -570,6 +582,88 @@ class RunManifestTests(unittest.TestCase):
             with self.subTest(value_len=len(value)):
                 with self.assertRaisesRegex(MOD.ManifestError, "E_IDENTIFIER_INVALID"):
                     self.fx.create(run_tag=value)
+
+    def test_commitment_write_failure_rolls_back_without_manifest(self):
+        self.fx.stage()
+        with mock.patch.object(MOD.os, "write",
+                               side_effect=OSError(errno.ENOSPC, "injected full write")):
+            with self.assertRaisesRegex(MOD.ManifestError, "E_COMMITMENT_WRITE"):
+                self.fx.create()
+        self.assertFalse((self.fx.trace / "run-manifest.json").exists())
+        self.assertEqual(self.fx.commitment.read_bytes(), b"")
+        self.fx.create()
+        self.fx.verify()
+
+    def test_partial_commitment_write_failure_rolls_back(self):
+        self.fx.stage()
+        real_write = MOD.os.write
+        calls = 0
+
+        def partial_then_fail(fd, data):
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                return real_write(fd, data[:7])
+            raise OSError(errno.ENOSPC, "injected partial write")
+
+        with mock.patch.object(MOD.os, "write", side_effect=partial_then_fail):
+            with self.assertRaisesRegex(MOD.ManifestError, "E_COMMITMENT_WRITE"):
+                self.fx.create()
+        self.assertFalse((self.fx.trace / "run-manifest.json").exists())
+        self.assertEqual(self.fx.commitment.read_bytes(), b"")
+        self.fx.create()
+        self.fx.verify()
+
+    def test_short_commitment_writes_are_completed(self):
+        self.fx.stage()
+        real_write = MOD.os.write
+
+        def short_write(fd, data):
+            return real_write(fd, data[:min(7, len(data))])
+
+        with mock.patch.object(MOD.os, "write", side_effect=short_write):
+            self.fx.create()
+        self.assertEqual(len(self.fx.commitment.read_text().splitlines()), 1)
+        json.loads(self.fx.commitment.read_text())
+        self.fx.verify()
+
+    def test_crash_after_commitment_before_manifest_is_retryable(self):
+        self.fx.stage()
+        with mock.patch.object(MOD.os, "link",
+                               side_effect=OSError(errno.EIO, "injected publish failure")):
+            with self.assertRaisesRegex(MOD.ManifestError, "E_MANIFEST_PUBLISH"):
+                self.fx.create()
+        self.assertFalse((self.fx.trace / "run-manifest.json").exists())
+        self.assertEqual(len(self.fx.commitment.read_text().splitlines()), 1)
+        self.fx.create()
+        self.fx.verify()
+        self.assertEqual(len(self.fx.commitment.read_text().splitlines()), 1)
+
+    def test_exact_manifest_without_commitment_is_repaired(self):
+        original = self.valid_manifest()
+        self.fx.commitment.write_bytes(b"")
+        repaired = self.fx.create()
+        self.assertEqual(repaired, original)
+        self.fx.verify()
+        self.assertEqual(len(self.fx.commitment.read_text().splitlines()), 1)
+
+    def test_conflicting_orphan_commitment_fails_closed(self):
+        self.valid_manifest()
+        (self.fx.trace / "run-manifest.json").unlink()
+        self.fx.prompt.write_text("changed\n", encoding="utf-8")
+        with self.assertRaisesRegex(MOD.ManifestError, "E_COMMITMENT_CONFLICT"):
+            self.fx.create()
+        self.assertFalse((self.fx.trace / "run-manifest.json").exists())
+        self.assertEqual(len(self.fx.commitment.read_text().splitlines()), 1)
+
+    def test_conflicting_manifest_without_commitment_fails_closed(self):
+        self.valid_manifest()
+        self.fx.commitment.write_bytes(b"")
+        (self.fx.trace / "run-manifest.json").write_bytes(b"winner\n")
+        with self.assertRaisesRegex(MOD.ManifestError, "E_MANIFEST_CONFLICT"):
+            self.fx.create()
+        self.assertEqual(self.fx.commitment.read_bytes(), b"")
+        self.assertEqual((self.fx.trace / "run-manifest.json").read_bytes(), b"winner\n")
 
     def test_atomic_manifest_race_never_overwrites_winner(self):
         trace = self.fx.root / "atomic-trace"; trace.mkdir()
