@@ -182,7 +182,10 @@ class ValidityFixture:
 
     def validate(self):
         module=load_path("validate_run_%s" % id(self), TOOL)
-        module.CHECKER_TIMEOUT=0.25
+        # Process startup can exceed 250 ms on the four-core Contabo gate.
+        # Keep this far below the fixture's 60 s timeout case while allowing
+        # normal verified checker subprocesses to finish under host jitter.
+        module.CHECKER_TIMEOUT=2.0
         return module.validate_run(str(self.trace), str(self.fx.commitment),
                                    str(self.fx.commitment_key), str(self.ledger))
 
