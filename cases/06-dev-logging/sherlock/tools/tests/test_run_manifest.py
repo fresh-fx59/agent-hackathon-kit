@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """Provider-free contract tests for sealed benchmark manifests."""
+import contextlib
 import datetime as dt
 import errno
 import hashlib
 import hmac
 import importlib.util
+import io
 import json
 import os
 from pathlib import Path
@@ -135,6 +137,30 @@ class Fixture:
                 "commitment_key": str(self.commitment_key)}
         args.update(updates)
         return MOD.verify_manifest(**args)
+
+    def create_argv(self):
+        values = (("run-tag", "run-001"), ("dataset", "fixture"), ("arm", "v28"),
+                  ("source-corpus", self.corpus), ("answer-key", self.key),
+                  ("renderer", self.renderer), ("prompt", self.prompt),
+                  ("skill-root", self.skill), ("runner", self.runner),
+                  ("scorer", self.scorer), ("triage-checker", self.triage),
+                  ("stop-checker", self.stop), ("citation-checker", self.citation),
+                  ("target-cli", self.target_cli), ("target-version", "0.21.1"),
+                  ("requested-model", "qwen-target"), ("provider", "linkapi"),
+                  ("expected-returned-identity", "qwen-real"), ("lane", "paid"),
+                  ("health-receipt", self.health), ("controller-parent", self.parent),
+                  ("commitment-file", self.commitment),
+                  ("commitment-key", self.commitment_key),
+                  ("staged-corpus-destination", self.staged))
+        argv = [str(TOOL), "create", str(self.trace)]
+        for name, value in values:
+            argv.extend(("--" + name, str(value)))
+        return argv
+
+    def verify_argv(self):
+        return [str(TOOL), "verify", str(self.trace),
+                "--commitment-file", str(self.commitment),
+                "--commitment-key", str(self.commitment_key)]
 
 
 MOD = load_tool()
@@ -626,6 +652,106 @@ class RunManifestTests(unittest.TestCase):
         self.assertEqual(len(self.fx.commitment.read_text().splitlines()), 1)
         json.loads(self.fx.commitment.read_text())
         self.fx.verify()
+
+    def test_hard_death_after_short_write_repairs_final_fragment(self):
+        self.fx.stage()
+        real_write = MOD.os.write
+        calls = 0
+
+        def partial_then_die(fd, data):
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                return real_write(fd, data[:7])
+            raise SystemExit(91)
+
+        with mock.patch.object(MOD.os, "write", side_effect=partial_then_die):
+            with self.assertRaises(SystemExit):
+                self.fx.create()
+        self.assertEqual(len(self.fx.commitment.read_bytes()), 7)
+        self.assertFalse((self.fx.trace / "run-manifest.json").exists())
+        self.fx.create()
+        self.fx.verify()
+        self.assertEqual(len(self.fx.commitment.read_text().splitlines()), 1)
+
+    def test_newline_terminated_malformed_commitment_stays_fail_closed(self):
+        self.valid_manifest()
+        malformed = self.fx.commitment.read_bytes() + b'{"incomplete":true}\n'
+        self.fx.commitment.write_bytes(malformed)
+        with self.assertRaisesRegex(MOD.ManifestError, "E_COMMITMENT_SCHEMA"):
+            self.fx.create()
+        self.assertEqual(self.fx.commitment.read_bytes(), malformed)
+        self.assertTrue((self.fx.trace / "run-manifest.json").exists())
+
+    def test_premature_commitment_eof_has_stable_race_error(self):
+        self.fx.commitment.write_bytes(b"{}\n")
+        fd = os.open(self.fx.commitment, os.O_RDONLY)
+        try:
+            with mock.patch.object(MOD.os, "read",
+                                   side_effect=(b"", AssertionError("read retried after EOF"))):
+                with self.assertRaisesRegex(MOD.ManifestError, "E_COMMITMENT_RACE"):
+                    MOD._commitment_rows(fd)
+        finally:
+            os.close(fd)
+
+    def test_create_lock_acquisition_retries_eintr(self):
+        self.fx.stage()
+        real_flock = MOD.fcntl.flock
+        interrupted = False
+
+        def inject(fd, operation):
+            nonlocal interrupted
+            if operation == MOD.fcntl.LOCK_EX and not interrupted:
+                interrupted = True
+                raise OSError(errno.EINTR, "injected interrupt")
+            return real_flock(fd, operation)
+
+        with mock.patch.object(MOD.fcntl, "flock", side_effect=inject):
+            self.fx.create()
+        self.assertTrue(interrupted)
+        self.fx.verify()
+
+    def test_verify_lock_acquisition_retries_eintr_without_mutation(self):
+        self.valid_manifest()
+        before = self.fx.commitment.read_bytes()
+        real_flock = MOD.fcntl.flock
+        interrupted = False
+
+        def inject(fd, operation):
+            nonlocal interrupted
+            if operation == MOD.fcntl.LOCK_SH and not interrupted:
+                interrupted = True
+                raise OSError(errno.EINTR, "injected interrupt")
+            return real_flock(fd, operation)
+
+        with mock.patch.object(MOD.fcntl, "flock", side_effect=inject):
+            self.fx.verify()
+        self.assertTrue(interrupted)
+        self.assertEqual(self.fx.commitment.read_bytes(), before)
+
+    def test_create_cli_lock_error_is_stable_without_traceback(self):
+        self.fx.stage()
+        stderr = io.StringIO()
+        with mock.patch.object(sys, "argv", self.fx.create_argv()), \
+                mock.patch.object(MOD.fcntl, "flock",
+                                  side_effect=OSError(errno.EIO, "injected lock error")), \
+                contextlib.redirect_stderr(stderr):
+            code = MOD.main()
+        self.assertEqual(code, 2)
+        self.assertIn("E_COMMITMENT_LOCK", stderr.getvalue())
+        self.assertNotIn("Traceback", stderr.getvalue())
+
+    def test_verify_cli_lock_error_is_stable_without_traceback(self):
+        self.valid_manifest()
+        stderr = io.StringIO()
+        with mock.patch.object(sys, "argv", self.fx.verify_argv()), \
+                mock.patch.object(MOD.fcntl, "flock",
+                                  side_effect=OSError(errno.EIO, "injected lock error")), \
+                contextlib.redirect_stderr(stderr):
+            code = MOD.main()
+        self.assertEqual(code, 2)
+        self.assertIn("E_COMMITMENT_LOCK", stderr.getvalue())
+        self.assertNotIn("Traceback", stderr.getvalue())
 
     def test_crash_after_commitment_before_manifest_is_retryable(self):
         self.fx.stage()

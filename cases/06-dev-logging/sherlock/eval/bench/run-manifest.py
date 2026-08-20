@@ -600,14 +600,41 @@ def _sign_commitment(payload, key):
     return hmac.new(key, canonical(payload), hashlib.sha256).hexdigest()
 
 
-def _commitment_rows(fd):
-    size = os.fstat(fd).st_size
-    if size > 8 * 1024 * 1024:
-        fail("E_COMMITMENT_BOUNDS", "commitment file is too large")
-    os.lseek(fd, 0, os.SEEK_SET)
-    data = b""
-    while len(data) < size:
-        data += os.read(fd, min(65536, size - len(data)))
+def _commitment_lock(fd, operation):
+    while True:
+        try:
+            fcntl.flock(fd, operation)
+            return
+        except OSError as error:
+            if error.errno == errno.EINTR:
+                continue
+            fail("E_COMMITMENT_LOCK", "commitment lock operation failed")
+
+
+def _commitment_rows(fd, parent_fd=None, repair_tail=False):
+    try:
+        size = os.fstat(fd).st_size
+        if size > 8 * 1024 * 1024:
+            fail("E_COMMITMENT_BOUNDS", "commitment file is too large")
+        os.lseek(fd, 0, os.SEEK_SET)
+        data = b""
+        while len(data) < size:
+            chunk = os.read(fd, min(65536, size - len(data)))
+            if not chunk:
+                fail("E_COMMITMENT_RACE", "commitment changed during bounded read")
+            data += chunk
+        if data and not data.endswith(b"\n"):
+            if not repair_tail:
+                fail("E_COMMITMENT_SCHEMA", "commitment row is unterminated")
+            complete = data.rfind(b"\n") + 1
+            os.ftruncate(fd, complete)
+            os.fsync(fd)
+            os.fsync(parent_fd)
+            data = data[:complete]
+    except ManifestError:
+        raise
+    except OSError:
+        fail("E_COMMITMENT_IO", "commitment read or recovery failed")
     rows = []
     for raw in data.splitlines():
         if len(raw) > 1024:
@@ -670,10 +697,12 @@ def _append_commitment(fd, parent_fd, line):
 def _write_manifest_and_commit(trace, commitment_file, row, key, key_id):
     fd, parent_fd, _ = _commitment_fd(commitment_file)
     trace_fd = temporary = None
+    locked = False
     try:
-        fcntl.flock(fd, fcntl.LOCK_EX)
+        _commitment_lock(fd, fcntl.LOCK_EX)
+        locked = True
         trace_fd, temporary, manifest_bytes = _prepare_manifest(trace, row)
-        matches = [item for item in _commitment_rows(fd)
+        matches = [item for item in _commitment_rows(fd, parent_fd, repair_tail=True)
                    if item["run_tag"] == row["run_tag"]]
         state = _manifest_state(trace_fd, manifest_bytes)
         if len(matches) > 1:
@@ -704,25 +733,36 @@ def _write_manifest_and_commit(trace, commitment_file, row, key, key_id):
             if state != "exact":
                 fail("E_MANIFEST_CONFLICT", "run manifest publication lost a race")
     finally:
-        if trace_fd is not None:
-            _discard_prepared(trace_fd, temporary)
         try:
-            fcntl.flock(fd, fcntl.LOCK_UN)
-        except OSError:
-            pass
-        os.close(fd)
-        os.close(parent_fd)
+            if trace_fd is not None:
+                _discard_prepared(trace_fd, temporary)
+        finally:
+            try:
+                if locked:
+                    _commitment_lock(fd, fcntl.LOCK_UN)
+            finally:
+                try:
+                    os.close(fd)
+                finally:
+                    os.close(parent_fd)
 
 
 def _verify_commitment(path, row, trace, key, key_id):
     fd, parent_fd, canonical_path = _commitment_fd(path, create=False)
+    locked = False
     try:
-        fcntl.flock(fd, fcntl.LOCK_SH)
+        _commitment_lock(fd, fcntl.LOCK_SH)
+        locked = True
         rows = _commitment_rows(fd)
     finally:
-        fcntl.flock(fd, fcntl.LOCK_UN)
-        os.close(fd)
-        os.close(parent_fd)
+        try:
+            if locked:
+                _commitment_lock(fd, fcntl.LOCK_UN)
+        finally:
+            try:
+                os.close(fd)
+            finally:
+                os.close(parent_fd)
     matches = [item for item in rows if item["run_tag"] == row.get("run_tag")]
     if not rows:
         fail("E_COMMITMENT_MISSING", "external manifest commitment is missing")
