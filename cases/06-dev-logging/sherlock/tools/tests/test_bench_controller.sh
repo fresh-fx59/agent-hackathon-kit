@@ -6,6 +6,7 @@ import hmac
 import json
 import os
 from pathlib import Path
+import shlex
 import signal
 import stat
 import subprocess
@@ -173,6 +174,10 @@ class ControllerFixture:
             "{pid} (controller) S 1 {pgid} {pgid} " + "0 " * 15 + "41\n", encoding="utf-8")
         (self.proc / "self/cmdline").write_bytes(b"fixture-controller\0")
         self.capture = self.base / "target-env.json"
+        self.target_env_names = self.base / "target-env-names.json"
+        self.target_runtime = self.base / "target-runtime.json"
+        self.health_env_names = self.base / "health-env-names.json"
+        self.health_runtime = self.base / "health-runtime.json"
         self.corpus_capture = self.base / "target-corpus.txt"
         self.term_marker = self.base / "term-marker"
         self.child_pid = self.base / "group-child.pid"
@@ -276,14 +281,26 @@ if mutation:
 raise SystemExit(0)
 ''', encoding="utf-8"); self.validator_tool.chmod(0o755)
         self.health_tool.write_text(r'''#!/usr/bin/env python3
-import datetime,json,os
+import datetime,json,os,sys
+json.dump(sorted(os.environ),open(sys.argv[1],"w"))
+safe=("HOME","PATH","LANG","LC_ALL","LC_CTYPE","TMPDIR","SHERLOCK_ALLOW_SUBAGENT",
+      "PROBE_REPS","PROBE_SIZES_KB","PROBE_SHAPE","PROBE_TOOLS")
+json.dump({name:os.environ.get(name) for name in safe},open(sys.argv[2],"w"))
 now=datetime.datetime.now(datetime.timezone.utc)
 def z(value): return value.isoformat().replace("+00:00","Z")
+reps=int(os.environ.get("PROBE_REPS","2"))
+history=[{"size_kb":n,"status":200,"returned_model":os.environ["PROBE_EXPECTED_RETURNED_MODEL"],
+          "attempt":attempt} for attempt in range(1,reps+1) for n in (100,250,400)]
+mutation=os.environ.get("FAKE_HEALTH_HISTORY")
+if mutation == "reduced": history=history[:1]
+elif mutation == "duplicate": history.append(dict(history[0]))
+elif mutation == "missing-size": history=[item for item in history if item["size_kb"] != 400]
+elif mutation == "wrong-attempt": history[0]["attempt"]=2
 row={"schema":1,"checked_at":z(now),"expires_at":z(now+datetime.timedelta(minutes=10)),
 "lane":os.environ["PROBE_LANE"],"provider":os.environ["PROBE_PROVIDER"],
 "requested_model":os.environ["SHERLOCK_MODEL"],"endpoint":os.environ["PROBE_BASE_URL"],
-"shape":"history","tools":25,"sizes_kb":[100,250,400],
-"history":[{"size_kb":n,"status":200,"returned_model":os.environ["PROBE_EXPECTED_RETURNED_MODEL"]} for n in (100,250,400)],
+"shape":"history","tools":25,"sizes_kb":[100,250,400],"reps":int(os.environ.get("FAKE_HEALTH_REPS_FIELD",reps)),
+"history":history,
 "verdict":os.environ.get("FAKE_HEALTH_VERDICT","HEALTHY")}
 with open(os.environ["PROBE_RECEIPT_PATH"],"w") as f: json.dump(row,f); f.write("\n")
 ''', encoding="utf-8"); self.health_tool.chmod(0o755)
@@ -318,6 +335,17 @@ python3 - "{self.capture}" <<'PY2'
 import json,os,sys
 bad=[n for n in os.environ if "CONTROLLER" in n or "COMMITMENT" in n or n in ("SHERLOCK_MANIFEST_TOOL","SHERLOCK_VALIDATOR_TOOL","SHERLOCK_PROC_ROOT")]
 json.dump(sorted(bad),open(sys.argv[1],"w"))
+PY2
+python3 - "{self.target_env_names}" "{self.target_runtime}" <<'PY2'
+import json,os,sys
+json.dump(sorted(os.environ),open(sys.argv[1],"w"))
+safe=("HOME","PATH","LANG","LC_ALL","LC_CTYPE","TMPDIR","SHERLOCK_ALLOW_SUBAGENT",
+      "SHERLOCK_RUN_TAG","SHERLOCK_TRACE","SHERLOCK_CORPUS","SHERLOCK_REQUIRE_ATTRIBUTION",
+      "SHERLOCK_BUDGET_MAX_UPSTREAM_ATTEMPTS","SHERLOCK_BUDGET_MAX_REQUEST_BYTES",
+      "SHERLOCK_BUDGET_MAX_WALL_SECONDS","SHERLOCK_BUDGET_MAX_CONSECUTIVE_PROVIDER_FAILURES",
+      "BENCH_RUNS","QWEN_BIN","SHERLOCK_MODEL","SHERLOCK_BASE_URL",
+      "SHERLOCK_EXPECTED_RETURNED_IDENTITY")
+json.dump({{name:os.environ.get(name) for name in safe}},open(sys.argv[2],"w"))
 PY2
 printf '%s\n' "$SHERLOCK_CORPUS" > "{self.corpus_capture}"
 touch "$SHERLOCK_TRACE/.runner-ready"
@@ -374,7 +402,9 @@ printf '{{"schema":1}}\\n' > "$SHERLOCK_TRACE/candidate.json"
         env.update({
             "SHERLOCK_CONTROLLER_ROOT": str(self.controllers),
             "SHERLOCK_FREE_TEST_COMMAND": "true",
-            "SHERLOCK_HEALTH_COMMAND": str(self.health_tool),
+            "SHERLOCK_HEALTH_COMMAND": "%s %s %s" % (
+                shlex.quote(str(self.health_tool)), shlex.quote(str(self.health_env_names)),
+                shlex.quote(str(self.health_runtime))),
             "SHERLOCK_TARGET_COMMAND": str(self.target_tool),
             "BENCH_RUNS": str(self.runs),
             "SHERLOCK_BUDGET_MAX_UPSTREAM_ATTEMPTS": "5",
@@ -401,11 +431,25 @@ printf '{{"schema":1}}\\n' > "$SHERLOCK_TRACE/candidate.json"
             "SHERLOCK_EXPECTED_RETURNED_IDENTITY": "fixture-returned",
             "SHERLOCK_LANE": "paid",
             "SHERLOCK_BASE_URL": "http://127.0.0.1:9/v1",
+            "SHERLOCK_API_KEY": "fixture-api-key",
             "FAKE_VALIDITY": "true",
             "FAKE_VALIDATOR_COUNT": str(self.validator_count),
             "FAKE_MANIFEST_VERIFY_COUNT": str(self.manifest_verify_count),
         })
         env.update(updates)
+        health_controls={}
+        for name in ("FAKE_HEALTH_HISTORY","FAKE_HEALTH_REPS_FIELD","FAKE_HEALTH_VERDICT"):
+            value=env.pop(name,None)
+            if value is not None: health_controls[name]=value
+        if health_controls:
+            assignments=" ".join("%s=%s" % (name,shlex.quote(value))
+                                 for name,value in health_controls.items())
+            env["SHERLOCK_HEALTH_COMMAND"]="env %s %s" % (
+                assignments,env["SHERLOCK_HEALTH_COMMAND"])
+        mode=env.pop("FAKE_TARGET_MODE",None)
+        if mode is not None:
+            env["SHERLOCK_TARGET_COMMAND"]="env FAKE_TARGET_MODE=%s %s" % (
+                shlex.quote(mode),shlex.quote(str(self.target_tool)))
         return env
 
     def run(self, *args, env=None, timeout=30):
@@ -499,6 +543,84 @@ os.stat=guarded_stat
         resumed_status=json.loads((controller/"status.json").read_text())
         self.assertEqual((resumed_status["phase"],resumed_status["reason"]),
                          ("BLOCKED","HEALTH_RECEIPT_INVALID"))
+
+    def test_health_receipt_requires_exact_one_by_three_matrix(self):
+        cases=(("reduced",{}),("duplicate",{}),("missing-size",{}),
+               ("wrong-attempt",{}),(None,{"FAKE_HEALTH_REPS_FIELD":"2"}))
+        for mutation,extra in cases:
+            with self.subTest(mutation=mutation or "wrong-reps"):
+                if any(self.fx.controllers.glob("controller-*")):
+                    self.fx.close(); self.fx=ControllerFixture(self)
+                updates=dict(extra)
+                if mutation is not None: updates["FAKE_HEALTH_HISTORY"]=mutation
+                result=self.fx.run(env=self.fx.env(**updates))
+                self.assertNotEqual(result.returncode,0,(mutation,result.stdout,result.stderr))
+                self.assertFalse(self.fx.capture.exists())
+                status=json.loads((self.fx.controller_dir()/"status.json").read_text())
+                self.assertEqual((status["phase"],status["reason"]),
+                                 ("BLOCKED","HEALTH_RECEIPT_INVALID"))
+
+    def test_health_launch_forces_one_rep_and_exact_three_sizes(self):
+        result=self.fx.run(env=self.fx.env(PROBE_REPS="7"))
+        self.assertEqual(result.returncode,0,(result.stdout,result.stderr))
+        receipt=json.loads((self.fx.controller_dir()/"health-receipt.json").read_text())
+        self.assertEqual(receipt["reps"],1)
+        self.assertEqual([(item["size_kb"],item["attempt"]) for item in receipt["history"]],
+                         [(100,1),(250,1),(400,1)])
+
+    def test_health_environment_is_allowlisted_and_forces_subagents_off(self):
+        env=self.fx.env(SHERLOCK_ALLOW_SUBAGENT="1",JUDGE_API_KEY="fixture-judge-secret",
+                        ARBITRARY_SECRET_SENTINEL="must-not-cross")
+        result=self.fx.run(env=env); self.assertEqual(result.returncode,0,(result.stdout,result.stderr))
+        names=set(json.loads(self.fx.health_env_names.read_text()))
+        forbidden={"JUDGE_API_KEY","ARBITRARY_SECRET_SENTINEL","SHERLOCK_CONTROLLER_ROOT",
+                   "SHERLOCK_FREE_TEST_COMMAND","SHERLOCK_HEALTH_COMMAND","SHERLOCK_TARGET_COMMAND",
+                   "SHERLOCK_MANIFEST_TOOL","SHERLOCK_VALIDATOR_TOOL","SHERLOCK_LEDGER",
+                   "SHERLOCK_ANSWER_KEY","SHERLOCK_RENDERER","SHERLOCK_PROMPT_FILE",
+                   "SHERLOCK_SKILL_ROOT","SHERLOCK_SCORER","SHERLOCK_TRIAGE_CHECKER",
+                   "SHERLOCK_STOP_CHECKER","SHERLOCK_CITATION_CHECKER","SHERLOCK_PROC_ROOT",
+                   "BENCH_RUNS","QWEN_BIN"}
+        self.assertFalse(names & forbidden,names & forbidden)
+        self.assertIn("SHERLOCK_API_KEY",names)
+        runtime=json.loads(self.fx.health_runtime.read_text())
+        self.assertEqual(runtime["SHERLOCK_ALLOW_SUBAGENT"],"0")
+        self.assertEqual([runtime[name] for name in ("PROBE_REPS","PROBE_SIZES_KB",
+                                                     "PROBE_SHAPE","PROBE_TOOLS")],
+                         ["1","100 250 400","history","25"])
+
+    def test_target_environment_is_allowlisted_and_forces_subagents_off(self):
+        custom_home=self.fx.base/"target-home"; custom_home.mkdir()
+        custom_tmp=self.fx.base/"target-tmp"; custom_tmp.mkdir()
+        injected_path=self.fx.base/"injected-bin"; injected_path.mkdir()
+        env=self.fx.env(HOME=str(custom_home),TMPDIR=str(custom_tmp),LANG="C",LC_ALL="C",
+                        PATH=str(injected_path)+os.pathsep+os.environ.get("PATH",""),
+                        SHERLOCK_ALLOW_SUBAGENT="1",JUDGE_API_KEY="fixture-judge-secret",
+                        ARBITRARY_SECRET_SENTINEL="must-not-cross")
+        result=self.fx.run(env=env); self.assertEqual(result.returncode,0,(result.stdout,result.stderr))
+        names=set(json.loads(self.fx.target_env_names.read_text()))
+        forbidden={"JUDGE_API_KEY","ARBITRARY_SECRET_SENTINEL","SHERLOCK_CONTROLLER_ROOT",
+                   "SHERLOCK_FREE_TEST_COMMAND","SHERLOCK_HEALTH_COMMAND","SHERLOCK_TARGET_COMMAND",
+                   "SHERLOCK_MANIFEST_TOOL","SHERLOCK_VALIDATOR_TOOL","SHERLOCK_LEDGER",
+                   "SHERLOCK_ANSWER_KEY","SHERLOCK_RENDERER","SHERLOCK_SKILL_ROOT",
+                   "SHERLOCK_SCORER","SHERLOCK_TRIAGE_CHECKER","SHERLOCK_STOP_CHECKER",
+                   "SHERLOCK_CITATION_CHECKER","SHERLOCK_PROC_ROOT"}
+        self.assertFalse(names & forbidden,names & forbidden)
+        self.assertIn("SHERLOCK_API_KEY",names)
+        runtime=json.loads(self.fx.target_runtime.read_text())
+        link=json.loads((self.fx.controller_dir()/"controller-child.json").read_text())
+        self.assertEqual(runtime["HOME"],str(custom_home))
+        self.assertEqual(runtime["TMPDIR"],str(custom_tmp))
+        self.assertEqual((runtime["LANG"],runtime["LC_ALL"]),("C","C"))
+        self.assertEqual(runtime["SHERLOCK_ALLOW_SUBAGENT"],"0")
+        self.assertNotIn(str(injected_path),runtime["PATH"].split(os.pathsep))
+        self.assertEqual(runtime["SHERLOCK_RUN_TAG"],link["child_run_tag"])
+        self.assertEqual(runtime["SHERLOCK_TRACE"],link["child_trace"])
+        self.assertEqual(runtime["SHERLOCK_CORPUS"],str(self.fx.controller_dir()/"staged-corpus"))
+        self.assertEqual(runtime["SHERLOCK_REQUIRE_ATTRIBUTION"],"1")
+        self.assertEqual([runtime[name] for name in (
+            "SHERLOCK_BUDGET_MAX_UPSTREAM_ATTEMPTS","SHERLOCK_BUDGET_MAX_REQUEST_BYTES",
+            "SHERLOCK_BUDGET_MAX_WALL_SECONDS","SHERLOCK_BUDGET_MAX_CONSECUTIVE_PROVIDER_FAILURES")],
+            ["5","5000","20","3"])
 
     def test_runner_and_validator_outcomes_are_not_conflated(self):
         result=self.fx.run(env=self.fx.env(FAKE_TARGET_MODE="none")); self.assertNotEqual(result.returncode,0)

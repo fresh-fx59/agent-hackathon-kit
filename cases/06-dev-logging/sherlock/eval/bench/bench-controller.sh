@@ -36,6 +36,20 @@ LIMIT_ENV = {
     "max_wall_seconds": "SHERLOCK_BUDGET_MAX_WALL_SECONDS",
     "max_consecutive_provider_failures": "SHERLOCK_BUDGET_MAX_CONSECUTIVE_PROVIDER_FAILURES",
 }
+RUNTIME_ENV_ALLOW = {
+    "HOME", "LANG", "LANGUAGE", "LC_ALL", "LC_CTYPE", "TMPDIR", "TEMP", "TMP", "TZ",
+    "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "http_proxy", "https_proxy", "no_proxy",
+    "SSL_CERT_FILE", "SSL_CERT_DIR", "NODE_EXTRA_CA_CERTS",
+}
+HEALTH_ENV_ALLOW = {*RUNTIME_ENV_ALLOW, "SHERLOCK_API_KEY"}
+TARGET_ENV_ALLOW = {
+    *RUNTIME_ENV_ALLOW,
+    "BENCH_RUNS", "QWEN_BIN", "SHERLOCK_API_KEY", "SHERLOCK_BASE_URL",
+    "SHERLOCK_CONTEXT_WINDOW", "SHERLOCK_DATASET", "SHERLOCK_EXPECTED_RETURNED_IDENTITY",
+    "SHERLOCK_MODEL", "SHERLOCK_PROMPT_FILE", "SHERLOCK_RESUME_BACKOFF_S",
+    "SHERLOCK_RESUME_MAX_ATTEMPTS", "SHERLOCK_TIMEOUT", "SHERLOCK_UPSTREAM_LOG",
+    "SHERLOCK_UPSTREAM_RETRY", "SHERLOCK_UPSTREAM_RETRY_BASE_MS", "UPSTREAM_LANE_PROXY",
+}
 MAX_JSON_BYTES = 1024 * 1024
 MAX_ARTIFACTS = 4096
 MAX_ARTIFACT_BYTES = 512 * 1024 * 1024
@@ -310,13 +324,21 @@ def validate_health(path, expected):
         expires = dt.datetime.fromisoformat(row["expires_at"].replace("Z", "+00:00"))
     except Exception as exc: raise Blocked("HEALTH_RECEIPT_INVALID") from exc
     current = dt.datetime.now(dt.timezone.utc)
-    identities = {item.get("returned_model") for item in row.get("history", []) if isinstance(item, dict)}
+    history = row.get("history")
+    matrix_ok = (isinstance(history, list) and len(history) == 3 and
+                 type(row.get("reps")) is int and row["reps"] == 1 and
+                 all(isinstance(item, dict) for item in history) and
+                 all(type(item.get("size_kb")) is int and
+                     type(item.get("attempt")) is int for item in history) and
+                 {(item["size_kb"], item["attempt"]) for item in history} ==
+                 {(100, 1), (250, 1), (400, 1)} and
+                 all(type(item.get("status")) is int and item["status"] == 200 and
+                     item.get("returned_model") == expected["identity"] for item in history))
     ok = (row.get("schema") == 1 and row.get("verdict") == "HEALTHY" and
           row.get("lane") == expected["lane"] and row.get("provider") == expected["provider"] and
           row.get("requested_model") == expected["model"] and row.get("endpoint") == expected["base"] and
           row.get("shape") == "history" and row.get("tools") == 25 and
-          row.get("sizes_kb") == [100, 250, 400] and identities == {expected["identity"]} and
-          all(item.get("status") == 200 for item in row.get("history", [])) and
+          row.get("sizes_kb") == [100, 250, 400] and matrix_ok and
           checked <= current <= expires and (current - checked).total_seconds() <= 900)
     if not ok: raise Blocked("HEALTH_RECEIPT_INVALID")
 
@@ -606,18 +628,25 @@ def acquire_lock(root, resume_id):
     return fd, owner_path
 
 
+def controlled_environment(allowed):
+    env = {name: os.environ[name] for name in allowed if name in os.environ}
+    path_parts = []
+    qwen = os.environ.get("QWEN_BIN", "")
+    if "QWEN_BIN" in allowed and qwen and os.path.isabs(qwen):
+        path_parts.append(str(Path(qwen).parent))
+    home = os.environ.get("HOME", "")
+    if home and os.path.isabs(home): path_parts.append(str(Path(home) / ".local/bin"))
+    path_parts.extend((str(Path(sys.executable).parent), "/opt/homebrew/bin", "/usr/local/bin",
+                       "/usr/bin", "/bin", "/usr/sbin", "/sbin"))
+    env["PATH"] = os.pathsep.join(dict.fromkeys(path_parts))
+    return env
+
+
 def target_environment(tag, trace, staged_corpus, limits):
-    env = dict(os.environ)
-    remove = {"SHERLOCK_CONTROLLER_ROOT", "SHERLOCK_FREE_TEST_COMMAND", "SHERLOCK_HEALTH_COMMAND",
-              "SHERLOCK_TARGET_COMMAND", "SHERLOCK_PROC_ROOT", "SHERLOCK_MANIFEST_TOOL",
-              "SHERLOCK_VALIDATOR_TOOL", "SHERLOCK_LEDGER", "SHERLOCK_ANSWER_KEY",
-              "SHERLOCK_RENDERER", "SHERLOCK_SKILL_ROOT", "SHERLOCK_SCORER",
-              "SHERLOCK_TRIAGE_CHECKER", "SHERLOCK_STOP_CHECKER", "SHERLOCK_CITATION_CHECKER",
-              "SHERLOCK_TARGET_VERSION", "SHERLOCK_PROVIDER", "SHERLOCK_LANE"}
-    for name in remove: env.pop(name, None)
+    env = controlled_environment(TARGET_ENV_ALLOW)
     env.update({"SHERLOCK_RUN_TAG": tag, "SHERLOCK_TRACE": str(trace),
                 "SHERLOCK_CORPUS": str(staged_corpus),
-                "SHERLOCK_REQUIRE_ATTRIBUTION": "1"})
+                "SHERLOCK_REQUIRE_ATTRIBUTION": "1", "SHERLOCK_ALLOW_SUBAGENT": "0"})
     for field, name in LIMIT_ENV.items(): env[name] = str(limits[field])
     return env
 
@@ -651,10 +680,14 @@ def run_fresh(root, runs, controller_id, controller, key_path, key, limits, lock
     model = os.environ.get("SHERLOCK_MODEL", "")
     identity_name = os.environ.get("SHERLOCK_EXPECTED_RETURNED_IDENTITY", "")
     base = os.environ.get("SHERLOCK_BASE_URL", "")
-    health_env = dict(os.environ)
-    health_env.update({"PROBE_RECEIPT_PATH": str(health), "PROBE_LANE": lane,
+    health_env = controlled_environment(HEALTH_ENV_ALLOW)
+    health_env.update({"SHERLOCK_MODEL": model, "SHERLOCK_BASE_URL": base,
+                       "SHERLOCK_ALLOW_SUBAGENT": "0",
+                       "PROBE_RECEIPT_PATH": str(health), "PROBE_LANE": lane,
                        "PROBE_PROVIDER": provider, "PROBE_EXPECTED_RETURNED_MODEL": identity_name,
-                       "PROBE_BASE_URL": base, "PROBE_ENDPOINT_LABEL": base})
+                       "PROBE_BASE_URL": base, "PROBE_ENDPOINT_LABEL": base,
+                       "PROBE_REPS": "1", "PROBE_SIZES_KB": "100 250 400",
+                       "PROBE_SHAPE": "history", "PROBE_TOOLS": "25"})
     result = subprocess.run(os.environ["SHERLOCK_HEALTH_COMMAND"], shell=True, env=health_env)
     try:
         if result.returncode: raise Blocked("HEALTH_COMMAND_FAILED")
