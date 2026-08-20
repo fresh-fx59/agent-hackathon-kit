@@ -46,6 +46,7 @@ save_trace() {
   [ -f "$W/attempts.jsonl" ] && cp "$W/attempts.jsonl" "$TRACE/attempts.jsonl"
   [ -f "$W/incomplete.json" ] && cp "$W/incomplete.json" "$TRACE/incomplete.json"
   [ -f "$W/err.txt" ]  && cp "$W/err.txt"  "$TRACE/err.txt"
+  [ -f "$W/.qwen/settings.json" ] && cp "$W/.qwen/settings.json" "$TRACE/qwen-settings.json"
   # whatever the run wrote for itself (v11 keeps its worklist verdicts here)
   [ -d "$W/work" ] && cp -r "$W/work" "$TRACE/work"
   # A malformed upstream SSE must not erase the only resumable session state.
@@ -60,10 +61,21 @@ export QWEN_HOME="$W/home"; mkdir -p "$QWEN_HOME"
 # the 649 MB corpus, so a 177,000-token ceiling hurts here most of all.
 # → measure/run-case.sh for why the default is 400,000 and not 1,048,576.
 CTX_WINDOW="${SHERLOCK_CONTEXT_WINDOW:-400000}"
+# Qwen's `agent` tool launches a subagent that does not inherit the project
+# `.qwen/skills/` directory. The result is a one-turn no-skill answer from the
+# empty runner directory. This exact failure is characterised in run-case.sh;
+# keep the target bench on the same, skill-loaded execution path.
+EXCLUDE_JSON=''
+if [ "${SHERLOCK_ALLOW_SUBAGENT:-0}" != "1" ]; then
+  EXCLUDE_JSON=', "tools": { "exclude": ["agent"] }'
+fi
 if [ "$CTX_WINDOW" != "0" ]; then
   mkdir -p "$W/.qwen"
-  printf '{ "model": { "generationConfig": { "contextWindowSize": %s } } }\n' \
-    "$CTX_WINDOW" > "$W/.qwen/settings.json"
+  printf '{ "model": { "generationConfig": { "contextWindowSize": %s } }%s }\n' \
+    "$CTX_WINDOW" "$EXCLUDE_JSON" > "$W/.qwen/settings.json"
+elif [ -n "$EXCLUDE_JSON" ]; then
+  mkdir -p "$W/.qwen"
+  printf '{ "tools": { "exclude": ["agent"] } }\n' > "$W/.qwen/settings.json"
 fi
 
 if [ "$ARM" != "none" ]; then

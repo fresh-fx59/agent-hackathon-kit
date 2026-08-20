@@ -39,6 +39,7 @@ bash "$RUNNER" none > "$TMP/out.log" 2>&1
 TRACE="$(find "$TMP/runs" -mindepth 1 -maxdepth 1 -type d | head -1)"
 test -f "$TRACE/out-attempt-0.json"
 test -f "$TRACE/err-attempt-0.txt"
+test "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["tools"]["exclude"])' "$TRACE/qwen-settings.json")" = "['agent']"
 test -f "$TRACE/qwen-home/saved/11111111-1111-1111-1111-111111111111"
 test "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["resume_attempts"])' "$TRACE/recovery.json")" = 1
 test "$(wc -l < "$TRACE/attempts.jsonl")" = 2
