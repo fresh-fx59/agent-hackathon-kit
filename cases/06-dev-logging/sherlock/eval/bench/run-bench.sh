@@ -27,6 +27,13 @@ TIMEOUT="${SHERLOCK_TIMEOUT:-2700}"
 [ -d "$CORPUS" ] || { echo "✗ corpus not found: $CORPUS" >&2; exit 1; }
 
 W="$(mktemp -d "${TMPDIR:-/tmp}/bench-XXXXXX")"
+# Qwen Code only grants file tools access to its project workspace. Giving the
+# prompt an absolute corpus path outside that workspace produces a one-turn
+# refusal, even under yolo. Stage a private read-only-in-practice copy instead
+# of a symlink: a symlink resolves outside the boundary and is denied again.
+RUN_CORPUS="$W/corpus"
+mkdir -p "$RUN_CORPUS"
+cp -a "$CORPUS/." "$RUN_CORPUS/"
 # The trajectory is the ONLY way to tell "never opened the file" from "opened it
 # and closed it wrongly" from "found it and discarded it" — and that is exactly
 # the question every arm since v5 exists to answer. It used to be deleted on
@@ -94,10 +101,10 @@ DATASET="${SHERLOCK_DATASET:-bench649}"
 PROMPT_FILE="${SHERLOCK_PROMPT_FILE:-$HERE/prompts/$DATASET.txt}"
 if [ -f "$PROMPT_FILE" ]; then
   PROMPT="$(cat "$PROMPT_FILE")"
-  PROMPT="${PROMPT//\$CORPUS/$CORPUS}"
-  PROMPT="$(printf '%s' "$PROMPT" | sed "s|{CORPUS}|$CORPUS|g")"
+  PROMPT="${PROMPT//\$CORPUS/$RUN_CORPUS}"
+  PROMPT="$(printf '%s' "$PROMPT" | sed "s|{CORPUS}|$RUN_CORPUS|g")"
 elif [ "$DATASET" = "bench649" ]; then
-  PROMPT="Продакшн деградировал. Логи со всей платформы лежат в $CORPUS.
+  PROMPT="Продакшн деградировал. Логи со всей платформы лежат в $RUN_CORPUS.
 Найди ВСЕ проблемы и инциденты, определи корневую причину каждой и предложи,
 что делать. Ссылайся на конкретные строки в формате файл:строка."
 else
