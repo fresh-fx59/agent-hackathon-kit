@@ -40,6 +40,11 @@ save_trace() {
   for partial in "$W"/out-attempt-*.json; do
     [ -f "$partial" ] && cp "$partial" "$TRACE/$(basename "$partial")"
   done
+  for partial in "$W"/err-attempt-*.txt "$W"/exit-attempt-*.txt; do
+    [ -f "$partial" ] && cp "$partial" "$TRACE/$(basename "$partial")"
+  done
+  [ -f "$W/attempts.jsonl" ] && cp "$W/attempts.jsonl" "$TRACE/attempts.jsonl"
+  [ -f "$W/incomplete.json" ] && cp "$W/incomplete.json" "$TRACE/incomplete.json"
   [ -f "$W/err.txt" ]  && cp "$W/err.txt"  "$TRACE/err.txt"
   # whatever the run wrote for itself (v11 keeps its worklist verdicts here)
   [ -d "$W/work" ] && cp -r "$W/work" "$TRACE/work"
@@ -113,19 +118,41 @@ RESUME_ATTEMPTS=0
 RESUME_SESSION=""
 
 run_qwen() {
+  local attempt="$1"
+  shift
   # key via environment, never argv (visible in ps; this box has a guest account)
   ( cd "$W" && OPENAI_API_KEY="$SHERLOCK_API_KEY" OPENAI_BASE_URL="$BASE_URL" \
     timeout "$TIMEOUT" "$QWEN" --auth-type openai --model "$CLIENT_MODEL" \
       --approval-mode yolo "$@" --output-format json </dev/null \
   ) >"$W/out.json" 2>"$W/err.txt"
+  local rc=$?
+  # A resume must never overwrite the diagnostic from the attempt that failed.
+  cp "$W/out.json" "$W/out-attempt-$attempt.json"
+  cp "$W/err.txt" "$W/err-attempt-$attempt.txt"
+  printf '%s\n' "$rc" > "$W/exit-attempt-$attempt.txt"
+  printf '{"attempt":%s,"exit_code":%s,"output_bytes":%s,"stderr_bytes":%s}\n' \
+    "$attempt" "$rc" "$(wc -c < "$W/out.json")" "$(wc -c < "$W/err.txt")" \
+    >> "$W/attempts.jsonl"
+  return "$rc"
 }
 
 broken_session() {
   python3 - "$W/out.json" <<'PY'
-import json, sys
+import json, re, sys
 try:
-    rows = json.load(open(sys.argv[1], encoding="utf-8"))
-except (OSError, ValueError):
+    raw = open(sys.argv[1], encoding="utf-8", errors="replace").read()
+except OSError:
+    sys.exit(1)
+try:
+    rows = json.loads(raw)
+except ValueError:
+    # A broken provider can leave Qwen with a partial JSON array. Its system
+    # record already has the saved session id, so resume it instead of discarding
+    # all prior work because the final record is not parseable.
+    match = re.search(r'"session_id"\s*:\s*"([0-9a-f-]{16,})"', raw)
+    if match:
+        print(match.group(1))
+        sys.exit(0)
     sys.exit(1)
 if not isinstance(rows, list):
     rows = [rows]
@@ -144,15 +171,14 @@ sys.exit(1)
 PY
 }
 
-run_qwen -p "$PROMPT"
+run_qwen 0 -p "$PROMPT" || true
 while RESUME_SESSION="$(broken_session)" \
   && [ "$RESUME_ATTEMPTS" -lt "$RESUME_MAX_ATTEMPTS" ]; do
-  mv "$W/out.json" "$W/out-attempt-$RESUME_ATTEMPTS.json"
   RESUME_ATTEMPTS=$((RESUME_ATTEMPTS + 1))
   BACKOFF=$((RESUME_BACKOFF_S * (2 ** (RESUME_ATTEMPTS - 1))))
   echo "  ⚠ stream failed; preserving session $RESUME_SESSION and retrying in ${BACKOFF}s (attempt $RESUME_ATTEMPTS/$RESUME_MAX_ATTEMPTS)" >&2
   sleep "$BACKOFF"
-  run_qwen --resume "$RESUME_SESSION" -p "The previous provider stream failed. Continue the same investigation from saved state. Do not restart mapping; finish the unresolved worklist and deliver the report."
+  run_qwen "$RESUME_ATTEMPTS" --resume "$RESUME_SESSION" -p "The previous provider stream failed. Continue the same investigation from saved state. Do not restart mapping; finish the unresolved worklist and deliver the report." || true
 done
 mkdir -p "$TRACE"
 python3 - "$TRACE/recovery.json" "$RESUME_ATTEMPTS" "$RESUME_SESSION" <<'PY'
@@ -213,7 +239,12 @@ if broke:
     # field stays null and never 0. → [[eval-must-measure-cost-not-just-quality]]
     why = (final or {}).get("error") or t or "no final result record"
     if not art.strip():
-        print("  ✗ run produced neither an answer nor a report, NOT recorded:",
+        # Keep the failed outcome next to the trajectory. The quality ledger
+        # still excludes incomplete runs, so it cannot turn an outage into score.
+        with open(os.path.join(workroot, "incomplete.json"), "w", encoding="utf-8") as fh:
+            json.dump({"status": "incomplete", "reason": str(why)[:160]}, fh)
+            fh.write("\n")
+        print("  ✗ run produced neither an answer nor a report; saved incomplete result:",
               str(why)[:160])
         sys.exit(2)
     print("  ⚠ run failed (%s) but work/report.md survived — ARTIFACT-ONLY row, "

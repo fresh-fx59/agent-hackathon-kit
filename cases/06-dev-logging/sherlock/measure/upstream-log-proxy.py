@@ -201,7 +201,12 @@ class Proxy(BaseHTTPRequestHandler):
         headers["Accept-Encoding"] = "identity"
         req = urllib.request.Request(self._upstream_url(), data=body or None,
                                      headers=headers, method=self.command)
-        state = {"returned_model": None, "tool_call": False, "error": None}
+        # HTTP 200 only says the front door accepted the request. Providers can
+        # splice an HTTP error into SSE after many successful turns; the client
+        # sees malformed JSON while a status-only ledger says success.
+        state = {"returned_model": None, "tool_call": False, "error": None,
+                 "stream_events": 0, "stream_parse_errors": 0,
+                 "stream_complete": None, "stream_bytes": 0}
         status = None
         attempt = 0
         while True:
@@ -264,7 +269,11 @@ class Proxy(BaseHTTPRequestHandler):
                    tool_call=state["tool_call"], status=status,
                    duration_ms=int((time.time() - t0) * 1000), sent_model=sent,
                    request_bytes=len(body), path=self.path, stream=streaming,
-                   upstream_error=state["error"])
+                   upstream_error=state["error"],
+                   stream_events=state["stream_events"],
+                   stream_parse_errors=state["stream_parse_errors"],
+                   stream_complete=state["stream_complete"],
+                   stream_bytes=state["stream_bytes"])
 
     def _relay_headers(self, resp, status, extra=()):
         self.send_response(status)
@@ -298,16 +307,26 @@ class Proxy(BaseHTTPRequestHandler):
         self.end_headers()
         self.close_connection = True
         for raw in resp:
+            state["stream_bytes"] += len(raw)
             self.wfile.write(raw)
             self.wfile.flush()
             line = raw.strip()
             if line.startswith(b"data:"):
                 chunk = line[5:].strip()
-                if chunk and chunk != b"[DONE]":
+                if chunk == b"[DONE]":
+                    state["stream_complete"] = True
+                elif chunk:
+                    state["stream_events"] += 1
                     try:
                         _scan_obj(json.loads(chunk.decode("utf-8", "replace")), state)
                     except Exception:
-                        pass
+                        state["stream_parse_errors"] += 1
+                        # Do not persist arbitrary model text or corpus lines.
+                        # Keep only a gateway status embedded by a broken stream.
+                        match = re.search(br"HTTP/\d(?:\.\d)?\s+(\d{3})", chunk)
+                        state["error"] = ("malformed_sse_embedded_http_status:%s" %
+                                          match.group(1).decode("ascii") if match else
+                                          "malformed_sse_json")
 
 
 def main():
