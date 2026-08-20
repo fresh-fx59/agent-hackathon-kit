@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Provider-free, authoritative validity reducer for one sealed trace."""
 import argparse
+import errno
 import fcntl
 import hashlib
 import hmac
@@ -67,6 +68,22 @@ def sha(data):
 def normalized_text(value):
     value = unicodedata.normalize("NFC", str(value)).replace("\r\n", "\n").replace("\r", "\n")
     return " ".join(value.split())
+
+def lock(fd, operation, code):
+    while True:
+        try:
+            fcntl.flock(fd, operation)
+            return
+        except OSError as error:
+            if error.errno == errno.EINTR:
+                continue
+            fail(code)
+
+def fingerprint_match(kind, needle, haystack):
+    if kind == "substring":
+        return needle in haystack
+    boundary = r"(?<![\w])%s(?![\w])" % re.escape(needle)
+    return re.search(boundary, haystack) is not None
 
 def read_relative(trace_fd, relative, prefix, maximum=MAX_STREAM, missing=False):
     try:
@@ -310,43 +327,54 @@ def checker_summary(name, result):
             "blocking": ledger["unresolved_total"]}
 
 def contamination(manifest, message, artifact, delivered, work_blobs,
-                  key_data, prompt_data, skill_blobs, corpus_blobs):
+                  key_data, prompt_data, skill_blobs, corpus_blobs,
+                  settings_pre, settings_saved, transcript):
     key_path = manifest["artifacts"]["answer_key"]["path"]
     key = json_object(key_data, "manifest_invalid")
     corpus_text = normalized_text(b"\n".join(corpus_blobs).decode("utf-8", "replace"))
     fingerprints = []
+    dataset = normalized_text(key.get("dataset", manifest.get("dataset", "")))
     for defect in key.get("defects", []):
         if not isinstance(defect, dict): continue
-        if defect.get("id"): fingerprints.append(("answer_id", normalized_text(defect["id"]), True))
+        defect_id = normalized_text(defect.get("id", ""))
+        if dataset and defect_id:
+            fingerprints.append(("answer_id", "%s:%s" % (dataset, defect_id), True, "token"))
         for field in ("title", "description", "root_cause", "trap"):
             value = normalized_text(defect.get(field, ""))
-            if len(value) >= 24: fingerprints.append((field, value, False))
+            if len(value) >= 24: fingerprints.append((field, value, False, "substring"))
         for proof in defect.get("proof_locations", []):
             if not isinstance(proof, dict): continue
             path, start, end = proof.get("file"), proof.get("line_start"), proof.get("line_end")
             if path and type(start) is int:
                 value = "%s:%s%s" % (path, start, ("-%s" % end) if type(end) is int and end != start else "")
-                fingerprints.append(("proof", normalized_text(value), True))
+                fingerprints.append(("proof", normalized_text(value), True, "token"))
     for crib in key.get("crib_strings", []):
         value = normalized_text(crib)
-        if len(value) >= 16: fingerprints.append(("crib", value, False))
-    fingerprints.append(("answer_key_name", normalized_text(os.path.basename(key_path)), True))
-    fingerprints = [(cat, text, hard) for cat, text, hard in fingerprints
-                    if text and (hard or text not in corpus_text)]
+        if len(value) >= 16: fingerprints.append(("crib", value, False, "substring"))
+    fingerprints.append(("answer_key_name", normalized_text(os.path.basename(key_path)), True, "token"))
+    fingerprints = [(cat, text, hard, kind) for cat, text, hard, kind in fingerprints
+                    if text and (hard or not fingerprint_match(kind, text, corpus_text))]
     sources = [("prompt", prompt_data, True), ("skill", b"\n".join(skill_blobs), True),
                ("workspace", b"\n".join(work_blobs), True),
+               ("settings_pre", settings_pre, True), ("settings_saved", settings_saved, True),
+               ("staged_corpus", b"\n".join(corpus_blobs), True),
+               ("transcript", transcript, False),
                ("message", message.encode(), False), ("artifact", artifact.encode(), False),
                ("delivered", delivered.encode(), False)]
     hits = []
     for source, blob, pre_run in sources:
         haystack = normalized_text(blob.decode("utf-8", "replace"))
-        for category, needle, always_hidden in fingerprints:
-            if needle in haystack and (pre_run or always_hidden or needle not in corpus_text):
+        for category, needle, always_hidden, kind in fingerprints:
+            if fingerprint_match(kind, needle, haystack) and (pre_run or always_hidden or
+                                                              not fingerprint_match(kind, needle, corpus_text)):
                 hits.append({"source": source, "category": category,
                              "source_sha256": sha(blob), "fingerprint_sha256": sha(needle.encode())})
                 if len(hits) >= 64: break
         if len(hits) >= 64: break
-    return {"schema": "contamination-v1", "hit_count": len(hits), "hits": hits}
+    source_rows = [{"source": source, "bytes": len(blob), "sha256": sha(blob)}
+                   for source, blob, _ in sources]
+    return {"schema": "contamination-v1", "hit_count": len(hits), "hits": hits,
+            "sources": source_rows}
 
 def validate_fresh(trace, trace_fd, manifest, candidate, candidate_data):
     reasons = []
@@ -357,6 +385,8 @@ def validate_fresh(trace, trace_fd, manifest, candidate, candidate_data):
         authority_tmp.cleanup(); raise
     result_data = read_relative(trace_fd, "out.json", "RESULT", MAX_STREAM)
     upstream_data = read_relative(trace_fd, "upstream-completed.jsonl", "UPSTREAM", MAX_STREAM)
+    settings_pre = read_relative(trace_fd, "qwen-settings-pre.json", "SETTINGS_PRE", MAX_JSON)
+    settings_saved = read_relative(trace_fd, "qwen-settings.json", "SETTINGS_SAVED", MAX_JSON)
     artifact_data = read_relative(trace_fd, "work/report.md", "ARTIFACT", MAX_STREAM, missing=True)
     artifact = "" if artifact_data is None else artifact_data.decode("utf-8", "replace")
     final, message, transport, usage = result_facts(result_data, candidate)
@@ -432,7 +462,8 @@ def validate_fresh(trace, trace_fd, manifest, candidate, candidate_data):
     except Exception:
         reasons.append("inventory_target_failed")
     contamination_row = contamination(manifest, message, artifact, delivered, work_blobs,
-                                      extras["answer_key"], extras["prompt"], skill_blobs, corpus_blobs)
+                                      extras["answer_key"], extras["prompt"], skill_blobs, corpus_blobs,
+                                      settings_pre, settings_saved, result_data)
     if contamination_row["hit_count"]: reasons.append("contaminated")
     row = {"schema": 1, "valid": not reasons, "reasons": sorted(set(reasons)),
            "run_tag": manifest["run_tag"], "manifest_sha256": manifest["manifest_sha256"],
@@ -463,9 +494,17 @@ def existing_seal(trace, trace_fd, key, manifest_sha, candidate_sha):
         fail("validity_conflict")
     result = read_relative(trace_fd, "out.json", "RESULT", MAX_STREAM)
     upstream = read_relative(trace_fd, "upstream-completed.jsonl", "UPSTREAM", MAX_STREAM)
+    settings_pre = read_relative(trace_fd, "qwen-settings-pre.json", "SETTINGS_PRE", MAX_JSON)
+    settings_saved = read_relative(trace_fd, "qwen-settings.json", "SETTINGS_SAVED", MAX_JSON)
     work_digest, _ = trace_tree(trace_fd, "work")
+    source_rows = row.get("contamination", {}).get("sources", [])
+    source_digests = {item.get("source"): item.get("sha256") for item in source_rows
+                      if isinstance(item, dict)}
     if (row.get("result_stream_sha256") != sha(result) or
-            row.get("upstream_sha256") != sha(upstream) or row.get("work_sha256") != work_digest):
+            row.get("upstream_sha256") != sha(upstream) or row.get("work_sha256") != work_digest or
+            source_digests.get("transcript") != sha(result) or
+            source_digests.get("settings_pre") != sha(settings_pre) or
+            source_digests.get("settings_saved") != sha(settings_saved)):
         fail("validity_conflict")
     return row
 
@@ -503,7 +542,7 @@ def append_ledger(path, row):
     try:
         fd = os.open(name, flags, 0o600, dir_fd=parent_fd)
         with os.fdopen(fd, "r+b", closefd=True) as handle:
-            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+            lock(handle.fileno(), fcntl.LOCK_EX, "ledger_lock_failed")
             data = handle.read()
             if len(data) > MAX_STREAM: fail("ledger_invalid")
             if data and not data.endswith(b"\n"):
@@ -517,10 +556,9 @@ def append_ledger(path, row):
                 if not isinstance(value, dict): fail("ledger_invalid")
                 rows.append(value)
             same_tag = [value for value in rows if value.get("run_tag") == row["run_tag"]]
-            exact = [value for value in same_tag if value == row]
-            if len(exact) > 1 or any(value.get("validity_sha256") != row["validity_sha256"] for value in same_tag):
+            if same_tag:
+                if len(same_tag) == 1 and same_tag[0] == row: return
                 fail("ledger_conflict")
-            if exact: return
             handle.seek(0, os.SEEK_END); handle.write(canonical(row) + b"\n")
             handle.flush(); os.fsync(handle.fileno()); os.fsync(parent_fd)
     finally:
@@ -548,7 +586,7 @@ def validate_run(trace, commitment_file, commitment_key, ledger):
     try:
         lock_fd = os.open(".validity.lock", os.O_RDWR | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0),
                           0o600, dir_fd=trace_fd)
-        fcntl.flock(lock_fd, fcntl.LOCK_EX)
+        lock(lock_fd, fcntl.LOCK_EX, "validity_lock_failed")
         try:
             manifest = MANIFEST.verify_manifest(trace, commitment_file, commitment_key)
             key, _, _ = MANIFEST._commitment_key(MANIFEST.clean_abs(commitment_key))
@@ -582,10 +620,10 @@ def validate_run(trace, commitment_file, commitment_key, ledger):
         else:
             payload = canonical(row) + b"\n"
         phase = "ACCEPTED" if row["valid"] else "REJECTED"
-        if row["valid"]:
-            append_ledger(ledger, ledger_row(row, sha(payload), manifest))
         state(trace, phase, manifest["run_tag"], manifest,
               None if row["valid"] else row["reasons"][0])
+        if row["valid"]:
+            append_ledger(ledger, ledger_row(row, sha(payload), manifest))
         return row
     finally:
         if lock_fd is not None: os.close(lock_fd)

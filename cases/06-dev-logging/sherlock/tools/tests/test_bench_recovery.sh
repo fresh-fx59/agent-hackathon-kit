@@ -13,6 +13,7 @@ cat > "$TMP/fake-qwen" <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
 SESSION="11111111-1111-1111-1111-111111111111"
+test "$(find "$BENCH_RUNS" -mindepth 2 -maxdepth 2 -name qwen-settings-pre.json | wc -l | tr -d '[:space:]')" = 1
 if [[ " $* " == *" --resume $SESSION "* ]]; then
   if [ "${OMIT_RESUME_SESSION:-0}" = 1 ]; then
     printf '[{"type":"result","is_error":false,"num_turns":2,"result":"PROVEN: sample.log:1"}]\n'
@@ -46,6 +47,7 @@ TRACE="$(find "$TMP/runs" -mindepth 1 -maxdepth 1 -type d | head -1)"
 test -f "$TRACE/out-attempt-0.json"
 test -f "$TRACE/err-attempt-0.txt"
 test "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["tools"]["exclude"])' "$TRACE/qwen-settings.json")" = "['agent']"
+cmp "$TRACE/qwen-settings-pre.json" "$TRACE/qwen-settings.json"
 test -f "$TRACE/qwen-home/saved/11111111-1111-1111-1111-111111111111"
 test "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["resume_attempts"])' "$TRACE/recovery.json")" = 1
 test "$(wc -l < "$TRACE/attempts.jsonl" | tr -d '[:space:]')" = 2

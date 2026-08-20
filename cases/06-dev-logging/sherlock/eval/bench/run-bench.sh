@@ -48,7 +48,11 @@ save_trace() {
   [ -f "$W/attempts.jsonl" ] && cp "$W/attempts.jsonl" "$TRACE/attempts.jsonl"
   [ -f "$W/incomplete.json" ] && cp "$W/incomplete.json" "$TRACE/incomplete.json"
   [ -f "$W/err.txt" ] && cp "$W/err.txt" "$TRACE/err.txt"
-  [ -f "$W/.qwen/settings.json" ] && cp "$W/.qwen/settings.json" "$TRACE/qwen-settings.json"
+  if [ -f "$W/.qwen/settings.json" ]; then
+    cp "$W/.qwen/settings.json" "$TRACE/qwen-settings.json" || return 1
+  else
+    printf '{}\n' > "$TRACE/qwen-settings.json" || return 1
+  fi
   if [ -d "$W/work" ]; then
     [ ! -e "$TRACE/work" ] || return 1
     work_copy="$(mktemp -d "$TRACE/.work.XXXXXX")" || return 1
@@ -173,6 +177,27 @@ elif [ -n "$EXCLUDE_JSON" ]; then
   mkdir -p "$W/.qwen"
   printf '{ "tools": { "exclude": ["agent"] } }\n' > "$W/.qwen/settings.json"
 fi
+
+# Seal the exact target settings before the target can observe or mutate them.
+python3 - "$W/.qwen/settings.json" "$TRACE/qwen-settings-pre.json" <<'PY' || exit 1
+import os, sys, tempfile
+source, target = sys.argv[1:]
+try:
+    with open(source, "rb") as handle: data = handle.read()
+except FileNotFoundError:
+    data = b"{}\n"
+directory = os.path.dirname(target)
+fd, temporary = tempfile.mkstemp(prefix=".qwen-settings-pre.", dir=directory)
+try:
+    with os.fdopen(fd, "wb") as handle:
+        handle.write(data); handle.flush(); os.fsync(handle.fileno())
+    os.link(temporary, target, follow_symlinks=False)
+    directory_fd = os.open(directory, os.O_RDONLY)
+    try: os.fsync(directory_fd)
+    finally: os.close(directory_fd)
+finally:
+    if os.path.exists(temporary): os.unlink(temporary)
+PY
 
 if [ "$ARM" != "none" ]; then
   mkdir -p "$W/.qwen/skills"

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Provider-free contract tests for authoritative benchmark validity."""
 import hashlib
+import errno
 import importlib.util
 import json
 import os
@@ -108,7 +109,8 @@ json.dump({"version":28,"active":True,"workspace":os.path.realpath("."),"corpus"
 
 
 class ValidityFixture:
-    def __init__(self, root, *, prompt="investigate\n", skill_extra="", delivered="clean report", artifact=None):
+    def __init__(self, root, *, prompt="investigate\n", skill_extra="", delivered="clean report",
+                 artifact=None, corpus_extra="", settings_pre="{}\n", settings_saved="{}\n"):
         self.root = Path(root)
         self.fx = RM_TEST.Fixture(root)
         self.fx.prompt.write_text(prompt, encoding="utf-8")
@@ -125,9 +127,17 @@ class ValidityFixture:
         })
         self.fx.key_data["defects"][0]["proof_locations"][0].update(
             {"line_start": 2, "line_end": 2})
+        if corpus_extra:
+            corpus_file = self.fx.corpus / "host" / "a.log"
+            corpus_file.write_text(corpus_file.read_text(encoding="utf-8") + corpus_extra,
+                                   encoding="utf-8")
+            self.fx.key_data["files"] = [RM_TEST.file_row(self.fx.corpus, item["path"])
+                                         for item in self.fx.key_data["files"]]
         self.fx.write_key()
         self.fx.stage(); self.manifest = self.fx.create()
         self.trace = self.fx.trace
+        (self.trace / "qwen-settings-pre.json").write_text(settings_pre, encoding="utf-8")
+        (self.trace / "qwen-settings.json").write_text(settings_saved, encoding="utf-8")
         self.work = self.trace / "work"; self.work.mkdir()
         self.write_target_worklist()
         (self.trace / ".sherlock").mkdir()
@@ -243,6 +253,25 @@ class BenchValidityTests(unittest.TestCase):
                 self.assertEqual(row["contamination"]["schema"],"contamination-v1")
                 self.assertNotIn(hidden,json.dumps(row))
 
+    def test_contamination_audits_settings_transcript_and_staged_corpus_as_bound_sources(self):
+        hidden="Hidden answer title alpha omega"
+        cases=(("settings_pre",{"settings_pre":json.dumps({"note":hidden})}),
+               ("settings_saved",{"settings_saved":json.dumps({"note":hidden})}),
+               ("staged_corpus",{"corpus_extra":"\nfixture:F-01\n"}),
+               ("transcript",{}))
+        for source,kwargs in cases:
+            with self.subTest(source=source):
+                fx=self.fixture(**kwargs)
+                if source=="transcript":
+                    (fx.trace/"out.json").write_text(json.dumps([
+                        {"type":"system","note":hidden},fx.result]),encoding="utf-8")
+                row=fx.validate(); self.assertFalse(row["valid"],row)
+                self.assertIn("contaminated",row["reasons"])
+                self.assertTrue(any(hit["source"]==source for hit in row["contamination"]["hits"]))
+                bound={item["source"] for item in row["contamination"]["sources"]}
+                self.assertTrue({"settings_pre","settings_saved","staged_corpus","transcript"} <= bound)
+                self.assertNotIn(hidden,json.dumps(row))
+
     def test_delivery_divergence_is_fact_and_exact_union_is_checked(self):
         fx=self.fixture(delivered="message block", artifact="file block")
         row=fx.validate(); self.assertTrue(row["delivery"]["divergent"]); self.assertTrue(row["valid"])
@@ -273,11 +302,47 @@ class BenchValidityTests(unittest.TestCase):
         fx.ledger.write_text(json.dumps(ledger_row)+"\n",encoding="utf-8")
         with self.assertRaisesRegex(Exception,"ledger_conflict"): fx.validate()
 
+        fx=self.fixture(); fx.validate()
+        ledger_row=json.loads(fx.ledger.read_text()); ledger_row["transport"]["status"]="forged"
+        fx.ledger.write_text(json.dumps(ledger_row)+"\n",encoding="utf-8")
+        with self.assertRaisesRegex(Exception,"ledger_conflict"): fx.validate()
+        self.assertEqual(len(fx.ledger.read_text().splitlines()),1)
+
     def test_rerun_repairs_missing_or_partial_ledger_tail(self):
         fx=self.fixture(); row=fx.validate(); fx.ledger.unlink(); fx.validate()
         self.assertEqual(len(fx.ledger.read_text().splitlines()),1)
         fx.ledger.write_bytes(fx.ledger.read_bytes()+b'{"partial"')
         fx.validate(); self.assertEqual(len(fx.ledger.read_text().splitlines()),1)
+
+    def test_seal_then_accepted_state_then_ledger_crash_repairs_without_revalidation(self):
+        fx=self.fixture(); module=load_path("validate_ledger_crash",TOOL)
+        original_validate=module.validate_fresh; original_append=module.append_ledger
+        calls={"fresh":0}
+        def counted(*args,**kwargs):
+            calls["fresh"]+=1; return original_validate(*args,**kwargs)
+        def crash(*args,**kwargs): raise module.ValidityError("ledger_io")
+        module.validate_fresh=counted; module.append_ledger=crash
+        with self.assertRaisesRegex(Exception,"ledger_io"):
+            module.validate_run(str(fx.trace),str(fx.fx.commitment),str(fx.fx.commitment_key),str(fx.ledger))
+        self.assertTrue((fx.trace/"validity.json").is_file())
+        self.assertEqual(json.loads((fx.trace/"status.json").read_text())["phase"],"ACCEPTED")
+        self.assertFalse(fx.ledger.exists())
+        module.append_ledger=original_append
+        row=module.validate_run(str(fx.trace),str(fx.fx.commitment),str(fx.fx.commitment_key),str(fx.ledger))
+        self.assertTrue(row["valid"]); self.assertEqual(calls["fresh"],1)
+        self.assertEqual(len(fx.ledger.read_text().splitlines()),1)
+
+    def test_flock_retries_eintr(self):
+        fx=self.fixture(); module=load_path("validate_eintr",TOOL)
+        original=module.fcntl.flock; calls={"count":0}
+        def flaky(fd,operation):
+            calls["count"]+=1
+            if calls["count"]==1: raise OSError(errno.EINTR,"interrupted")
+            return original(fd,operation)
+        module.fcntl.flock=flaky
+        self.assertTrue(module.validate_run(str(fx.trace),str(fx.fx.commitment),
+                                            str(fx.fx.commitment_key),str(fx.ledger))["valid"])
+        self.assertGreaterEqual(calls["count"],3)
 
     def test_sealed_evidence_is_rehashed_before_ledger_repair(self):
         for relative in ("out.json","upstream-completed.jsonl","work/report.md","work/worklist.tsv"):
@@ -288,7 +353,7 @@ class BenchValidityTests(unittest.TestCase):
                 with self.assertRaisesRegex(Exception,"validity_conflict"): fx.validate()
                 self.assertFalse(fx.ledger.exists())
 
-    def test_trace_swap_and_ledger_failure_cannot_publish_accepted_state(self):
+    def test_trace_swap_fails_closed_and_ledger_conflict_preserves_authenticated_state(self):
         fx=self.fixture(); module=load_path("validate_swap",TOOL)
         original=module.MANIFEST.verify_manifest
         def swap(trace, commitment, key):
@@ -299,7 +364,7 @@ class BenchValidityTests(unittest.TestCase):
             module.validate_run(str(fx.trace),str(fx.fx.commitment),str(fx.fx.commitment_key),str(fx.ledger))
         fx=self.fixture(); fx.ledger.write_text(json.dumps({"run_tag":"run-001","validity_sha256":"0"*64})+"\n")
         with self.assertRaisesRegex(Exception,"ledger_conflict"): fx.validate()
-        self.assertNotEqual(json.loads((fx.trace/"status.json").read_text())["phase"],"ACCEPTED")
+        self.assertEqual(json.loads((fx.trace/"status.json").read_text())["phase"],"ACCEPTED")
 
     def test_post_bind_swap_and_verified_checker_mutation_fail_closed(self):
         fx=self.fixture(); module=load_path("validate_post_bind_swap",TOOL)
@@ -339,14 +404,23 @@ class BenchValidityTests(unittest.TestCase):
             with self.assertRaises(stop.ActiveStateError):
                 stop.compose_worklists([str(one),str(two)],str(root))
 
-    def test_real_v28_is_detected_as_contaminated_by_selected_key_ids(self):
+    def test_real_v28_bare_ordinal_ids_are_not_bluesky_leakage_but_composite_ids_are(self):
         module=load_path("validity_real_contamination",TOOL)
-        key=SHERLOCK/"eval/bench/answer-key.json"; skill=SHERLOCK/"skills/v28"
+        key=SHERLOCK/"eval/bench/answer-key-bluesky.json"; skill=SHERLOCK/"skills/v28"
         blobs=[path.read_bytes() for path in sorted(skill.rglob("*")) if path.is_file() and ".git" not in path.parts]
-        row=module.contamination({"artifacts":{"answer_key":{"path":str(key)}}},"","","",[],
-                                 key.read_bytes(),b"",blobs,[])
-        self.assertGreater(row["hit_count"],0)
-        self.assertTrue(any(hit["source"]=="skill" and hit["category"]=="answer_id" for hit in row["hits"]))
+        args=({"artifacts":{"answer_key":{"path":str(key)}}},"","","",[],
+              key.read_bytes(),b"",blobs,[],b"{}",b"{}",b"[]")
+        row=module.contamination(*args)
+        self.assertEqual(row["hit_count"],0,row)
+        for injected,expected in ((b"bare D0100 token",False),(b"selected bluesky:D01 material",True)):
+            altered=list(args); altered[7]=blobs+[injected]
+            hit=module.contamination(*altered)
+            self.assertEqual(any(item["category"]=="answer_id" for item in hit["hits"]),expected,hit)
+        key_row=json.loads(key.read_text(encoding="utf-8"))
+        hidden=next(item["title"] for item in key_row["defects"] if len(item.get("title","")) >= 24)
+        altered=list(args); altered[7]=blobs+[hidden.encode()]
+        hit=module.contamination(*altered)
+        self.assertTrue(any(item["category"]=="title" for item in hit["hits"]),hit)
 
 
 if __name__ == "__main__":
