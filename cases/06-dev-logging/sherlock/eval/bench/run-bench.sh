@@ -37,9 +37,14 @@ TRACE="$RUNS/$STAMP"
 save_trace() {
   mkdir -p "$TRACE"
   [ -f "$W/out.json" ] && cp "$W/out.json" "$TRACE/out.json"
+  for partial in "$W"/out-attempt-*.json; do
+    [ -f "$partial" ] && cp "$partial" "$TRACE/$(basename "$partial")"
+  done
   [ -f "$W/err.txt" ]  && cp "$W/err.txt"  "$TRACE/err.txt"
   # whatever the run wrote for itself (v11 keeps its worklist verdicts here)
   [ -d "$W/work" ] && cp -r "$W/work" "$TRACE/work"
+  # A malformed upstream SSE must not erase the only resumable session state.
+  [ -d "$QWEN_HOME" ] && cp -r "$QWEN_HOME" "$TRACE/qwen-home"
   rm -rf "$W"
   [ -n "${LANE_PROXY_PID:-}" ] && kill "$LANE_PROXY_PID" 2>/dev/null
 }
@@ -99,11 +104,63 @@ CLIENT_MODEL="$LANE_CLIENT_MODEL"
 
 echo "▶ bench arm=$ARM  dataset=$DATASET  corpus=$(du -sh "$CORPUS" | cut -f1)  model=$MODEL"
 START=$(date +%s)
-# key via environment, never argv (visible in ps; this box has a guest account)
-( cd "$W" && OPENAI_API_KEY="$SHERLOCK_API_KEY" OPENAI_BASE_URL="$BASE_URL" \
-  timeout "$TIMEOUT" "$QWEN" --auth-type openai --model "$CLIENT_MODEL" \
-    --approval-mode yolo -p "$PROMPT" --output-format json </dev/null \
-) >"$W/out.json" 2>"$W/err.txt"
+# A stream can break after the agent has already mapped most of the corpus. Keep
+# its QWEN_HOME and resume the same session with bounded exponential backoff;
+# never replace useful mid-session work with a fresh, empty investigation.
+RESUME_MAX_ATTEMPTS="${SHERLOCK_RESUME_MAX_ATTEMPTS:-2}"
+RESUME_BACKOFF_S="${SHERLOCK_RESUME_BACKOFF_S:-15}"
+RESUME_ATTEMPTS=0
+RESUME_SESSION=""
+
+run_qwen() {
+  # key via environment, never argv (visible in ps; this box has a guest account)
+  ( cd "$W" && OPENAI_API_KEY="$SHERLOCK_API_KEY" OPENAI_BASE_URL="$BASE_URL" \
+    timeout "$TIMEOUT" "$QWEN" --auth-type openai --model "$CLIENT_MODEL" \
+      --approval-mode yolo "$@" --output-format json </dev/null \
+  ) >"$W/out.json" 2>"$W/err.txt"
+}
+
+broken_session() {
+  python3 - "$W/out.json" <<'PY'
+import json, sys
+try:
+    rows = json.load(open(sys.argv[1], encoding="utf-8"))
+except (OSError, ValueError):
+    sys.exit(1)
+if not isinstance(rows, list):
+    rows = [rows]
+final = next((r for r in rows if isinstance(r, dict) and r.get("type") == "result"), {})
+text = final.get("result") or ""
+broken = (not final or final.get("is_error") or text.lstrip().startswith("[API Error")
+          or ("[API Error" in text and len(text) < 400))
+if not broken:
+    sys.exit(1)
+session = final.get("session_id") or next(
+    (r.get("session_id") for r in rows if isinstance(r, dict) and r.get("session_id")), "")
+if session:
+    print(session)
+    sys.exit(0)
+sys.exit(1)
+PY
+}
+
+run_qwen -p "$PROMPT"
+while RESUME_SESSION="$(broken_session)" \
+  && [ "$RESUME_ATTEMPTS" -lt "$RESUME_MAX_ATTEMPTS" ]; do
+  mv "$W/out.json" "$W/out-attempt-$RESUME_ATTEMPTS.json"
+  RESUME_ATTEMPTS=$((RESUME_ATTEMPTS + 1))
+  BACKOFF=$((RESUME_BACKOFF_S * (2 ** (RESUME_ATTEMPTS - 1))))
+  echo "  ⚠ stream failed; preserving session $RESUME_SESSION and retrying in ${BACKOFF}s (attempt $RESUME_ATTEMPTS/$RESUME_MAX_ATTEMPTS)" >&2
+  sleep "$BACKOFF"
+  run_qwen --resume "$RESUME_SESSION" -p "The previous provider stream failed. Continue the same investigation from saved state. Do not restart mapping; finish the unresolved worklist and deliver the report."
+done
+mkdir -p "$TRACE"
+python3 - "$TRACE/recovery.json" "$RESUME_ATTEMPTS" "$RESUME_SESSION" <<'PY'
+import json, sys
+with open(sys.argv[1], "w", encoding="utf-8") as fh:
+    json.dump({"resume_attempts": int(sys.argv[2]), "session_id": sys.argv[3]}, fh)
+    fh.write("\n")
+PY
 ELAPSED=$(( $(date +%s) - START ))
 
 python3 - "$W/out.json" "$ARM" "$ELAPSED" "$CORPUS" "$LEDGER" "$TRACE" "$MODEL" \
