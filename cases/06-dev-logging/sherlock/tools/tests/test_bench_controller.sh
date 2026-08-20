@@ -708,7 +708,16 @@ os.stat=guarded_stat
         second=self.fx.run(env=self.fx.env()); self.assertNotEqual(second.returncode,0)
         first.send_signal(signal.SIGKILL); first.wait(timeout=5)
         resumed=subprocess.Popen(["bash",str(CONTROLLER),"--resume",controller.name],env=self.fx.env(FAKE_TARGET_MODE="wait"),stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
-        time.sleep(.2); (self.fx.base/"release-target").write_text("go\n")
+        owner_path=self.fx.controllers/"paid-lane-owner.json"; reclaimed=False
+        deadline=time.time()+10
+        while time.time()<deadline:
+            try: reclaimed=json.loads(owner_path.read_text())["pid"] == resumed.pid
+            except (OSError,ValueError,KeyError): reclaimed=False
+            if reclaimed: break
+            if resumed.poll() is not None: break
+            time.sleep(.02)
+        (self.fx.base/"release-target").write_text("go\n")
+        self.assertTrue(reclaimed,"resume never durably reclaimed the paid-lane owner")
         out=resumed.communicate(timeout=20); self.assertEqual(resumed.returncode,0,out)
 
     def test_fresh_controller_refuses_unowned_nonterminal_crash_record(self):
