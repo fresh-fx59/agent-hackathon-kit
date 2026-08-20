@@ -2,14 +2,14 @@
 
 Working agreements for any coding agent in this repo.
 
-## Harness: we continue with Claude Code
+## Harness
 
-**All case-06 implementation happens in Claude Code** (decision 2026-07-28).
-Codex was used for cross-review only; its artifacts are archived under
-`cases/6-log-analisys-codex/` (research, case summary, OpenSpec MVP increment,
-`.codex/` skills) and are **planning/review documents, not build targets**.
-Their accepted ideas are already folded into the authoritative spec via the
-cross-review — do not code from the OpenSpec change directly.
+Case-06 implementation may use Codex. Do not block delivery on Claude Code
+subscription limits. Keep model use proportionate: provider-free implementation,
+tests and review need no model call; use the exact target runtime only for an
+accepted target arm. The archived `cases/6-log-analisys-codex/` artifacts remain
+planning/review documents, not build targets; implement only from the
+authoritative Sherlock specification.
 
 ## Case 06 — what we are actually building (operator, 2026-07-28)
 

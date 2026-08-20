@@ -1,5 +1,17 @@
 # DESIGN-EVIDENCE — the measurements the Sherlock tools are built out of
 
+## E32 — a bounded Stop reason labels sampled identifiers
+
+**Audit 2026-08-20 (v28).** Every `_block()` call in `stopcheck.py` was reviewed.
+The unresolved-worklist branch is the only Stop reason that includes a sampled
+identifier list. All other reasons contain a fixed action, checked state, or an
+exception class; none holds a truncated sample.
+
+**Rule in the source.** Aggregate unresolved rows across every selected worklist.
+State the total and mandatory action before at most five example identifiers,
+and label them as examples. The 220-character cap may shorten examples, never
+the count, action, or their label.
+
 **This file is deliberately NOT part of any shipped arm.** `eval/bench/run-bench.sh`
 installs a skill with
 
