@@ -66,4 +66,36 @@ assert attempts[1]["attempt"] == 1 and attempts[1]["session_id"] == "11111111-11
 assert all(row["duration_s"] is not None and row["upstream_log"] for row in attempts), attempts
 assert any(row["event"] == "RECOVERY_DECIDED" and row["reason"] == "broken_stream" for row in events), events
 PY
+cat > "$TMP/fake-qwen-success" <<'SH'
+#!/usr/bin/env bash
+printf '[{"type":"result","session_id":"22222222-2222-2222-2222-222222222222","is_error":false,"num_turns":1,"result":"PROVEN: sample.log:1"}]\n'
+SH
+chmod +x "$TMP/fake-qwen-success"
+SHERLOCK_API_KEY=dummy SHERLOCK_CORPUS="$TMP/corpus" SHERLOCK_UPSTREAM_LOG=0 \
+QWEN_BIN="$TMP/fake-qwen-success" BENCH_RUNS="$TMP/runs-success" BENCH_LEDGER="$TMP/ledger-success.jsonl" \
+bash "$RUNNER" none > /dev/null 2>&1
+SUCCESS_TRACE="$(find "$TMP/runs-success" -mindepth 1 -maxdepth 1 -type d | head -1)"
+python3 - "$SUCCESS_TRACE" <<'PY'
+import json, pathlib, sys
+trace = pathlib.Path(sys.argv[1]); status = json.loads((trace / "status.json").read_text())
+events = [json.loads(line) for line in (trace / "status-events.jsonl").read_text().splitlines()]
+assert status["phase"] == "FINISHED_UNCHECKED" and status["session_id"].startswith("2222"), status
+assert [row["event"] for row in events].count("FINISHED_UNCHECKED") == 1, events
+assert next(row for row in events if row["event"] == "ATTEMPT_FINISHED")["session_id"].startswith("2222")
+PY
+set +e
+SHERLOCK_API_KEY=dummy SHERLOCK_CORPUS="$TMP/corpus" SHERLOCK_UPSTREAM_LOG=0 SHERLOCK_DATASET=missing \
+QWEN_BIN="$TMP/fake-qwen-success" BENCH_RUNS="$TMP/runs-missing" BENCH_LEDGER="$TMP/ledger-missing.jsonl" \
+bash "$RUNNER" none > /dev/null 2>&1
+MISSING_RC=$?
+set -e
+test "$MISSING_RC" = 1
+MISSING_TRACE="$(find "$TMP/runs-missing" -mindepth 1 -maxdepth 1 -type d | head -1)"
+python3 - "$MISSING_TRACE" <<'PY'
+import json, pathlib, sys
+trace = pathlib.Path(sys.argv[1]); status = json.loads((trace / "status.json").read_text())
+events = [json.loads(line) for line in (trace / "status-events.jsonl").read_text().splitlines()]
+assert status["phase"] == "RUN_FAILED" and status["exit_code"] == "1", status
+assert [row["event"] for row in events].count("RUN_FAILED") == 1, events
+PY
 echo 'ok: preserves session and resumes after malformed stream'

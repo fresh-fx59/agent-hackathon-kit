@@ -17,15 +17,54 @@ SKILLS="$(cd "$HERE/../.." && pwd)/skills"
 QWEN="${QWEN_BIN:-$HOME/.local/bin/qwen}"
 LEDGER="${BENCH_LEDGER:-$HERE/runs-bench.jsonl}"
 
-ARM="${1:?usage: run-bench.sh <none|v1|v2|v3>}"
-CORPUS="${SHERLOCK_CORPUS:?set SHERLOCK_CORPUS to the 649MB corpus dir}"
+ARM="${1:-unknown}"
+CORPUS="${SHERLOCK_CORPUS:-}"
 BASE_URL="${SHERLOCK_BASE_URL:-https://linkapi.ai/v1}"
 MODEL="${SHERLOCK_MODEL:-[SP]deepseek-v4-flash}"
 TIMEOUT="${SHERLOCK_TIMEOUT:-2700}"
-: "${SHERLOCK_API_KEY:?set SHERLOCK_API_KEY}"
-
+RUNS="${BENCH_RUNS:-$HERE/runs}"; mkdir -p "$RUNS"
+STAMP="$(date -u +%Y%m%dT%H%M%SZ)-$ARM"
+TRACE="$RUNS/$STAMP"
+DATASET="${SHERLOCK_DATASET:-bench649}"
+MEASURE_DIR="$(cd "$HERE/../../measure" && pwd)"
+STATE_TOOL="$MEASURE_DIR/run_state.py"
+ATTEMPT_FILE="$TRACE/current-attempt"
+W=""
+TERMINAL_WRITTEN=0
+state_set() { python3 "$STATE_TOOL" set "$TRACE/status.json" "$@"; }
+state_event() { python3 "$STATE_TOOL" event "$TRACE/status-events.jsonl" "$@"; }
+mkdir -p "$TRACE"
+state_set --run-tag "$STAMP" --phase STAGING --dataset "$DATASET" --arm "$ARM" --trace-dir "$TRACE"
+state_event STAGING --run-tag "$STAMP" --phase STAGING --dataset "$DATASET" --arm "$ARM" --trace-dir "$TRACE"
+save_trace() {
+  [ -n "$W" ] || return 0
+  mkdir -p "$TRACE"
+  [ -f "$W/out.json" ] && cp "$W/out.json" "$TRACE/out.json"
+  for partial in "$W"/out-attempt-*.json; do [ -f "$partial" ] && cp "$partial" "$TRACE/$(basename "$partial")"; done
+  for partial in "$W"/err-attempt-*.txt "$W"/exit-attempt-*.txt; do [ -f "$partial" ] && cp "$partial" "$TRACE/$(basename "$partial")"; done
+  [ -f "$W/attempts.jsonl" ] && cp "$W/attempts.jsonl" "$TRACE/attempts.jsonl"
+  [ -f "$W/incomplete.json" ] && cp "$W/incomplete.json" "$TRACE/incomplete.json"
+  [ -f "$W/err.txt" ] && cp "$W/err.txt" "$TRACE/err.txt"
+  [ -f "$W/.qwen/settings.json" ] && cp "$W/.qwen/settings.json" "$TRACE/qwen-settings.json"
+  [ -d "$W/work" ] && cp -r "$W/work" "$TRACE/work"
+  [ -n "${QWEN_HOME:-}" ] && [ -d "$QWEN_HOME" ] && cp -r "$QWEN_HOME" "$TRACE/qwen-home"
+  rm -rf "$W"
+  [ -n "${LANE_PROXY_PID:-}" ] && kill "$LANE_PROXY_PID" 2>/dev/null
+}
+on_exit() {
+  local rc="$1"
+  trap - EXIT
+  if [ "$TERMINAL_WRITTEN" = 0 ]; then
+    state_set --run-tag "$STAMP" --phase RUN_FAILED --dataset "$DATASET" --arm "$ARM" --trace-dir "$TRACE" --exit-code "$rc"
+    state_event RUN_FAILED --run-tag "$STAMP" --phase RUN_FAILED --dataset "$DATASET" --arm "$ARM" --trace-dir "$TRACE" --exit-code "$rc"
+  fi
+  save_trace
+  return "$rc"
+}
+trap 'on_exit $?' EXIT
+[ "$ARM" != unknown ] || { echo "usage: run-bench.sh <none|v1|v2|v3>" >&2; exit 2; }
 [ -d "$CORPUS" ] || { echo "✗ corpus not found: $CORPUS" >&2; exit 1; }
-
+: "${SHERLOCK_API_KEY:?set SHERLOCK_API_KEY}"
 W="$(mktemp -d "${TMPDIR:-/tmp}/bench-XXXXXX")"
 # Qwen Code only grants file tools access to its project workspace. Giving the
 # prompt an absolute corpus path outside that workspace produces a one-turn
@@ -38,39 +77,6 @@ cp -a "$CORPUS/." "$RUN_CORPUS/"
 # and closed it wrongly" from "found it and discarded it" — and that is exactly
 # the question every arm since v5 exists to answer. It used to be deleted on
 # exit, so five runs in a row were unreadable. Keep it next to the ledger.
-RUNS="${BENCH_RUNS:-$HERE/runs}"; mkdir -p "$RUNS"
-STAMP="$(date -u +%Y%m%dT%H%M%SZ)-$ARM"
-TRACE="$RUNS/$STAMP"
-DATASET="${SHERLOCK_DATASET:-bench649}"
-MEASURE_DIR="$(cd "$HERE/../../measure" && pwd)"
-STATE_TOOL="$MEASURE_DIR/run_state.py"
-ATTEMPT_FILE="$TRACE/current-attempt"
-state_set() { python3 "$STATE_TOOL" set "$TRACE/status.json" "$@"; }
-state_event() { python3 "$STATE_TOOL" event "$TRACE/status-events.jsonl" "$@"; }
-mkdir -p "$TRACE"
-state_set --run-tag "$STAMP" --phase STAGING --dataset "$DATASET" --arm "$ARM" --trace-dir "$TRACE"
-state_event STAGING --run-tag "$STAMP" --phase STAGING --dataset "$DATASET" --arm "$ARM" --trace-dir "$TRACE"
-save_trace() {
-  mkdir -p "$TRACE"
-  [ -f "$W/out.json" ] && cp "$W/out.json" "$TRACE/out.json"
-  for partial in "$W"/out-attempt-*.json; do
-    [ -f "$partial" ] && cp "$partial" "$TRACE/$(basename "$partial")"
-  done
-  for partial in "$W"/err-attempt-*.txt "$W"/exit-attempt-*.txt; do
-    [ -f "$partial" ] && cp "$partial" "$TRACE/$(basename "$partial")"
-  done
-  [ -f "$W/attempts.jsonl" ] && cp "$W/attempts.jsonl" "$TRACE/attempts.jsonl"
-  [ -f "$W/incomplete.json" ] && cp "$W/incomplete.json" "$TRACE/incomplete.json"
-  [ -f "$W/err.txt" ]  && cp "$W/err.txt"  "$TRACE/err.txt"
-  [ -f "$W/.qwen/settings.json" ] && cp "$W/.qwen/settings.json" "$TRACE/qwen-settings.json"
-  # whatever the run wrote for itself (v11 keeps its worklist verdicts here)
-  [ -d "$W/work" ] && cp -r "$W/work" "$TRACE/work"
-  # A malformed upstream SSE must not erase the only resumable session state.
-  [ -d "$QWEN_HOME" ] && cp -r "$QWEN_HOME" "$TRACE/qwen-home"
-  rm -rf "$W"
-  [ -n "${LANE_PROXY_PID:-}" ] && kill "$LANE_PROXY_PID" 2>/dev/null
-}
-trap save_trace EXIT
 export QWEN_HOME="$W/home"; mkdir -p "$QWEN_HOME"
 
 # STATE THE CONTEXT WINDOW OUTRIGHT, same as run-case.sh. This is the runner on
@@ -143,6 +149,23 @@ RESUME_MAX_ATTEMPTS="${SHERLOCK_RESUME_MAX_ATTEMPTS:-2}"
 RESUME_BACKOFF_S="${SHERLOCK_RESUME_BACKOFF_S:-15}"
 RESUME_ATTEMPTS=0
 RESUME_SESSION=""
+LAST_SESSION=""
+ATTEMPT_REASON=""
+
+session_from_output() {
+  python3 - "$W/out.json" <<'PY'
+import re, sys
+try:
+    raw = open(sys.argv[1], encoding="utf-8", errors="replace").read()
+except OSError:
+    sys.exit(1)
+match = re.search(r'"session_id"\s*:\s*"([0-9a-f-]{16,})"', raw)
+if match:
+    print(match.group(1))
+    sys.exit(0)
+sys.exit(1)
+PY
+}
 
 run_qwen() {
   local attempt="$1"
@@ -158,7 +181,7 @@ run_qwen() {
     --trace-dir "$TRACE" --attempt "$attempt" --session-id "$session" \
     --upstream-log "$TRACE.upstream.jsonl" --inflight-path "$TRACE/upstream-inflight.json"
   state_event ATTEMPT_STARTED --run-tag "$STAMP" --phase QWEN_RUNNING --dataset "$DATASET" --arm "$ARM" \
-    --trace-dir "$TRACE" --attempt "$attempt" --session-id "$session" \
+    --trace-dir "$TRACE" --attempt "$attempt" --session-id "$session" --reason "$ATTEMPT_REASON" \
     --upstream-log "$TRACE.upstream.jsonl" --inflight-path "$TRACE/upstream-inflight.json"
   # key via environment, never argv (visible in ps; this box has a guest account)
   ( cd "$W" && OPENAI_API_KEY="$SHERLOCK_API_KEY" OPENAI_BASE_URL="$BASE_URL" \
@@ -171,12 +194,14 @@ run_qwen() {
   cp "$W/out.json" "$W/out-attempt-$attempt.json"
   cp "$W/err.txt" "$W/err-attempt-$attempt.txt"
   printf '%s\n' "$rc" > "$W/exit-attempt-$attempt.txt"
+  session="$(session_from_output || true)"
+  [ -n "$session" ] && LAST_SESSION="$session"
   printf '{"attempt":%s,"session_id":"%s","exit_code":%s,"duration_s":%s,"output_bytes":%s,"stderr_bytes":%s}\n' \
     "$attempt" "$session" "$rc" "$((finished - started))" "$(wc -c < "$W/out.json")" "$(wc -c < "$W/err.txt")" \
     >> "$W/attempts.jsonl"
   state_event ATTEMPT_FINISHED --run-tag "$STAMP" --phase QWEN_RUNNING --dataset "$DATASET" --arm "$ARM" \
     --trace-dir "$TRACE" --attempt "$attempt" --session-id "$session" --exit-code "$rc" \
-    --duration-s "$((finished - started))" --upstream-log "$TRACE.upstream.jsonl" \
+    --reason "$ATTEMPT_REASON" --duration-s "$((finished - started))" --upstream-log "$TRACE.upstream.jsonl" \
     --inflight-path "$TRACE/upstream-inflight.json"
   return "$rc"
 }
@@ -220,6 +245,7 @@ run_qwen 0 -p "$PROMPT" || true
 while RESUME_SESSION="$(broken_session)" \
   && [ "$RESUME_ATTEMPTS" -lt "$RESUME_MAX_ATTEMPTS" ]; do
   RESUME_ATTEMPTS=$((RESUME_ATTEMPTS + 1))
+  ATTEMPT_REASON="broken_stream"
   BACKOFF=$((RESUME_BACKOFF_S * (2 ** (RESUME_ATTEMPTS - 1))))
   state_event RECOVERY_DECIDED --run-tag "$STAMP" --phase QWEN_RUNNING --dataset "$DATASET" --arm "$ARM" \
     --trace-dir "$TRACE" --attempt "$RESUME_ATTEMPTS" --session-id "$RESUME_SESSION" --reason broken_stream \
@@ -229,10 +255,10 @@ while RESUME_SESSION="$(broken_session)" \
   run_qwen "$RESUME_ATTEMPTS" --resume "$RESUME_SESSION" -p "The previous provider stream failed. Continue the same investigation from saved state. Do not restart mapping; finish the unresolved worklist and deliver the report." || true
 done
 state_set --run-tag "$STAMP" --phase VERIFYING --dataset "$DATASET" --arm "$ARM" --trace-dir "$TRACE" \
-  --attempt "$RESUME_ATTEMPTS" --session-id "$RESUME_SESSION" --upstream-log "$TRACE.upstream.jsonl" \
+  --attempt "$RESUME_ATTEMPTS" --session-id "${LAST_SESSION:-$RESUME_SESSION}" --upstream-log "$TRACE.upstream.jsonl" \
   --inflight-path "$TRACE/upstream-inflight.json"
 state_event VERIFYING --run-tag "$STAMP" --phase VERIFYING --dataset "$DATASET" --arm "$ARM" --trace-dir "$TRACE" \
-  --attempt "$RESUME_ATTEMPTS" --session-id "$RESUME_SESSION" --upstream-log "$TRACE.upstream.jsonl" \
+  --attempt "$RESUME_ATTEMPTS" --session-id "${LAST_SESSION:-$RESUME_SESSION}" --upstream-log "$TRACE.upstream.jsonl" \
   --inflight-path "$TRACE/upstream-inflight.json"
 python3 - "$TRACE/recovery.json" "$RESUME_ATTEMPTS" "$RESUME_SESSION" <<'PY'
 import json, sys
@@ -349,11 +375,12 @@ PY
 RC=$?
 if [ "$RC" -eq 0 ]; then
   state_set --run-tag "$STAMP" --phase FINISHED_UNCHECKED --dataset "$DATASET" --arm "$ARM" --trace-dir "$TRACE" \
-    --attempt "$RESUME_ATTEMPTS" --session-id "$RESUME_SESSION" --upstream-log "$TRACE.upstream.jsonl" \
+    --attempt "$RESUME_ATTEMPTS" --session-id "${LAST_SESSION:-$RESUME_SESSION}" --upstream-log "$TRACE.upstream.jsonl" \
     --inflight-path "$TRACE/upstream-inflight.json"
   state_event FINISHED_UNCHECKED --run-tag "$STAMP" --phase FINISHED_UNCHECKED --dataset "$DATASET" --arm "$ARM" --trace-dir "$TRACE" \
-    --attempt "$RESUME_ATTEMPTS" --session-id "$RESUME_SESSION" --upstream-log "$TRACE.upstream.jsonl" \
+    --attempt "$RESUME_ATTEMPTS" --session-id "${LAST_SESSION:-$RESUME_SESSION}" --upstream-log "$TRACE.upstream.jsonl" \
     --inflight-path "$TRACE/upstream-inflight.json"
+  TERMINAL_WRITTEN=1
 else
   state_set --run-tag "$STAMP" --phase RUN_FAILED --dataset "$DATASET" --arm "$ARM" --trace-dir "$TRACE" \
     --attempt "$RESUME_ATTEMPTS" --exit-code "$RC" --upstream-log "$TRACE.upstream.jsonl" \
@@ -361,6 +388,7 @@ else
   state_event RUN_FAILED --run-tag "$STAMP" --phase RUN_FAILED --dataset "$DATASET" --arm "$ARM" --trace-dir "$TRACE" \
     --attempt "$RESUME_ATTEMPTS" --exit-code "$RC" --upstream-log "$TRACE.upstream.jsonl" \
     --inflight-path "$TRACE/upstream-inflight.json"
+  TERMINAL_WRITTEN=1
 fi
 # the CLI's own stderr is the only clue when the run produced nothing
 [ "$RC" -ne 0 ] && [ -f "$W/err.txt" ] && sed -n '1,8p' "$W/err.txt"

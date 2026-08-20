@@ -260,12 +260,15 @@ class Proxy(BaseHTTPRequestHandler):
         req = urllib.request.Request(self._upstream_url(), data=body or None,
                                      headers=headers, method=self.command)
         request_id = uuid.uuid4().hex
-        _update_inflight(request_id, {
-            "started_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-            "request_bytes": len(body), "path": self.path,
-            "requested_model": requested, "attempt": _attempt(),
-            "run_tag": RUN_TAG, "pid": os.getpid(), "proxy_instance": PROXY_INSTANCE,
-        })
+        try:
+            _update_inflight(request_id, {
+                "started_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                "request_bytes": len(body), "path": self.path,
+                "requested_model": requested, "attempt": _attempt(),
+                "run_tag": RUN_TAG, "pid": os.getpid(), "proxy_instance": PROXY_INSTANCE,
+            })
+        except OSError:
+            pass  # observability can never alter request delivery
         # HTTP 200 only says the front door accepted the request. Providers can
         # splice an HTTP error into SSE after many successful turns; the client
         # sees malformed JSON while a status-only ledger says success.
@@ -274,7 +277,8 @@ class Proxy(BaseHTTPRequestHandler):
                  "stream_complete": None, "stream_bytes": 0}
         status = None
         attempt = 0
-        while True:
+        try:
+          while True:
             attempt += 1
             t_try = time.time()
             try:
@@ -294,11 +298,14 @@ class Proxy(BaseHTTPRequestHandler):
                         why = _err_text(e.read())
                     except Exception:
                         why = None
-                    record(requested_model=requested, returned_model=None,
-                           tool_call=False, status=status, attempt=attempt,
-                           duration_ms=int((time.time() - t_try) * 1000),
-                           sent_model=sent, request_bytes=len(body),
-                           path=self.path, stream=False, upstream_error=why)
+                    try:
+                        record(requested_model=requested, returned_model=None,
+                               tool_call=False, status=status, attempt=attempt,
+                               duration_ms=int((time.time() - t_try) * 1000),
+                               sent_model=sent, request_bytes=len(body),
+                               path=self.path, stream=False, upstream_error=why)
+                    except OSError:
+                        pass
                     time.sleep(min(60.0, (UPSTREAM_RETRY_BASE_MS / 1000.0)
                                    * (2 ** (attempt - 1))))
                     req = urllib.request.Request(self._upstream_url(),
@@ -308,39 +315,46 @@ class Proxy(BaseHTTPRequestHandler):
                     continue
                 break
             except Exception as e:                   # DNS, TLS, refused, timeout
-                record(requested_model=requested, returned_model=None,
-                       tool_call=False, status=None, error=str(e)[:300],
-                       attempt=attempt,
-                       duration_ms=int((time.time() - t0) * 1000), sent_model=sent,
-                       request_bytes=len(body), path=self.path, stream=False)
+                try:
+                    record(requested_model=requested, returned_model=None,
+                           tool_call=False, status=None, error=str(e)[:300],
+                           attempt=attempt,
+                           duration_ms=int((time.time() - t0) * 1000), sent_model=sent,
+                           request_bytes=len(body), path=self.path, stream=False)
+                except OSError:
+                    pass
                 self.send_response(502)
                 payload = json.dumps({"error": {"message": "proxy: %s" % e}}).encode()
                 self.send_header("Content-Type", "application/json")
                 self.send_header("Content-Length", str(len(payload)))
                 self.end_headers()
                 self.wfile.write(payload)
-                _update_inflight(request_id)
                 return
 
-        ctype = (resp.headers.get("Content-Type") or "")
-        streaming = "text/event-stream" in ctype.lower()
-        try:
-            if streaming:
-                self._pump_stream(resp, state)
-            else:
-                self._pump_whole(resp, status, state)
+          ctype = (resp.headers.get("Content-Type") or "")
+          streaming = "text/event-stream" in ctype.lower()
+          try:
+              if streaming:
+                  self._pump_stream(resp, state)
+              else:
+                  self._pump_whole(resp, status, state)
+          finally:
+              try:
+                  record(requested_model=requested,
+                         returned_model=state["returned_model"], attempt=attempt,
+                         tool_call=state["tool_call"], status=status,
+                         duration_ms=int((time.time() - t0) * 1000), sent_model=sent,
+                         request_bytes=len(body), path=self.path, stream=streaming,
+                         upstream_error=state["error"], stream_events=state["stream_events"],
+                         stream_parse_errors=state["stream_parse_errors"],
+                         stream_complete=state["stream_complete"], stream_bytes=state["stream_bytes"])
+              except OSError:
+                  pass
         finally:
-            record(requested_model=requested,
-                   returned_model=state["returned_model"], attempt=attempt,
-                   tool_call=state["tool_call"], status=status,
-                   duration_ms=int((time.time() - t0) * 1000), sent_model=sent,
-                   request_bytes=len(body), path=self.path, stream=streaming,
-                   upstream_error=state["error"],
-                   stream_events=state["stream_events"],
-                   stream_parse_errors=state["stream_parse_errors"],
-                   stream_complete=state["stream_complete"],
-                   stream_bytes=state["stream_bytes"])
-            _update_inflight(request_id)
+            try:
+                _update_inflight(request_id)
+            except OSError:
+                pass
 
     def _relay_headers(self, resp, status, extra=()):
         self.send_response(status)
