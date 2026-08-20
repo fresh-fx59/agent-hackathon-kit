@@ -10,6 +10,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 
 HERE = Path(__file__).resolve()
@@ -62,6 +63,7 @@ class Fixture:
         self.citation = self._skill_file("citecheck.py", "cite\n")
         self.target_cli = self._file("qwen", "cli\n")
         self.parent = self._file("controller-parent.json", "{}\n")
+        self.commitment = self.root / "run-commitments.jsonl"
         self.health = self.root / "health.json"
         self.write_health()
 
@@ -110,6 +112,7 @@ class Fixture:
                 "provider": "linkapi", "expected_returned_identity": "qwen-real",
                 "lane": "paid", "health_receipt": str(self.health),
                 "controller_parent": str(self.parent),
+                "commitment_file": str(self.commitment),
                 "staged_corpus_destination": str(self.staged), "forbid_paths": ()}
         args.update(updates)
         return MOD.create_manifest(**args)
@@ -129,7 +132,7 @@ class RunManifestTests(unittest.TestCase):
     def valid_manifest(self):
         staged = self.fx.stage()
         manifest = self.fx.create()
-        verified = MOD.verify_manifest(str(self.fx.trace))
+        verified = MOD.verify_manifest(str(self.fx.trace), str(self.fx.commitment))
         self.assertEqual(staged["included_count"], 2)
         self.assertEqual(manifest["expected"]["ids"], ["F-01", "F-02"])
         self.assertEqual(verified["manifest_sha256"], manifest["manifest_sha256"])
@@ -150,7 +153,7 @@ class RunManifestTests(unittest.TestCase):
 
     def test_manifest_collision_is_refused(self):
         self.fx.stage(); self.fx.create()
-        with self.assertRaisesRegex(MOD.ManifestError, "E_MANIFEST_EXISTS"):
+        with self.assertRaisesRegex(MOD.ManifestError, "E_COMMITMENT_DUPLICATE"):
             self.fx.create()
 
     def test_wrong_dataset_is_refused(self):
@@ -167,7 +170,7 @@ class RunManifestTests(unittest.TestCase):
 
     def test_traversal_and_symlink_entries_are_refused(self):
         self.fx.key_data["files"][0]["path"] = "../outside.log"; self.fx.write_key()
-        with self.assertRaisesRegex(MOD.ManifestError, "E_CORPUS_PATH_INVALID"):
+        with self.assertRaisesRegex(MOD.ManifestError, "E_KEY_PATH"):
             self.fx.stage()
         self.fx.key_data["files"] = [file_row(self.fx.corpus, "b.log")]
         self.fx.key_data["files"][0]["path"] = "link.log"
@@ -180,6 +183,27 @@ class RunManifestTests(unittest.TestCase):
         linked = self.fx.root / "linked-target"; os.symlink(real, linked)
         with self.assertRaisesRegex(MOD.ManifestError, "E_STAGE_SYMLINK"):
             self.fx.stage(destination=str(linked / "corpus"))
+
+    def test_nested_symlinked_stage_and_trace_parents_are_refused(self):
+        real = self.fx.root / "real"; (real / "existing").mkdir(parents=True)
+        linked = self.fx.root / "linked"; os.symlink(real, linked)
+        with self.assertRaisesRegex(MOD.ManifestError, "E_STAGE_SYMLINK"):
+            self.fx.stage(destination=str(linked / "existing" / "stage"))
+        self.fx.stage()
+        with self.assertRaisesRegex(MOD.ManifestError, "E_TRACE_SYMLINK"):
+            self.fx.create(trace=str(linked / "existing" / "trace"))
+
+    def test_open_source_fd_survives_parent_swap_without_escape(self):
+        evil = self.fx.root / "evil"; (evil / "host").mkdir(parents=True)
+        (evil / "host" / "a.log").write_text("evil\n", encoding="utf-8")
+        root_fd = MOD._open_dir(str(self.fx.corpus), "CORPUS")
+        moved = self.fx.root / "source-moved"
+        os.rename(self.fx.corpus, moved); os.symlink(evil, self.fx.corpus)
+        try:
+            data = MOD._read_relative(root_fd, "host/a.log", "CORPUS")
+        finally:
+            os.close(root_fd)
+        self.assertEqual(data, b"alpha\nbeta\n")
 
     def test_size_line_and_hash_mismatch_are_refused(self):
         for field, code in (("on_disk_bytes", "E_CORPUS_SIZE_MISMATCH"),
@@ -232,7 +256,7 @@ class RunManifestTests(unittest.TestCase):
         self.valid_manifest()
         (self.fx.staged / "b.log").write_text("omega\n", encoding="utf-8")
         with self.assertRaisesRegex(MOD.ManifestError, "E_STAGED_HASH_MISMATCH"):
-            MOD.verify_manifest(str(self.fx.trace))
+            MOD.verify_manifest(str(self.fx.trace), str(self.fx.commitment))
 
     def test_artifact_tamper_is_rejected(self):
         targets = (("renderer", "E_RENDERER_DIGEST_MISMATCH"),
@@ -247,11 +271,77 @@ class RunManifestTests(unittest.TestCase):
                 fx = Fixture(self.root_for("tamper-" + attr)); fx.stage(); fx.create()
                 Path(getattr(fx, attr)).write_text("changed\n", encoding="utf-8")
                 with self.assertRaisesRegex(MOD.ManifestError, code):
-                    MOD.verify_manifest(str(fx.trace))
+                    MOD.verify_manifest(str(fx.trace), str(fx.commitment))
         fx = Fixture(self.root_for("tamper-skill")); fx.stage(); fx.create()
         (fx.skill / "SKILL.md").write_text("changed\n", encoding="utf-8")
         with self.assertRaisesRegex(MOD.ManifestError, "E_SKILL_DIGEST_MISMATCH"):
-            MOD.verify_manifest(str(fx.trace))
+            MOD.verify_manifest(str(fx.trace), str(fx.commitment))
+
+    def test_answer_key_target_cli_parent_and_health_tamper_are_rejected(self):
+        targets = (("key", "E_ANSWER_KEY_DIGEST_MISMATCH"),
+                   ("target_cli", "E_TARGET_CLI_DIGEST_MISMATCH"),
+                   ("parent", "E_CONTROLLER_PARENT_DIGEST_MISMATCH"),
+                   ("health", "E_HEALTH_RECEIPT_DIGEST_MISMATCH"))
+        for attr, code in targets:
+            with self.subTest(attr=attr):
+                fx = Fixture(self.root_for("direct-" + attr)); fx.stage(); fx.create()
+                path = Path(getattr(fx, attr))
+                if attr == "health":
+                    row = json.loads(path.read_text()); row["note"] = "changed"
+                    path.write_text(json.dumps(row), encoding="utf-8")
+                else:
+                    path.write_text("changed\n", encoding="utf-8")
+                with self.assertRaisesRegex(MOD.ManifestError, code):
+                    MOD.verify_manifest(str(fx.trace), str(fx.commitment))
+
+    def test_resealed_manifest_tamper_is_rejected_by_external_commitment(self):
+        manifest = self.valid_manifest()
+        path = self.fx.trace / "run-manifest.json"
+        manifest["run_tag"] = "run-tampered"
+        unsigned = dict(manifest); unsigned.pop("manifest_sha256")
+        manifest["manifest_sha256"] = hashlib.sha256(
+            json.dumps(unsigned, ensure_ascii=False, sort_keys=True,
+                       separators=(",", ":")).encode()).hexdigest()
+        path.write_text(json.dumps(manifest), encoding="utf-8")
+        with self.assertRaisesRegex(MOD.ManifestError, "E_COMMITMENT_MISMATCH"):
+            MOD.verify_manifest(str(self.fx.trace), str(self.fx.commitment))
+
+    def test_target_identity_seal_tamper_is_rejected(self):
+        manifest = self.valid_manifest()
+        manifest["target"]["identity_sha256"] = "0" * 64
+        unsigned = dict(manifest); unsigned.pop("manifest_sha256")
+        manifest["manifest_sha256"] = hashlib.sha256(
+            json.dumps(unsigned, ensure_ascii=False, sort_keys=True,
+                       separators=(",", ":")).encode()).hexdigest()
+        (self.fx.trace / "run-manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+        commitment = json.loads(self.fx.commitment.read_text())
+        commitment["manifest_sha256"] = manifest["manifest_sha256"]
+        self.fx.commitment.write_text(json.dumps(commitment) + "\n", encoding="utf-8")
+        with self.assertRaisesRegex(MOD.ManifestError, "E_TARGET_IDENTITY_MISMATCH"):
+            MOD.verify_manifest(str(self.fx.trace), str(self.fx.commitment))
+
+    def test_commitment_tamper_and_duplicate_run_tag_are_refused(self):
+        self.valid_manifest()
+        self.fx.commitment.write_text("", encoding="utf-8")
+        with self.assertRaisesRegex(MOD.ManifestError, "E_COMMITMENT_MISSING"):
+            MOD.verify_manifest(str(self.fx.trace), str(self.fx.commitment))
+        shared = self.fx.root / "shared-commitments.jsonl"
+        one = Fixture(self.root_for("commit-one")); one.stage(); one.create(commitment_file=str(shared))
+        two = Fixture(self.root_for("commit-two")); two.stage()
+        with self.assertRaisesRegex(MOD.ManifestError, "E_COMMITMENT_DUPLICATE"):
+            two.create(commitment_file=str(shared))
+
+    def test_missing_commitment_verify_does_not_create_it(self):
+        self.valid_manifest()
+        self.fx.commitment.unlink()
+        with self.assertRaisesRegex(MOD.ManifestError, "E_COMMITMENT_MISSING"):
+            MOD.verify_manifest(str(self.fx.trace), str(self.fx.commitment))
+        self.assertFalse(self.fx.commitment.exists())
+
+    def test_commitment_must_remain_outside_target_roots(self):
+        self.fx.stage()
+        with self.assertRaisesRegex(MOD.ManifestError, "E_COMMITMENT_LOCATION"):
+            self.fx.create(commitment_file=str(self.fx.trace / "commitments.jsonl"))
 
     def test_health_stale_wrong_lane_shape_and_mixed_identity_are_refused(self):
         now = dt.datetime.now(dt.timezone.utc)
@@ -278,6 +368,76 @@ class RunManifestTests(unittest.TestCase):
         self.fx.write_health(schema=2)
         with self.assertRaisesRegex(MOD.ManifestError, "E_HEALTH_SCHEMA"):
             self.fx.create()
+
+    def test_health_maximum_age_lifetime_and_future_skew_are_enforced(self):
+        now = dt.datetime.now(dt.timezone.utc)
+        cases = (({"checked_at": (now - dt.timedelta(minutes=16)).isoformat(),
+                   "expires_at": (now + dt.timedelta(minutes=1)).isoformat()}, "E_HEALTH_STALE"),
+                 ({"checked_at": now.isoformat(),
+                   "expires_at": (now + dt.timedelta(minutes=16)).isoformat()}, "E_HEALTH_LIFETIME"),
+                 ({"checked_at": (now + dt.timedelta(seconds=61)).isoformat(),
+                   "expires_at": (now + dt.timedelta(minutes=2)).isoformat()}, "E_HEALTH_FUTURE"))
+        for updates, code in cases:
+            with self.subTest(code=code):
+                fx = Fixture(self.root_for(code.lower())); fx.stage(); fx.write_health(**updates)
+                with self.assertRaisesRegex(MOD.ManifestError, code): fx.create()
+
+    def test_malformed_key_schema_has_stable_errors(self):
+        cases = (({"files": None}, "E_KEY_FILES"),
+                 ({"files": [None]}, "E_KEY_FILE_ENTRY"),
+                 ({"defects": None}, "E_KEY_DEFECTS"),
+                 ({"defects": [None]}, "E_KEY_DEFECTS"),
+                 ({"files.0.path": 7}, "E_KEY_PATH"),
+                 ({"files.0.lines": "two"}, "E_KEY_FILE_ENTRY"),
+                 ({"defects.0.proof_locations": None}, "E_KEY_PROOFS"),
+                 ({"defects.0.proof_locations": ["bad"]}, "E_KEY_PROOF"))
+        for index, (mutation, code) in enumerate(cases):
+            with self.subTest(code=code, mutation=mutation):
+                fx = Fixture(self.root_for("key-malformed-%d" % index))
+                key, value = next(iter(mutation.items()))
+                if key == "files": fx.key_data["files"] = value
+                elif key == "defects": fx.key_data["defects"] = value
+                elif key.startswith("files.0."): fx.key_data["files"][0][key.split(".")[-1]] = value
+                elif key == "defects.0.proof_locations": fx.key_data["defects"][0]["proof_locations"] = value
+                fx.write_key()
+                with self.assertRaisesRegex(MOD.ManifestError, code): fx.stage()
+
+    def test_malformed_health_schema_has_stable_errors(self):
+        cases = (({"schema": "1"}, "E_HEALTH_SCHEMA"),
+                 ({"checked_at": []}, "E_HEALTH_TIME"),
+                 ({"lane": []}, "E_HEALTH_IDENTITY"),
+                 ({"tools": "25"}, "E_HEALTH_TOOLS"),
+                 ({"sizes_kb": [{}]}, "E_HEALTH_SIZES"),
+                 ({"history": None}, "E_HEALTH_HISTORY"),
+                 ({"history": [None]}, "E_HEALTH_HISTORY"),
+                 ({"history": [{"size_kb": 100, "status": 200,
+                                 "returned_model": {}}]}, "E_HEALTH_RETURNED_IDENTITY"),
+                 ({"verdict": []}, "E_HEALTH_VERDICT"))
+        for index, (updates, code) in enumerate(cases):
+            with self.subTest(code=code):
+                fx = Fixture(self.root_for("health-malformed-%d" % index)); fx.stage()
+                fx.write_health(**updates)
+                with self.assertRaisesRegex(MOD.ManifestError, code): fx.create()
+
+    def test_cli_identity_labels_are_bounded(self):
+        self.fx.stage()
+        for value in ("bad\nidentifier", "x" * 129):
+            with self.subTest(value_len=len(value)):
+                with self.assertRaisesRegex(MOD.ManifestError, "E_IDENTIFIER_INVALID"):
+                    self.fx.create(run_tag=value)
+
+    def test_atomic_manifest_race_never_overwrites_winner(self):
+        trace = self.fx.root / "atomic-trace"; trace.mkdir()
+        original = MOD.os.link
+        def race(src, dst, **kwargs):
+            fd = os.open(dst, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600,
+                         dir_fd=kwargs["dst_dir_fd"])
+            os.write(fd, b"winner\n"); os.close(fd)
+            return original(src, dst, **kwargs)
+        with mock.patch.object(MOD.os, "link", side_effect=race):
+            with self.assertRaisesRegex(MOD.ManifestError, "E_MANIFEST_EXISTS"):
+                MOD._atomic_manifest(str(trace), {"schema": 1})
+        self.assertEqual((trace / "run-manifest.json").read_bytes(), b"winner\n")
 
     def test_secret_shaped_input_is_rejected_without_echo(self):
         self.fx.stage()
