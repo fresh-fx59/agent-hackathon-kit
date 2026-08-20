@@ -10,7 +10,7 @@ import tempfile
 
 STATUS_FIELDS = ("schema", "run_tag", "phase", "updated_at", "pid", "attempt",
                  "dataset", "arm", "trace_dir", "detail")
-SECRET_MARKERS = re.compile(r"(?:bearer\s+|(?:sk|ghp|glpat|xox[baprs])-|AKIA[0-9A-Z]{16}|-----BEGIN .*PRIVATE KEY-----|password\s*=|api[_-]?key\s*=)", re.I)
+SECRET_MARKERS = re.compile(r"(?:bearer\s+|(?:sk|ghp|glpat|xox[baprs])-|AKIA[0-9A-Z]{16}|-----BEGIN .*PRIVATE KEY-----|(?:password|token|api[_-]?key)\s*[:=])", re.I)
 
 
 def _now():
@@ -18,12 +18,17 @@ def _now():
 
 
 def _safe(value):
+    if isinstance(value, (dict, list, tuple, set)):
+        raise ValueError("non-scalar value rejected")
     if isinstance(value, str) and SECRET_MARKERS.search(value):
         raise ValueError("secret-shaped value rejected")
     return value
 
 
 def _normalize(fields):
+    unknown = set(fields) - set(STATUS_FIELDS)
+    if unknown:
+        raise ValueError("unknown state field rejected")
     row = {name: None for name in STATUS_FIELDS}
     row.update(fields)
     row["schema"] = 1

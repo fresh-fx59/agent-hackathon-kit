@@ -1,5 +1,4 @@
 import json
-import multiprocessing
 import pathlib
 import subprocess
 import sys
@@ -59,6 +58,19 @@ class RunStateTests(unittest.TestCase):
                 run_state.write_status(str(path), run_tag="r1", detail="Bearer super-secret-token")
             self.assertNotIn("super-secret-token", str(caught.exception))
             self.assertFalse(path.exists())
+
+    def test_unknown_fields_and_non_scalar_values_are_rejected(self):
+        with self.assertRaises(ValueError):
+            run_state.write_status("/tmp/never-written-status.json", response="model output")
+        with self.assertRaises(ValueError):
+            run_state.write_status("/tmp/never-written-status.json", detail={"nested": "value"})
+
+    def test_secret_key_value_forms_are_rejected_without_echo(self):
+        for value in ("password: hidden-value", "api_key: hidden-value", "token=hidden-value"):
+            with self.subTest(value=value):
+                with self.assertRaises(ValueError) as caught:
+                    run_state.write_status("/tmp/never-written-status.json", detail=value)
+            self.assertNotIn("hidden-value", str(caught.exception))
 
     def test_cli_set_and_event(self):
         import tempfile
