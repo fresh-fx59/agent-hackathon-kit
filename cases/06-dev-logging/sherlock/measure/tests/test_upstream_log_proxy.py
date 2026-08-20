@@ -349,6 +349,7 @@ class ItStaysOutOfTheWay(ProxyCase):
     def test_the_secret_is_never_written_to_the_log(self):
         self.start("json_toolcall")
         self.post(auth="Bearer sekrit")
+        self.assertTrue(self.lines(), "upstream log row never became durable")
         with open(self.log, encoding="utf-8") as fh:
             self.assertNotIn("sekrit", fh.read())
 
