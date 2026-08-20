@@ -18,6 +18,8 @@ if [[ " $* " == *" --resume $SESSION "* ]]; then
 [{"type":"result","session_id":"11111111-1111-1111-1111-111111111111","is_error":false,"num_turns":2,"result":"PROVEN: sample.log:1 — `2026-01-01 test`"}]
 JSON
 else
+  test -f "$PWD/corpus/sample.log"
+  [[ "$*" == *"$PWD/corpus"* ]]
   mkdir -p "$QWEN_HOME/saved"
   printf state > "$QWEN_HOME/saved/$SESSION"
   # Simulates a provider disconnect while Qwen is emitting its JSON envelope.
