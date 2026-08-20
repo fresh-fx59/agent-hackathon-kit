@@ -170,7 +170,7 @@ PY
 run_qwen() {
   local attempt="$1"
   shift
-  local session="" started rc finished
+  local session="" parsed_session="" started rc finished
   [ "${1:-}" = "--resume" ] && session="${2:-}"
   printf '%s\n' "$attempt" > "$ATTEMPT_FILE"
   started="$(date +%s)"
@@ -194,7 +194,8 @@ run_qwen() {
   cp "$W/out.json" "$W/out-attempt-$attempt.json"
   cp "$W/err.txt" "$W/err-attempt-$attempt.txt"
   printf '%s\n' "$rc" > "$W/exit-attempt-$attempt.txt"
-  session="$(session_from_output || true)"
+  parsed_session="$(session_from_output || true)"
+  [ -n "$parsed_session" ] && session="$parsed_session"
   [ -n "$session" ] && LAST_SESSION="$session"
   printf '{"attempt":%s,"session_id":"%s","exit_code":%s,"duration_s":%s,"output_bytes":%s,"stderr_bytes":%s}\n' \
     "$attempt" "$session" "$rc" "$((finished - started))" "$(wc -c < "$W/out.json")" "$(wc -c < "$W/err.txt")" \
