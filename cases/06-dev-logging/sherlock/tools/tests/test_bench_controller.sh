@@ -691,9 +691,22 @@ os.stat=guarded_stat
         deadline=time.time()+10
         while not self.fx.capture.exists() and time.time()<deadline: time.sleep(.02)
         self.assertTrue(self.fx.capture.exists())
+        controller=self.fx.controller_dir()
+        trace=None
+        deadline=time.time()+10
+        while time.time()<deadline:
+            link_path=controller/"controller-child.json"
+            if link_path.exists():
+                link=json.loads(link_path.read_text())
+                trace=Path(link["child_trace"])
+                if ((trace/"controller-process.json").exists() and
+                        (controller/"child-process-proof.json").exists()): break
+            time.sleep(.02)
+        self.assertIsNotNone(trace)
+        self.assertTrue((trace/"controller-process.json").exists())
+        self.assertTrue((controller/"child-process-proof.json").exists())
         second=self.fx.run(env=self.fx.env()); self.assertNotEqual(second.returncode,0)
         first.send_signal(signal.SIGKILL); first.wait(timeout=5)
-        controller=self.fx.controller_dir()
         resumed=subprocess.Popen(["bash",str(CONTROLLER),"--resume",controller.name],env=self.fx.env(FAKE_TARGET_MODE="wait"),stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
         time.sleep(.2); (self.fx.base/"release-target").write_text("go\n")
         out=resumed.communicate(timeout=20); self.assertEqual(resumed.returncode,0,out)
@@ -758,8 +771,11 @@ os.stat=guarded_stat
         controller=self.fx.controller_dir(); link=json.loads((controller/"controller-child.json").read_text())
         trace=Path(link["child_trace"])
         deadline=time.time()+5
-        while not (trace/"controller-process.json").exists() and time.time()<deadline: time.sleep(.02)
+        while (not (trace/"controller-process.json").exists() or
+               not (controller/"child-process-proof.json").exists()) and time.time()<deadline:
+            time.sleep(.02)
         self.assertTrue((trace/"controller-process.json").exists())
+        self.assertTrue((controller/"child-process-proof.json").exists())
         first.kill(); first.wait(timeout=5)
         (self.fx.base/"release-target").write_text("go\n")
         self.fx.foreign_process=subprocess.Popen(
