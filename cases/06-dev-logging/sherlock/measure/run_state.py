@@ -9,7 +9,8 @@ import re
 import tempfile
 
 STATUS_FIELDS = ("schema", "run_tag", "phase", "updated_at", "pid", "attempt",
-                 "dataset", "arm", "trace_dir", "detail")
+                 "dataset", "arm", "trace_dir", "detail", "session_id", "reason",
+                 "exit_code", "duration_s", "upstream_log", "inflight_path")
 SECRET_MARKERS = re.compile(r"(?:bearer\s+|(?:sk|ghp|glpat|xox[baprs])-|AKIA[0-9A-Z]{16}|-----BEGIN .*PRIVATE KEY-----|(?:password|token|api[_-]?key)\s*[:=])", re.I)
 
 

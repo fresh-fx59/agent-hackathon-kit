@@ -83,6 +83,19 @@ class RunStateTests(unittest.TestCase):
             subprocess.run(command + ["event", str(events), "RUN_FINISHED", "--run-tag", "r1"], check=True)
             self.assertEqual(json.loads(events.read_text())["event"], "RUN_FINISHED")
 
+    def test_cli_accepts_causal_runner_fields(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as directory:
+            events = pathlib.Path(directory) / "events.jsonl"
+            command = [sys.executable, str(MEASURE / "run_state.py"), "event", str(events), "ATTEMPT_FINISHED",
+                       "--run-tag", "r1", "--session-id", "session-1", "--reason", "broken_stream",
+                       "--exit-code", "0", "--duration-s", "3", "--upstream-log", "upstream.jsonl",
+                       "--inflight-path", "upstream-inflight.json"]
+            subprocess.run(command, check=True)
+            row = json.loads(events.read_text())
+            self.assertEqual(row["session_id"], "session-1")
+            self.assertEqual(row["exit_code"], "0")
+
 
 if __name__ == "__main__":
     unittest.main()

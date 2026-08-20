@@ -44,7 +44,26 @@ test -f "$TRACE/err-attempt-0.txt"
 test "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["tools"]["exclude"])' "$TRACE/qwen-settings.json")" = "['agent']"
 test -f "$TRACE/qwen-home/saved/11111111-1111-1111-1111-111111111111"
 test "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["resume_attempts"])' "$TRACE/recovery.json")" = 1
-test "$(wc -l < "$TRACE/attempts.jsonl")" = 2
-test "$(wc -l < "$TMP/ledger.jsonl")" = 1
+test "$(wc -l < "$TRACE/attempts.jsonl" | tr -d '[:space:]')" = 2
+test "$(wc -l < "$TMP/ledger.jsonl" | tr -d '[:space:]')" = 1
 rg -q 'stream failed; preserving session 11111111-1111-1111-1111-111111111111' "$TMP/out.log"
+test -f "$TRACE/status.json"
+test -f "$TRACE/status-events.jsonl"
+python3 - "$TRACE" <<'PY'
+import json, pathlib, sys
+trace = pathlib.Path(sys.argv[1])
+status = json.loads((trace / "status.json").read_text())
+assert status["phase"] == "FINISHED_UNCHECKED", status
+events = [json.loads(line) for line in (trace / "status-events.jsonl").read_text().splitlines()]
+names = [row["event"] for row in events]
+for event in ("STAGING", "QWEN_RUNNING", "VERIFYING", "FINISHED_UNCHECKED"):
+    assert event in names, names
+assert names.index("STAGING") < names.index("QWEN_RUNNING") < names.index("VERIFYING") < names.index("FINISHED_UNCHECKED"), names
+attempts = [row for row in events if row["event"] == "ATTEMPT_FINISHED"]
+assert len(attempts) == 2, attempts
+assert attempts[0]["attempt"] == 0 and attempts[0]["exit_code"] == "0", attempts
+assert attempts[1]["attempt"] == 1 and attempts[1]["session_id"] == "11111111-1111-1111-1111-111111111111", attempts
+assert all(row["duration_s"] is not None and row["upstream_log"] for row in attempts), attempts
+assert any(row["event"] == "RECOVERY_DECIDED" and row["reason"] == "broken_stream" for row in events), events
+PY
 echo 'ok: preserves session and resumes after malformed stream'

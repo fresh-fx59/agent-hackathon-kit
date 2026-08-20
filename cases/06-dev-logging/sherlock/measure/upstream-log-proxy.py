@@ -26,6 +26,7 @@ never logs the Authorization header. If it cannot parse a response it records
 `returned_model: null` rather than guessing — an unmeasured value is null, never
 a default. → measure/probes/upstream-split.sh
 """
+import fcntl
 import json
 import os
 import re
@@ -34,6 +35,7 @@ import threading
 import time
 import urllib.error
 import urllib.request
+import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlsplit
 
@@ -41,6 +43,10 @@ UPSTREAM_BASE = os.environ.get("UPSTREAM_BASE", "https://linkapi.ai/v1").rstrip(
 UPSTREAM_LOG = os.environ.get("UPSTREAM_LOG", "upstream.jsonl")
 LISTEN_PORT = int(os.environ.get("LISTEN_PORT", "8791"))
 RUN_TAG = os.environ.get("RUN_TAG", "")
+RUN_ATTEMPT = os.environ.get("RUN_ATTEMPT", "")
+RUN_ATTEMPT_FILE = os.environ.get("RUN_ATTEMPT_FILE", "")
+UPSTREAM_INFLIGHT = os.environ.get("UPSTREAM_INFLIGHT", "")
+PROXY_INSTANCE = str(uuid.uuid4())
 # THE 177,000-TOKEN CEILING WAS A MODEL-ID PARSING ARTIFACT, not a real limit.
 # qwen-code sizes the context window from the model id, and its own normalize()
 # turns "[SP]deepseek-v4-flash" into "[sp]deepseek-v4-flash", which matches no
@@ -66,6 +72,7 @@ _RETRYABLE = {400, 408, 429, 500, 502, 503, 504}
 
 _BASE_PATH = urlsplit(UPSTREAM_BASE).path.rstrip("/")     # e.g. "/v1"
 _LOG_LOCK = threading.Lock()
+_INFLIGHT_LOCK = threading.Lock()
 
 # Hop-by-hop headers are per-connection and must not be relayed (RFC 7230 §6.1).
 _HOP = {"connection", "keep-alive", "proxy-authenticate", "proxy-authorization",
@@ -105,6 +112,57 @@ def record(**row):
     with _LOG_LOCK:                       # ThreadingHTTPServer ⇒ concurrent turns
         with open(UPSTREAM_LOG, "a", encoding="utf-8") as fh:
             fh.write(line + "\n")
+
+
+def _update_inflight(request_id, row=None):
+    """Atomically add or remove one request from the trace-local live map."""
+    if not UPSTREAM_INFLIGHT:
+        return
+    directory = os.path.dirname(os.path.abspath(UPSTREAM_INFLIGHT))
+    os.makedirs(directory, exist_ok=True)
+    lock_path = UPSTREAM_INFLIGHT + ".lock"
+    with _INFLIGHT_LOCK, open(lock_path, "a+", encoding="utf-8") as lock:
+        fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+        try:
+            try:
+                with open(UPSTREAM_INFLIGHT, encoding="utf-8") as source:
+                    requests = json.load(source).get("requests", {})
+            except (OSError, ValueError, AttributeError):
+                requests = {}
+            if row is None:
+                requests.pop(request_id, None)
+            else:
+                requests[request_id] = row
+            if not requests:
+                try:
+                    os.unlink(UPSTREAM_INFLIGHT)
+                except FileNotFoundError:
+                    pass
+                return
+            temporary = UPSTREAM_INFLIGHT + ".tmp.%d.%s" % (os.getpid(), uuid.uuid4().hex)
+            try:
+                with open(temporary, "w", encoding="utf-8") as target:
+                    json.dump({"requests": requests}, target, ensure_ascii=False, sort_keys=True)
+                    target.write("\n")
+                    target.flush()
+                    os.fsync(target.fileno())
+                os.replace(temporary, UPSTREAM_INFLIGHT)
+            finally:
+                try:
+                    os.unlink(temporary)
+                except FileNotFoundError:
+                    pass
+        finally:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+
+
+def _attempt():
+    if RUN_ATTEMPT_FILE:
+        try:
+            return open(RUN_ATTEMPT_FILE, encoding="utf-8").read().strip()[:32]
+        except OSError:
+            pass
+    return RUN_ATTEMPT
 
 
 # How much of an upstream error body is kept. 300 chars is enough for every
@@ -201,6 +259,13 @@ class Proxy(BaseHTTPRequestHandler):
         headers["Accept-Encoding"] = "identity"
         req = urllib.request.Request(self._upstream_url(), data=body or None,
                                      headers=headers, method=self.command)
+        request_id = uuid.uuid4().hex
+        _update_inflight(request_id, {
+            "started_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "request_bytes": len(body), "path": self.path,
+            "requested_model": requested, "attempt": _attempt(),
+            "run_tag": RUN_TAG, "pid": os.getpid(), "proxy_instance": PROXY_INSTANCE,
+        })
         # HTTP 200 only says the front door accepted the request. Providers can
         # splice an HTTP error into SSE after many successful turns; the client
         # sees malformed JSON while a status-only ledger says success.
@@ -254,6 +319,7 @@ class Proxy(BaseHTTPRequestHandler):
                 self.send_header("Content-Length", str(len(payload)))
                 self.end_headers()
                 self.wfile.write(payload)
+                _update_inflight(request_id)
                 return
 
         ctype = (resp.headers.get("Content-Type") or "")
@@ -274,6 +340,7 @@ class Proxy(BaseHTTPRequestHandler):
                    stream_parse_errors=state["stream_parse_errors"],
                    stream_complete=state["stream_complete"],
                    stream_bytes=state["stream_bytes"])
+            _update_inflight(request_id)
 
     def _relay_headers(self, resp, status, extra=()):
         self.send_response(status)

@@ -49,6 +49,7 @@
 upstream_lane_start() {
   local up_base="${1:?upstream_lane_start <upstream_base> <log> <tag> <model>}"
   local log_path="${2:?}" run_tag="${3:?}" model="${4:?}"
+  local inflight_path="${5:-}" attempt_path="${6:-}"
   local here proxy port
 
   # Defaults are the safe ones, so every early return below is already correct.
@@ -68,8 +69,8 @@ upstream_lane_start() {
   port="$(python3 -c 'import socket
 s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1]); s.close()')"
 
-  UPSTREAM_BASE="$up_base" UPSTREAM_LOG="$log_path" LISTEN_PORT="$port" \
-  RUN_TAG="$run_tag" UPSTREAM_MODEL="$model" \
+  UPSTREAM_BASE="$up_base" UPSTREAM_LOG="$log_path" UPSTREAM_INFLIGHT="$inflight_path" \
+  RUN_TAG="$run_tag" RUN_ATTEMPT_FILE="$attempt_path" UPSTREAM_MODEL="$model" LISTEN_PORT="$port" \
   UPSTREAM_RETRY_MAX="${SHERLOCK_UPSTREAM_RETRY:-6}" \
   UPSTREAM_RETRY_BASE_MS="${SHERLOCK_UPSTREAM_RETRY_BASE_MS:-2000}" \
     python3 "$proxy" >/dev/null 2>>"${log_path%.jsonl}.proxy.err" &
