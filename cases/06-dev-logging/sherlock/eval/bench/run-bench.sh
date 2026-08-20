@@ -10,56 +10,285 @@
 #     puts the same corpus in front of DeepSeek-V4-Flash, the corporate model;
 #   * it yields the organizers' «≥50 % дефектов» number against a real answer key.
 #
-# Writes to its OWN ledger (runs-bench.jsonl) so it never races the A/B ledger.
+# Produces a sealed candidate; validate-run.py exclusively owns accepted ledger rows.
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SKILLS="$(cd "$HERE/../.." && pwd)/skills"
 QWEN="${QWEN_BIN:-$HOME/.local/bin/qwen}"
-LEDGER="${BENCH_LEDGER:-$HERE/runs-bench.jsonl}"
-
-ARM="${1:?usage: run-bench.sh <none|v1|v2|v3>}"
-CORPUS="${SHERLOCK_CORPUS:?set SHERLOCK_CORPUS to the 649MB corpus dir}"
+ARM="${1:-unknown}"
+CORPUS="${SHERLOCK_CORPUS:-}"
 BASE_URL="${SHERLOCK_BASE_URL:-https://linkapi.ai/v1}"
 MODEL="${SHERLOCK_MODEL:-[SP]deepseek-v4-flash}"
 TIMEOUT="${SHERLOCK_TIMEOUT:-2700}"
-: "${SHERLOCK_API_KEY:?set SHERLOCK_API_KEY}"
-
+RUNS="${BENCH_RUNS:-$HERE/runs}"
+CONTROLLED=0
+if [ -n "${SHERLOCK_RUN_TAG:-}" ] || [ -n "${SHERLOCK_TRACE:-}" ]; then
+  [ -n "${SHERLOCK_RUN_TAG:-}" ] && [ -n "${SHERLOCK_TRACE:-}" ] || {
+    echo "✗ controlled run requires both SHERLOCK_RUN_TAG and SHERLOCK_TRACE" >&2
+    exit 2
+  }
+  CONTROLLED=1
+  STAMP="$SHERLOCK_RUN_TAG"
+  TRACE="$SHERLOCK_TRACE"
+  python3 - "$RUNS" "$STAMP" "$TRACE" <<'PY' || exit 2
+import os, re, stat, sys
+runs, tag, trace = sys.argv[1:]
+if not os.path.isabs(runs) or not os.path.isabs(trace):
+    raise SystemExit("controlled run paths must be absolute")
+if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,95}", tag) or tag in (".", ".."):
+    raise SystemExit("invalid controlled run tag")
+if os.path.realpath(runs) != os.path.normpath(runs):
+    raise SystemExit("BENCH_RUNS must be canonical and contain no symlink component")
+expected = os.path.join(runs, tag)
+if trace != expected or os.path.realpath(trace) != trace:
+    raise SystemExit("controlled trace is not canonical BENCH_RUNS/tag")
+try:
+    mode = os.lstat(trace).st_mode
+except OSError as exc:
+    raise SystemExit("controlled trace missing: %s" % exc)
+if not stat.S_ISDIR(mode) or stat.S_ISLNK(mode):
+    raise SystemExit("controlled trace must be a no-symlink directory")
+if os.listdir(trace) != ["run-manifest.json"]:
+    raise SystemExit("controlled trace collision before launch")
+manifest = os.lstat(os.path.join(trace, "run-manifest.json")).st_mode
+if not stat.S_ISREG(manifest) or stat.S_ISLNK(manifest):
+    raise SystemExit("run-manifest.json must be a regular no-symlink file")
+PY
+else
+  mkdir -p "$RUNS"
+  STAMP="$(date -u +%Y%m%dT%H%M%SZ)-$ARM"
+  TRACE="$RUNS/$STAMP"
+  mkdir -p "$TRACE"
+fi
+DATASET="${SHERLOCK_DATASET:-bench649}"
+MEASURE_DIR="$(cd "$HERE/../../measure" && pwd)"
+STATE_TOOL="$MEASURE_DIR/run_state.py"
+ATTEMPT_FILE="$TRACE/current-attempt"
+W=""
+TERMINAL_WRITTEN=0
+PROOF_PID="" PROOF_START="" PROOF_PGID="" PROOF_BOOT="" PROOF_COMMAND=""
+state_set() {
+  if [ "$CONTROLLED" = 1 ]; then
+    python3 "$STATE_TOOL" set "$TRACE/status.json" "$@" --pid "$PROOF_PID" \
+      --process-start-ticks "$PROOF_START" --pgid "$PROOF_PGID" \
+      --boot-id-sha256 "$PROOF_BOOT" --command-sha256 "$PROOF_COMMAND"
+  else
+    python3 "$STATE_TOOL" set "$TRACE/status.json" "$@"
+  fi
+}
+state_event() {
+  if [ "$CONTROLLED" = 1 ]; then
+    python3 "$STATE_TOOL" event "$TRACE/status-events.jsonl" "$@" --pid "$PROOF_PID" \
+      --process-start-ticks "$PROOF_START" --pgid "$PROOF_PGID" \
+      --boot-id-sha256 "$PROOF_BOOT" --command-sha256 "$PROOF_COMMAND"
+  else
+    python3 "$STATE_TOOL" event "$TRACE/status-events.jsonl" "$@"
+  fi
+}
+if [ "$CONTROLLED" = 1 ]; then
+  python3 - "$TRACE/.runner-ready" <<'PY' || exit 2
+import os, sys
+path = sys.argv[1]
+fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+try: os.fsync(fd)
+finally: os.close(fd)
+directory = os.open(os.path.dirname(path), os.O_RDONLY)
+try: os.fsync(directory)
+finally: os.close(directory)
+PY
+  proof_path="$TRACE/controller-process.json"
+  proof_wait=0
+  while [ ! -f "$proof_path" ] && [ "$proof_wait" -lt 300 ]; do
+    sleep 0.1
+    proof_wait=$((proof_wait + 1))
+  done
+  [ -f "$proof_path" ] || { echo "✗ controller process proof was not supplied" >&2; exit 2; }
+  proof_values="$(python3 - "$proof_path" <<'PY'
+import json, re, stat, sys
+path = sys.argv[1]
+mode = __import__('os').lstat(path).st_mode
+if not stat.S_ISREG(mode) or stat.S_ISLNK(mode): raise SystemExit(1)
+with open(path, encoding="utf-8") as handle: row = json.load(handle)
+fields = {"pid", "process_start_ticks", "pgid", "boot_id_sha256", "command_sha256"}
+if set(row) != fields: raise SystemExit(1)
+if any(type(row[name]) is not int or row[name] <= 0 for name in ("pid", "process_start_ticks", "pgid")):
+    raise SystemExit(1)
+if row["pid"] != row["pgid"]: raise SystemExit(1)
+if any(not isinstance(row[name], str) or not re.fullmatch(r"[0-9a-f]{64}", row[name])
+       for name in ("boot_id_sha256", "command_sha256")): raise SystemExit(1)
+print(row["pid"], row["process_start_ticks"], row["pgid"], row["boot_id_sha256"], row["command_sha256"])
+PY
+)" || { echo "✗ invalid controller process proof" >&2; exit 2; }
+  read -r PROOF_PID PROOF_START PROOF_PGID PROOF_BOOT PROOF_COMMAND <<EOF
+$proof_values
+EOF
+fi
+state_set --run-tag "$STAMP" --phase STAGING --dataset "$DATASET" --arm "$ARM" --trace-dir "$TRACE"
+state_event STAGING --run-tag "$STAMP" --phase STAGING --dataset "$DATASET" --arm "$ARM" --trace-dir "$TRACE"
+save_trace() {
+  [ -n "$W" ] || return 0
+  mkdir -p "$TRACE"
+  if [ -n "${LANE_PROXY_PID:-}" ]; then
+    kill "$LANE_PROXY_PID" 2>/dev/null || true
+    wait "$LANE_PROXY_PID" 2>/dev/null || true
+    unset LANE_PROXY_PID
+  fi
+  if [ -f "$W/out.json" ]; then cp "$W/out.json" "$TRACE/out.json" || return 1; fi
+  for partial in "$W"/out-attempt-*.json; do [ -f "$partial" ] && cp "$partial" "$TRACE/$(basename "$partial")"; done
+  for partial in "$W"/err-attempt-*.txt "$W"/exit-attempt-*.txt; do [ -f "$partial" ] && cp "$partial" "$TRACE/$(basename "$partial")"; done
+  [ -f "$W/attempts.jsonl" ] && cp "$W/attempts.jsonl" "$TRACE/attempts.jsonl"
+  [ -f "$W/incomplete.json" ] && cp "$W/incomplete.json" "$TRACE/incomplete.json"
+  [ -f "$W/err.txt" ] && cp "$W/err.txt" "$TRACE/err.txt"
+  if [ -f "$W/.qwen/settings.json" ]; then
+    cp "$W/.qwen/settings.json" "$TRACE/qwen-settings.json" || return 1
+  else
+    printf '{}\n' > "$TRACE/qwen-settings.json" || return 1
+  fi
+  if [ -d "$W/work" ]; then
+    [ ! -e "$TRACE/work" ] || return 1
+    work_copy="$(mktemp -d "$TRACE/.work.XXXXXX")" || return 1
+    cp -r "$W/work/." "$work_copy/" || return 1
+    mv "$work_copy" "$TRACE/work" || return 1
+  fi
+  if [ -f "$W/.sherlock/active.json" ]; then
+    mkdir -p "$TRACE/.sherlock"
+    python3 - "$W/.sherlock/active.json" "$TRACE/.sherlock/active.json" "$TRACE" "$CORPUS" "$SKILLS/$ARM" <<'PY'
+import json, os, sys, tempfile
+source, target, trace, corpus, skill = sys.argv[1:]
+with open(source, encoding="utf-8") as handle:
+    row = json.load(handle)
+row.update({"workspace": os.path.realpath(trace), "out": os.path.realpath(os.path.join(trace, "work")),
+            "corpus": os.path.realpath(corpus), "skill_root": os.path.realpath(skill)})
+directory = os.path.dirname(target)
+fd, temporary = tempfile.mkstemp(prefix=".active.", dir=directory)
+try:
+    with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        json.dump(row, handle, ensure_ascii=False, sort_keys=True); handle.write("\n")
+        handle.flush(); os.fsync(handle.fileno())
+    os.replace(temporary, target); os.chmod(target, 0o600)
+    directory_fd = os.open(directory, os.O_RDONLY)
+    try: os.fsync(directory_fd)
+    finally: os.close(directory_fd)
+finally:
+    if os.path.exists(temporary): os.unlink(temporary)
+PY
+  fi
+  [ -n "${QWEN_HOME:-}" ] && [ -d "$QWEN_HOME" ] && cp -r "$QWEN_HOME" "$TRACE/qwen-home"
+  if [ -f "$TRACE.upstream.jsonl" ]; then
+    cp "$TRACE.upstream.jsonl" "$TRACE/upstream-completed.jsonl" || return 1
+  else
+    : > "$TRACE/upstream-completed.jsonl"
+  fi
+  sync || return 1
+  python3 - "$TRACE" "$STAMP" <<'PY' || return 1
+import json, os, sys, tempfile
+trace, run_tag = sys.argv[1:]
+out = os.path.join(trace, "out.json")
+try:
+    with open(out, encoding="utf-8") as handle: stream = json.load(handle)
+except (OSError, ValueError, TypeError):
+    sys.exit(0)
+rows = stream if isinstance(stream, list) else [stream]
+results = [(i, row) for i, row in enumerate(rows)
+           if isinstance(row, dict) and row.get("type") == "result"]
+if len(results) != 1 or results[0][0] != len(rows) - 1:
+    sys.exit(0)
+final = results[0][1]; text = final.get("result") or ""
+errored = (final.get("is_error") is True or text.lstrip().startswith("[API Error")
+           or ("[API Error" in text and len(text) < 400))
+usage = final.get("usage") if isinstance(final.get("usage"), dict) else {}
+candidate = {"schema": 1, "run_tag": run_tag, "result_stream": "out.json",
+             "work_root": "work", "artifact": "work/report.md",
+             "upstream_completed": "upstream-completed.jsonl",
+             "transport": {"exit_code": None, "status": "error" if errored else "success",
+                           "duration_s": None},
+             "usage": {"turns": None if errored else final.get("num_turns"),
+                       "input_tokens": None if errored else usage.get("input_tokens"),
+                       "output_tokens": None if errored else usage.get("output_tokens")}}
+fd, temporary = tempfile.mkstemp(prefix=".candidate.", dir=trace)
+try:
+    with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        json.dump(candidate, handle, ensure_ascii=False, sort_keys=True); handle.write("\n")
+        handle.flush(); os.fsync(handle.fileno())
+    os.link(temporary, os.path.join(trace, "candidate.json"), follow_symlinks=False)
+    directory = os.open(trace, os.O_RDONLY)
+    try: os.fsync(directory)
+    finally: os.close(directory)
+finally:
+    if os.path.exists(temporary): os.unlink(temporary)
+PY
+  rm -rf "$W"
+  W=""
+}
+on_exit() {
+  local rc="$1"
+  trap - EXIT
+  if [ "$TERMINAL_WRITTEN" = 0 ]; then
+    state_set --run-tag "$STAMP" --phase RUN_FAILED --dataset "$DATASET" --arm "$ARM" --trace-dir "$TRACE" --exit-code "$rc"
+    state_event RUN_FAILED --run-tag "$STAMP" --phase RUN_FAILED --dataset "$DATASET" --arm "$ARM" --trace-dir "$TRACE" --exit-code "$rc"
+  fi
+  save_trace
+  return "$rc"
+}
+trap 'on_exit $?' EXIT
+[ "$ARM" != unknown ] || { echo "usage: run-bench.sh <none|v1|v2|v3>" >&2; exit 2; }
 [ -d "$CORPUS" ] || { echo "✗ corpus not found: $CORPUS" >&2; exit 1; }
-
+: "${SHERLOCK_API_KEY:?set SHERLOCK_API_KEY}"
 W="$(mktemp -d "${TMPDIR:-/tmp}/bench-XXXXXX")"
+# Qwen Code only grants file tools access to its project workspace. Giving the
+# prompt an absolute corpus path outside that workspace produces a one-turn
+# refusal, even under yolo. Stage a private read-only-in-practice copy instead
+# of a symlink: a symlink resolves outside the boundary and is denied again.
+RUN_CORPUS="$W/corpus"
+mkdir -p "$RUN_CORPUS"
+cp -a "$CORPUS/." "$RUN_CORPUS/"
 # The trajectory is the ONLY way to tell "never opened the file" from "opened it
 # and closed it wrongly" from "found it and discarded it" — and that is exactly
 # the question every arm since v5 exists to answer. It used to be deleted on
 # exit, so five runs in a row were unreadable. Keep it next to the ledger.
-RUNS="${BENCH_RUNS:-$HERE/runs}"; mkdir -p "$RUNS"
-STAMP="$(date -u +%Y%m%dT%H%M%SZ)-$ARM"
-TRACE="$RUNS/$STAMP"
-save_trace() {
-  mkdir -p "$TRACE"
-  [ -f "$W/out.json" ] && cp "$W/out.json" "$TRACE/out.json"
-  for partial in "$W"/out-attempt-*.json; do
-    [ -f "$partial" ] && cp "$partial" "$TRACE/$(basename "$partial")"
-  done
-  [ -f "$W/err.txt" ]  && cp "$W/err.txt"  "$TRACE/err.txt"
-  # whatever the run wrote for itself (v11 keeps its worklist verdicts here)
-  [ -d "$W/work" ] && cp -r "$W/work" "$TRACE/work"
-  # A malformed upstream SSE must not erase the only resumable session state.
-  [ -d "$QWEN_HOME" ] && cp -r "$QWEN_HOME" "$TRACE/qwen-home"
-  rm -rf "$W"
-  [ -n "${LANE_PROXY_PID:-}" ] && kill "$LANE_PROXY_PID" 2>/dev/null
-}
-trap save_trace EXIT
 export QWEN_HOME="$W/home"; mkdir -p "$QWEN_HOME"
 
 # STATE THE CONTEXT WINDOW OUTRIGHT, same as run-case.sh. This is the runner on
 # the 649 MB corpus, so a 177,000-token ceiling hurts here most of all.
 # → measure/run-case.sh for why the default is 400,000 and not 1,048,576.
 CTX_WINDOW="${SHERLOCK_CONTEXT_WINDOW:-400000}"
+# Qwen's `agent` tool launches a subagent that does not inherit the project
+# `.qwen/skills/` directory. The result is a one-turn no-skill answer from the
+# empty runner directory. This exact failure is characterised in run-case.sh;
+# keep the target bench on the same, skill-loaded execution path.
+EXCLUDE_JSON=''
+if [ "${SHERLOCK_ALLOW_SUBAGENT:-0}" != "1" ]; then
+  EXCLUDE_JSON=', "tools": { "exclude": ["agent"] }'
+fi
 if [ "$CTX_WINDOW" != "0" ]; then
   mkdir -p "$W/.qwen"
-  printf '{ "model": { "generationConfig": { "contextWindowSize": %s } } }\n' \
-    "$CTX_WINDOW" > "$W/.qwen/settings.json"
+  printf '{ "model": { "generationConfig": { "contextWindowSize": %s } }%s }\n' \
+    "$CTX_WINDOW" "$EXCLUDE_JSON" > "$W/.qwen/settings.json"
+elif [ -n "$EXCLUDE_JSON" ]; then
+  mkdir -p "$W/.qwen"
+  printf '{ "tools": { "exclude": ["agent"] } }\n' > "$W/.qwen/settings.json"
 fi
+
+# Seal the exact target settings before the target can observe or mutate them.
+python3 - "$W/.qwen/settings.json" "$TRACE/qwen-settings-pre.json" <<'PY' || exit 1
+import os, sys, tempfile
+source, target = sys.argv[1:]
+try:
+    with open(source, "rb") as handle: data = handle.read()
+except FileNotFoundError:
+    data = b"{}\n"
+directory = os.path.dirname(target)
+fd, temporary = tempfile.mkstemp(prefix=".qwen-settings-pre.", dir=directory)
+try:
+    with os.fdopen(fd, "wb") as handle:
+        handle.write(data); handle.flush(); os.fsync(handle.fileno())
+    os.link(temporary, target, follow_symlinks=False)
+    directory_fd = os.open(directory, os.O_RDONLY)
+    try: os.fsync(directory_fd)
+    finally: os.close(directory_fd)
+finally:
+    if os.path.exists(temporary): os.unlink(temporary)
+PY
 
 if [ "$ARM" != "none" ]; then
   mkdir -p "$W/.qwen/skills"
@@ -73,14 +302,13 @@ fi
 #   1. $SHERLOCK_PROMPT_FILE           — explicit, wins
 #   2. $HERE/prompts/$DATASET.txt      — per-corpus, committed next to the key
 #   3. the historical outage prompt    — kept ONLY for dataset bench649
-DATASET="${SHERLOCK_DATASET:-bench649}"
 PROMPT_FILE="${SHERLOCK_PROMPT_FILE:-$HERE/prompts/$DATASET.txt}"
 if [ -f "$PROMPT_FILE" ]; then
   PROMPT="$(cat "$PROMPT_FILE")"
-  PROMPT="${PROMPT//\$CORPUS/$CORPUS}"
-  PROMPT="$(printf '%s' "$PROMPT" | sed "s|{CORPUS}|$CORPUS|g")"
+  PROMPT="${PROMPT//\$CORPUS/$RUN_CORPUS}"
+  PROMPT="$(printf '%s' "$PROMPT" | sed "s|{CORPUS}|$RUN_CORPUS|g")"
 elif [ "$DATASET" = "bench649" ]; then
-  PROMPT="Продакшн деградировал. Логи со всей платформы лежат в $CORPUS.
+  PROMPT="Продакшн деградировал. Логи со всей платформы лежат в $RUN_CORPUS.
 Найди ВСЕ проблемы и инциденты, определи корневую причину каждой и предложи,
 что делать. Ссылайся на конкретные строки в формате файл:строка."
 else
@@ -96,11 +324,26 @@ fi
 # handed `[SP]deepseek-v4-flash`, whose bracket prefix defeats qwen-code's own
 # model-id table and pins the context window to 200,000 — the "177,000-token
 # ceiling". On the 649 MB corpus that is the runner where it hurts most.
-MEASURE_DIR="$(cd "$HERE/../../measure" && pwd)"
 . "$MEASURE_DIR/upstream-lane.sh"
-upstream_lane_start "$BASE_URL" "$TRACE.upstream.jsonl" "$STAMP" "$MODEL"
+if ! upstream_lane_start "$BASE_URL" "$TRACE.upstream.jsonl" "$STAMP" "$MODEL" \
+  "$TRACE/upstream-inflight.json" "$ATTEMPT_FILE"; then
+  state_set --run-tag "$STAMP" --phase RUN_FAILED --dataset "$DATASET" --arm "$ARM" --trace-dir "$TRACE" \
+    --reason ATTRIBUTION_UNAVAILABLE --upstream-log "$TRACE.upstream.jsonl" \
+    --inflight-path "$TRACE/upstream-inflight.json"
+  state_event RUN_FAILED --run-tag "$STAMP" --phase RUN_FAILED --dataset "$DATASET" --arm "$ARM" --trace-dir "$TRACE" \
+    --reason ATTRIBUTION_UNAVAILABLE --upstream-log "$TRACE.upstream.jsonl" \
+    --inflight-path "$TRACE/upstream-inflight.json"
+  TERMINAL_WRITTEN=1
+  exit 3
+fi
 BASE_URL="$LANE_BASE_URL"
 CLIENT_MODEL="$LANE_CLIENT_MODEL"
+if [ "$CONTROLLED" = 1 ]; then
+  unset SHERLOCK_BUDGET_MAX_UPSTREAM_ATTEMPTS \
+    SHERLOCK_BUDGET_MAX_REQUEST_BYTES \
+    SHERLOCK_BUDGET_MAX_WALL_SECONDS \
+    SHERLOCK_BUDGET_MAX_CONSECUTIVE_PROVIDER_FAILURES
+fi
 
 echo "▶ bench arm=$ARM  dataset=$DATASET  corpus=$(du -sh "$CORPUS" | cut -f1)  model=$MODEL"
 START=$(date +%s)
@@ -111,21 +354,81 @@ RESUME_MAX_ATTEMPTS="${SHERLOCK_RESUME_MAX_ATTEMPTS:-2}"
 RESUME_BACKOFF_S="${SHERLOCK_RESUME_BACKOFF_S:-15}"
 RESUME_ATTEMPTS=0
 RESUME_SESSION=""
+LAST_SESSION=""
+ATTEMPT_REASON=""
+
+session_from_output() {
+  python3 - "$W/out.json" <<'PY'
+import re, sys
+try:
+    raw = open(sys.argv[1], encoding="utf-8", errors="replace").read()
+except OSError:
+    sys.exit(1)
+match = re.search(r'"session_id"\s*:\s*"([0-9a-f-]{16,})"', raw)
+if match:
+    print(match.group(1))
+    sys.exit(0)
+sys.exit(1)
+PY
+}
 
 run_qwen() {
+  local attempt="$1"
+  shift
+  local session="" parsed_session="" started rc finished
+  [ "${1:-}" = "--resume" ] && session="${2:-}"
+  printf '%s\n' "$attempt" > "$ATTEMPT_FILE"
+  started="$(date +%s)"
+  state_set --run-tag "$STAMP" --phase QWEN_RUNNING --dataset "$DATASET" --arm "$ARM" \
+    --trace-dir "$TRACE" --attempt "$attempt" --session-id "$session" \
+    --upstream-log "$TRACE.upstream.jsonl" --inflight-path "$TRACE/upstream-inflight.json"
+  state_event QWEN_RUNNING --run-tag "$STAMP" --phase QWEN_RUNNING --dataset "$DATASET" --arm "$ARM" \
+    --trace-dir "$TRACE" --attempt "$attempt" --session-id "$session" \
+    --upstream-log "$TRACE.upstream.jsonl" --inflight-path "$TRACE/upstream-inflight.json"
+  state_event ATTEMPT_STARTED --run-tag "$STAMP" --phase QWEN_RUNNING --dataset "$DATASET" --arm "$ARM" \
+    --trace-dir "$TRACE" --attempt "$attempt" --session-id "$session" --reason "$ATTEMPT_REASON" \
+    --upstream-log "$TRACE.upstream.jsonl" --inflight-path "$TRACE/upstream-inflight.json"
   # key via environment, never argv (visible in ps; this box has a guest account)
   ( cd "$W" && OPENAI_API_KEY="$SHERLOCK_API_KEY" OPENAI_BASE_URL="$BASE_URL" \
     timeout "$TIMEOUT" "$QWEN" --auth-type openai --model "$CLIENT_MODEL" \
       --approval-mode yolo "$@" --output-format json </dev/null \
   ) >"$W/out.json" 2>"$W/err.txt"
+  local rc=$?
+  finished="$(date +%s)"
+  # A resume must never overwrite the diagnostic from the attempt that failed.
+  cp "$W/out.json" "$W/out-attempt-$attempt.json"
+  cp "$W/err.txt" "$W/err-attempt-$attempt.txt"
+  printf '%s\n' "$rc" > "$W/exit-attempt-$attempt.txt"
+  parsed_session="$(session_from_output || true)"
+  [ -n "$parsed_session" ] && session="$parsed_session"
+  [ -n "$session" ] && LAST_SESSION="$session"
+  printf '{"attempt":%s,"session_id":"%s","exit_code":%s,"duration_s":%s,"output_bytes":%s,"stderr_bytes":%s}\n' \
+    "$attempt" "$session" "$rc" "$((finished - started))" "$(wc -c < "$W/out.json")" "$(wc -c < "$W/err.txt")" \
+    >> "$W/attempts.jsonl"
+  state_event ATTEMPT_FINISHED --run-tag "$STAMP" --phase QWEN_RUNNING --dataset "$DATASET" --arm "$ARM" \
+    --trace-dir "$TRACE" --attempt "$attempt" --session-id "$session" --exit-code "$rc" \
+    --reason "$ATTEMPT_REASON" --duration-s "$((finished - started))" --upstream-log "$TRACE.upstream.jsonl" \
+    --inflight-path "$TRACE/upstream-inflight.json"
+  return "$rc"
 }
 
 broken_session() {
   python3 - "$W/out.json" <<'PY'
-import json, sys
+import json, re, sys
 try:
-    rows = json.load(open(sys.argv[1], encoding="utf-8"))
-except (OSError, ValueError):
+    raw = open(sys.argv[1], encoding="utf-8", errors="replace").read()
+except OSError:
+    sys.exit(1)
+try:
+    rows = json.loads(raw)
+except ValueError:
+    # A broken provider can leave Qwen with a partial JSON array. Its system
+    # record already has the saved session id, so resume it instead of discarding
+    # all prior work because the final record is not parseable.
+    match = re.search(r'"session_id"\s*:\s*"([0-9a-f-]{16,})"', raw)
+    if match:
+        print(match.group(1))
+        sys.exit(0)
     sys.exit(1)
 if not isinstance(rows, list):
     rows = [rows]
@@ -144,125 +447,44 @@ sys.exit(1)
 PY
 }
 
-run_qwen -p "$PROMPT"
+run_qwen 0 -p "$PROMPT" || true
 while RESUME_SESSION="$(broken_session)" \
   && [ "$RESUME_ATTEMPTS" -lt "$RESUME_MAX_ATTEMPTS" ]; do
-  mv "$W/out.json" "$W/out-attempt-$RESUME_ATTEMPTS.json"
   RESUME_ATTEMPTS=$((RESUME_ATTEMPTS + 1))
+  ATTEMPT_REASON="broken_stream"
   BACKOFF=$((RESUME_BACKOFF_S * (2 ** (RESUME_ATTEMPTS - 1))))
+  state_event RECOVERY_DECIDED --run-tag "$STAMP" --phase QWEN_RUNNING --dataset "$DATASET" --arm "$ARM" \
+    --trace-dir "$TRACE" --attempt "$RESUME_ATTEMPTS" --session-id "$RESUME_SESSION" --reason broken_stream \
+    --upstream-log "$TRACE.upstream.jsonl" --inflight-path "$TRACE/upstream-inflight.json"
   echo "  ⚠ stream failed; preserving session $RESUME_SESSION and retrying in ${BACKOFF}s (attempt $RESUME_ATTEMPTS/$RESUME_MAX_ATTEMPTS)" >&2
   sleep "$BACKOFF"
-  run_qwen --resume "$RESUME_SESSION" -p "The previous provider stream failed. Continue the same investigation from saved state. Do not restart mapping; finish the unresolved worklist and deliver the report."
+  run_qwen "$RESUME_ATTEMPTS" --resume "$RESUME_SESSION" -p "The previous provider stream failed. Continue the same investigation from saved state. Do not restart mapping; finish the unresolved worklist and deliver the report." || true
 done
-mkdir -p "$TRACE"
 python3 - "$TRACE/recovery.json" "$RESUME_ATTEMPTS" "$RESUME_SESSION" <<'PY'
 import json, sys
 with open(sys.argv[1], "w", encoding="utf-8") as fh:
     json.dump({"resume_attempts": int(sys.argv[2]), "session_id": sys.argv[3]}, fh)
     fh.write("\n")
 PY
-ELAPSED=$(( $(date +%s) - START ))
-
-python3 - "$W/out.json" "$ARM" "$ELAPSED" "$CORPUS" "$LEDGER" "$TRACE" "$MODEL" \
-         "$W" "$MEASURE_DIR" "$DATASET" <<'PY'
-import importlib.util, json, os, re, sys
-out, arm, elapsed, corpus, ledger, trace, model, workroot, measure, dataset = sys.argv[1:11]
-
-# ONE definition of "what the run produced", shared with score-bench.py. A second
-# copy of this rule is how one measurement becomes two incomparable scales.
-_spec = importlib.util.spec_from_file_location(
-    "deliverable", os.path.join(measure, "deliverable.py"))
-D = importlib.util.module_from_spec(_spec); _spec.loader.exec_module(D)
-
-# ── A run delivers on TWO channels; this ledger used to see one ───────────────
-# 2026-08-02 (`runs/20260802T221034Z-v11`): citecheck green 45/45, «Теперь
-# финальный шаг — вывести отчёт полностью», `read_file(work/report.md)`, stop.
-# Final message 101 chars beside a complete 19,991-char report — 18,758,431
-# input tokens, no row. A tool result is not the `result` record, and no wording
-# fixes that: every phrasing of "output the report" is satisfiable by a tool the
-# model already has (two edits tried, `ebf39ca` and `6490599`, both failed).
-apath = os.path.join(workroot, "work", "report.md")
-art = ""
-if os.path.isfile(apath):
-    with open(apath, encoding="utf-8", errors="replace") as fh:
-        art = fh.read()
-
-raw = ""
-try:
-    with open(out, encoding="utf-8") as fh:
-        raw = fh.read()
-except OSError:
-    pass
-try:
-    d = json.loads(raw) if raw.strip() else []
-except ValueError:
-    d = []
-d = d if isinstance(d, list) else [d]
-final = next((r for r in d if isinstance(r, dict) and r.get("type") == "result"), None)
-sysr  = next((r for r in d if isinstance(r, dict) and r.get("type") == "system"), {})
-
-t = (final or {}).get("result") or ""
-broke = (final is None or final.get("is_error")
-         or t.lstrip().startswith("[API Error")
-         or ("[API Error" in t and len(t) < 400))
-artifact_only = False
-if broke:
-    # A killed or provider-errored run. It used to leave NO row at all, and ~33 %
-    # of this project's spend has bought exactly that. If a finished report
-    # survived, detection is still answerable — the COST is not, so every cost
-    # field stays null and never 0. → [[eval-must-measure-cost-not-just-quality]]
-    why = (final or {}).get("error") or t or "no final result record"
-    if not art.strip():
-        print("  ✗ run produced neither an answer nor a report, NOT recorded:",
-              str(why)[:160])
-        sys.exit(2)
-    print("  ⚠ run failed (%s) but work/report.md survived — ARTIFACT-ONLY row, "
-          "cost unknown" % str(why)[:80])
-    t, artifact_only = "", True
-
-deliverable = D.compose(t, art)
-delivered_in = D.channel(t, art)
-
-# Coverage: how many of the corpus's files does the run actually name?
-# Matched on the RELATIVE PATH, not the basename. Two files here are both called
-# `syslog`, so a basename count reported 30 files in a 31-file corpus and called
-# one citation two. Counted over BOTH channels — reading it off the final
-# message alone is what scored the collapsed run "0 of 31 files cited".
-rels = set()
-for root, _, fs in os.walk(corpus):
-    for f in fs:
-        rels.add(os.path.relpath(os.path.join(root, f), corpus).replace(os.sep, "/"))
-cited = {r for r in rels if r in deliverable}
-u = (final or {}).get("usage") or {}
-cost = (lambda k: None) if artifact_only else (lambda k: u.get(k))
-# `model` = what the PROVIDER was asked for (the alias); `client_model` = the
-# id the CLI reported, which is the one it sized its context window from.
-rec = {"arm": arm, "model": model, "client_model": sysr.get("model"),
-       "turns": None if artifact_only else (final or {}).get("num_turns"),
-       "duration_s": int(elapsed), "input_tokens": cost("input_tokens"),
-       "output_tokens": cost("output_tokens"), "answer_chars": len(t),
-       "artifact_chars": len(art), "deliverable_chars": len(deliverable),
-       "delivered_in": delivered_in, "artifact_only": artifact_only,
-       "files_in_corpus": len(rels), "files_cited": len(cited),
-       "cited_files": sorted(cited),
-       "line_refs": len(re.findall(r":\d+", deliverable)),
-       # was the literal "bench649" on EVERY row, whatever corpus ran. A run
-       # against an intrusion corpus filed under the dev corpus is a number
-       # attributed to the wrong evidence.
-       "dataset": dataset, "corpus_dir": corpus,
-       "trace_dir": trace, "answer": t, "artifact": art}
-with open(ledger, "a", encoding="utf-8") as f:
-    f.write(json.dumps(rec, ensure_ascii=False) + "\n")
-print("  ✓ turns=%s %ss in/out=%s/%s delivered_in=%s msg=%d file=%d "
-      "files_cited=%d/%d line_refs=%d"
-      % (rec["turns"], elapsed, rec["input_tokens"], rec["output_tokens"],
-         delivered_in, rec["answer_chars"], rec["artifact_chars"],
-         rec["files_cited"], rec["files_in_corpus"], rec["line_refs"]))
-if delivered_in == "file":
-    print("  ⚠ DELIVERY: the report is in work/report.md, not in the final message")
-print("  trajectory: %s" % trace)
-PY
-RC=$?
+save_trace
+[ -f "$TRACE/candidate.json" ] && RC=0 || RC=2
+if [ "$RC" -eq 0 ]; then
+  state_set --run-tag "$STAMP" --phase FINISHED_UNCHECKED --dataset "$DATASET" --arm "$ARM" --trace-dir "$TRACE" \
+    --attempt "$RESUME_ATTEMPTS" --session-id "${LAST_SESSION:-$RESUME_SESSION}" --upstream-log "$TRACE.upstream.jsonl" \
+    --inflight-path "$TRACE/upstream-inflight.json"
+  state_event FINISHED_UNCHECKED --run-tag "$STAMP" --phase FINISHED_UNCHECKED --dataset "$DATASET" --arm "$ARM" --trace-dir "$TRACE" \
+    --attempt "$RESUME_ATTEMPTS" --session-id "${LAST_SESSION:-$RESUME_SESSION}" --upstream-log "$TRACE.upstream.jsonl" \
+    --inflight-path "$TRACE/upstream-inflight.json"
+  TERMINAL_WRITTEN=1
+else
+  state_set --run-tag "$STAMP" --phase RUN_FAILED --dataset "$DATASET" --arm "$ARM" --trace-dir "$TRACE" \
+    --attempt "$RESUME_ATTEMPTS" --exit-code "$RC" --upstream-log "$TRACE.upstream.jsonl" \
+    --inflight-path "$TRACE/upstream-inflight.json"
+  state_event RUN_FAILED --run-tag "$STAMP" --phase RUN_FAILED --dataset "$DATASET" --arm "$ARM" --trace-dir "$TRACE" \
+    --attempt "$RESUME_ATTEMPTS" --exit-code "$RC" --upstream-log "$TRACE.upstream.jsonl" \
+    --inflight-path "$TRACE/upstream-inflight.json"
+  TERMINAL_WRITTEN=1
+fi
 # the CLI's own stderr is the only clue when the run produced nothing
-[ "$RC" -ne 0 ] && [ -f "$W/err.txt" ] && sed -n '1,8p' "$W/err.txt"
+[ "$RC" -ne 0 ] && [ -f "$TRACE/err.txt" ] && sed -n '1,8p' "$TRACE/err.txt"
 exit "$RC"

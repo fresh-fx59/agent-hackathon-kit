@@ -26,14 +26,18 @@ never logs the Authorization header. If it cannot parse a response it records
 `returned_model: null` rather than guessing — an unmeasured value is null, never
 a default. → measure/probes/upstream-split.sh
 """
+import fcntl
 import json
 import os
 import re
+import stat
+import tempfile
 import sys
 import threading
 import time
 import urllib.error
 import urllib.request
+import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlsplit
 
@@ -41,6 +45,13 @@ UPSTREAM_BASE = os.environ.get("UPSTREAM_BASE", "https://linkapi.ai/v1").rstrip(
 UPSTREAM_LOG = os.environ.get("UPSTREAM_LOG", "upstream.jsonl")
 LISTEN_PORT = int(os.environ.get("LISTEN_PORT", "8791"))
 RUN_TAG = os.environ.get("RUN_TAG", "")
+RUN_ATTEMPT = os.environ.get("RUN_ATTEMPT", "")
+RUN_ATTEMPT_FILE = os.environ.get("RUN_ATTEMPT_FILE", "")
+UPSTREAM_INFLIGHT = os.environ.get("UPSTREAM_INFLIGHT", "")
+UPSTREAM_BUDGET_STATE = os.environ.get("UPSTREAM_BUDGET_STATE", "")
+UPSTREAM_EXPECTED_RETURNED_IDENTITY = os.environ.get(
+    "UPSTREAM_EXPECTED_RETURNED_IDENTITY", "")
+PROXY_INSTANCE = str(uuid.uuid4())
 # THE 177,000-TOKEN CEILING WAS A MODEL-ID PARSING ARTIFACT, not a real limit.
 # qwen-code sizes the context window from the model id, and its own normalize()
 # turns "[SP]deepseek-v4-flash" into "[sp]deepseek-v4-flash", which matches no
@@ -60,12 +71,39 @@ UPSTREAM_MODEL = os.environ.get("UPSTREAM_MODEL", "")
 # Off by default (0) so the proxy stays a pass-through unless a runner asks.
 UPSTREAM_RETRY_MAX = int(os.environ.get("UPSTREAM_RETRY_MAX", "0") or 0)
 UPSTREAM_RETRY_BASE_MS = int(os.environ.get("UPSTREAM_RETRY_BASE_MS", "2000") or 2000)
+
+
+def _positive_env(name):
+    raw = os.environ.get(name)
+    if raw is None:
+        return None
+    value = int(raw)
+    if value <= 0:
+        raise ValueError("%s must be a positive integer" % name)
+    return value
+
+
+_BUDGET_LIMITS = {
+    "max_upstream_attempts": _positive_env("UPSTREAM_MAX_UPSTREAM_ATTEMPTS"),
+    "max_request_bytes": _positive_env("UPSTREAM_MAX_REQUEST_BYTES"),
+    "max_wall_seconds": _positive_env("UPSTREAM_MAX_WALL_SECONDS"),
+    "max_consecutive_provider_failures": _positive_env(
+        "UPSTREAM_MAX_CONSECUTIVE_PROVIDER_FAILURES"),
+}
+_BUDGET_ENABLED = bool(UPSTREAM_BUDGET_STATE)
+if _BUDGET_ENABLED and (not RUN_TAG or not UPSTREAM_EXPECTED_RETURNED_IDENTITY or
+                        any(value is None for value in _BUDGET_LIMITS.values())):
+    raise ValueError("controlled proxy requires run identity and all finite limits")
 # Only statuses that are transient on this lane. A 401/404/422 is a real defect
 # in the request and retrying it just burns the context again for nothing.
 _RETRYABLE = {400, 408, 429, 500, 502, 503, 504}
 
 _BASE_PATH = urlsplit(UPSTREAM_BASE).path.rstrip("/")     # e.g. "/v1"
 _LOG_LOCK = threading.Lock()
+_INFLIGHT_LOCK = threading.Lock()
+_BUDGET_LOCK = threading.Lock()
+_MAX_BUDGET_BYTES = 1024 * 1024
+_REASON_CODE = re.compile(r"[A-Z][A-Z0-9_]{0,63}")
 
 # Hop-by-hop headers are per-connection and must not be relayed (RFC 7230 §6.1).
 _HOP = {"connection", "keep-alive", "proxy-authenticate", "proxy-authorization",
@@ -105,6 +143,226 @@ def record(**row):
     with _LOG_LOCK:                       # ThreadingHTTPServer ⇒ concurrent turns
         with open(UPSTREAM_LOG, "a", encoding="utf-8") as fh:
             fh.write(line + "\n")
+
+
+class BudgetUnknown(Exception):
+    pass
+
+
+def _budget_timestamp():
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+
+def _strict_object(pairs):
+    row = {}
+    for key, value in pairs:
+        if key in row:
+            raise ValueError("duplicate JSON key")
+        row[key] = value
+    return row
+
+
+def _read_budget():
+    nofollow = getattr(os, "O_NOFOLLOW", 0)
+    try:
+        before = os.lstat(UPSTREAM_BUDGET_STATE)
+        if not stat.S_ISREG(before.st_mode) or stat.S_ISLNK(before.st_mode):
+            raise BudgetUnknown()
+        fd = os.open(UPSTREAM_BUDGET_STATE, os.O_RDONLY | nofollow)
+        try:
+            opened = os.fstat(fd)
+            if (not stat.S_ISREG(opened.st_mode) or opened.st_size > _MAX_BUDGET_BYTES or
+                    (before.st_dev, before.st_ino) != (opened.st_dev, opened.st_ino)):
+                raise BudgetUnknown()
+            chunks = []; total = 0
+            while total <= _MAX_BUDGET_BYTES:
+                chunk = os.read(fd, min(65536, _MAX_BUDGET_BYTES + 1 - total))
+                if not chunk: break
+                chunks.append(chunk); total += len(chunk)
+            finished = os.fstat(fd)
+            if (total > _MAX_BUDGET_BYTES or total != finished.st_size or
+                    (opened.st_dev, opened.st_ino, opened.st_size) !=
+                    (finished.st_dev, finished.st_ino, finished.st_size)):
+                raise BudgetUnknown()
+        finally:
+            os.close(fd)
+        return json.loads(b"".join(chunks).decode("utf-8"), object_pairs_hook=_strict_object)
+    except BudgetUnknown:
+        raise
+    except (OSError, UnicodeError, ValueError, TypeError, RecursionError) as exc:
+        raise BudgetUnknown() from exc
+
+
+def _budget_shape(row):
+    fields = {"schema", "run_tag", "updated_at", "attempts_charged",
+              "request_bytes", "consecutive_provider_failures", "limits",
+              "verdict", "reason"}
+    return (isinstance(row, dict) and set(row) == fields and row.get("schema") == 1 and
+            row.get("run_tag") == RUN_TAG and row.get("limits") == _BUDGET_LIMITS and
+            all(type(row.get(name)) is int and row[name] >= 0 for name in
+                ("attempts_charged", "request_bytes", "consecutive_provider_failures")) and
+            row.get("verdict") in ("WITHIN", "EXCEEDED") and
+            (row.get("reason") is None or
+             (isinstance(row.get("reason"), str) and _REASON_CODE.fullmatch(row["reason"]))))
+
+
+def _write_budget(row):
+    directory = os.path.dirname(os.path.abspath(UPSTREAM_BUDGET_STATE))
+    os.makedirs(directory, exist_ok=True)
+    fd, temporary = tempfile.mkstemp(prefix=".upstream-budget-state.", dir=directory)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as target:
+            json.dump(row, target, ensure_ascii=False, sort_keys=True)
+            target.write("\n")
+            target.flush()
+            os.fsync(target.fileno())
+        os.replace(temporary, UPSTREAM_BUDGET_STATE)
+        directory_fd = os.open(directory, os.O_RDONLY)
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
+    finally:
+        try:
+            os.unlink(temporary)
+        except FileNotFoundError:
+            pass
+
+
+def _reconcile_completed(row):
+    """Keep durable reservations at least as large as completed paid rows."""
+    attempts = 0
+    request_bytes = 0
+    try:
+        with _LOG_LOCK, open(UPSTREAM_LOG, encoding="utf-8") as source:
+            for line in source:
+                if not line.strip():
+                    continue
+                completed = json.loads(line)
+                if not isinstance(completed, dict):
+                    raise BudgetUnknown()
+                if completed.get("run_tag") != RUN_TAG:
+                    continue
+                charged = completed.get("request_bytes")
+                if type(charged) is not int or charged < 0:
+                    raise BudgetUnknown()
+                attempts += 1
+                request_bytes += charged
+    except FileNotFoundError:
+        return row
+    except (OSError, ValueError, TypeError) as exc:
+        raise BudgetUnknown() from exc
+    row["attempts_charged"] = max(row["attempts_charged"], attempts)
+    row["request_bytes"] = max(row["request_bytes"], request_bytes)
+    if row["verdict"] == "WITHIN":
+        if row["attempts_charged"] > row["limits"]["max_upstream_attempts"]:
+            row.update(verdict="EXCEEDED", reason="MAX_UPSTREAM_ATTEMPTS")
+        elif row["request_bytes"] > row["limits"]["max_request_bytes"]:
+            row.update(verdict="EXCEEDED", reason="MAX_REQUEST_BYTES")
+    return row
+
+
+def _budget_update(change):
+    if not _BUDGET_ENABLED:
+        return None
+    lock_path = UPSTREAM_BUDGET_STATE + ".lock"
+    directory = os.path.dirname(os.path.abspath(lock_path))
+    os.makedirs(directory, exist_ok=True)
+    with _BUDGET_LOCK, open(lock_path, "a+", encoding="utf-8") as lock:
+        fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+        try:
+            row = _read_budget()
+            if not _budget_shape(row):
+                raise BudgetUnknown()
+            row = _reconcile_completed(row)
+            changed = change(dict(row))
+            changed["updated_at"] = _budget_timestamp()
+            if not _budget_shape(changed):
+                raise BudgetUnknown()
+            _write_budget(changed)
+            return changed
+        finally:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+
+
+def _reserve_budget(request_bytes):
+    def reserve(row):
+        if row["verdict"] == "EXCEEDED":
+            return row
+        attempts = row["attempts_charged"] + 1
+        total_bytes = row["request_bytes"] + request_bytes
+        if attempts > row["limits"]["max_upstream_attempts"]:
+            row.update(verdict="EXCEEDED", reason="MAX_UPSTREAM_ATTEMPTS")
+        elif total_bytes > row["limits"]["max_request_bytes"]:
+            row.update(verdict="EXCEEDED", reason="MAX_REQUEST_BYTES")
+        else:
+            row["attempts_charged"] = attempts
+            row["request_bytes"] = total_bytes
+        return row
+    row = _budget_update(reserve)
+    return row is None or row["verdict"] == "WITHIN"
+
+
+def _record_budget_result(success):
+    def finish(row):
+        row["consecutive_provider_failures"] = (
+            0 if success else row["consecutive_provider_failures"] + 1)
+        if (not success and row["consecutive_provider_failures"] >=
+                row["limits"]["max_consecutive_provider_failures"]):
+            row.update(verdict="EXCEEDED", reason="MAX_CONSECUTIVE_PROVIDER_FAILURES")
+        return row
+    return _budget_update(finish)
+
+
+def _update_inflight(request_id, row=None):
+    """Atomically add or remove one request from the trace-local live map."""
+    if not UPSTREAM_INFLIGHT:
+        return
+    directory = os.path.dirname(os.path.abspath(UPSTREAM_INFLIGHT))
+    os.makedirs(directory, exist_ok=True)
+    lock_path = UPSTREAM_INFLIGHT + ".lock"
+    with _INFLIGHT_LOCK, open(lock_path, "a+", encoding="utf-8") as lock:
+        fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+        try:
+            try:
+                with open(UPSTREAM_INFLIGHT, encoding="utf-8") as source:
+                    requests = json.load(source).get("requests", {})
+            except (OSError, ValueError, AttributeError):
+                requests = {}
+            if row is None:
+                requests.pop(request_id, None)
+            else:
+                requests[request_id] = row
+            if not requests:
+                try:
+                    os.unlink(UPSTREAM_INFLIGHT)
+                except FileNotFoundError:
+                    pass
+                return
+            temporary = UPSTREAM_INFLIGHT + ".tmp.%d.%s" % (os.getpid(), uuid.uuid4().hex)
+            try:
+                with open(temporary, "w", encoding="utf-8") as target:
+                    json.dump({"requests": requests}, target, ensure_ascii=False, sort_keys=True)
+                    target.write("\n")
+                    target.flush()
+                    os.fsync(target.fileno())
+                os.replace(temporary, UPSTREAM_INFLIGHT)
+            finally:
+                try:
+                    os.unlink(temporary)
+                except FileNotFoundError:
+                    pass
+        finally:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+
+
+def _attempt():
+    if RUN_ATTEMPT_FILE:
+        try:
+            return open(RUN_ATTEMPT_FILE, encoding="utf-8").read().strip()[:32]
+        except OSError:
+            pass
+    return RUN_ATTEMPT
 
 
 # How much of an upstream error body is kept. 300 chars is enough for every
@@ -201,12 +459,36 @@ class Proxy(BaseHTTPRequestHandler):
         headers["Accept-Encoding"] = "identity"
         req = urllib.request.Request(self._upstream_url(), data=body or None,
                                      headers=headers, method=self.command)
-        state = {"returned_model": None, "tool_call": False, "error": None}
+        request_id = uuid.uuid4().hex
+        try:
+            _update_inflight(request_id, {
+                "started_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                "request_bytes": len(body), "path": self.path,
+                "requested_model": requested, "attempt": _attempt(),
+                "run_tag": RUN_TAG, "pid": os.getpid(), "proxy_instance": PROXY_INSTANCE,
+            })
+        except OSError:
+            pass  # observability can never alter request delivery
+        # HTTP 200 only says the front door accepted the request. Providers can
+        # splice an HTTP error into SSE after many successful turns; the client
+        # sees malformed JSON while a status-only ledger says success.
+        state = {"returned_model": None, "tool_call": False, "error": None,
+                 "stream_events": 0, "stream_parse_errors": 0,
+                 "stream_complete": None, "stream_bytes": 0,
+                 "response_valid": False}
         status = None
         attempt = 0
-        while True:
+        try:
+          while True:
             attempt += 1
             t_try = time.time()
+            try:
+                if not _reserve_budget(len(body)):
+                    self._budget_refusal()
+                    return
+            except BudgetUnknown:
+                self._budget_refusal()
+                return
             try:
                 resp = urllib.request.urlopen(req, timeout=1800)
                 status = resp.getcode()
@@ -224,11 +506,19 @@ class Proxy(BaseHTTPRequestHandler):
                         why = _err_text(e.read())
                     except Exception:
                         why = None
-                    record(requested_model=requested, returned_model=None,
-                           tool_call=False, status=status, attempt=attempt,
-                           duration_ms=int((time.time() - t_try) * 1000),
-                           sent_model=sent, request_bytes=len(body),
-                           path=self.path, stream=False, upstream_error=why)
+                    try:
+                        record(requested_model=requested, returned_model=None,
+                               tool_call=False, status=status, attempt=attempt,
+                               duration_ms=int((time.time() - t_try) * 1000),
+                               sent_model=sent, request_bytes=len(body),
+                               path=self.path, stream=False, upstream_error=why)
+                    except OSError:
+                        pass
+                    try:
+                        _record_budget_result(False)
+                    except BudgetUnknown:
+                        self._budget_refusal()
+                        return
                     time.sleep(min(60.0, (UPSTREAM_RETRY_BASE_MS / 1000.0)
                                    * (2 ** (attempt - 1))))
                     req = urllib.request.Request(self._upstream_url(),
@@ -238,11 +528,18 @@ class Proxy(BaseHTTPRequestHandler):
                     continue
                 break
             except Exception as e:                   # DNS, TLS, refused, timeout
-                record(requested_model=requested, returned_model=None,
-                       tool_call=False, status=None, error=str(e)[:300],
-                       attempt=attempt,
-                       duration_ms=int((time.time() - t0) * 1000), sent_model=sent,
-                       request_bytes=len(body), path=self.path, stream=False)
+                try:
+                    record(requested_model=requested, returned_model=None,
+                           tool_call=False, status=None, error=str(e)[:300],
+                           attempt=attempt,
+                           duration_ms=int((time.time() - t0) * 1000), sent_model=sent,
+                           request_bytes=len(body), path=self.path, stream=False)
+                except OSError:
+                    pass
+                try:
+                    _record_budget_result(False)
+                except BudgetUnknown:
+                    pass
                 self.send_response(502)
                 payload = json.dumps({"error": {"message": "proxy: %s" % e}}).encode()
                 self.send_header("Content-Type", "application/json")
@@ -251,20 +548,47 @@ class Proxy(BaseHTTPRequestHandler):
                 self.wfile.write(payload)
                 return
 
-        ctype = (resp.headers.get("Content-Type") or "")
-        streaming = "text/event-stream" in ctype.lower()
-        try:
-            if streaming:
-                self._pump_stream(resp, state)
-            else:
-                self._pump_whole(resp, status, state)
+          ctype = (resp.headers.get("Content-Type") or "")
+          streaming = "text/event-stream" in ctype.lower()
+          try:
+              if streaming:
+                  self._pump_stream(resp, state)
+              else:
+                  self._pump_whole(resp, status, state)
+          finally:
+              success = (type(status) is int and 200 <= status < 300 and
+                         state["returned_model"] == UPSTREAM_EXPECTED_RETURNED_IDENTITY and
+                         ((streaming and state["stream_complete"] is True and
+                           state["stream_parse_errors"] == 0) or
+                          (not streaming and state["response_valid"])))
+              try:
+                  _record_budget_result(success)
+              except BudgetUnknown:
+                  pass
+              try:
+                  record(requested_model=requested,
+                         returned_model=state["returned_model"], attempt=attempt,
+                         tool_call=state["tool_call"], status=status,
+                         duration_ms=int((time.time() - t0) * 1000), sent_model=sent,
+                         request_bytes=len(body), path=self.path, stream=streaming,
+                         upstream_error=state["error"], stream_events=state["stream_events"],
+                         stream_parse_errors=state["stream_parse_errors"],
+                         stream_complete=state["stream_complete"], stream_bytes=state["stream_bytes"])
+              except OSError:
+                  pass
         finally:
-            record(requested_model=requested,
-                   returned_model=state["returned_model"], attempt=attempt,
-                   tool_call=state["tool_call"], status=status,
-                   duration_ms=int((time.time() - t0) * 1000), sent_model=sent,
-                   request_bytes=len(body), path=self.path, stream=streaming,
-                   upstream_error=state["error"])
+            try:
+                _update_inflight(request_id)
+            except OSError:
+                pass
+
+    def _budget_refusal(self):
+        payload = b'{"error":{"message":"proxy: paid budget unavailable"}}'
+        self.send_response(503)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(payload)))
+        self.end_headers()
+        self.wfile.write(payload)
 
     def _relay_headers(self, resp, status, extra=()):
         self.send_response(status)
@@ -283,7 +607,9 @@ class Proxy(BaseHTTPRequestHandler):
         if status and status >= 400:
             state["error"] = _err_text(payload)
         try:
-            _scan_obj(json.loads(payload.decode("utf-8", "replace")), state)
+            parsed = json.loads(payload.decode("utf-8", "replace"))
+            state["response_valid"] = isinstance(parsed, dict)
+            _scan_obj(parsed, state)
         except Exception:
             pass
         self._relay_headers(resp, status)
@@ -298,16 +624,26 @@ class Proxy(BaseHTTPRequestHandler):
         self.end_headers()
         self.close_connection = True
         for raw in resp:
+            state["stream_bytes"] += len(raw)
             self.wfile.write(raw)
             self.wfile.flush()
             line = raw.strip()
             if line.startswith(b"data:"):
                 chunk = line[5:].strip()
-                if chunk and chunk != b"[DONE]":
+                if chunk == b"[DONE]":
+                    state["stream_complete"] = True
+                elif chunk:
+                    state["stream_events"] += 1
                     try:
                         _scan_obj(json.loads(chunk.decode("utf-8", "replace")), state)
                     except Exception:
-                        pass
+                        state["stream_parse_errors"] += 1
+                        # Do not persist arbitrary model text or corpus lines.
+                        # Keep only a gateway status embedded by a broken stream.
+                        match = re.search(br"HTTP/\d(?:\.\d)?\s+(\d{3})", chunk)
+                        state["error"] = ("malformed_sse_embedded_http_status:%s" %
+                                          match.group(1).decode("ascii") if match else
+                                          "malformed_sse_json")
 
 
 def main():

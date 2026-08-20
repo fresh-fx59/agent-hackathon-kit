@@ -85,7 +85,11 @@ set -uo pipefail
 . "$LANE"
 LANE_PROXY_PID=""
 trap '[ -n "${LANE_PROXY_PID:-}" ] && kill "$LANE_PROXY_PID" 2>/dev/null' EXIT
-upstream_lane_start "$UP_BASE" "$LOG_PATH" "run-tag" "$THE_MODEL"
+if ! upstream_lane_start "$UP_BASE" "$LOG_PATH" "run-tag" "$THE_MODEL" \
+    "${INFLIGHT_PATH:-}" "${ATTEMPT_PATH:-}"; then
+  echo "LANE_FAILED=1"
+  exit 9
+fi
 echo "BASE=$LANE_BASE_URL"
 echo "CLIENT_MODEL=$LANE_CLIENT_MODEL"
 export LANE_BASE_URL LANE_CLIENT_MODEL
@@ -183,6 +187,57 @@ class TheLanePutsTheProxyInThePath(unittest.TestCase):
         self.assertEqual(out.get("CLIENT_MODEL"), "[SP]deepseek-v4-flash")
         self.assertEqual(rows, [])
         self.assertEqual([r.get("model") for r in seen], ["[SP]deepseek-v4-flash"])
+
+    def test_strict_attribution_refuses_disabled_logging_before_provider_use(self):
+        """A controlled paid run must not silently take the direct fallback."""
+        out, seen, rows, p = self.drive(
+            "[SP]deepseek-v4-flash",
+            {"SHERLOCK_REQUIRE_ATTRIBUTION": "1", "SHERLOCK_UPSTREAM_LOG": "0"})
+        self.assertEqual(p.returncode, 9)
+        self.assertEqual(out.get("LANE_FAILED"), "1")
+        self.assertEqual(seen, [])
+        self.assertEqual(rows, [])
+
+    def test_strict_attribution_refuses_a_missing_proxy_before_provider_use(self):
+        """Missing local attribution is RUN_FAILED, never direct paid traffic."""
+        out, seen, _rows, p = self.drive(
+            "[SP]deepseek-v4-flash",
+            {"SHERLOCK_REQUIRE_ATTRIBUTION": "1",
+             "UPSTREAM_LANE_PROXY": "/nonexistent/upstream-log-proxy.py"})
+        self.assertEqual(p.returncode, 9)
+        self.assertEqual(out.get("LANE_FAILED"), "1")
+        self.assertEqual(seen, [])
+
+    def test_strict_lane_forwards_all_four_caps_only_to_the_proxy(self):
+        """A retry must be stopped by the proxy's atomic one-attempt reservation."""
+        trace = tempfile.mkdtemp()
+        with open(os.path.join(trace, "upstream-budget-state.json"), "w", encoding="utf-8") as fh:
+            json.dump({"schema": 1, "run_tag": "run-tag", "updated_at": "fixture",
+                       "attempts_charged": 0, "request_bytes": 0,
+                       "consecutive_provider_failures": 0,
+                       "limits": {"max_upstream_attempts": 1,
+                                  "max_request_bytes": 100000,
+                                  "max_wall_seconds": 300,
+                                  "max_consecutive_provider_failures": 5},
+                       "verdict": "WITHIN", "reason": None}, fh)
+        out, _seen, rows, p = self.drive(
+            "[SP]deepseek-v4-flash", {
+                "SHERLOCK_REQUIRE_ATTRIBUTION": "1",
+                "SHERLOCK_EXPECTED_RETURNED_IDENTITY": "DeepSeek-V4-Flash",
+                "SHERLOCK_BUDGET_MAX_UPSTREAM_ATTEMPTS": "1",
+                "SHERLOCK_BUDGET_MAX_REQUEST_BYTES": "100000",
+                "SHERLOCK_BUDGET_MAX_WALL_SECONDS": "300",
+                "SHERLOCK_BUDGET_MAX_CONSECUTIVE_PROVIDER_FAILURES": "5",
+                "SHERLOCK_UPSTREAM_RETRY_BASE_MS": "1",
+                "INFLIGHT_PATH": os.path.join(trace, "upstream-inflight.json"),
+            }, fail_times=3)
+        self.assertEqual(p.returncode, 0)
+        self.assertTrue(out.get("BASE", "").startswith("http://127.0.0.1:"))
+        self.assertEqual([row["status"] for row in rows], [400])
+        with open(os.path.join(trace, "upstream-budget-state.json"), encoding="utf-8") as fh:
+            state = json.load(fh)
+        self.assertEqual((state["attempts_charged"], state["verdict"], state["reason"]),
+                         (1, "EXCEEDED", "MAX_UPSTREAM_ATTEMPTS"))
 
 
 if __name__ == "__main__":

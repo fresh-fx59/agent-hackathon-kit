@@ -10,6 +10,8 @@ A stub `qwen` and a stub provider keep this network-free and free of charge.
 """
 import json
 import os
+import importlib.util
+import re
 import stat
 import subprocess
 import tempfile
@@ -21,6 +23,11 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 MEASURE = os.path.dirname(HERE)
 SHERLOCK = os.path.dirname(MEASURE)
 RUNNER = os.path.join(SHERLOCK, "eval", "bench", "run-bench.sh")
+
+_spec = importlib.util.spec_from_file_location(
+    "deliverable", os.path.join(MEASURE, "deliverable.py"))
+D = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(D)
 
 # Records argv, relays ONE request through OPENAI_BASE_URL carrying the id it was
 # handed, then answers in run-bench.sh's `--output-format json` shape.
@@ -150,10 +157,9 @@ class TheBenchRunnerUsesTheSameUpstreamLane(BenchRunnerRig, unittest.TestCase):
         _argv, seen, _rows, _p = self.go()
         self.assertEqual([r.get("model") for r in seen], ["[SP]deepseek-v4-flash"])
 
-    def test_the_ledger_names_the_provider_alias(self):
-        _argv, _seen, rows, p = self.go()
-        self.assertEqual(len(rows), 1, "no ledger row; stderr: %s" % p.stderr[-800:])
-        self.assertEqual(rows[0]["model"], "[SP]deepseek-v4-flash")
+    def test_the_runner_does_not_append_an_unchecked_ledger_row(self):
+        _argv, _seen, rows, _p = self.go()
+        self.assertEqual(rows, [], "the runner must not append an unchecked ledger row")
 
     def test_without_the_lane_the_cli_keeps_the_alias(self):
         argv, _seen, _rows, _p = self.go({"SHERLOCK_UPSTREAM_LOG": "0"})
@@ -170,8 +176,8 @@ class TheBenchRunnerUsesTheSameUpstreamLane(BenchRunnerRig, unittest.TestCase):
                 400000)
 
 
-class TheLedgerRecordsEveryChannelTheRunDeliveredOn(BenchRunnerRig, unittest.TestCase):
-    """The 18.76 M-token row that recorded nothing.
+class TheDeliveredArtifactContract(BenchRunnerRig, unittest.TestCase):
+    """Delivery facts are computed by the acceptance validator, not the runner.
 
     `20260802T221034Z-v11`: `citecheck` green at 45/45, «Теперь финальный шаг —
     вывести отчёт полностью», `read_file(work/report.md)`, stop. Final message
@@ -179,61 +185,56 @@ class TheLedgerRecordsEveryChannelTheRunDeliveredOn(BenchRunnerRig, unittest.Tes
     the `result` record, so the runner recorded a 101-char answer and the
     scorer had nothing to judge.
 
-    These tests pin the fix at the RUNNER, not at the skill's wording — two
-    wording edits already failed, because "output the report" is satisfiable by
-    a tool the model has.
+    These tests keep the channel semantics stable while the runner emits only a
+    candidate for validate-run.py; accepted ledger rows are written there.
     """
 
     REPORT = ("# Отчёт\n\napps/api.log:1 the vendor_ref query has no index\n"
               "svc/other.log:9 payments-worker panics on a short batch\n")
 
-    def test_a_report_file_is_recorded_beside_the_final_message(self):
-        _a, _s, rows, p = self.go({"QWEN_STUB_REPORT": self.REPORT})
-        self.assertEqual(len(rows), 1, "no ledger row; stderr: %s" % p.stderr[-800:])
-        self.assertEqual(rows[0]["artifact"], self.REPORT)
-        self.assertEqual(rows[0]["artifact_chars"], len(self.REPORT))
+    def test_a_report_file_is_classified_as_file_delivery(self):
+        _a, _s, rows, _p = self.go({"QWEN_STUB_REPORT": self.REPORT})
+        self.assertEqual(rows, [])
+        answer = "apps/api.log:1 something broke"
+        self.assertEqual(D.channel(answer, self.REPORT), "file")
+        self.assertGreaterEqual(len(D.compose(answer, self.REPORT)), len(self.REPORT))
 
-    def test_a_collapsed_message_beside_a_full_report_is_recorded_as_file(self):
+    def test_a_collapsed_message_beside_a_full_report_is_classified_as_file(self):
         _a, _s, rows, _p = self.go({"QWEN_STUB_REPORT": self.REPORT,
                                     "QWEN_STUB_ANSWER": "Отчёт готов."})
-        self.assertEqual(rows[0]["delivered_in"], "file")
-        self.assertEqual(rows[0]["answer_chars"], len("Отчёт готов."),
-                         "the collapse must stay visible, not be papered over")
+        self.assertEqual(rows, [])
+        self.assertEqual(D.channel("Отчёт готов.", self.REPORT), "file")
+        self.assertNotEqual(D.compose("Отчёт готов.", self.REPORT), "Отчёт готов.",
+                            "the collapse must stay visible, not be papered over")
 
-    def test_a_run_with_no_report_file_is_unchanged(self):
+    def test_a_run_with_no_report_file_is_classified_as_message(self):
         """Every row before 2026-08-03 is message-only, including the 0-of-11
         baseline. If this row moved, the published comparison would break."""
         _a, _s, rows, _p = self.go()
-        self.assertEqual(rows[0]["delivered_in"], "message")
-        self.assertEqual(rows[0]["artifact"], "")
-        self.assertEqual(rows[0]["deliverable_chars"], rows[0]["answer_chars"])
+        self.assertEqual(rows, [])
+        answer = "apps/api.log:1 something broke"
+        self.assertEqual(D.channel(answer, ""), "message")
+        self.assertEqual(len(D.compose(answer, "")), len(answer))
 
-    def test_coverage_counts_files_named_in_either_channel(self):
+    def test_coverage_counts_files_named_in_the_deliverable(self):
         """`files_cited` drove the "cited 0 of 31" reading of the collapsed run.
         It was counting a 101-char message against a 31-file corpus."""
         _a, _s, rows, _p = self.go({"QWEN_STUB_REPORT": self.REPORT,
                                     "QWEN_STUB_ANSWER": "Отчёт готов."})
-        self.assertEqual(rows[0]["files_cited"], 1,
+        self.assertEqual(rows, [])
+        deliverable = D.compose("Отчёт готов.", self.REPORT)
+        self.assertEqual(len({path for path in ("apps/api.log", "svc/other.log")
+                              if path in deliverable}), 2,
                          "apps/api.log is named in the file, not the message")
-        self.assertGreaterEqual(rows[0]["line_refs"], 2)
+        self.assertGreaterEqual(len(re.findall(r":\d+", deliverable)), 2)
 
-    def test_a_killed_run_that_left_a_report_is_recorded_with_NULL_cost(self):
-        """`20260802T151710Z-v11`: 0-byte out.json, 24,233-char report.md. The
-        runner exited before recording anything, so a paid-for run left no row
-        at all — and ~33 % of this project's spend has bought exactly that.
-        Detection is still answerable from the report; cost is NOT, so every
-        cost field stays null and never 0.
-        → [[eval-must-measure-cost-not-just-quality]]"""
+    def test_a_killed_run_that_left_a_report_writes_no_unchecked_row(self):
+        """A failed transport with a surviving report must not create an
+        unchecked accepted row; validate-run.py decides whether it is valid."""
         _a, _s, rows, p = self.go({"QWEN_STUB_REPORT": self.REPORT,
                                    "QWEN_STUB_KILL": "1"})
-        self.assertEqual(len(rows), 1, "stdout: %s\nstderr: %s"
-                         % (p.stdout[-600:], p.stderr[-600:]))
-        r = rows[0]
-        self.assertIs(r["artifact_only"], True)
-        self.assertEqual(r["artifact"], self.REPORT)
-        self.assertIsNone(r["input_tokens"], "unmeasured cost is null, never 0")
-        self.assertIsNone(r["output_tokens"])
-        self.assertIsNone(r["turns"])
+        self.assertEqual(rows, [], "the runner must not append an unchecked ledger row")
+        self.assertNotEqual(p.returncode, 0)
 
     def test_a_run_that_produced_nothing_at_all_is_still_refused(self):
         """No report, no answer: recording it would put a transport failure on

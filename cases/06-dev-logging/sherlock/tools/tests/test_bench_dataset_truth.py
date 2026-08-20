@@ -38,6 +38,11 @@ _spec = importlib.util.spec_from_file_location(
 SB = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(SB)
 
+_spec = importlib.util.spec_from_file_location(
+    "validate_run", os.path.join(BENCH, "validate-run.py"))
+VR = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(VR)
+
 
 def row(**kw):
     base = {"arm": "v14", "dataset": "bench649", "trace_dir": "/runs/x", "stub": False}
@@ -50,16 +55,26 @@ class DatasetIsRecorded(unittest.TestCase):
         src = open(RUNNER, encoding="utf-8").read()
         self.assertNotIn('"dataset": "bench649"', src,
                          "the literal is what filed every run under the dev corpus")
-        self.assertIn('"dataset": dataset', src)
+        self.assertNotIn('"dataset": dataset', src,
+                         "accepted dataset fields belong to validate-run.py")
 
-    def test_runner_records_the_corpus_directory_too(self):
-        """A dataset id is a label; the path is the fact behind it."""
-        self.assertIn('"corpus_dir": corpus', open(RUNNER, encoding="utf-8").read())
+    def test_runner_does_not_write_the_corpus_directory_to_ledger(self):
+        """The verified manifest, not the runner, owns the corpus identity."""
+        self.assertNotIn('"corpus_dir": corpus', open(RUNNER, encoding="utf-8").read(),
+                         "accepted corpus identity belongs to the verified manifest")
 
-    def test_runner_passes_dataset_into_the_ledger_writer(self):
-        src = open(RUNNER, encoding="utf-8").read()
-        self.assertIn('"$DATASET"', src)
-        self.assertIn("dataset = sys.argv[1:11]", src)
+    def test_validator_passes_manifest_identity_into_the_ledger_row(self):
+        """The validator copies identity from the verified manifest into the row."""
+        validity = {"run_tag": "run-1", "manifest_sha256": "manifest-sha",
+                    "candidate_sha256": "candidate-sha", "identity": {
+                        "requested_sha256": "requested-sha",
+                        "returned_sha256": "returned-sha"},
+                    "transport": {}, "usage": {}, "delivery": {}}
+        manifest = {"dataset": "bluesky", "arm": "v14"}
+        row = VR.ledger_row(validity, "validity-sha", manifest)
+        self.assertEqual(row["dataset"], "bluesky")
+        self.assertEqual(row["manifest_sha256"], "manifest-sha",
+                         "the verified manifest binds the row to its corpus identity")
 
     def test_runner_is_valid_shell(self):
         self.assertEqual(subprocess.call(["bash", "-n", RUNNER]), 0)

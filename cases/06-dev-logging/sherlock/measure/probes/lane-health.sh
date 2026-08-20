@@ -38,18 +38,29 @@ BAD_PCT="${PROBE_BAD_PCT:-35}"
 # how a 3/3 "healthy" verdict gated a run that then failed 46 % of its calls.
 SHAPE="${PROBE_SHAPE:-history}"
 NTOOLS="${PROBE_TOOLS:-25}"
+RECEIPT_PATH="${PROBE_RECEIPT_PATH:-}"
+ENDPOINT_LABEL="${PROBE_ENDPOINT_LABEL:-${BASE_URL}}"
+LANE_LABEL="${PROBE_LANE:-${ENDPOINT_LABEL}}"
+PROVIDER_LABEL="${PROBE_PROVIDER:-${ENDPOINT_LABEL}}"
+EXPECTED_MODEL="${PROBE_EXPECTED_RETURNED_MODEL:-DeepSeek-V4-Flash}"
 export PROBE_URL="$BASE_URL" PROBE_MODEL="$MODEL" PROBE_SIZES="$SIZES_KB" \
        PROBE_N="$REPS" PROBE_OK="$OK_PCT" PROBE_BAD="$BAD_PCT" PROBE_SHAPE="$SHAPE" \
-       PROBE_TOOLS="$NTOOLS"
+       PROBE_TOOLS="$NTOOLS" PROBE_RECEIPT="$RECEIPT_PATH" PROBE_ENDPOINT="$ENDPOINT_LABEL" \
+       PROBE_LANE="$LANE_LABEL" PROBE_PROVIDER="$PROVIDER_LABEL" PROBE_EXPECTED="$EXPECTED_MODEL"
 
 python3 - <<'PY'
-import json, os, sys, time, urllib.request
+import datetime, json, os, sys, tempfile, time, urllib.error, urllib.request
 
 url = os.environ["PROBE_URL"].rstrip("/") + "/chat/completions"
 model = os.environ["PROBE_MODEL"]
 key = os.environ["SHERLOCK_API_KEY"]
-sizes = [int(s) for s in os.environ["PROBE_SIZES"].split()]
-reps = int(os.environ["PROBE_N"])
+try:
+    sizes = [int(s) for s in os.environ["PROBE_SIZES"].split()]
+    reps = int(os.environ["PROBE_N"])
+    if not sizes or reps < 1 or any(s <= 0 for s in sizes): raise ValueError
+except (ValueError, TypeError):
+    print("CONFIG_ERROR: invalid probe sizes/reps", file=sys.stderr)
+    sys.exit(2)
 ok_pct, bad_pct = float(os.environ["PROBE_OK"]), float(os.environ["PROBE_BAD"])
 
 # Realistic filler: a log line, because that is what a real turn is carrying.
@@ -120,9 +131,14 @@ for kb in sizes:
         t0 = time.time()
         req = urllib.request.Request(url, data=payload, headers={
             "Content-Type": "application/json", "Authorization": "Bearer " + key})
+        response_bytes = 0
+        status = None
+        error_code = None
         try:
             with urllib.request.urlopen(req, timeout=120) as resp:
+                status = int(resp.status)
                 raw = resp.read()
+                response_bytes = len(raw)
             # A 200 IS the health signal. Which model answered is a bonus, and
             # failing to extract it must never be reported as a lane failure.
             #
@@ -137,45 +153,79 @@ for kb in sizes:
             # a name can drift from behaviour, a body cannot.
             name, text = None, raw.decode("utf-8", "replace")
             if text.lstrip().startswith("data:"):
+                saw_done, parse_errors, embedded_status = False, 0, None
                 for ln in text.splitlines():
-                    if ln.startswith("data: ") and '"model"' in ln:
-                        try:
-                            name = json.loads(ln[6:]).get("model")
-                        except ValueError:
-                            pass
-                        if name:
-                            break
+                    if not ln.startswith("data: "):
+                        continue
+                    payload = ln[6:]
+                    if payload == "[DONE]":
+                        saw_done = True
+                        continue
+                    try:
+                        event = json.loads(payload)
+                    except ValueError:
+                        parse_errors += 1
+                        hit = __import__("re").search(r"HTTP/\d(?:\.\d)?\s+(\d{3})", payload)
+                        embedded_status = hit.group(1) if hit else None
+                        continue
+                    if event.get("model") and not name:
+                        name = event["model"]
+                # A provider can send a gateway page as a `data:` line after
+                # returning HTTP 200. That killed a 60-turn Qwen run while the
+                # old health gate incorrectly called it healthy.
+                if parse_errors or not saw_done:
+                    detail = "malformed SSE (%d parse errors, done=%s" % (parse_errors, saw_done)
+                    if embedded_status:
+                        detail += ", embedded HTTP %s" % embedded_status
+                    error_code = "MALFORMED_SSE"
+                    raise RuntimeError(detail + ")")
             else:
                 try:
                     name = json.loads(text).get("model")
                 except ValueError:
+                    error_code = "MALFORMED_JSON"
                     pass
-            rows.append((kb, 200, time.time() - t0, name, None))
+            rows.append({"size_kb": kb, "status": 200, "duration_s": time.time() - t0,
+                         "returned_model": name, "error_code": error_code,
+                         "request_bytes": len(payload), "response_bytes": response_bytes,
+                         "attempt": r + 1})
         except Exception as e:
-            code = getattr(e, "code", None) or type(e).__name__
+            if isinstance(e, urllib.error.HTTPError):
+                status = int(e.code)
+                error_code = "HTTP_%d" % status
+                try:
+                    response_bytes = len(e.read(4096))
+                except Exception:
+                    pass
+            elif error_code is None:
+                error_code = "MALFORMED_SSE" if isinstance(e, RuntimeError) else "REQUEST_ERROR"
             # KEEP THE PROVIDER'S OWN WORDS. Until 2026-08-02 this except clause
             # discarded the response body, so a degraded verdict said "0/6" and
             # nothing about whether the lane was rate-limiting us, refusing the
             # request, or falling over. Three theories about these failures were
             # argued from counts alone and two were wrong.
-            why = None
+            why = str(e)[:300] or None
             try:
-                why = e.read().decode("utf-8", "replace").strip()[:300]
+                why = e.read().decode("utf-8", "replace").strip()[:300] or why
             except Exception:
                 pass
-            rows.append((kb, code, time.time() - t0, None, why))
+            rows.append({"size_kb": kb, "status": status or 0,
+                         "duration_s": time.time() - t0, "returned_model": None,
+                         "error_code": error_code, "request_bytes": len(payload),
+                         "response_bytes": response_bytes, "attempt": r + 1,
+                         "detail": why})
         total_bytes += len(payload)
 
 print("shape=%s tools=%d" % (shape, len(TOOLS)))
 print("size   ok/total   median s   returned")
 worst = 0.0
 for kb in sizes:
-    g = [r for r in rows if r[0] == kb]
-    good = [r for r in g if r[1] == 200]
+    g = [r for r in rows if r["size_kb"] == kb]
+    good = [r for r in g if r["status"] == 200]
     fail = 100.0 * (len(g) - len(good)) / len(g)
     worst = max(worst, fail)
-    med = sorted(r[2] for r in g)[len(g) // 2]
-    names = sorted({r[3] for r in good if r[3]})
+    med = sorted(r["duration_s"] for r in g)[len(g) // 2]
+    names = sorted({r["returned_model"] for r in good if r["returned_model"]})
     print("%4dK  %d/%-8d %6.1f     %s" % (kb, len(good), len(g), med,
                                           ",".join(names) or "-"))
 print("\nuploaded %.2f MB across %d calls; worst-size fail rate %.1f%%"
@@ -186,17 +236,60 @@ print("\nuploaded %.2f MB across %d calls; worst-size fail rate %.1f%%"
 # they call for three different responses: wait, fix the request, or switch lane.
 reasons = {}
 for r in rows:
-    if r[1] != 200:
+    if r["status"] != 200:
         # The status is always shown, even when the body is empty: "400 with no
         # body" is itself a finding, and hiding the failure behind a missing
         # explanation is the blindness this block exists to remove.
-        key = "%s  %s" % (r[1], (r[4] or "(no body)").replace("\n", " "))
+        key = "%s  %s" % (r["status"], (r.get("detail") or "(no body)").replace("\n", " "))
         reasons[key] = reasons.get(key, 0) + 1
 if reasons:
     print("\nwhat the provider said:")
     for txt, n in sorted(reasons.items(), key=lambda kv: -kv[1]):
         print("  %3d x  %s" % (n, txt))
 
+receipt = os.environ.get("PROBE_RECEIPT", "")
+expected = os.environ.get("PROBE_EXPECTED", "")
+required = {100, 250, 400}
+receipt_healthy = (set(sizes) >= required and {r["size_kb"] for r in rows} >= required and
+                   all(r["status"] == 200 for r in rows) and
+                   all(r["returned_model"] == expected for r in rows))
+if receipt:
+    now = datetime.datetime.now(datetime.timezone.utc)
+    iso = lambda value: value.isoformat().replace("+00:00", "Z")
+    safe_rows = [{k: r.get(k) for k in ("size_kb", "status", "returned_model",
+                 "error_code", "duration_s", "request_bytes", "response_bytes", "attempt")} for r in rows]
+    doc = {"schema": 1, "checked_at": iso(now),
+           "expires_at": iso(now + datetime.timedelta(minutes=15)),
+           "lane": os.environ.get("PROBE_LANE", "")[:200],
+           "provider": os.environ.get("PROBE_PROVIDER", "")[:200],
+           "requested_model": model[:200], "shape": shape, "tools": len(TOOLS),
+           "sizes_kb": sizes, "history": safe_rows,
+           "verdict": "HEALTHY" if receipt_healthy else "DEGRADED",
+           "started_at": iso(now), "finished_at": iso(now), "ttl_seconds": 900,
+           "endpoint": os.environ.get("PROBE_ENDPOINT", "")[:200], "reps": reps,
+           "total_request_bytes": sum(r["request_bytes"] for r in rows),
+           "total_response_bytes": sum(r["response_bytes"] for r in rows)}
+    tmp = None
+    try:
+        parent = os.path.dirname(os.path.abspath(receipt)) or "."
+        os.makedirs(parent, exist_ok=True)
+        fd, tmp = tempfile.mkstemp(prefix=".health.", dir=parent, text=True)
+        with os.fdopen(fd, "w", encoding="utf-8") as out:
+            json.dump(doc, out, sort_keys=True, separators=(",", ":")); out.write("\n")
+            out.flush(); os.fsync(out.fileno())
+        os.replace(tmp, receipt)
+        dfd = os.open(parent, os.O_RDONLY)
+        try: os.fsync(dfd)
+        finally: os.close(dfd)
+    except OSError:
+        if tmp:
+            try: os.unlink(tmp)
+            except OSError: pass
+        print("RECEIPT_ERROR: unable to persist health receipt", file=sys.stderr)
+        sys.exit(2)
+if receipt and not receipt_healthy:
+    print("VERDICT: DEGRADED — health receipt identity or required result failed")
+    sys.exit(1)
 if worst >= bad_pct:
     print("VERDICT: DEGRADED — do not start a metered batch")
     sys.exit(1)
