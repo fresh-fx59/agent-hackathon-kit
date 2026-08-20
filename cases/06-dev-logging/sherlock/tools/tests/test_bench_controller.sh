@@ -9,6 +9,7 @@ from pathlib import Path
 import signal
 import stat
 import subprocess
+import sys
 import tempfile
 import time
 import unittest
@@ -194,12 +195,17 @@ class ControllerFixture:
         self.target_tool = self.base / "target-tool.sh"
         self.group_child_tool = self.base / "group-child.py"
         self.crash_controller_tool = self.base / "crash-controller.py"
+        self.foreign_process = None
         self._write_tools()
 
     def close(self):
         if self.child_pid.exists():
             try: os.kill(int(self.child_pid.read_text()),signal.SIGKILL)
             except (OSError,ValueError): pass
+        if self.foreign_process is not None:
+            try: self.foreign_process.wait(timeout=3)
+            except subprocess.TimeoutExpired:
+                self.foreign_process.kill(); self.foreign_process.wait(timeout=3)
         self.tmp.cleanup()
 
     def _write_tools(self):
@@ -265,6 +271,8 @@ if mutation:
         raw=open(path).read().strip(); open(path,"w").write('{"schema":1,'+raw[1:]+"\n")
     elif mutation == "oversized":
         with open(path,"a") as target: target.write(" "*(1024*1024+1))
+    elif mutation == "deep":
+        open(path,"w").write("["*1500+"]"*1500)
 raise SystemExit(0)
 ''', encoding="utf-8"); self.validator_tool.chmod(0o755)
         self.health_tool.write_text(r'''#!/usr/bin/env python3
@@ -453,6 +461,31 @@ class PersistentControllerTests(unittest.TestCase):
         result=self.fx.run(); self.assertNotEqual(result.returncode,0)
         self.assertEqual(key.read_bytes(),b"short"); self.assertFalse(self.fx.capture.exists())
 
+    def test_existing_key_swap_after_stat_never_reads_replacement_inode(self):
+        keydir=self.fx.controllers/"keys"; keydir.mkdir(mode=0o700)
+        key=keydir/"controller.key"; key.write_bytes(b"A"*32); key.chmod(0o600)
+        outside=self.fx.base/"outside.key"; outside.write_bytes(b"B"*32); outside.chmod(0o600)
+        hookdir=self.fx.base/"python-hook"; hookdir.mkdir()
+        (hookdir/"sitecustomize.py").write_text(r'''
+import os
+real_stat=os.stat
+swapped=False
+def guarded_stat(path,*args,**kwargs):
+    global swapped
+    result=real_stat(path,*args,**kwargs)
+    if (not swapped and os.path.abspath(os.fspath(path)) == os.environ.get("SWAP_KEY_PATH")
+            and kwargs.get("follow_symlinks") is False):
+        swapped=True
+        os.unlink(path); os.symlink(os.environ["SWAP_KEY_TARGET"],path)
+    return result
+os.stat=guarded_stat
+''',encoding="utf-8")
+        result=self.fx.run(env=self.fx.env(PYTHONPATH=str(hookdir),SWAP_KEY_PATH=str(key),
+                                            SWAP_KEY_TARGET=str(outside)))
+        self.assertNotEqual(result.returncode,0,(result.stdout,result.stderr))
+        self.assertFalse(self.fx.capture.exists())
+        self.assertEqual(outside.read_bytes(),b"B"*32)
+
     def test_health_failure_blocks_before_target_and_paid_phase(self):
         result=self.fx.run(env=self.fx.env(FAKE_HEALTH_VERDICT="DEGRADED"))
         self.assertNotEqual(result.returncode,0); self.assertFalse(self.fx.capture.exists())
@@ -572,6 +605,64 @@ class PersistentControllerTests(unittest.TestCase):
         self.assertEqual((trace/"trace-manifest.json").read_bytes(),manifest)
         self.assertTrue((trace/"sealed").is_file())
 
+    def test_terminal_resume_authenticates_seal_before_using_mutable_process_proof(self):
+        first=self.fx.run(); self.assertEqual(first.returncode,0,(first.stdout,first.stderr))
+        controller=self.fx.controller_dir(); link=json.loads((controller/"controller-child.json").read_text())
+        trace=Path(link["child_trace"])
+        self.fx.foreign_process=subprocess.Popen(
+            [sys.executable,str(self.fx.group_child_tool),str(self.fx.proc),str(self.fx.child_pid)],
+            start_new_session=True,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+        deadline=time.time()+5
+        while not self.fx.child_pid.exists() and time.time()<deadline: time.sleep(.02)
+        self.assertTrue(self.fx.child_pid.exists())
+        pid=int(self.fx.child_pid.read_text()); stat_raw=(self.fx.proc/str(pid)/"stat").read_text()
+        values=stat_raw[stat_raw.rfind(")")+2:].split()
+        proof={"pid":pid,"process_start_ticks":int(values[19]),"pgid":int(values[2]),
+               "boot_id_sha256":hashlib.sha256((self.fx.proc/"sys/kernel/random/boot_id").read_bytes().strip()).hexdigest(),
+               "command_sha256":hashlib.sha256((self.fx.proc/str(pid)/"cmdline").read_bytes()).hexdigest()}
+        (trace/"controller-process.json").write_text(json.dumps(proof)+"\n",encoding="utf-8")
+        resumed=self.fx.run("--resume",controller.name,timeout=20)
+        self.assertNotEqual(resumed.returncode,0,(resumed.stdout,resumed.stderr))
+        self.assertIsNone(self.fx.foreign_process.poll(),"resume signalled an unauthenticated process group")
+        self.assertEqual(json.loads((controller/"status.json").read_text())["phase"],"BLOCKED_UNKNOWN")
+
+    def test_running_resume_never_acts_on_mutable_process_proof(self):
+        first=subprocess.Popen(["bash",str(CONTROLLER)],
+                               env=self.fx.env(FAKE_TARGET_MODE="wait"),
+                               stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+        deadline=time.time()+10
+        while not self.fx.capture.exists() and time.time()<deadline: time.sleep(.02)
+        self.assertTrue(self.fx.capture.exists())
+        controller=self.fx.controller_dir(); link=json.loads((controller/"controller-child.json").read_text())
+        trace=Path(link["child_trace"])
+        deadline=time.time()+5
+        while not (trace/"controller-process.json").exists() and time.time()<deadline: time.sleep(.02)
+        self.assertTrue((trace/"controller-process.json").exists())
+        first.kill(); first.wait(timeout=5)
+        (self.fx.base/"release-target").write_text("go\n")
+        self.fx.foreign_process=subprocess.Popen(
+            [sys.executable,str(self.fx.group_child_tool),str(self.fx.proc),str(self.fx.child_pid)],
+            start_new_session=True,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+        deadline=time.time()+5
+        while not self.fx.child_pid.exists() and time.time()<deadline: time.sleep(.02)
+        self.assertTrue(self.fx.child_pid.exists())
+        pid=int(self.fx.child_pid.read_text()); stat_raw=(self.fx.proc/str(pid)/"stat").read_text()
+        values=stat_raw[stat_raw.rfind(")")+2:].split()
+        proof={"pid":pid,"process_start_ticks":int(values[19]),"pgid":int(values[2]),
+               "boot_id_sha256":hashlib.sha256((self.fx.proc/"sys/kernel/random/boot_id").read_bytes().strip()).hexdigest(),
+               "command_sha256":hashlib.sha256((self.fx.proc/str(pid)/"cmdline").read_bytes()).hexdigest()}
+        (trace/"controller-process.json").write_text(json.dumps(proof)+"\n",encoding="utf-8")
+        budget=json.loads((trace/"upstream-budget-state.json").read_text())
+        budget.update({"verdict":"EXCEEDED","reason":"MAX_UPSTREAM_ATTEMPTS",
+                       "attempts_charged":budget["limits"]["max_upstream_attempts"]})
+        (trace/"upstream-budget-state.json").write_text(json.dumps(budget)+"\n",encoding="utf-8")
+        resumed=self.fx.run("--resume",controller.name,timeout=20)
+        self.assertNotEqual(resumed.returncode,0,(resumed.stdout,resumed.stderr))
+        self.assertIsNone(self.fx.foreign_process.poll(),"resume signalled an unauthenticated process group")
+        status=json.loads((controller/"status.json").read_text())
+        self.assertEqual((status["phase"],status["reason"]),
+                         ("BLOCKED_UNKNOWN","PROCESS_PROOF_AUTH_INVALID"))
+
     def test_duplicate_authenticated_link_key_blocks_resume_unknown(self):
         first=self.fx.run(); self.assertEqual(first.returncode,0)
         controller=self.fx.controller_dir(); link_path=controller/"controller-child.json"
@@ -596,6 +687,30 @@ class PersistentControllerTests(unittest.TestCase):
         resumed=self.fx.run("--resume",controller.name)
         self.assertNotEqual(resumed.returncode,0)
         self.assertEqual(json.loads((controller/"status.json").read_text())["phase"],"BLOCKED_UNKNOWN")
+
+    def test_deep_state_and_authenticated_json_block_without_traceback(self):
+        for target in ("status","link","terminal"):
+            with self.subTest(target=target):
+                if self.fx.capture.exists() or any(self.fx.controllers.glob("controller-*")):
+                    self.fx.close(); self.fx=ControllerFixture(self)
+                first=self.fx.run(); self.assertEqual(first.returncode,0,(target,first.stdout,first.stderr))
+                controller=self.fx.controller_dir(); link=json.loads((controller/"controller-child.json").read_text())
+                paths={"status":controller/"status.json",
+                       "link":controller/"controller-child.json",
+                       "terminal":Path(link["child_trace"])/"trace-manifest.json"}
+                paths[target].write_text("["*1500+"]"*1500,encoding="utf-8")
+                resumed=self.fx.run("--resume",controller.name)
+                self.assertNotEqual(resumed.returncode,0,(target,resumed.stdout,resumed.stderr))
+                self.assertNotIn("Traceback",resumed.stderr)
+                status=json.loads((controller/"status.json").read_text())
+                self.assertEqual(status["phase"],"BLOCKED_UNKNOWN")
+
+    def test_deep_raw_manifest_after_validator_blocks_without_traceback(self):
+        result=self.fx.run(env=self.fx.env(FAKE_MUTATE_MANIFEST="deep"))
+        self.assertNotEqual(result.returncode,0,(result.stdout,result.stderr))
+        self.assertNotIn("Traceback",result.stderr)
+        status=json.loads((self.fx.controller_dir()/"status.json").read_text())
+        self.assertEqual(status["phase"],"BLOCKED_UNKNOWN")
 
     def test_manifest_is_reauthenticated_after_validator_before_done(self):
         for mutation in ("extra","duplicate","oversized","symlink"):

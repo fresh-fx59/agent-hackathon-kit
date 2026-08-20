@@ -26,6 +26,8 @@ STATUS_FIELDS = {"schema", "controller_id", "phase", "updated_at", "child_run_ta
 LINK_FIELDS = {"schema", "parent_trace", "parent_identity_sha256", "child_run_tag",
                "child_trace", "child_manifest_sha256", "linked_at", "key_id", "hmac_sha256"}
 PROOF_FIELDS = {"pid", "process_start_ticks", "pgid", "boot_id_sha256", "command_sha256"}
+PROOF_AUTH_FIELDS = {"schema", "controller_id", "child_run_tag", *PROOF_FIELDS,
+                     "key_id", "hmac_sha256"}
 LIMIT_NAMES = ("max_upstream_attempts", "max_request_bytes", "max_wall_seconds",
                "max_consecutive_provider_failures")
 LIMIT_ENV = {
@@ -141,7 +143,7 @@ def read_object(path, fields=None, limit=MAX_JSON_BYTES):
         row = json.loads(read_bytes(path, limit).decode("utf-8"), object_pairs_hook=strict_object)
     except Blocked:
         raise
-    except (UnicodeError, ValueError, TypeError) as exc:
+    except (UnicodeError, ValueError, TypeError, RecursionError) as exc:
         raise Blocked("INVALID_STATE", True) from exc
     if not isinstance(row, dict) or (fields is not None and set(row) != fields):
         raise Blocked("INVALID_STATE", True)
@@ -174,12 +176,40 @@ def bootstrap_key(root):
     try:
         fd = os.open(key_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     except FileExistsError:
-        mode = os.lstat(key_path).st_mode
-        info = os.stat(key_path, follow_symlinks=False)
-        if (not stat.S_ISREG(mode) or stat.S_ISLNK(mode) or info.st_uid != os.geteuid() or
-                stat.S_IMODE(mode) != 0o600 or info.st_size != 32):
-            raise Blocked("INVALID_CONTROLLER_KEY")
-        return key_path, key_path.read_bytes()
+        key_fd = None
+        try:
+            before = os.lstat(key_path)
+            info = os.stat(key_path, follow_symlinks=False)
+            same = lambda left, right: (left.st_dev, left.st_ino, stat.S_IFMT(left.st_mode)) == (
+                right.st_dev, right.st_ino, stat.S_IFMT(right.st_mode))
+            if (not same(before, info) or not stat.S_ISREG(before.st_mode) or
+                    stat.S_ISLNK(before.st_mode) or info.st_uid != os.geteuid() or
+                    stat.S_IMODE(info.st_mode) != 0o600 or info.st_size != 32):
+                raise Blocked("INVALID_CONTROLLER_KEY")
+            key_fd = os.open(key_path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+            opened = os.fstat(key_fd)
+            if (not same(before, opened) or not stat.S_ISREG(opened.st_mode) or
+                    opened.st_uid != os.geteuid() or stat.S_IMODE(opened.st_mode) != 0o600 or
+                    opened.st_size != 32):
+                raise Blocked("INVALID_CONTROLLER_KEY")
+            chunks = []; total = 0
+            while total <= 32:
+                chunk = os.read(key_fd, 33 - total)
+                if not chunk: break
+                chunks.append(chunk); total += len(chunk)
+            finished = os.fstat(key_fd)
+            rebound = os.lstat(key_path)
+            if (total != 32 or not same(opened, finished) or not same(finished, rebound) or
+                    finished.st_uid != os.geteuid() or stat.S_IMODE(finished.st_mode) != 0o600 or
+                    finished.st_size != 32):
+                raise Blocked("INVALID_CONTROLLER_KEY")
+            return key_path, b"".join(chunks)
+        except Blocked:
+            raise
+        except OSError as exc:
+            raise Blocked("INVALID_CONTROLLER_KEY") from exc
+        finally:
+            if key_fd is not None: os.close(key_fd)
     data = secrets.token_bytes(32)
     try:
         os.write(fd, data); os.fsync(fd)
@@ -305,6 +335,21 @@ def verify_link(controller, key):
     if manifest.get("run_tag") != link["child_run_tag"] or manifest.get("manifest_sha256") != link["child_manifest_sha256"]:
         raise Blocked("LINK_CHILD_INVALID", True)
     return link, trace
+
+
+def process_proof_unsigned(controller_id, tag, proof, key):
+    return {"schema": 1, "controller_id": controller_id, "child_run_tag": tag,
+            **proof, "key_id": digest(key)}
+
+
+def verify_process_proof(controller, controller_id, tag, proof, key):
+    row = read_object(controller / "child-process-proof.json", PROOF_AUTH_FIELDS)
+    unsigned = dict(row); supplied = unsigned.pop("hmac_sha256")
+    expected = process_proof_unsigned(controller_id, tag, proof, key)
+    if (unsigned != expected or not isinstance(supplied, str) or not hmac.compare_digest(
+            supplied, hmac.new(key, canonical(unsigned), hashlib.sha256).hexdigest())):
+        raise Blocked("PROCESS_PROOF_AUTH_INVALID", True)
+    return proof
 
 
 def budget_initial(tag, limits):
@@ -533,7 +578,11 @@ def acquire_lock(root, resume_id):
             mode = os.lstat(candidate).st_mode
             if not stat.S_ISDIR(mode) or stat.S_ISLNK(mode):
                 raise Blocked("BLOCKED_UNKNOWN", True)
-            phase = read_object(candidate / "status.json", STATUS_FIELDS).get("phase")
+            try:
+                phase = read_object(candidate / "status.json", STATUS_FIELDS).get("phase")
+            except Blocked:
+                if candidate.name != resume_id: raise
+                nonterminal.append(candidate.name); continue
             if phase not in TERMINAL:
                 nonterminal.append(candidate.name)
     except Blocked:
@@ -678,6 +727,9 @@ def run_fresh(root, runs, controller_id, controller, key_path, key, limits, lock
         publish_no_replace(trace / "upstream-budget-state.json",
                            canonical(budget_initial(tag, limits)) + b"\n")
         publish_no_replace(trace / "controller-process.json", canonical(proof) + b"\n")
+        publish_no_replace(controller / "child-process-proof.json",
+                           canonical(signed(process_proof_unsigned(
+                               controller_id, tag, proof, key), key)) + b"\n")
     except FileExistsError:
         terminate_owned(proof, proc_root)
         persist(controller, controller_id, "BLOCKED_UNKNOWN", tag, manifest_sha,
@@ -775,17 +827,25 @@ def main():
                     return 1
                 try:
                     link, trace = verify_link(controller, key)
-                    proof_path = trace / "controller-process.json"
-                    if os.path.lexists(proof_path):
-                        proof = read_object(proof_path, PROOF_FIELDS)
-                        evidence = terminate_owned(proof, proc_root)
-                        if evidence["survivors"]:
-                            raise Blocked("OWNED_PROCESS_SURVIVED", True)
-                        if ((evidence["sigterm_sent"] or evidence["sigkill_sent"]) and
-                                not os.path.lexists(trace / "sealed")):
-                            atomic_replace(trace / "controller-termination.json",
-                                           canonical(evidence) + b"\n")
-                    seal_trace(trace, link["child_run_tag"], link["child_manifest_sha256"], key)
+                    terminal_exists = (os.path.lexists(trace / "trace-manifest.json") or
+                                       os.path.lexists(trace / "sealed"))
+                    if terminal_exists:
+                        # The terminal manifest authenticates every trace artifact, including
+                        # the process proof.  Verify it before consulting child-writable state.
+                        seal_trace(trace, link["child_run_tag"], link["child_manifest_sha256"], key)
+                    else:
+                        proof_path = trace / "controller-process.json"
+                        if os.path.lexists(proof_path):
+                            proof = read_object(proof_path, PROOF_FIELDS)
+                            verify_process_proof(controller, resume_id,
+                                                 link["child_run_tag"], proof, key)
+                            evidence = terminate_owned(proof, proc_root)
+                            if evidence["survivors"]:
+                                raise Blocked("OWNED_PROCESS_SURVIVED", True)
+                            if evidence["sigterm_sent"] or evidence["sigkill_sent"]:
+                                atomic_replace(trace / "controller-termination.json",
+                                               canonical(evidence) + b"\n")
+                        seal_trace(trace, link["child_run_tag"], link["child_manifest_sha256"], key)
                 except Blocked as exc:
                     persist(controller, resume_id, "BLOCKED_UNKNOWN", status["child_run_tag"],
                             status["child_manifest_sha256"], exc.reason); return 1
@@ -799,6 +859,7 @@ def main():
                                            key_path, key)
             if status["phase"] != "QWEN_RUNNING": raise Blocked("RESUME_PHASE_AMBIGUOUS", True)
             proof = read_object(trace / "controller-process.json", PROOF_FIELDS)
+            verify_process_proof(controller, resume_id, link["child_run_tag"], proof, key)
             if not group_members(proof, proc_root): raise Blocked("RECORDED_LAUNCH_UNCERTAIN", True)
             owner = {"schema": 1, "controller_id": resume_id, "child_run_tag": link["child_run_tag"],
                      **proc_snapshot(os.getpid(), proc_root, controller=True)}
@@ -814,10 +875,19 @@ def main():
         if failed_controller is not None and failed_controller.is_dir():
             try:
                 status = read_object(failed_controller / "status.json", STATUS_FIELDS)
+                tag = status.get("child_run_tag"); manifest_sha = status.get("child_manifest_sha256")
+            except Exception:
+                try:
+                    link, _ = verify_link(failed_controller, key)
+                    tag = link["child_run_tag"]; manifest_sha = link["child_manifest_sha256"]
+                except Exception:
+                    tag = None; manifest_sha = None
+            try:
                 persist(failed_controller, failed_id,
                         "BLOCKED_UNKNOWN" if exc.unknown else "BLOCKED",
-                        status.get("child_run_tag"), status.get("child_manifest_sha256"), exc.reason)
-            except Exception: pass
+                        tag, manifest_sha, exc.reason)
+            except Exception:
+                pass
         print(exc.reason, file=sys.stderr); return 1
     finally:
         os.close(lock_fd)

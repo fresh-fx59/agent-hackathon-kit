@@ -672,6 +672,12 @@ class ItReservesPaidBudgetBeforeForwarding(ProxyCase):
         self.srv.fail_times = 1
         self.start_budgeted(UPSTREAM_RETRY_MAX=1, UPSTREAM_RETRY_BASE_MS=1)
         self.post()
+        # The proxy updates the completed-attempt state after relaying the
+        # response bytes.  Observe that asynchronous durability boundary
+        # boundedly instead of racing the handler's finally block.
+        deadline = time.time() + 5
+        while self.budget()["consecutive_provider_failures"] != 0 and time.time() < deadline:
+            time.sleep(0.01)
         self.assertEqual(self.budget()["consecutive_provider_failures"], 0)
 
     def test_missing_or_corrupt_existing_budget_state_never_restarts_at_zero(self):
