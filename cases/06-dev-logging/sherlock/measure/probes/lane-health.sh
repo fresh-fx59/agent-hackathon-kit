@@ -137,14 +137,31 @@ for kb in sizes:
             # a name can drift from behaviour, a body cannot.
             name, text = None, raw.decode("utf-8", "replace")
             if text.lstrip().startswith("data:"):
+                saw_done, parse_errors, embedded_status = False, 0, None
                 for ln in text.splitlines():
-                    if ln.startswith("data: ") and '"model"' in ln:
-                        try:
-                            name = json.loads(ln[6:]).get("model")
-                        except ValueError:
-                            pass
-                        if name:
-                            break
+                    if not ln.startswith("data: "):
+                        continue
+                    payload = ln[6:]
+                    if payload == "[DONE]":
+                        saw_done = True
+                        continue
+                    try:
+                        event = json.loads(payload)
+                    except ValueError:
+                        parse_errors += 1
+                        hit = __import__("re").search(r"HTTP/\d(?:\.\d)?\s+(\d{3})", payload)
+                        embedded_status = hit.group(1) if hit else None
+                        continue
+                    if event.get("model") and not name:
+                        name = event["model"]
+                # A provider can send a gateway page as a `data:` line after
+                # returning HTTP 200. That killed a 60-turn Qwen run while the
+                # old health gate incorrectly called it healthy.
+                if parse_errors or not saw_done:
+                    detail = "malformed SSE (%d parse errors, done=%s" % (parse_errors, saw_done)
+                    if embedded_status:
+                        detail += ", embedded HTTP %s" % embedded_status
+                    raise RuntimeError(detail + ")")
             else:
                 try:
                     name = json.loads(text).get("model")
@@ -158,9 +175,9 @@ for kb in sizes:
             # nothing about whether the lane was rate-limiting us, refusing the
             # request, or falling over. Three theories about these failures were
             # argued from counts alone and two were wrong.
-            why = None
+            why = str(e)[:300] or None
             try:
-                why = e.read().decode("utf-8", "replace").strip()[:300]
+                why = e.read().decode("utf-8", "replace").strip()[:300] or why
             except Exception:
                 pass
             rows.append((kb, code, time.time() - t0, None, why))
