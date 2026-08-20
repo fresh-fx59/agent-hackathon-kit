@@ -7,7 +7,7 @@
  "totals": {
   "files": 106,
   "on_disk_bytes": 94860114,
-  "lines": 100917
+  "lines": 100916
  },
  "line_numbering": "Proof line numbers are 1-based PHYSICAL line numbers in the file as written by prepare-corpus.sh, and every file ends with a trailing newline, so `wc -l` agrees with the `lines` field below. *.jsonl: one EVTX record per line, in the order evtx_dump emits it -- the line number is NOT the EventRecordID, and records inside a channel are NOT in time order (Security.jsonl line 1 is 2021-06-01T18:36:04Z and line 34,916 is 18:35:48Z), because EVTX stores chunks. *.tsv: line 1 is a column header, so a data row is at line index+1. In pcap/frames.tsv frame F is at line F+1 (frames 1..4797 are contiguous); in pcap/tds-batches.tsv batch B is at line B+1; in pcap/tcp-streams.tsv stream S is at line S+2 (streams 0..1200, sorted numerically). pcap/http.tsv and pcap/dns.tsv are in frame order with no such arithmetic. toolkit/* are the carved artefacts byte-for-byte, with `.txt` appended to the `.ps1` names so that citecheck's plausible() recognises a citation to them at all.",
  "files": [
@@ -713,7 +713,7 @@
   },
   {
    "path": "toolkit/Invoke-SMBExec.ps1.txt",
-   "lines": 2949,
+   "lines": 2948,
    "uncompressed_bytes": 149645,
    "on_disk_bytes": 149645,
    "sha256": "2211a127a4467fb15a2112dd48ebe26df2660f97e6b8be95db57bbafab806412"
