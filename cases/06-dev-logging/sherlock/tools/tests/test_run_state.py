@@ -96,6 +96,40 @@ class RunStateTests(unittest.TestCase):
             self.assertEqual(row["session_id"], "session-1")
             self.assertEqual(row["exit_code"], "0")
 
+    def test_status_preserves_the_runner_process_proof(self):
+        """Replacing the runner facts with the state-writer PID breaks PID-reuse proof."""
+        import tempfile
+        with tempfile.TemporaryDirectory() as directory:
+            path = pathlib.Path(directory) / "status.json"
+            row = run_state.write_status(
+                str(path), run_tag="r1", phase="QWEN_RUNNING", pid=4123,
+                process_start_ticks=987654, pgid=4123,
+                boot_id_sha256="1" * 64, command_sha256="2" * 64)
+            self.assertEqual(
+                {name: row[name] for name in (
+                    "pid", "process_start_ticks", "pgid", "boot_id_sha256",
+                    "command_sha256")},
+                {"pid": 4123, "process_start_ticks": 987654, "pgid": 4123,
+                 "boot_id_sha256": "1" * 64, "command_sha256": "2" * 64})
+
+    def test_cli_accepts_the_complete_runner_process_proof(self):
+        """Dropping any proof field makes a paid child impossible to attribute."""
+        import tempfile
+        with tempfile.TemporaryDirectory() as directory:
+            status = pathlib.Path(directory) / "status.json"
+            command = [
+                sys.executable, str(MEASURE / "run_state.py"), "set", str(status),
+                "--run-tag", "r1", "--phase", "QWEN_RUNNING", "--pid", "4123",
+                "--process-start-ticks", "987654", "--pgid", "4123",
+                "--boot-id-sha256", "1" * 64, "--command-sha256", "2" * 64,
+            ]
+            subprocess.run(command, check=True)
+            row = json.loads(status.read_text())
+            self.assertEqual(row["process_start_ticks"], 987654)
+            self.assertEqual(row["pgid"], 4123)
+            self.assertEqual(row["boot_id_sha256"], "1" * 64)
+            self.assertEqual(row["command_sha256"], "2" * 64)
+
 
 if __name__ == "__main__":
     unittest.main()

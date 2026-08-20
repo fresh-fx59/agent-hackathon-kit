@@ -10,7 +10,8 @@ import tempfile
 
 STATUS_FIELDS = ("schema", "run_tag", "phase", "updated_at", "pid", "attempt",
                  "dataset", "arm", "trace_dir", "detail", "session_id", "reason",
-                 "exit_code", "duration_s", "upstream_log", "inflight_path")
+                 "exit_code", "duration_s", "upstream_log", "inflight_path",
+                 "process_start_ticks", "pgid", "boot_id_sha256", "command_sha256")
 SECRET_MARKERS = re.compile(r"(?:bearer\s+|(?:sk|ghp|glpat|xox[baprs])-|AKIA[0-9A-Z]{16}|-----BEGIN .*PRIVATE KEY-----|(?:password|token|api[_-]?key)\s*[:=])", re.I)
 
 
@@ -83,7 +84,7 @@ def _args():
         p.add_argument("path")
         if command == "event": p.add_argument("event")
         for name in STATUS_FIELDS:
-            if name not in ("schema", "updated_at", "pid"):
+            if name not in ("schema", "updated_at"):
                 p.add_argument("--" + name.replace("_", "-"))
     return parser.parse_args()
 
@@ -91,8 +92,9 @@ def _args():
 def main():
     args = _args()
     fields = {name: getattr(args, name) for name in STATUS_FIELDS if hasattr(args, name) and getattr(args, name) is not None}
-    if "attempt" in fields:
-        fields["attempt"] = int(fields["attempt"])
+    for name in ("pid", "attempt", "process_start_ticks", "pgid"):
+        if name in fields:
+            fields[name] = int(fields[name])
     if args.command == "set":
         write_status(args.path, **fields)
     else:

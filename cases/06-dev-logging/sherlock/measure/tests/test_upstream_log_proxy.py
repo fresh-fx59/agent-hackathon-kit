@@ -18,6 +18,7 @@ Everything here runs against a STUB upstream. No metered tokens.
 """
 import json
 import os
+import pathlib
 import subprocess
 import sys
 import tempfile
@@ -182,6 +183,54 @@ class ProxyCase(unittest.TestCase):
             except Exception:
                 time.sleep(0.05)
         self.fail("proxy never came up")
+
+    def start_budgeted(self, mode="json_toolcall", bootstrap=True, **updates):
+        """Start the real proxy with finite, trace-local paid reservations."""
+        self.srv.mode = mode
+        self.budget_state = os.path.join(self.tmp, "upstream-budget-state.json")
+        env = dict(
+            os.environ,
+            UPSTREAM_BASE="http://127.0.0.1:%d/v1" % self.up_port,
+            UPSTREAM_LOG=self.log,
+            LISTEN_PORT=str(self.px_port),
+            RUN_TAG="controlled-run",
+            UPSTREAM_BUDGET_STATE=self.budget_state,
+            UPSTREAM_MAX_UPSTREAM_ATTEMPTS="20",
+            UPSTREAM_MAX_REQUEST_BYTES="1000000",
+            UPSTREAM_MAX_WALL_SECONDS="300",
+            UPSTREAM_MAX_CONSECUTIVE_PROVIDER_FAILURES="5",
+            UPSTREAM_EXPECTED_RETURNED_IDENTITY="DeepSeek-V4-Flash",
+        )
+        env.update({key: str(value) for key, value in updates.items()})
+        if bootstrap:
+            limits = {
+                "max_upstream_attempts": int(env["UPSTREAM_MAX_UPSTREAM_ATTEMPTS"]),
+                "max_request_bytes": int(env["UPSTREAM_MAX_REQUEST_BYTES"]),
+                "max_wall_seconds": int(env["UPSTREAM_MAX_WALL_SECONDS"]),
+                "max_consecutive_provider_failures": int(
+                    env["UPSTREAM_MAX_CONSECUTIVE_PROVIDER_FAILURES"]),
+            }
+            pathlib.Path(self.budget_state).write_text(json.dumps({
+                "schema": 1, "run_tag": "controlled-run", "updated_at": "fixture",
+                "attempts_charged": 0, "request_bytes": 0,
+                "consecutive_provider_failures": 0, "limits": limits,
+                "verdict": "WITHIN", "reason": None,
+            }) + "\n", encoding="utf-8")
+        self.proc = subprocess.Popen([sys.executable, PROXY], env=env,
+                                     stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        for _ in range(100):
+            try:
+                with urllib.request.urlopen(
+                        "http://127.0.0.1:%d/healthz" % self.px_port, timeout=1) as r:
+                    r.read()
+                return
+            except Exception:
+                time.sleep(0.05)
+        out, err = self.proc.communicate(timeout=5)
+        self.fail("budgeted proxy never came up: %s %s" % (out, err))
+
+    def budget(self):
+        return json.loads(pathlib.Path(self.budget_state).read_text())
 
     def post(self, body=None, auth="Bearer sekrit"):
         body = body if body is not None else {"model": "[SP]deepseek-v4-flash",
@@ -522,6 +571,93 @@ class ItCanRestoreTheProviderAlias(ProxyCase):
         self.start("json_toolcall")
         self.post({"model": "deepseek-v4-flash", "messages": []})
         self.assertEqual(self.srv.seen[0]["body"]["model"], "deepseek-v4-flash")
+
+
+class ItReservesPaidBudgetBeforeForwarding(ProxyCase):
+
+    def test_restart_reconciles_completed_rows_as_a_reservation_lower_bound(self):
+        """A stale-but-valid state cannot undercount paid sends already in JSONL."""
+        pathlib.Path(self.log).write_text(
+            '\n'.join(json.dumps({"run_tag": "controlled-run", "request_bytes": 11,
+                                  "status": 200}) for _ in range(2)) + '\n',
+            encoding="utf-8")
+        self.start_budgeted(UPSTREAM_MAX_UPSTREAM_ATTEMPTS=2)
+        status, _body = self.post()
+        self.assertEqual(status, 503)
+        self.assertEqual(self.srv.seen, [])
+        state = self.budget()
+        self.assertEqual((state["attempts_charged"], state["request_bytes"]), (2, 22))
+        self.assertEqual((state["verdict"], state["reason"]),
+                         ("EXCEEDED", "MAX_UPSTREAM_ATTEMPTS"))
+
+    def test_missing_state_before_the_first_completed_row_is_unknown(self):
+        """Loss after a charged send but before JSONL is indistinguishable from fresh."""
+        self.start_budgeted(bootstrap=False)
+        code, _body = self.post()
+        self.assertEqual(code, 503)
+        self.assertEqual(self.srv.seen, [])
+        self.assertFalse(os.path.exists(self.budget_state),
+                         "the proxy must never recreate paid state at zero")
+
+    def test_two_racing_requests_cannot_both_take_the_last_attempt(self):
+        """Moving reservation after urlopen lets both paid sends pass a cap of one."""
+        self.start_budgeted(UPSTREAM_MAX_UPSTREAM_ATTEMPTS=1)
+        results = []
+        threads = [threading.Thread(target=lambda: results.append(self.post())) for _ in range(2)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=15)
+        self.assertEqual(len(self.srv.seen), 1)
+        self.assertEqual(self.budget()["attempts_charged"], 1)
+        self.assertEqual(self.budget()["verdict"], "EXCEEDED")
+        self.assertEqual(self.budget()["reason"], "MAX_UPSTREAM_ATTEMPTS")
+
+    def test_each_retry_reserves_bytes_and_attempts_before_transmission(self):
+        """Counting only a logical request makes billed retries invisible."""
+        self.srv.fail_times = 5
+        self.start_budgeted(
+            UPSTREAM_RETRY_MAX=5, UPSTREAM_RETRY_BASE_MS=1,
+            UPSTREAM_MAX_UPSTREAM_ATTEMPTS=2)
+        self.post({"model": "DeepSeek-V4-Flash", "messages": []})
+        state = self.budget()
+        self.assertEqual(len(self.srv.seen), 2)
+        self.assertEqual(state["attempts_charged"], 2)
+        self.assertEqual(state["request_bytes"], 2 * len(json.dumps(
+            {"model": "DeepSeek-V4-Flash", "messages": []}).encode()))
+        self.assertEqual((state["verdict"], state["reason"]),
+                         ("EXCEEDED", "MAX_UPSTREAM_ATTEMPTS"))
+
+    def test_request_that_would_cross_byte_cap_is_never_forwarded(self):
+        """Checking completed JSONL after the send crosses the paid byte cap."""
+        body = {"model": "DeepSeek-V4-Flash", "messages": [{"content": "x" * 400}]}
+        self.start_budgeted(UPSTREAM_MAX_REQUEST_BYTES=32)
+        self.post(body)
+        self.assertEqual(self.srv.seen, [])
+        self.assertEqual(self.budget()["request_bytes"], 0)
+        self.assertEqual(self.budget()["reason"], "MAX_REQUEST_BYTES")
+
+    def test_only_exact_complete_success_resets_consecutive_failures(self):
+        """A malformed stream or wrong identity is a provider failure despite HTTP 200."""
+        self.start_budgeted(mode="malformed_sse")
+        self.post()
+        self.assertEqual(self.budget()["consecutive_provider_failures"], 1)
+
+    def test_exact_json_success_resets_prior_provider_failure(self):
+        """The reset is earned by a 2xx response carrying the expected identity."""
+        self.srv.fail_times = 1
+        self.start_budgeted(UPSTREAM_RETRY_MAX=1, UPSTREAM_RETRY_BASE_MS=1)
+        self.post()
+        self.assertEqual(self.budget()["consecutive_provider_failures"], 0)
+
+    def test_missing_or_corrupt_existing_budget_state_never_restarts_at_zero(self):
+        """After evidence exists, loss of reservation state is unknown, not free."""
+        pathlib.Path(self.log).write_text('{"run_tag":"controlled-run","status":200}\n')
+        self.start_budgeted(bootstrap=False)
+        status, _ = self.post()
+        self.assertEqual(status, 503)
+        self.assertEqual(self.srv.seen, [])
+        self.assertFalse(pathlib.Path(self.budget_state).exists())
 
 
 if __name__ == "__main__":

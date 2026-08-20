@@ -25,6 +25,9 @@ PHASES = {"STAGING", "QWEN_RUNNING", "ATTEMPT_STARTED", "ATTEMPT_FINISHED",
           "RECOVERY_DECIDED", "FINISHED_UNCHECKED", "RUN_FAILED", "VERIFYING",
           "ACCEPTED", "REJECTED"}
 TERMINAL = {"RUN_FAILED", "ACCEPTED", "REJECTED"}
+CONTROLLER_PHASES = {"FIXING", "TESTING", "HEALTH_CHECKING", "READY",
+                     "QWEN_RUNNING", "VERIFYING", "DONE", "REJECTED",
+                     "RUNNER_FAILED", "BLOCKED", "BLOCKED_UNKNOWN"}
 STATUS_BASE = {"schema", "run_tag", "phase", "updated_at", "pid", "attempt",
                "dataset", "arm", "trace_dir", "detail", "session_id", "reason",
                "exit_code", "duration_s", "upstream_log", "inflight_path"}
@@ -350,6 +353,59 @@ def validity_projection(held, manifest, key):
     return verdict, delivery, returned, diagnostics
 
 
+def budget_projection(held, manifest, key):
+    state, row, _ = json_read(held, "controller-receipt.json")
+    if state == "missing": return "not_reported", []
+    fields = {"schema", "run_tag", "manifest_sha256", "observed_at",
+              "attempts_charged", "request_bytes", "input_tokens", "output_tokens",
+              "wall_seconds", "consecutive_provider_failures", "limits", "verdict",
+              "reason", "key_id", "hmac_sha256"}
+    limit_fields = {"max_upstream_attempts", "max_request_bytes", "max_wall_seconds",
+                    "max_consecutive_provider_failures"}
+    valid = (state == "ok" and set(row) == fields and row.get("schema") == 1 and
+             row.get("run_tag") == manifest["run_tag"] and
+             row.get("manifest_sha256") == manifest["manifest_sha256"] and
+             timestamp(row.get("observed_at")) is not None and
+             all(uint(row.get(name)) for name in ("attempts_charged", "request_bytes",
+                                                   "wall_seconds",
+                                                   "consecutive_provider_failures")) and
+             row.get("input_tokens") is None and row.get("output_tokens") is None and
+             isinstance(row.get("limits"), dict) and set(row["limits"]) == limit_fields and
+             all(type(row["limits"].get(name)) is int and row["limits"][name] > 0
+                 for name in limit_fields) and row.get("verdict") in ("WITHIN", "EXCEEDED") and
+             (row.get("reason") is None or (isinstance(row.get("reason"), str) and
+                                             CODE.fullmatch(row["reason"]))) and
+             is_hex(row.get("key_id")) and is_hex(row.get("hmac_sha256")))
+    if not valid: return "invalid", ["BUDGET_INVALID"]
+    unsigned = dict(row); supplied = unsigned.pop("hmac_sha256")
+    key_id = hashlib.sha256(key).hexdigest()
+    expected = hmac.new(key, MANIFEST.canonical(unsigned), hashlib.sha256).hexdigest()
+    if row["key_id"] != key_id or not hmac.compare_digest(supplied, expected):
+        return "invalid", ["BUDGET_INVALID"]
+    projected = {name: row[name] for name in
+                 ("verdict", "reason", "attempts_charged", "request_bytes",
+                  "input_tokens", "output_tokens", "wall_seconds",
+                  "consecutive_provider_failures", "limits")}
+    projected["state"] = "reported"
+    return projected, []
+
+
+def controller_projection(parent, manifest):
+    state, row, _ = json_read(parent, "status.json", retry=True)
+    fields = {"schema", "controller_id", "phase", "updated_at", "child_run_tag",
+              "child_manifest_sha256", "reason"}
+    if (state != "ok" or set(row) != fields or row.get("schema") != 1 or
+            label(row.get("controller_id")) is None or row.get("phase") not in CONTROLLER_PHASES or
+            timestamp(row.get("updated_at")) is None or
+            row.get("child_run_tag") != manifest["run_tag"] or
+            row.get("child_manifest_sha256") != manifest["manifest_sha256"] or
+            (row.get("reason") is not None and
+             (not isinstance(row.get("reason"), str) or CODE.fullmatch(row["reason"]) is None))):
+        return None, ["CONTROLLER_INVALID"]
+    return {"phase": row["phase"], "updated_at": row["updated_at"],
+            "reason": row["reason"]}, []
+
+
 def jsonl_rows(held, name, maximum, row_limit):
     try: data = held.read(name, maximum)
     except Missing: return [], False
@@ -498,6 +554,7 @@ def project(trace, manifest, key, selection="direct", proc_root="/", held=None):
         diagnostics = []; state, found, _ = status_projection(held, manifest); diagnostics.extend(found)
         phase = state["phase"] if state else "UNKNOWN"; updated = state["updated_at"] if state else None
         verdict, delivery, returned_digest, found = validity_projection(held, manifest, key); diagnostics.extend(found)
+        budget, found = budget_projection(held, manifest, key); diagnostics.extend(found)
         last_event, recovery, event_attempt, found = event_projection(held, manifest["run_tag"]); diagnostics.extend(found)
         inflight, found = inflight_projection(held, manifest["run_tag"]); diagnostics.extend(found)
         completed, found = completed_projection(held, manifest["run_tag"],
@@ -523,7 +580,7 @@ def project(trace, manifest, key, selection="direct", proc_root="/", held=None):
                           "lane": safe(manifest["target"]["lane"]), "identity": target_identity,
                           "requested_sha256": digest(manifest["target"]["requested_model"].encode()),
                           "returned_sha256": returned_digest},
-               "health": health, "budget": "not_reported", "validity": verdict,
+               "health": health, "budget": budget, "validity": verdict,
                "delivery": delivery, "diagnostics": sorted(set(diagnostics))[:16]}
         held.check(); return row
     finally:
@@ -589,10 +646,13 @@ def wrap_path(value):
 def render(row):
     run_tag, selection = safe(row.get("run_tag"), 64), safe(row.get("selection")); phase = row.get("phase") if row.get("phase") in PHASES else "UNKNOWN"
     upstream = row.get("upstream") if isinstance(row.get("upstream"), dict) else {}
+    budget = row.get("budget")
+    budget_text = ("%s:%s" % (budget.get("state", "?"), budget.get("verdict", "?"))
+                   if isinstance(budget, dict) else safe(budget))
     delivery = row.get("delivery"); delivery_text = delivery.get("channel", "?") if isinstance(delivery, dict) else "pending"
     lines = ["%s %s %s" % (phase, run_tag, selection),
              "attempt=%s recovery=%s upstream=%s" % (row.get("attempt"), safe(row.get("recovery")), upstream.get("completed")),
-             "process=%s health=%s budget=%s" % (safe(row.get("process")), safe(row.get("health")), safe(row.get("budget"))),
+             "process=%s health=%s budget=%s" % (safe(row.get("process")), safe(row.get("health")), budget_text),
              "validity=%s delivery=%s" % (safe(row.get("validity", {}).get("state")), safe(delivery_text))]
     reason = row.get("validity", {}).get("reason")
     if reason is not None: lines.append("reason=%s" % safe(reason, 64))
@@ -619,6 +679,9 @@ def main(argv=None):
             parent, child, manifest, key = link_auth(path, args.run_tag, args.commitment_file,
                                                      args.commitment_key, held); held = None
             row = project(child.path, manifest, key, "link", held=child); parent.check(); child.check()
+            controller, codes = controller_projection(parent, manifest)
+            row["diagnostics"] = sorted(set(row["diagnostics"] + codes))[:16]
+            if controller is not None: row["controller"] = controller
         elif kind == "file":
             child, manifest, key, _ = trace_auth(path, args.commitment_file, args.commitment_key, held); held = None
             row = project(child.path, manifest, key, held=child); child.check()

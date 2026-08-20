@@ -50,30 +50,68 @@ upstream_lane_start() {
   local up_base="${1:?upstream_lane_start <upstream_base> <log> <tag> <model>}"
   local log_path="${2:?}" run_tag="${3:?}" model="${4:?}"
   local inflight_path="${5:-}" attempt_path="${6:-}"
-  local here proxy port
+  local here proxy port strict="${SHERLOCK_REQUIRE_ATTRIBUTION:-0}" budget_state=""
+  local -a budget_env=()
 
   # Defaults are the safe ones, so every early return below is already correct.
   LANE_BASE_URL="$up_base"
   LANE_CLIENT_MODEL="$model"
   LANE_PROXY_PID=""
 
-  [ "${SHERLOCK_UPSTREAM_LOG:-1}" = "1" ] || return 0
+  if [ "${SHERLOCK_UPSTREAM_LOG:-1}" != "1" ]; then
+    [ "$strict" != 1 ] || {
+      echo "  ✗ upstream lane: attribution is required but logging is disabled" >&2
+      return 1
+    }
+    return 0
+  fi
 
   here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
   proxy="${UPSTREAM_LANE_PROXY:-$here/upstream-log-proxy.py}"
   if [ ! -f "$proxy" ]; then
     echo "  ⚠ upstream lane: no proxy at $proxy — running WITHOUT attribution" >&2
+    [ "$strict" != 1 ] || return 1
     return 0
   fi
 
   port="$(python3 -c 'import socket
 s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1]); s.close()')"
 
-  UPSTREAM_BASE="$up_base" UPSTREAM_LOG="$log_path" UPSTREAM_INFLIGHT="$inflight_path" \
-  RUN_TAG="$run_tag" RUN_ATTEMPT_FILE="$attempt_path" UPSTREAM_MODEL="$model" LISTEN_PORT="$port" \
-  UPSTREAM_RETRY_MAX="${SHERLOCK_UPSTREAM_RETRY:-6}" \
-  UPSTREAM_RETRY_BASE_MS="${SHERLOCK_UPSTREAM_RETRY_BASE_MS:-2000}" \
-    python3 "$proxy" >/dev/null 2>>"${log_path%.jsonl}.proxy.err" &
+  if [ "$strict" = 1 ]; then
+    if [ -z "$inflight_path" ] || [ -z "${SHERLOCK_EXPECTED_RETURNED_IDENTITY:-}" ] || \
+       [ -z "${SHERLOCK_BUDGET_MAX_UPSTREAM_ATTEMPTS:-}" ] || \
+       [ -z "${SHERLOCK_BUDGET_MAX_REQUEST_BYTES:-}" ] || \
+       [ -z "${SHERLOCK_BUDGET_MAX_WALL_SECONDS:-}" ] || \
+       [ -z "${SHERLOCK_BUDGET_MAX_CONSECUTIVE_PROVIDER_FAILURES:-}" ]; then
+      echo "  ✗ upstream lane: controlled attribution requires trace path, identity, and four caps" >&2
+      return 1
+    fi
+    budget_state="$(dirname "$inflight_path")/upstream-budget-state.json"
+    budget_env=(
+      "UPSTREAM_BUDGET_STATE=$budget_state"
+      "UPSTREAM_EXPECTED_RETURNED_IDENTITY=$SHERLOCK_EXPECTED_RETURNED_IDENTITY"
+      "UPSTREAM_MAX_UPSTREAM_ATTEMPTS=$SHERLOCK_BUDGET_MAX_UPSTREAM_ATTEMPTS"
+      "UPSTREAM_MAX_REQUEST_BYTES=$SHERLOCK_BUDGET_MAX_REQUEST_BYTES"
+      "UPSTREAM_MAX_WALL_SECONDS=$SHERLOCK_BUDGET_MAX_WALL_SECONDS"
+      "UPSTREAM_MAX_CONSECUTIVE_PROVIDER_FAILURES=$SHERLOCK_BUDGET_MAX_CONSECUTIVE_PROVIDER_FAILURES"
+    )
+  fi
+
+  if [ "$strict" = 1 ]; then
+    env UPSTREAM_BASE="$up_base" UPSTREAM_LOG="$log_path" UPSTREAM_INFLIGHT="$inflight_path" \
+      RUN_TAG="$run_tag" RUN_ATTEMPT_FILE="$attempt_path" UPSTREAM_MODEL="$model" LISTEN_PORT="$port" \
+      UPSTREAM_RETRY_MAX="${SHERLOCK_UPSTREAM_RETRY:-6}" \
+      UPSTREAM_RETRY_BASE_MS="${SHERLOCK_UPSTREAM_RETRY_BASE_MS:-2000}" "${budget_env[@]}" \
+      python3 "$proxy" >/dev/null 2>>"${log_path%.jsonl}.proxy.err" &
+  else
+    # Bash 3.2 treats an empty-array expansion as unbound under `set -u`.
+    # Keep the legacy path separate so the strict-only variables do not leak.
+    env UPSTREAM_BASE="$up_base" UPSTREAM_LOG="$log_path" UPSTREAM_INFLIGHT="$inflight_path" \
+      RUN_TAG="$run_tag" RUN_ATTEMPT_FILE="$attempt_path" UPSTREAM_MODEL="$model" LISTEN_PORT="$port" \
+      UPSTREAM_RETRY_MAX="${SHERLOCK_UPSTREAM_RETRY:-6}" \
+      UPSTREAM_RETRY_BASE_MS="${SHERLOCK_UPSTREAM_RETRY_BASE_MS:-2000}" \
+      python3 "$proxy" >/dev/null 2>>"${log_path%.jsonl}.proxy.err" &
+  fi
   LANE_PROXY_PID=$!
 
   if python3 - "$port" <<'PY'
@@ -98,7 +136,9 @@ PY
   else
     echo "  ⚠ upstream lane: proxy did not start — running WITHOUT attribution" >&2
     kill "$LANE_PROXY_PID" 2>/dev/null
+    wait "$LANE_PROXY_PID" 2>/dev/null || true
     LANE_PROXY_PID=""
+    [ "$strict" != 1 ] || return 1
   fi
   return 0
 }

@@ -1,0 +1,693 @@
+#!/usr/bin/env bash
+set -euo pipefail
+BENCH_CONTROLLER_HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)" exec python3 - "$@" <<'PY'
+import datetime as dt
+import fcntl
+import hashlib
+import hmac
+import json
+import os
+from pathlib import Path
+import re
+import secrets
+import shlex
+import signal
+import stat
+import subprocess
+import sys
+import tempfile
+import time
+
+
+HERE = Path(os.environ.pop("BENCH_CONTROLLER_HERE"))
+TERMINAL = {"DONE", "REJECTED", "RUNNER_FAILED", "BLOCKED", "BLOCKED_UNKNOWN"}
+STATUS_FIELDS = {"schema", "controller_id", "phase", "updated_at", "child_run_tag",
+                 "child_manifest_sha256", "reason"}
+LINK_FIELDS = {"schema", "parent_trace", "parent_identity_sha256", "child_run_tag",
+               "child_trace", "child_manifest_sha256", "linked_at", "key_id", "hmac_sha256"}
+PROOF_FIELDS = {"pid", "process_start_ticks", "pgid", "boot_id_sha256", "command_sha256"}
+LIMIT_NAMES = ("max_upstream_attempts", "max_request_bytes", "max_wall_seconds",
+               "max_consecutive_provider_failures")
+LIMIT_ENV = {
+    "max_upstream_attempts": "SHERLOCK_BUDGET_MAX_UPSTREAM_ATTEMPTS",
+    "max_request_bytes": "SHERLOCK_BUDGET_MAX_REQUEST_BYTES",
+    "max_wall_seconds": "SHERLOCK_BUDGET_MAX_WALL_SECONDS",
+    "max_consecutive_provider_failures": "SHERLOCK_BUDGET_MAX_CONSECUTIVE_PROVIDER_FAILURES",
+}
+
+
+class Blocked(Exception):
+    def __init__(self, reason, unknown=False):
+        super().__init__(reason); self.reason = reason; self.unknown = unknown
+
+
+def now():
+    return dt.datetime.now(dt.timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
+
+def canonical(row):
+    return json.dumps(row, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+
+
+def digest(data):
+    return hashlib.sha256(data).hexdigest()
+
+
+def signed(row, key):
+    result = dict(row)
+    result["hmac_sha256"] = hmac.new(key, canonical(row), hashlib.sha256).hexdigest()
+    return result
+
+
+def fsync_dir(path):
+    fd = os.open(str(path), os.O_RDONLY)
+    try: os.fsync(fd)
+    finally: os.close(fd)
+
+
+def atomic_replace(path, data, mode=0o600):
+    path = Path(path); path.parent.mkdir(parents=True, exist_ok=True)
+    fd, temporary = tempfile.mkstemp(prefix="." + path.name + ".", dir=str(path.parent))
+    try:
+        os.fchmod(fd, mode)
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(data); handle.flush(); os.fsync(handle.fileno())
+        os.replace(temporary, path); fsync_dir(path.parent)
+    finally:
+        try: os.unlink(temporary)
+        except FileNotFoundError: pass
+
+
+def publish_no_replace(path, data, mode=0o600):
+    path = Path(path)
+    fd, temporary = tempfile.mkstemp(prefix="." + path.name + ".", dir=str(path.parent))
+    try:
+        os.fchmod(fd, mode)
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(data); handle.flush(); os.fsync(handle.fileno())
+        os.link(temporary, path, follow_symlinks=False); fsync_dir(path.parent)
+    finally:
+        try: os.unlink(temporary)
+        except FileNotFoundError: pass
+
+
+def read_object(path, fields=None):
+    path = Path(path); mode = os.lstat(path).st_mode
+    if not stat.S_ISREG(mode) or stat.S_ISLNK(mode): raise Blocked("NONREGULAR_STATE", True)
+    with path.open(encoding="utf-8") as handle: row = json.load(handle)
+    if not isinstance(row, dict) or (fields is not None and set(row) != fields):
+        raise Blocked("INVALID_STATE", True)
+    return row
+
+
+def state_paths(controller):
+    return controller / "status.json", controller / "status-events.jsonl"
+
+
+def persist(controller, controller_id, phase, tag=None, manifest_sha=None, reason=None):
+    row = {"schema": 1, "controller_id": controller_id, "phase": phase, "updated_at": now(),
+           "child_run_tag": tag, "child_manifest_sha256": manifest_sha, "reason": reason}
+    status_path, events_path = state_paths(controller)
+    atomic_replace(status_path, canonical(row) + b"\n")
+    with open(events_path, "a+b") as handle:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        handle.write(canonical(row) + b"\n"); handle.flush(); os.fsync(handle.fileno())
+        fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+    fsync_dir(controller)
+    return row
+
+
+def bootstrap_key(root):
+    key_dir = root / "keys"; key_dir.mkdir(mode=0o700, exist_ok=True)
+    mode = os.lstat(key_dir).st_mode
+    if not stat.S_ISDIR(mode) or stat.S_ISLNK(mode) or os.path.realpath(key_dir) != str(key_dir):
+        raise Blocked("INVALID_KEY_ROOT")
+    key_path = key_dir / "controller.key"
+    try:
+        fd = os.open(key_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    except FileExistsError:
+        mode = os.lstat(key_path).st_mode
+        info = os.stat(key_path, follow_symlinks=False)
+        if (not stat.S_ISREG(mode) or stat.S_ISLNK(mode) or info.st_uid != os.geteuid() or
+                stat.S_IMODE(mode) != 0o600 or info.st_size != 32):
+            raise Blocked("INVALID_CONTROLLER_KEY")
+        return key_path, key_path.read_bytes()
+    data = secrets.token_bytes(32)
+    try:
+        os.write(fd, data); os.fsync(fd)
+    finally: os.close(fd)
+    fsync_dir(key_dir)
+    return key_path, data
+
+
+def clean_root(name):
+    value = os.environ.get(name, "")
+    if not value or not os.path.isabs(value): raise Blocked("MISSING_" + name)
+    path = Path(value)
+    if os.path.realpath(value) != os.path.normpath(value): raise Blocked("NONCANONICAL_" + name)
+    path.mkdir(parents=True, exist_ok=True)
+    if stat.S_ISLNK(os.lstat(path).st_mode): raise Blocked("SYMLINK_" + name)
+    return path
+
+
+def ensure_authority_boundaries(root, runs):
+    root_s, runs_s = str(root), str(runs)
+    common = os.path.commonpath((root_s, runs_s))
+    if common in (root_s, runs_s): raise Blocked("AUTHORITY_ROOT_OVERLAP")
+    authority = []
+    for name in ("keys", "records"):
+        path = root / name
+        if path.exists():
+            mode = os.lstat(path).st_mode
+            if not stat.S_ISDIR(mode) or stat.S_ISLNK(mode) or os.path.realpath(path) != str(path):
+                raise Blocked("INVALID_AUTHORITY_ROOT")
+        authority.append(str(path))
+    if os.path.commonpath(authority) in authority:
+        raise Blocked("AUTHORITY_ROOT_OVERLAP")
+
+
+def proc_snapshot(pid, proc_root, leader=False, controller=False):
+    directory = proc_root / str(pid)
+    if not directory.is_dir() and proc_root != Path("/proc") and controller:
+        directory = proc_root / "self"
+    stat_path = directory / "stat"; command_path = directory / "cmdline"
+    try:
+        raw_stat = stat_path.read_text(encoding="utf-8")
+        raw_stat = raw_stat.replace("{pid}", str(pid)).replace("{pgid}", str(os.getpgid(pid)))
+        close = raw_stat.rfind(")")
+        values = raw_stat[close + 2:].split()
+        pgid = int(values[2]); start = int(values[19])
+        boot = (proc_root / "sys/kernel/random/boot_id").read_bytes().strip()
+        command = command_path.read_bytes()
+    except (OSError, ValueError, IndexError) as exc:
+        raise Blocked("PROC_UNAVAILABLE") from exc
+    row = {"pid": pid, "process_start_ticks": start, "pgid": pgid,
+           "boot_id_sha256": digest(boot), "command_sha256": digest(command)}
+    if leader and pgid != pid: raise Blocked("RUNNER_NOT_GROUP_LEADER", True)
+    return row
+
+
+def process_alive(proof, proc_root):
+    try:
+        os.kill(proof["pid"], 0)
+        raw = (proc_root / str(proof["pid"]) / "stat").read_text(encoding="utf-8")
+        if raw[raw.rfind(")") + 2:].split()[0] == "Z": return False
+        return proc_snapshot(proof["pid"], proc_root, leader=True) == proof
+    except (OSError, Blocked):
+        return False
+
+
+def run_tool(path, arguments, env=None):
+    prefix = [sys.executable, path] if path.endswith(".py") else [path]
+    return subprocess.run(prefix + arguments, env=env, stdout=subprocess.PIPE,
+                          stderr=subprocess.PIPE, text=True)
+
+
+def validate_health(path, expected):
+    try: row = read_object(path)
+    except Exception as exc: raise Blocked("HEALTH_RECEIPT_INVALID") from exc
+    try:
+        checked = dt.datetime.fromisoformat(row["checked_at"].replace("Z", "+00:00"))
+        expires = dt.datetime.fromisoformat(row["expires_at"].replace("Z", "+00:00"))
+    except Exception as exc: raise Blocked("HEALTH_RECEIPT_INVALID") from exc
+    current = dt.datetime.now(dt.timezone.utc)
+    identities = {item.get("returned_model") for item in row.get("history", []) if isinstance(item, dict)}
+    ok = (row.get("schema") == 1 and row.get("verdict") == "HEALTHY" and
+          row.get("lane") == expected["lane"] and row.get("provider") == expected["provider"] and
+          row.get("requested_model") == expected["model"] and row.get("endpoint") == expected["base"] and
+          row.get("shape") == "history" and row.get("tools") == 25 and
+          row.get("sizes_kb") == [100, 250, 400] and identities == {expected["identity"]} and
+          all(item.get("status") == 200 for item in row.get("history", [])) and
+          checked <= current <= expires and (current - checked).total_seconds() <= 900)
+    if not ok: raise Blocked("HEALTH_RECEIPT_INVALID")
+
+
+def verify_link(controller, key):
+    link = read_object(controller / "controller-child.json", LINK_FIELDS)
+    unsigned = dict(link); supplied = unsigned.pop("hmac_sha256")
+    if not isinstance(supplied, str) or not hmac.compare_digest(
+            supplied, hmac.new(key, canonical(unsigned), hashlib.sha256).hexdigest()):
+        raise Blocked("LINK_AUTH_INVALID", True)
+    if link["parent_trace"] != str(controller) or link["parent_identity_sha256"] != digest(str(controller).encode()):
+        raise Blocked("LINK_IDENTITY_INVALID", True)
+    if link["key_id"] != digest(key): raise Blocked("LINK_KEY_INVALID", True)
+    trace = Path(link["child_trace"])
+    manifest = read_object(trace / "run-manifest.json")
+    if manifest.get("run_tag") != link["child_run_tag"] or manifest.get("manifest_sha256") != link["child_manifest_sha256"]:
+        raise Blocked("LINK_CHILD_INVALID", True)
+    return link, trace
+
+
+def budget_initial(tag, limits):
+    return {"schema": 1, "run_tag": tag, "updated_at": now(), "attempts_charged": 0,
+            "request_bytes": 0, "consecutive_provider_failures": 0,
+            "limits": dict(limits), "verdict": "WITHIN", "reason": None}
+
+
+def budget_read(path, tag, limits):
+    fields = {"schema", "run_tag", "updated_at", "attempts_charged", "request_bytes",
+              "consecutive_provider_failures", "limits", "verdict", "reason"}
+    try: row = read_object(path, fields)
+    except Exception as exc: raise Blocked("BUDGET_STATE_UNKNOWN", True) from exc
+    if (row.get("schema") != 1 or row.get("run_tag") != tag or row.get("limits") != limits or
+            row.get("verdict") not in ("WITHIN", "EXCEEDED") or
+            any(type(row.get(name)) is not int or row[name] < 0 for name in
+                ("attempts_charged", "request_bytes", "consecutive_provider_failures"))):
+        raise Blocked("BUDGET_STATE_UNKNOWN", True)
+    return row
+
+
+def write_receipt(trace, tag, manifest_sha, state, limits, elapsed, key, verdict=None, reason=None):
+    row = {"schema": 1, "run_tag": tag, "manifest_sha256": manifest_sha, "observed_at": now(),
+           "attempts_charged": state["attempts_charged"], "request_bytes": state["request_bytes"],
+           "input_tokens": None, "output_tokens": None, "wall_seconds": max(0, int(elapsed)),
+           "consecutive_provider_failures": state["consecutive_provider_failures"],
+           "limits": dict(limits), "verdict": verdict or state["verdict"],
+           "reason": reason if reason is not None else state["reason"], "key_id": digest(key)}
+    atomic_replace(trace / "controller-receipt.json", canonical(signed(row, key)) + b"\n")
+
+
+def terminate_owned(proof, proc_root):
+    evidence = {"sigterm_sent": False, "sigkill_sent": False, "survivors": []}
+    if not process_alive(proof, proc_root): return evidence
+    os.killpg(proof["pgid"], signal.SIGTERM); evidence["sigterm_sent"] = True
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline and process_alive(proof, proc_root): time.sleep(.05)
+    if process_alive(proof, proc_root):
+        os.killpg(proof["pgid"], signal.SIGKILL); evidence["sigkill_sent"] = True
+        time.sleep(.05)
+    if process_alive(proof, proc_root): evidence["survivors"].append(proof["pid"])
+    return evidence
+
+
+def artifact_rows(trace):
+    rows = []
+    nofollow = getattr(os, "O_NOFOLLOW", 0)
+    directory_flag = getattr(os, "O_DIRECTORY", 0)
+
+    def same(left, right):
+        return (left.st_dev, left.st_ino, stat.S_IFMT(left.st_mode)) == (
+            right.st_dev, right.st_ino, stat.S_IFMT(right.st_mode))
+
+    def visit(directory_fd, prefix=""):
+        try: names = sorted(os.listdir(directory_fd))
+        except OSError as exc: raise Blocked("TRACE_ARTIFACT_UNSAFE", True) from exc
+        for name in names:
+            relative = prefix + name
+            if not prefix and relative in ("trace-manifest.json", "sealed"): continue
+            try: before = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
+            except OSError as exc: raise Blocked("TRACE_ARTIFACT_UNSAFE", True) from exc
+            if stat.S_ISDIR(before.st_mode):
+                try: child_fd = os.open(name, os.O_RDONLY | directory_flag | nofollow, dir_fd=directory_fd)
+                except OSError as exc: raise Blocked("TRACE_ARTIFACT_UNSAFE", True) from exc
+                try:
+                    if not same(before, os.fstat(child_fd)): raise Blocked("TRACE_ARTIFACT_RACE", True)
+                    visit(child_fd, relative + "/")
+                    after = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
+                    if not same(after, os.fstat(child_fd)): raise Blocked("TRACE_ARTIFACT_RACE", True)
+                finally: os.close(child_fd)
+            elif stat.S_ISREG(before.st_mode):
+                try: file_fd = os.open(name, os.O_RDONLY | nofollow, dir_fd=directory_fd)
+                except OSError as exc: raise Blocked("TRACE_ARTIFACT_UNSAFE", True) from exc
+                try:
+                    opened = os.fstat(file_fd)
+                    if not same(before, opened): raise Blocked("TRACE_ARTIFACT_RACE", True)
+                    chunks = []
+                    while True:
+                        chunk = os.read(file_fd, 1024 * 1024)
+                        if not chunk: break
+                        chunks.append(chunk)
+                    data = b"".join(chunks); finished = os.fstat(file_fd)
+                    rebound = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
+                    if (not same(opened, finished) or not same(finished, rebound) or
+                            finished.st_size != len(data)):
+                        raise Blocked("TRACE_ARTIFACT_RACE", True)
+                finally: os.close(file_fd)
+                rows.append({"path": relative, "bytes": len(data), "sha256": digest(data)})
+            else:
+                raise Blocked("TRACE_ARTIFACT_UNSAFE", True)
+
+    try: root_fd = os.open(trace, os.O_RDONLY | directory_flag | nofollow)
+    except OSError as exc: raise Blocked("TRACE_ARTIFACT_UNSAFE", True) from exc
+    try: visit(root_fd)
+    finally: os.close(root_fd)
+    return rows
+
+
+def seal_trace(trace, tag, manifest_sha, key):
+    manifest_path = trace / "trace-manifest.json"; sealed_path = trace / "sealed"
+    manifest_exists = os.path.lexists(manifest_path)
+    sealed_exists = os.path.lexists(sealed_path)
+    if sealed_exists and not manifest_exists:
+        raise Blocked("TERMINAL_SEAL_MISMATCH", True)
+    if manifest_exists:
+        verify_terminal(trace, tag, manifest_sha, key, require_marker=sealed_exists)
+        if sealed_exists:
+            return
+    else:
+        row = {"schema": 1, "run_tag": tag, "child_manifest_sha256": manifest_sha,
+               "artifacts": artifact_rows(trace), "key_id": digest(key)}
+        publish_no_replace(manifest_path, canonical(signed(row, key)) + b"\n")
+    fd = os.open(sealed_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    try: os.fsync(fd)
+    finally: os.close(fd)
+    fsync_dir(trace)
+
+
+def verify_terminal(trace, tag, manifest_sha, key, require_marker=True):
+    row = read_object(trace / "trace-manifest.json")
+    supplied = row.get("hmac_sha256"); unsigned = dict(row); unsigned.pop("hmac_sha256", None)
+    expected_fields = {"schema", "run_tag", "child_manifest_sha256", "artifacts", "key_id"}
+    if (set(unsigned) != expected_fields or row.get("schema") != 1 or row.get("run_tag") != tag or
+            row.get("child_manifest_sha256") != manifest_sha or row.get("key_id") != digest(key) or
+            not isinstance(supplied, str) or not hmac.compare_digest(
+                supplied, hmac.new(key, canonical(unsigned), hashlib.sha256).hexdigest()) or
+            row.get("artifacts") != artifact_rows(trace)):
+        raise Blocked("TERMINAL_SEAL_MISMATCH", True)
+    if require_marker:
+        try: mode = os.lstat(trace / "sealed").st_mode
+        except OSError as exc: raise Blocked("TERMINAL_SEAL_MISMATCH", True) from exc
+        if not stat.S_ISREG(mode) or stat.S_ISLNK(mode):
+            raise Blocked("TERMINAL_SEAL_MISMATCH", True)
+
+
+def validity_result(trace, tag, manifest_sha, key):
+    try: row = read_object(trace / "validity.json")
+    except Exception: return False
+    supplied = row.get("hmac_sha256"); unsigned = dict(row); unsigned.pop("hmac_sha256", None)
+    return (isinstance(supplied, str) and hmac.compare_digest(
+        supplied, hmac.new(key, canonical(unsigned), hashlib.sha256).hexdigest()) and
+        row.get("run_tag") == tag and row.get("manifest_sha256") == manifest_sha and row.get("valid") is True)
+
+
+def parse_configuration():
+    required = ("SHERLOCK_CONTROLLER_ROOT", "SHERLOCK_FREE_TEST_COMMAND", "BENCH_RUNS",
+                "SHERLOCK_TARGET_COMMAND", "SHERLOCK_HEALTH_COMMAND")
+    for name in required:
+        if not os.environ.get(name): raise Blocked("MISSING_" + name)
+    limits = {}
+    for field, name in LIMIT_ENV.items():
+        try: value = int(os.environ.get(name, ""))
+        except ValueError: raise Blocked("INVALID_" + name)
+        if value <= 0: raise Blocked("INVALID_" + name)
+        limits[field] = value
+    if any(os.environ.get(name) for name in
+           ("SHERLOCK_BUDGET_MAX_INPUT_TOKENS", "SHERLOCK_BUDGET_MAX_OUTPUT_TOKENS",
+            "SHERLOCK_BUDGET_MAX_TOKENS")):
+        raise Blocked("BLOCKED_USAGE_UNAVAILABLE")
+    return limits
+
+
+def acquire_lock(root, resume_id):
+    path = root / "paid-lane.lock"
+    fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o600)
+    try: fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        os.close(fd); raise Blocked("BLOCKED_EXISTING_CONTROLLER")
+    nonterminal = []
+    try:
+        for candidate in root.iterdir():
+            if not re.fullmatch(r"controller-[A-Za-z0-9._-]{1,95}", candidate.name):
+                continue
+            mode = os.lstat(candidate).st_mode
+            if not stat.S_ISDIR(mode) or stat.S_ISLNK(mode):
+                raise Blocked("BLOCKED_UNKNOWN", True)
+            phase = read_object(candidate / "status.json", STATUS_FIELDS).get("phase")
+            if phase not in TERMINAL:
+                nonterminal.append(candidate.name)
+    except Blocked:
+        os.close(fd); raise
+    except OSError as exc:
+        os.close(fd); raise Blocked("BLOCKED_UNKNOWN", True) from exc
+    if nonterminal and (resume_id is None or nonterminal != [resume_id]):
+        os.close(fd); raise Blocked("BLOCKED_EXISTING_CONTROLLER")
+    owner_path = root / "paid-lane-owner.json"
+    if owner_path.exists():
+        try: owner = read_object(owner_path)
+        except Exception:
+            os.close(fd); raise Blocked("BLOCKED_UNKNOWN", True)
+        prior_id = owner.get("controller_id")
+        if prior_id and prior_id != resume_id:
+            prior_status = root / prior_id / "status.json"
+            try: phase = read_object(prior_status, STATUS_FIELDS)["phase"]
+            except Exception: phase = None
+            if phase not in TERMINAL:
+                os.close(fd); raise Blocked("BLOCKED_EXISTING_CONTROLLER")
+    return fd, owner_path
+
+
+def target_environment(tag, trace, staged_corpus, limits):
+    env = dict(os.environ)
+    remove = {"SHERLOCK_CONTROLLER_ROOT", "SHERLOCK_FREE_TEST_COMMAND", "SHERLOCK_HEALTH_COMMAND",
+              "SHERLOCK_TARGET_COMMAND", "SHERLOCK_PROC_ROOT", "SHERLOCK_MANIFEST_TOOL",
+              "SHERLOCK_VALIDATOR_TOOL", "SHERLOCK_LEDGER", "SHERLOCK_ANSWER_KEY",
+              "SHERLOCK_RENDERER", "SHERLOCK_SKILL_ROOT", "SHERLOCK_SCORER",
+              "SHERLOCK_TRIAGE_CHECKER", "SHERLOCK_STOP_CHECKER", "SHERLOCK_CITATION_CHECKER",
+              "SHERLOCK_TARGET_VERSION", "SHERLOCK_PROVIDER", "SHERLOCK_LANE"}
+    for name in remove: env.pop(name, None)
+    env.update({"SHERLOCK_RUN_TAG": tag, "SHERLOCK_TRACE": str(trace),
+                "SHERLOCK_CORPUS": str(staged_corpus),
+                "SHERLOCK_REQUIRE_ATTRIBUTION": "1"})
+    for field, name in LIMIT_ENV.items(): env[name] = str(limits[field])
+    return env
+
+
+def controller_id_new():
+    stamp = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    return "controller-%s-%s" % (stamp, secrets.token_hex(6))
+
+
+def run_fresh(root, runs, controller_id, controller, key_path, key, limits, lock_fd, owner_path, proc_root):
+    tag = "run-" + controller_id.removeprefix("controller-")
+    trace = runs / tag
+    controller.mkdir(mode=0o700)
+    identity = {"schema": 1, "controller_id": controller_id, "parent_trace": str(controller)}
+    atomic_replace(controller / "controller-identity.json", canonical(identity) + b"\n")
+    persist(controller, controller_id, "FIXING", tag)
+    persist(controller, controller_id, "TESTING", tag)
+    free = subprocess.run(os.environ["SHERLOCK_FREE_TEST_COMMAND"], shell=True)
+    if free.returncode:
+        persist(controller, controller_id, "BLOCKED", tag, reason="FREE_TEST_FAILED"); return 1
+    try: controller_proof = proc_snapshot(os.getpid(), proc_root, controller=True)
+    except Blocked as exc:
+        persist(controller, controller_id, "BLOCKED", tag, reason=exc.reason); return 1
+    owner = {"schema": 1, "controller_id": controller_id, "child_run_tag": tag, **controller_proof}
+    atomic_replace(owner_path, canonical(owner) + b"\n")
+    trace.mkdir(mode=0o700)
+    persist(controller, controller_id, "HEALTH_CHECKING", tag)
+    health = controller / "health-receipt.json"
+    lane = os.environ.get("SHERLOCK_LANE", "paid")
+    provider = os.environ.get("SHERLOCK_PROVIDER", "linkapi")
+    model = os.environ.get("SHERLOCK_MODEL", "")
+    identity_name = os.environ.get("SHERLOCK_EXPECTED_RETURNED_IDENTITY", "")
+    base = os.environ.get("SHERLOCK_BASE_URL", "")
+    health_env = dict(os.environ)
+    health_env.update({"PROBE_RECEIPT_PATH": str(health), "PROBE_LANE": lane,
+                       "PROBE_PROVIDER": provider, "PROBE_EXPECTED_RETURNED_MODEL": identity_name,
+                       "PROBE_BASE_URL": base, "PROBE_ENDPOINT_LABEL": base})
+    result = subprocess.run(os.environ["SHERLOCK_HEALTH_COMMAND"], shell=True, env=health_env)
+    try:
+        if result.returncode: raise Blocked("HEALTH_COMMAND_FAILED")
+        validate_health(health, {"lane": lane, "provider": provider, "model": model,
+                                 "identity": identity_name, "base": base})
+    except Blocked as exc:
+        persist(controller, controller_id, "BLOCKED", tag, reason=exc.reason); return 1
+    manifest_tool = os.environ.get("SHERLOCK_MANIFEST_TOOL", str(HERE / "run-manifest.py"))
+    staged = controller / "staged-corpus"
+    stage_args = ["stage", "--source-corpus", os.environ.get("SHERLOCK_CORPUS", ""),
+                  "--answer-key", os.environ.get("SHERLOCK_ANSWER_KEY", ""),
+                  "--dataset", os.environ.get("SHERLOCK_DATASET", "bench649"),
+                  "--destination", str(staged)]
+    if run_tool(manifest_tool, stage_args).returncode:
+        persist(controller, controller_id, "BLOCKED", tag, reason="MANIFEST_STAGE_FAILED"); return 1
+    records = root / "records"; records.mkdir(mode=0o700, exist_ok=True)
+    commitment = records / "run-commitments.jsonl"
+    create_values = [
+        ("run-tag", tag), ("dataset", os.environ.get("SHERLOCK_DATASET", "bench649")),
+        ("arm", os.environ.get("SHERLOCK_ARM", "v3")), ("source-corpus", os.environ.get("SHERLOCK_CORPUS", "")),
+        ("answer-key", os.environ.get("SHERLOCK_ANSWER_KEY", "")),
+        ("renderer", os.environ.get("SHERLOCK_RENDERER", "")),
+        ("prompt", os.environ.get("SHERLOCK_PROMPT_FILE", "")),
+        ("skill-root", os.environ.get("SHERLOCK_SKILL_ROOT", "")),
+        ("runner", str(HERE / "run-bench.sh")), ("scorer", os.environ.get("SHERLOCK_SCORER", "")),
+        ("triage-checker", os.environ.get("SHERLOCK_TRIAGE_CHECKER", "")),
+        ("stop-checker", os.environ.get("SHERLOCK_STOP_CHECKER", "")),
+        ("citation-checker", os.environ.get("SHERLOCK_CITATION_CHECKER", "")),
+        ("target-cli", os.environ.get("QWEN_BIN", "")),
+        ("target-version", os.environ.get("SHERLOCK_TARGET_VERSION", "")),
+        ("requested-model", model), ("provider", provider),
+        ("expected-returned-identity", identity_name), ("lane", lane),
+        ("health-receipt", str(health)), ("controller-parent", str(controller / "controller-identity.json")),
+        ("commitment-file", str(commitment)), ("commitment-key", str(key_path)),
+        ("staged-corpus-destination", str(staged))]
+    create_args = ["create", str(trace)]
+    for name, value in create_values: create_args += ["--" + name, value]
+    if run_tool(manifest_tool, create_args).returncode or run_tool(
+            manifest_tool, ["verify", str(trace), "--commitment-file", str(commitment),
+                            "--commitment-key", str(key_path)]).returncode:
+        persist(controller, controller_id, "BLOCKED", tag, reason="MANIFEST_INVALID"); return 1
+    try:
+        manifest = read_object(trace / "run-manifest.json")
+        manifest_sha = manifest["manifest_sha256"]
+        if manifest.get("run_tag") != tag or not re.fullmatch(r"[0-9a-f]{64}", manifest_sha): raise ValueError()
+        if os.listdir(trace) != ["run-manifest.json"]: raise ValueError()
+    except Exception:
+        persist(controller, controller_id, "BLOCKED", tag, reason="MANIFEST_INVALID"); return 1
+    link_unsigned = {"schema": 1, "parent_trace": str(controller),
+        "parent_identity_sha256": digest(str(controller).encode()), "child_run_tag": tag,
+        "child_trace": str(trace), "child_manifest_sha256": manifest_sha,
+        "linked_at": now(), "key_id": digest(key)}
+    publish_no_replace(controller / "controller-child.json", canonical(signed(link_unsigned, key)) + b"\n")
+    persist(controller, controller_id, "READY", tag, manifest_sha)
+    persist(controller, controller_id, "QWEN_RUNNING", tag, manifest_sha)
+    command = os.environ["SHERLOCK_TARGET_COMMAND"]
+    child = subprocess.Popen(["bash", "-c", "exec " + command], start_new_session=True,
+                             env=target_environment(tag, trace, staged, limits))
+    ready = trace / ".runner-ready"; deadline = time.monotonic() + 30
+    while not ready.is_file() and child.poll() is None and time.monotonic() < deadline: time.sleep(.02)
+    if not ready.is_file():
+        if child.poll() is None: child.terminate()
+        persist(controller, controller_id, "RUNNER_FAILED", tag, manifest_sha, "RUNNER_HANDSHAKE_FAILED")
+        return 1
+    try: proof = proc_snapshot(child.pid, proc_root, leader=True)
+    except Blocked as exc:
+        if child.poll() is None: child.terminate()
+        persist(controller, controller_id, "BLOCKED_UNKNOWN", tag, manifest_sha, exc.reason); return 1
+    try:
+        publish_no_replace(trace / "upstream-budget-state.json",
+                           canonical(budget_initial(tag, limits)) + b"\n")
+        publish_no_replace(trace / "controller-process.json", canonical(proof) + b"\n")
+    except FileExistsError:
+        terminate_owned(proof, proc_root)
+        persist(controller, controller_id, "BLOCKED_UNKNOWN", tag, manifest_sha,
+                "HANDSHAKE_ARTIFACT_COLLISION")
+        return 1
+    return monitor_and_finish(root, controller, controller_id, trace, tag, manifest_sha,
+                              key_path, key, limits, proc_root, proof, child)
+
+
+def monitor_and_finish(root, controller, controller_id, trace, tag, manifest_sha,
+                       key_path, key, limits, proc_root, proof, child=None):
+    started = time.monotonic(); budget_path = trace / "upstream-budget-state.json"
+    breach = None
+    while process_alive(proof, proc_root):
+        elapsed = time.monotonic() - started
+        try: budget = budget_read(budget_path, tag, limits)
+        except Blocked as exc: breach = exc.reason; break
+        if budget["verdict"] == "EXCEEDED": breach = budget["reason"] or "BUDGET_EXCEEDED"
+        elif elapsed >= limits["max_wall_seconds"]: breach = "MAX_WALL_SECONDS"
+        write_receipt(trace, tag, manifest_sha, budget, limits, elapsed, key,
+                      "EXCEEDED" if breach else None, breach)
+        if breach: break
+        time.sleep(.05)
+    if not breach:
+        try: budget = budget_read(budget_path, tag, limits)
+        except Blocked as exc: breach = exc.reason
+        else:
+            if budget["verdict"] == "EXCEEDED":
+                breach = budget["reason"] or "BUDGET_EXCEEDED"
+            elif time.monotonic() - started >= limits["max_wall_seconds"]:
+                breach = "MAX_WALL_SECONDS"
+    if breach:
+        evidence = terminate_owned(proof, proc_root)
+        atomic_replace(trace / "controller-termination.json", canonical(evidence) + b"\n")
+        try: budget = budget_read(budget_path, tag, limits)
+        except Blocked: budget = budget_initial(tag, limits)
+        write_receipt(trace, tag, manifest_sha, budget, limits, time.monotonic() - started,
+                      key, "EXCEEDED", breach)
+        phase = "BLOCKED_UNKNOWN" if breach == "BUDGET_STATE_UNKNOWN" else "BLOCKED"
+        persist(controller, controller_id, phase, tag, manifest_sha, breach)
+        seal_trace(trace, tag, manifest_sha, key); return 1
+    rc = child.wait() if child is not None else 0
+    budget = budget_read(budget_path, tag, limits)
+    write_receipt(trace, tag, manifest_sha, budget, limits, time.monotonic() - started, key)
+    if rc != 0 or not (trace / "candidate.json").is_file():
+        persist(controller, controller_id, "RUNNER_FAILED", tag, manifest_sha,
+                "RUNNER_NONZERO" if rc else "CANDIDATE_MISSING")
+        seal_trace(trace, tag, manifest_sha, key); return 1
+    persist(controller, controller_id, "VERIFYING", tag, manifest_sha)
+    return validate_and_finish(root, controller, controller_id, trace, tag, manifest_sha,
+                               key_path, key)
+
+
+def validate_and_finish(root, controller, controller_id, trace, tag, manifest_sha, key_path, key):
+    validator = os.environ.get("SHERLOCK_VALIDATOR_TOOL", str(HERE / "validate-run.py"))
+    if not (trace / "validity.json").exists():
+        result = run_tool(validator, [str(trace), "--commitment-file", str(root / "records/run-commitments.jsonl"),
+                                     "--commitment-key", str(key_path), "--ledger", os.environ.get("SHERLOCK_LEDGER", "")])
+        if result.returncode:
+            persist(controller, controller_id, "RUNNER_FAILED", tag, manifest_sha, "VALIDATOR_NONZERO")
+            seal_trace(trace, tag, manifest_sha, key); return 1
+    accepted = validity_result(trace, tag, manifest_sha, key)
+    phase = "DONE" if accepted else "REJECTED"
+    persist(controller, controller_id, phase, tag, manifest_sha, None if accepted else "VALIDITY_REJECTED")
+    seal_trace(trace, tag, manifest_sha, key)
+    return 0 if accepted else 1
+
+
+def main():
+    resume_id = None
+    if len(sys.argv) == 3 and sys.argv[1] == "--resume": resume_id = sys.argv[2]
+    elif len(sys.argv) != 1:
+        print("usage: bench-controller.sh [--resume CONTROLLER_ID]", file=sys.stderr); return 2
+    try:
+        limits = parse_configuration()
+        root = clean_root("SHERLOCK_CONTROLLER_ROOT"); runs = clean_root("BENCH_RUNS")
+        ensure_authority_boundaries(root, runs)
+        key_path, key = bootstrap_key(root)
+        lock_fd, owner_path = acquire_lock(root, resume_id)
+    except Blocked as exc:
+        print(exc.reason, file=sys.stderr); return 1
+    try:
+        proc_root = Path(os.environ.get("SHERLOCK_PROC_ROOT", "/proc"))
+        if resume_id:
+            if not re.fullmatch(r"controller-[A-Za-z0-9._-]{1,95}", resume_id): raise Blocked("INVALID_CONTROLLER_ID")
+            controller = root / resume_id
+            if os.path.realpath(controller) != str(controller) or not controller.is_dir(): raise Blocked("CONTROLLER_MISSING")
+            status = read_object(controller / "status.json", STATUS_FIELDS)
+            if status["controller_id"] != resume_id: raise Blocked("CONTROLLER_ID_MISMATCH", True)
+            if status["phase"] in TERMINAL:
+                if status["child_manifest_sha256"] is None:
+                    return 1
+                try:
+                    link, trace = verify_link(controller, key)
+                    seal_trace(trace, link["child_run_tag"], link["child_manifest_sha256"], key)
+                except Blocked as exc:
+                    persist(controller, resume_id, "BLOCKED_UNKNOWN", status["child_run_tag"],
+                            status["child_manifest_sha256"], exc.reason); return 1
+                return 0 if status["phase"] == "DONE" else 1
+            link, trace = verify_link(controller, key)
+            if status["phase"] == "VERIFYING":
+                if not (trace / "candidate.json").is_file():
+                    raise Blocked("CANDIDATE_MISSING", True)
+                return validate_and_finish(root, controller, resume_id, trace,
+                                           link["child_run_tag"], link["child_manifest_sha256"],
+                                           key_path, key)
+            if status["phase"] != "QWEN_RUNNING": raise Blocked("RESUME_PHASE_AMBIGUOUS", True)
+            proof = read_object(trace / "controller-process.json", PROOF_FIELDS)
+            if not process_alive(proof, proc_root): raise Blocked("RECORDED_LAUNCH_UNCERTAIN", True)
+            owner = {"schema": 1, "controller_id": resume_id, "child_run_tag": link["child_run_tag"],
+                     **proc_snapshot(os.getpid(), proc_root, controller=True)}
+            atomic_replace(owner_path, canonical(owner) + b"\n")
+            return monitor_and_finish(root, controller, resume_id, trace, link["child_run_tag"],
+                                      link["child_manifest_sha256"], key_path, key, limits, proc_root, proof)
+        controller_id = controller_id_new(); controller = root / controller_id
+        return run_fresh(root, runs, controller_id, controller, key_path, key, limits,
+                         lock_fd, owner_path, proc_root)
+    except Blocked as exc:
+        failed_id = resume_id or locals().get("controller_id")
+        failed_controller = root / failed_id if failed_id else None
+        if failed_controller is not None and failed_controller.is_dir():
+            try:
+                status = read_object(failed_controller / "status.json", STATUS_FIELDS)
+                persist(failed_controller, failed_id,
+                        "BLOCKED_UNKNOWN" if exc.unknown else "BLOCKED",
+                        status.get("child_run_tag"), status.get("child_manifest_sha256"), exc.reason)
+            except Exception: pass
+        print(exc.reason, file=sys.stderr); return 1
+    finally:
+        os.close(lock_fd)
+
+
+raise SystemExit(main())
+PY

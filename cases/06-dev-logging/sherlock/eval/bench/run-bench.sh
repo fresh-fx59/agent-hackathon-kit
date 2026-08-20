@@ -20,18 +20,109 @@ CORPUS="${SHERLOCK_CORPUS:-}"
 BASE_URL="${SHERLOCK_BASE_URL:-https://linkapi.ai/v1}"
 MODEL="${SHERLOCK_MODEL:-[SP]deepseek-v4-flash}"
 TIMEOUT="${SHERLOCK_TIMEOUT:-2700}"
-RUNS="${BENCH_RUNS:-$HERE/runs}"; mkdir -p "$RUNS"
-STAMP="$(date -u +%Y%m%dT%H%M%SZ)-$ARM"
-TRACE="$RUNS/$STAMP"
+RUNS="${BENCH_RUNS:-$HERE/runs}"
+CONTROLLED=0
+if [ -n "${SHERLOCK_RUN_TAG:-}" ] || [ -n "${SHERLOCK_TRACE:-}" ]; then
+  [ -n "${SHERLOCK_RUN_TAG:-}" ] && [ -n "${SHERLOCK_TRACE:-}" ] || {
+    echo "✗ controlled run requires both SHERLOCK_RUN_TAG and SHERLOCK_TRACE" >&2
+    exit 2
+  }
+  CONTROLLED=1
+  STAMP="$SHERLOCK_RUN_TAG"
+  TRACE="$SHERLOCK_TRACE"
+  python3 - "$RUNS" "$STAMP" "$TRACE" <<'PY' || exit 2
+import os, re, stat, sys
+runs, tag, trace = sys.argv[1:]
+if not os.path.isabs(runs) or not os.path.isabs(trace):
+    raise SystemExit("controlled run paths must be absolute")
+if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,95}", tag) or tag in (".", ".."):
+    raise SystemExit("invalid controlled run tag")
+if os.path.realpath(runs) != os.path.normpath(runs):
+    raise SystemExit("BENCH_RUNS must be canonical and contain no symlink component")
+expected = os.path.join(runs, tag)
+if trace != expected or os.path.realpath(trace) != trace:
+    raise SystemExit("controlled trace is not canonical BENCH_RUNS/tag")
+try:
+    mode = os.lstat(trace).st_mode
+except OSError as exc:
+    raise SystemExit("controlled trace missing: %s" % exc)
+if not stat.S_ISDIR(mode) or stat.S_ISLNK(mode):
+    raise SystemExit("controlled trace must be a no-symlink directory")
+if os.listdir(trace) != ["run-manifest.json"]:
+    raise SystemExit("controlled trace collision before launch")
+manifest = os.lstat(os.path.join(trace, "run-manifest.json")).st_mode
+if not stat.S_ISREG(manifest) or stat.S_ISLNK(manifest):
+    raise SystemExit("run-manifest.json must be a regular no-symlink file")
+PY
+else
+  mkdir -p "$RUNS"
+  STAMP="$(date -u +%Y%m%dT%H%M%SZ)-$ARM"
+  TRACE="$RUNS/$STAMP"
+  mkdir -p "$TRACE"
+fi
 DATASET="${SHERLOCK_DATASET:-bench649}"
 MEASURE_DIR="$(cd "$HERE/../../measure" && pwd)"
 STATE_TOOL="$MEASURE_DIR/run_state.py"
 ATTEMPT_FILE="$TRACE/current-attempt"
 W=""
 TERMINAL_WRITTEN=0
-state_set() { python3 "$STATE_TOOL" set "$TRACE/status.json" "$@"; }
-state_event() { python3 "$STATE_TOOL" event "$TRACE/status-events.jsonl" "$@"; }
-mkdir -p "$TRACE"
+PROOF_PID="" PROOF_START="" PROOF_PGID="" PROOF_BOOT="" PROOF_COMMAND=""
+state_set() {
+  if [ "$CONTROLLED" = 1 ]; then
+    python3 "$STATE_TOOL" set "$TRACE/status.json" "$@" --pid "$PROOF_PID" \
+      --process-start-ticks "$PROOF_START" --pgid "$PROOF_PGID" \
+      --boot-id-sha256 "$PROOF_BOOT" --command-sha256 "$PROOF_COMMAND"
+  else
+    python3 "$STATE_TOOL" set "$TRACE/status.json" "$@"
+  fi
+}
+state_event() {
+  if [ "$CONTROLLED" = 1 ]; then
+    python3 "$STATE_TOOL" event "$TRACE/status-events.jsonl" "$@" --pid "$PROOF_PID" \
+      --process-start-ticks "$PROOF_START" --pgid "$PROOF_PGID" \
+      --boot-id-sha256 "$PROOF_BOOT" --command-sha256 "$PROOF_COMMAND"
+  else
+    python3 "$STATE_TOOL" event "$TRACE/status-events.jsonl" "$@"
+  fi
+}
+if [ "$CONTROLLED" = 1 ]; then
+  python3 - "$TRACE/.runner-ready" <<'PY' || exit 2
+import os, sys
+path = sys.argv[1]
+fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+try: os.fsync(fd)
+finally: os.close(fd)
+directory = os.open(os.path.dirname(path), os.O_RDONLY)
+try: os.fsync(directory)
+finally: os.close(directory)
+PY
+  proof_path="$TRACE/controller-process.json"
+  proof_wait=0
+  while [ ! -f "$proof_path" ] && [ "$proof_wait" -lt 300 ]; do
+    sleep 0.1
+    proof_wait=$((proof_wait + 1))
+  done
+  [ -f "$proof_path" ] || { echo "✗ controller process proof was not supplied" >&2; exit 2; }
+  proof_values="$(python3 - "$proof_path" <<'PY'
+import json, re, stat, sys
+path = sys.argv[1]
+mode = __import__('os').lstat(path).st_mode
+if not stat.S_ISREG(mode) or stat.S_ISLNK(mode): raise SystemExit(1)
+with open(path, encoding="utf-8") as handle: row = json.load(handle)
+fields = {"pid", "process_start_ticks", "pgid", "boot_id_sha256", "command_sha256"}
+if set(row) != fields: raise SystemExit(1)
+if any(type(row[name]) is not int or row[name] <= 0 for name in ("pid", "process_start_ticks", "pgid")):
+    raise SystemExit(1)
+if row["pid"] != row["pgid"]: raise SystemExit(1)
+if any(not isinstance(row[name], str) or not re.fullmatch(r"[0-9a-f]{64}", row[name])
+       for name in ("boot_id_sha256", "command_sha256")): raise SystemExit(1)
+print(row["pid"], row["process_start_ticks"], row["pgid"], row["boot_id_sha256"], row["command_sha256"])
+PY
+)" || { echo "✗ invalid controller process proof" >&2; exit 2; }
+  read -r PROOF_PID PROOF_START PROOF_PGID PROOF_BOOT PROOF_COMMAND <<EOF
+$proof_values
+EOF
+fi
 state_set --run-tag "$STAMP" --phase STAGING --dataset "$DATASET" --arm "$ARM" --trace-dir "$TRACE"
 state_event STAGING --run-tag "$STAMP" --phase STAGING --dataset "$DATASET" --arm "$ARM" --trace-dir "$TRACE"
 save_trace() {
@@ -234,10 +325,25 @@ fi
 # model-id table and pins the context window to 200,000 — the "177,000-token
 # ceiling". On the 649 MB corpus that is the runner where it hurts most.
 . "$MEASURE_DIR/upstream-lane.sh"
-upstream_lane_start "$BASE_URL" "$TRACE.upstream.jsonl" "$STAMP" "$MODEL" \
-  "$TRACE/upstream-inflight.json" "$ATTEMPT_FILE"
+if ! upstream_lane_start "$BASE_URL" "$TRACE.upstream.jsonl" "$STAMP" "$MODEL" \
+  "$TRACE/upstream-inflight.json" "$ATTEMPT_FILE"; then
+  state_set --run-tag "$STAMP" --phase RUN_FAILED --dataset "$DATASET" --arm "$ARM" --trace-dir "$TRACE" \
+    --reason ATTRIBUTION_UNAVAILABLE --upstream-log "$TRACE.upstream.jsonl" \
+    --inflight-path "$TRACE/upstream-inflight.json"
+  state_event RUN_FAILED --run-tag "$STAMP" --phase RUN_FAILED --dataset "$DATASET" --arm "$ARM" --trace-dir "$TRACE" \
+    --reason ATTRIBUTION_UNAVAILABLE --upstream-log "$TRACE.upstream.jsonl" \
+    --inflight-path "$TRACE/upstream-inflight.json"
+  TERMINAL_WRITTEN=1
+  exit 3
+fi
 BASE_URL="$LANE_BASE_URL"
 CLIENT_MODEL="$LANE_CLIENT_MODEL"
+if [ "$CONTROLLED" = 1 ]; then
+  unset SHERLOCK_BUDGET_MAX_UPSTREAM_ATTEMPTS \
+    SHERLOCK_BUDGET_MAX_REQUEST_BYTES \
+    SHERLOCK_BUDGET_MAX_WALL_SECONDS \
+    SHERLOCK_BUDGET_MAX_CONSECUTIVE_PROVIDER_FAILURES
+fi
 
 echo "▶ bench arm=$ARM  dataset=$DATASET  corpus=$(du -sh "$CORPUS" | cut -f1)  model=$MODEL"
 START=$(date +%s)

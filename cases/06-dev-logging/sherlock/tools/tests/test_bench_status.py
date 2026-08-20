@@ -101,6 +101,28 @@ class BenchStatusTests(unittest.TestCase):
         (parent / "controller-child.json").write_text(json.dumps(row), encoding="utf-8")
         return row
 
+    def write_controller_receipt(self, **updates):
+        key = self.fx.commitment_key.read_bytes()
+        row = {
+            "schema": 1, "run_tag": "run-001",
+            "manifest_sha256": self.manifest["manifest_sha256"],
+            "observed_at": dt.datetime.now(dt.timezone.utc).isoformat().replace("+00:00", "Z"),
+            "attempts_charged": 3, "request_bytes": 4096,
+            "input_tokens": None, "output_tokens": None, "wall_seconds": 12,
+            "consecutive_provider_failures": 1,
+            "limits": {"max_upstream_attempts": 10, "max_request_bytes": 10000,
+                       "max_wall_seconds": 300,
+                       "max_consecutive_provider_failures": 4},
+            "verdict": "WITHIN", "reason": None,
+            "key_id": hashlib.sha256(key).hexdigest(),
+        }
+        row.update(updates)
+        row["hmac_sha256"] = hmac.new(
+            key, json.dumps(row, sort_keys=True, separators=(",", ":")).encode(),
+            hashlib.sha256).hexdigest()
+        (self.fx.trace / "controller-receipt.json").write_text(json.dumps(row))
+        return row
+
     def add_trace(self, name, tag, phase, updated):
         trace = self.fx.root / name
         manifest = self.fx.create(trace=str(trace), run_tag=tag)
@@ -154,6 +176,59 @@ class BenchStatusTests(unittest.TestCase):
         self.assertEqual((got["selection"], got["run_tag"]), ("link", "run-001"))
         row["child_run_tag"] = "other"; (parent / "controller-child.json").write_text(json.dumps(row), encoding="utf-8")
         self.assertNotEqual(self.status(parent, "--run-tag", "run-001").returncode, 0)
+
+    def test_linked_controller_is_display_only_and_cannot_accept_its_child(self):
+        """Controller DONE must not replace the validator's pending validity."""
+        parent = self.fx.root / "controller"; parent.mkdir()
+        self.write_link(parent)
+        controller = {"schema": 1, "controller_id": "controller-1", "phase": "DONE",
+                      "updated_at": "2026-08-20T10:00:00Z", "child_run_tag": "run-001",
+                      "child_manifest_sha256": self.manifest["manifest_sha256"], "reason": None}
+        (parent / "status.json").write_text(json.dumps(controller))
+        self.write_status(phase="FINISHED_UNCHECKED")
+        got = self.projection(parent, "--run-tag", "run-001")
+        self.assertEqual(got["controller"], {"phase": "DONE",
+                                               "updated_at": "2026-08-20T10:00:00Z",
+                                               "reason": None})
+        self.assertEqual(got["validity"]["state"], "pending")
+        self.assertEqual(got["phase"], "FINISHED_UNCHECKED")
+
+    def test_linked_controller_status_requires_exact_child_identity(self):
+        parent = self.fx.root / "controller"; parent.mkdir(); self.write_link(parent)
+        row = {"schema": 1, "controller_id": "controller-1", "phase": "READY",
+               "updated_at": "2026-08-20T10:00:00Z", "child_run_tag": "other",
+               "child_manifest_sha256": self.manifest["manifest_sha256"], "reason": None}
+        (parent / "status.json").write_text(json.dumps(row))
+        self.write_status()
+        got = self.projection(parent, "--run-tag", "run-001")
+        self.assertNotIn("controller", got)
+        self.assertIn("CONTROLLER_INVALID", got["diagnostics"])
+
+    def test_authenticated_controller_budget_receipt_is_projected(self):
+        self.write_status(); self.write_controller_receipt()
+        got = self.projection()
+        self.assertEqual(got["budget"], {
+            "state": "reported", "verdict": "WITHIN", "reason": None,
+            "attempts_charged": 3, "request_bytes": 4096,
+            "input_tokens": None, "output_tokens": None, "wall_seconds": 12,
+            "consecutive_provider_failures": 1,
+            "limits": {"max_upstream_attempts": 10, "max_request_bytes": 10000,
+                       "max_wall_seconds": 300,
+                       "max_consecutive_provider_failures": 4}})
+
+    def test_bad_or_malformed_budget_receipt_is_invalid_never_zero(self):
+        self.write_status()
+        for mutation in ("bad-hmac", "non-null-tokens", "extra-field"):
+            with self.subTest(mutation=mutation):
+                row = self.write_controller_receipt()
+                if mutation == "bad-hmac":
+                    row["hmac_sha256"] = "0" * 64
+                elif mutation == "non-null-tokens":
+                    row["input_tokens"] = 0
+                else:
+                    row["free"] = True
+                (self.fx.trace / "controller-receipt.json").write_text(json.dumps(row))
+                self.assertEqual(self.projection()["budget"], "invalid")
 
     def test_validity_hmac_changes_pending_to_accepted(self):
         self.write_status()
