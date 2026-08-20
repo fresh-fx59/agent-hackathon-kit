@@ -230,6 +230,15 @@ class BenchStatusTests(unittest.TestCase):
                 (self.fx.trace / "controller-receipt.json").write_text(json.dumps(row))
                 self.assertEqual(self.projection()["budget"], "invalid")
 
+    def test_duplicate_key_and_oversized_reason_receipts_are_invalid(self):
+        self.write_status(); self.write_controller_receipt()
+        receipt = self.fx.trace / "controller-receipt.json"
+        raw = receipt.read_text().strip()
+        receipt.write_text('{"schema":1,' + raw[1:] + "\n", encoding="utf-8")
+        self.assertEqual(self.projection()["budget"], "invalid")
+        self.write_controller_receipt(reason="X" * 65, verdict="EXCEEDED")
+        self.assertEqual(self.projection()["budget"], "invalid")
+
     def test_validity_hmac_changes_pending_to_accepted(self):
         self.write_status()
         validity = load("bench_status_validity", SHERLOCK / "eval" / "bench" / "validate-run.py")

@@ -34,6 +34,13 @@ LIMIT_ENV = {
     "max_wall_seconds": "SHERLOCK_BUDGET_MAX_WALL_SECONDS",
     "max_consecutive_provider_failures": "SHERLOCK_BUDGET_MAX_CONSECUTIVE_PROVIDER_FAILURES",
 }
+MAX_JSON_BYTES = 1024 * 1024
+MAX_ARTIFACTS = 4096
+MAX_ARTIFACT_BYTES = 512 * 1024 * 1024
+MAX_TRACE_BYTES = 2 * 1024 * 1024 * 1024
+MAX_INVENTORY_BYTES = 768 * 1024
+MAX_ARTIFACT_PATH_BYTES = 1024
+REASON_CODE = re.compile(r"[A-Z][A-Z0-9_]{0,63}")
 
 
 class Blocked(Exception):
@@ -91,10 +98,51 @@ def publish_no_replace(path, data, mode=0o600):
         except FileNotFoundError: pass
 
 
-def read_object(path, fields=None):
-    path = Path(path); mode = os.lstat(path).st_mode
-    if not stat.S_ISREG(mode) or stat.S_ISLNK(mode): raise Blocked("NONREGULAR_STATE", True)
-    with path.open(encoding="utf-8") as handle: row = json.load(handle)
+def strict_object(pairs):
+    row = {}
+    for key, value in pairs:
+        if key in row: raise ValueError("duplicate JSON key")
+        row[key] = value
+    return row
+
+
+def read_bytes(path, limit=MAX_JSON_BYTES):
+    path = Path(path); nofollow = getattr(os, "O_NOFOLLOW", 0)
+    try:
+        before = os.lstat(path)
+        if not stat.S_ISREG(before.st_mode) or stat.S_ISLNK(before.st_mode):
+            raise Blocked("NONREGULAR_STATE", True)
+        fd = os.open(path, os.O_RDONLY | nofollow)
+        try:
+            opened = os.fstat(fd)
+            if (not stat.S_ISREG(opened.st_mode) or
+                    (before.st_dev, before.st_ino) != (opened.st_dev, opened.st_ino) or
+                    opened.st_size > limit):
+                raise Blocked("INVALID_STATE", True)
+            chunks = []; total = 0
+            while total <= limit:
+                chunk = os.read(fd, min(65536, limit + 1 - total))
+                if not chunk: break
+                chunks.append(chunk); total += len(chunk)
+            finished = os.fstat(fd)
+            if (total > limit or (opened.st_dev, opened.st_ino, opened.st_size) !=
+                    (finished.st_dev, finished.st_ino, finished.st_size) or total != finished.st_size):
+                raise Blocked("INVALID_STATE", True)
+            return b"".join(chunks)
+        finally: os.close(fd)
+    except Blocked:
+        raise
+    except OSError as exc:
+        raise Blocked("INVALID_STATE", True) from exc
+
+
+def read_object(path, fields=None, limit=MAX_JSON_BYTES):
+    try:
+        row = json.loads(read_bytes(path, limit).decode("utf-8"), object_pairs_hook=strict_object)
+    except Blocked:
+        raise
+    except (UnicodeError, ValueError, TypeError) as exc:
+        raise Blocked("INVALID_STATE", True) from exc
     if not isinstance(row, dict) or (fields is not None and set(row) != fields):
         raise Blocked("INVALID_STATE", True)
     return row
@@ -166,35 +214,56 @@ def ensure_authority_boundaries(root, runs):
         raise Blocked("AUTHORITY_ROOT_OVERLAP")
 
 
-def proc_snapshot(pid, proc_root, leader=False, controller=False):
+def proc_stat(pid, proc_root, controller=False):
     directory = proc_root / str(pid)
     if not directory.is_dir() and proc_root != Path("/proc") and controller:
         directory = proc_root / "self"
     stat_path = directory / "stat"; command_path = directory / "cmdline"
     try:
         raw_stat = stat_path.read_text(encoding="utf-8")
-        raw_stat = raw_stat.replace("{pid}", str(pid)).replace("{pgid}", str(os.getpgid(pid)))
+        if "{pid}" in raw_stat or "{pgid}" in raw_stat:
+            raw_stat = raw_stat.replace("{pid}", str(pid)).replace("{pgid}", str(os.getpgid(pid)))
         close = raw_stat.rfind(")")
         values = raw_stat[close + 2:].split()
-        pgid = int(values[2]); start = int(values[19])
+        state = values[0]; pgid = int(values[2]); start = int(values[19])
         boot = (proc_root / "sys/kernel/random/boot_id").read_bytes().strip()
         command = command_path.read_bytes()
     except (OSError, ValueError, IndexError) as exc:
         raise Blocked("PROC_UNAVAILABLE") from exc
-    row = {"pid": pid, "process_start_ticks": start, "pgid": pgid,
+    return state, {"pid": pid, "process_start_ticks": start, "pgid": pgid,
            "boot_id_sha256": digest(boot), "command_sha256": digest(command)}
-    if leader and pgid != pid: raise Blocked("RUNNER_NOT_GROUP_LEADER", True)
+
+
+def proc_snapshot(pid, proc_root, leader=False, controller=False):
+    state, row = proc_stat(pid, proc_root, controller)
+    if leader and row["pgid"] != pid: raise Blocked("RUNNER_NOT_GROUP_LEADER", True)
     return row
 
 
 def process_alive(proof, proc_root):
     try:
         os.kill(proof["pid"], 0)
-        raw = (proc_root / str(proof["pid"]) / "stat").read_text(encoding="utf-8")
-        if raw[raw.rfind(")") + 2:].split()[0] == "Z": return False
-        return proc_snapshot(proof["pid"], proc_root, leader=True) == proof
+        state, current = proc_stat(proof["pid"], proc_root)
+        return state != "Z" and current == proof and current["pgid"] == proof["pid"]
     except (OSError, Blocked):
         return False
+
+
+def group_members(proof, proc_root):
+    members = []
+    try: names = os.listdir(proc_root)
+    except OSError as exc: raise Blocked("PROC_UNAVAILABLE", True) from exc
+    for name in names:
+        if not name.isdigit(): continue
+        pid = int(name)
+        try:
+            os.kill(pid, 0)
+            state, current = proc_stat(pid, proc_root)
+        except (OSError, Blocked):
+            continue
+        if state != "Z" and current["pgid"] == proof["pgid"]:
+            members.append(pid)
+    return sorted(members)
 
 
 def run_tool(path, arguments, env=None):
@@ -252,7 +321,9 @@ def budget_read(path, tag, limits):
     if (row.get("schema") != 1 or row.get("run_tag") != tag or row.get("limits") != limits or
             row.get("verdict") not in ("WITHIN", "EXCEEDED") or
             any(type(row.get(name)) is not int or row[name] < 0 for name in
-                ("attempts_charged", "request_bytes", "consecutive_provider_failures"))):
+                ("attempts_charged", "request_bytes", "consecutive_provider_failures")) or
+            (row.get("reason") is not None and
+             (not isinstance(row["reason"], str) or not REASON_CODE.fullmatch(row["reason"])))):
         raise Blocked("BUDGET_STATE_UNKNOWN", True)
     return row
 
@@ -267,21 +338,37 @@ def write_receipt(trace, tag, manifest_sha, state, limits, elapsed, key, verdict
     atomic_replace(trace / "controller-receipt.json", canonical(signed(row, key)) + b"\n")
 
 
-def terminate_owned(proof, proc_root):
+def terminate_owned(proof, proc_root, child=None):
     evidence = {"sigterm_sent": False, "sigkill_sent": False, "survivors": []}
-    if not process_alive(proof, proc_root): return evidence
-    os.killpg(proof["pgid"], signal.SIGTERM); evidence["sigterm_sent"] = True
+    def members():
+        if child is not None: child.poll()
+        return group_members(proof, proc_root)
+
+    live = members()
+    if not live: return evidence
+    try:
+        os.killpg(proof["pgid"], signal.SIGTERM); evidence["sigterm_sent"] = True
+    except ProcessLookupError:
+        pass
     deadline = time.monotonic() + 10
-    while time.monotonic() < deadline and process_alive(proof, proc_root): time.sleep(.05)
-    if process_alive(proof, proc_root):
-        os.killpg(proof["pgid"], signal.SIGKILL); evidence["sigkill_sent"] = True
-        time.sleep(.05)
-    if process_alive(proof, proc_root): evidence["survivors"].append(proof["pid"])
+    while time.monotonic() < deadline and members(): time.sleep(.05)
+    live = members()
+    if live:
+        try:
+            os.killpg(proof["pgid"], signal.SIGKILL); evidence["sigkill_sent"] = True
+        except ProcessLookupError:
+            pass
+        deadline = time.monotonic() + 3
+        while time.monotonic() < deadline and members(): time.sleep(.05)
+    evidence["survivors"] = members()
     return evidence
 
 
 def artifact_rows(trace):
     rows = []
+    entries = 0
+    total_bytes = 0
+    inventory_bytes = 2
     nofollow = getattr(os, "O_NOFOLLOW", 0)
     directory_flag = getattr(os, "O_DIRECTORY", 0)
 
@@ -289,12 +376,24 @@ def artifact_rows(trace):
         return (left.st_dev, left.st_ino, stat.S_IFMT(left.st_mode)) == (
             right.st_dev, right.st_ino, stat.S_IFMT(right.st_mode))
 
-    def visit(directory_fd, prefix=""):
-        try: names = sorted(os.listdir(directory_fd))
+    def visit(directory_fd, prefix="", depth=0):
+        nonlocal entries, total_bytes, inventory_bytes
+        if depth > 64: raise Blocked("TRACE_ARTIFACT_LIMIT", True)
+        try:
+            names = []
+            with os.scandir(directory_fd) as listing:
+                for entry in listing:
+                    if not prefix and entry.name in ("trace-manifest.json", "sealed"):
+                        continue
+                    entries += 1
+                    if entries > MAX_ARTIFACTS: raise Blocked("TRACE_ARTIFACT_LIMIT", True)
+                    names.append(entry.name)
+            names.sort()
         except OSError as exc: raise Blocked("TRACE_ARTIFACT_UNSAFE", True) from exc
         for name in names:
             relative = prefix + name
-            if not prefix and relative in ("trace-manifest.json", "sealed"): continue
+            if len(relative.encode("utf-8")) > MAX_ARTIFACT_PATH_BYTES:
+                raise Blocked("TRACE_ARTIFACT_LIMIT", True)
             try: before = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
             except OSError as exc: raise Blocked("TRACE_ARTIFACT_UNSAFE", True) from exc
             if stat.S_ISDIR(before.st_mode):
@@ -302,7 +401,7 @@ def artifact_rows(trace):
                 except OSError as exc: raise Blocked("TRACE_ARTIFACT_UNSAFE", True) from exc
                 try:
                     if not same(before, os.fstat(child_fd)): raise Blocked("TRACE_ARTIFACT_RACE", True)
-                    visit(child_fd, relative + "/")
+                    visit(child_fd, relative + "/", depth + 1)
                     after = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
                     if not same(after, os.fstat(child_fd)): raise Blocked("TRACE_ARTIFACT_RACE", True)
                 finally: os.close(child_fd)
@@ -312,18 +411,27 @@ def artifact_rows(trace):
                 try:
                     opened = os.fstat(file_fd)
                     if not same(before, opened): raise Blocked("TRACE_ARTIFACT_RACE", True)
-                    chunks = []
+                    if opened.st_size > MAX_ARTIFACT_BYTES or total_bytes + opened.st_size > MAX_TRACE_BYTES:
+                        raise Blocked("TRACE_ARTIFACT_LIMIT", True)
+                    hasher = hashlib.sha256(); length = 0
                     while True:
                         chunk = os.read(file_fd, 1024 * 1024)
                         if not chunk: break
-                        chunks.append(chunk)
-                    data = b"".join(chunks); finished = os.fstat(file_fd)
+                        length += len(chunk)
+                        if length > MAX_ARTIFACT_BYTES or total_bytes + length > MAX_TRACE_BYTES:
+                            raise Blocked("TRACE_ARTIFACT_LIMIT", True)
+                        hasher.update(chunk)
+                    finished = os.fstat(file_fd)
                     rebound = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
                     if (not same(opened, finished) or not same(finished, rebound) or
-                            finished.st_size != len(data)):
+                            finished.st_size != length):
                         raise Blocked("TRACE_ARTIFACT_RACE", True)
                 finally: os.close(file_fd)
-                rows.append({"path": relative, "bytes": len(data), "sha256": digest(data)})
+                row = {"path": relative, "bytes": length, "sha256": hasher.hexdigest()}
+                inventory_bytes += len(canonical(row)) + 1
+                if inventory_bytes > MAX_INVENTORY_BYTES:
+                    raise Blocked("TRACE_ARTIFACT_LIMIT", True)
+                total_bytes += length; rows.append(row)
             else:
                 raise Blocked("TRACE_ARTIFACT_UNSAFE", True)
 
@@ -369,6 +477,19 @@ def verify_terminal(trace, tag, manifest_sha, key, require_marker=True):
         except OSError as exc: raise Blocked("TERMINAL_SEAL_MISMATCH", True) from exc
         if not stat.S_ISREG(mode) or stat.S_ISLNK(mode):
             raise Blocked("TERMINAL_SEAL_MISMATCH", True)
+
+
+def verify_manifest_authority(root, trace, tag, manifest_sha, key_path):
+    manifest_path = trace / "run-manifest.json"
+    before = read_bytes(manifest_path)
+    manifest = read_object(manifest_path)
+    if manifest.get("run_tag") != tag or manifest.get("manifest_sha256") != manifest_sha:
+        raise Blocked("MANIFEST_AUTH_LOST", True)
+    manifest_tool = os.environ.get("SHERLOCK_MANIFEST_TOOL", str(HERE / "run-manifest.py"))
+    result = run_tool(manifest_tool, ["verify", str(trace), "--commitment-file",
+                      str(root / "records/run-commitments.jsonl"), "--commitment-key", str(key_path)])
+    if result.returncode or read_bytes(manifest_path) != before:
+        raise Blocked("MANIFEST_AUTH_LOST", True)
 
 
 def validity_result(trace, tag, manifest_sha, key):
@@ -569,8 +690,9 @@ def run_fresh(root, runs, controller_id, controller, key_path, key, limits, lock
 def monitor_and_finish(root, controller, controller_id, trace, tag, manifest_sha,
                        key_path, key, limits, proc_root, proof, child=None):
     started = time.monotonic(); budget_path = trace / "upstream-budget-state.json"
-    breach = None
-    while process_alive(proof, proc_root):
+    breach = None; budget = None
+    while group_members(proof, proc_root):
+        if child is not None: child.poll()
         elapsed = time.monotonic() - started
         try: budget = budget_read(budget_path, tag, limits)
         except Blocked as exc: breach = exc.reason; break
@@ -589,14 +711,15 @@ def monitor_and_finish(root, controller, controller_id, trace, tag, manifest_sha
             elif time.monotonic() - started >= limits["max_wall_seconds"]:
                 breach = "MAX_WALL_SECONDS"
     if breach:
-        evidence = terminate_owned(proof, proc_root)
-        atomic_replace(trace / "controller-termination.json", canonical(evidence) + b"\n")
-        try: budget = budget_read(budget_path, tag, limits)
-        except Blocked: budget = budget_initial(tag, limits)
-        write_receipt(trace, tag, manifest_sha, budget, limits, time.monotonic() - started,
-                      key, "EXCEEDED", breach)
         phase = "BLOCKED_UNKNOWN" if breach == "BUDGET_STATE_UNKNOWN" else "BLOCKED"
+        if budget is not None:
+            write_receipt(trace, tag, manifest_sha, budget, limits, time.monotonic() - started,
+                          key, "EXCEEDED", breach)
         persist(controller, controller_id, phase, tag, manifest_sha, breach)
+        evidence = terminate_owned(proof, proc_root, child)
+        atomic_replace(trace / "controller-termination.json", canonical(evidence) + b"\n")
+        if evidence["survivors"]: raise Blocked("OWNED_PROCESS_SURVIVED", True)
+        if phase == "BLOCKED_UNKNOWN": return 1
         seal_trace(trace, tag, manifest_sha, key); return 1
     rc = child.wait() if child is not None else 0
     budget = budget_read(budget_path, tag, limits)
@@ -618,6 +741,7 @@ def validate_and_finish(root, controller, controller_id, trace, tag, manifest_sh
         if result.returncode:
             persist(controller, controller_id, "RUNNER_FAILED", tag, manifest_sha, "VALIDATOR_NONZERO")
             seal_trace(trace, tag, manifest_sha, key); return 1
+    verify_manifest_authority(root, trace, tag, manifest_sha, key_path)
     accepted = validity_result(trace, tag, manifest_sha, key)
     phase = "DONE" if accepted else "REJECTED"
     persist(controller, controller_id, phase, tag, manifest_sha, None if accepted else "VALIDITY_REJECTED")
@@ -651,6 +775,16 @@ def main():
                     return 1
                 try:
                     link, trace = verify_link(controller, key)
+                    proof_path = trace / "controller-process.json"
+                    if os.path.lexists(proof_path):
+                        proof = read_object(proof_path, PROOF_FIELDS)
+                        evidence = terminate_owned(proof, proc_root)
+                        if evidence["survivors"]:
+                            raise Blocked("OWNED_PROCESS_SURVIVED", True)
+                        if ((evidence["sigterm_sent"] or evidence["sigkill_sent"]) and
+                                not os.path.lexists(trace / "sealed")):
+                            atomic_replace(trace / "controller-termination.json",
+                                           canonical(evidence) + b"\n")
                     seal_trace(trace, link["child_run_tag"], link["child_manifest_sha256"], key)
                 except Blocked as exc:
                     persist(controller, resume_id, "BLOCKED_UNKNOWN", status["child_run_tag"],
@@ -665,7 +799,7 @@ def main():
                                            key_path, key)
             if status["phase"] != "QWEN_RUNNING": raise Blocked("RESUME_PHASE_AMBIGUOUS", True)
             proof = read_object(trace / "controller-process.json", PROOF_FIELDS)
-            if not process_alive(proof, proc_root): raise Blocked("RECORDED_LAUNCH_UNCERTAIN", True)
+            if not group_members(proof, proc_root): raise Blocked("RECORDED_LAUNCH_UNCERTAIN", True)
             owner = {"schema": 1, "controller_id": resume_id, "child_run_tag": link["child_run_tag"],
                      **proc_snapshot(os.getpid(), proc_root, controller=True)}
             atomic_replace(owner_path, canonical(owner) + b"\n")

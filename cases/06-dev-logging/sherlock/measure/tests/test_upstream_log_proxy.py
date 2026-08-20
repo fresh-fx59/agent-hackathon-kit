@@ -599,6 +599,30 @@ class ItReservesPaidBudgetBeforeForwarding(ProxyCase):
         self.assertFalse(os.path.exists(self.budget_state),
                          "the proxy must never recreate paid state at zero")
 
+    def test_unbounded_or_unstable_budget_reason_is_unknown_before_forward(self):
+        self.start_budgeted()
+        row = self.budget(); row["reason"] = "x" * 10000
+        pathlib.Path(self.budget_state).write_text(json.dumps(row) + "\n", encoding="utf-8")
+        status, _body = self.post()
+        self.assertEqual(status, 503)
+        self.assertEqual(self.srv.seen, [])
+
+    def test_oversized_otherwise_valid_budget_object_is_unknown_before_forward(self):
+        self.start_budgeted()
+        with pathlib.Path(self.budget_state).open("a") as target:
+            target.write(" " * (1024 * 1024 + 1))
+        status, _body = self.post()
+        self.assertEqual(status, 503)
+        self.assertEqual(self.srv.seen, [])
+
+    def test_deeply_nested_budget_object_is_unknown_before_forward(self):
+        self.start_budgeted()
+        pathlib.Path(self.budget_state).write_text("[" * 2000 + "]" * 2000,
+                                                   encoding="utf-8")
+        status, _body = self.post()
+        self.assertEqual(status, 503)
+        self.assertEqual(self.srv.seen, [])
+
     def test_two_racing_requests_cannot_both_take_the_last_attempt(self):
         """Moving reservation after urlopen lets both paid sends pass a cap of one."""
         self.start_budgeted(UPSTREAM_MAX_UPSTREAM_ATTEMPTS=1)

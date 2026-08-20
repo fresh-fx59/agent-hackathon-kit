@@ -30,6 +30,7 @@ import fcntl
 import json
 import os
 import re
+import stat
 import tempfile
 import sys
 import threading
@@ -101,6 +102,8 @@ _BASE_PATH = urlsplit(UPSTREAM_BASE).path.rstrip("/")     # e.g. "/v1"
 _LOG_LOCK = threading.Lock()
 _INFLIGHT_LOCK = threading.Lock()
 _BUDGET_LOCK = threading.Lock()
+_MAX_BUDGET_BYTES = 1024 * 1024
+_REASON_CODE = re.compile(r"[A-Z][A-Z0-9_]{0,63}")
 
 # Hop-by-hop headers are per-connection and must not be relayed (RFC 7230 §6.1).
 _HOP = {"connection", "keep-alive", "proxy-authenticate", "proxy-authorization",
@@ -150,6 +153,46 @@ def _budget_timestamp():
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
 
+def _strict_object(pairs):
+    row = {}
+    for key, value in pairs:
+        if key in row:
+            raise ValueError("duplicate JSON key")
+        row[key] = value
+    return row
+
+
+def _read_budget():
+    nofollow = getattr(os, "O_NOFOLLOW", 0)
+    try:
+        before = os.lstat(UPSTREAM_BUDGET_STATE)
+        if not stat.S_ISREG(before.st_mode) or stat.S_ISLNK(before.st_mode):
+            raise BudgetUnknown()
+        fd = os.open(UPSTREAM_BUDGET_STATE, os.O_RDONLY | nofollow)
+        try:
+            opened = os.fstat(fd)
+            if (not stat.S_ISREG(opened.st_mode) or opened.st_size > _MAX_BUDGET_BYTES or
+                    (before.st_dev, before.st_ino) != (opened.st_dev, opened.st_ino)):
+                raise BudgetUnknown()
+            chunks = []; total = 0
+            while total <= _MAX_BUDGET_BYTES:
+                chunk = os.read(fd, min(65536, _MAX_BUDGET_BYTES + 1 - total))
+                if not chunk: break
+                chunks.append(chunk); total += len(chunk)
+            finished = os.fstat(fd)
+            if (total > _MAX_BUDGET_BYTES or total != finished.st_size or
+                    (opened.st_dev, opened.st_ino, opened.st_size) !=
+                    (finished.st_dev, finished.st_ino, finished.st_size)):
+                raise BudgetUnknown()
+        finally:
+            os.close(fd)
+        return json.loads(b"".join(chunks).decode("utf-8"), object_pairs_hook=_strict_object)
+    except BudgetUnknown:
+        raise
+    except (OSError, UnicodeError, ValueError, TypeError, RecursionError) as exc:
+        raise BudgetUnknown() from exc
+
+
 def _budget_shape(row):
     fields = {"schema", "run_tag", "updated_at", "attempts_charged",
               "request_bytes", "consecutive_provider_failures", "limits",
@@ -159,7 +202,8 @@ def _budget_shape(row):
             all(type(row.get(name)) is int and row[name] >= 0 for name in
                 ("attempts_charged", "request_bytes", "consecutive_provider_failures")) and
             row.get("verdict") in ("WITHIN", "EXCEEDED") and
-            (row.get("reason") is None or isinstance(row.get("reason"), str)))
+            (row.get("reason") is None or
+             (isinstance(row.get("reason"), str) and _REASON_CODE.fullmatch(row["reason"]))))
 
 
 def _write_budget(row):
@@ -227,13 +271,7 @@ def _budget_update(change):
     with _BUDGET_LOCK, open(lock_path, "a+", encoding="utf-8") as lock:
         fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
         try:
-            try:
-                with open(UPSTREAM_BUDGET_STATE, encoding="utf-8") as source:
-                    row = json.load(source)
-            except FileNotFoundError:
-                raise BudgetUnknown()
-            except (OSError, ValueError, TypeError):
-                raise BudgetUnknown()
+            row = _read_budget()
             if not _budget_shape(row):
                 raise BudgetUnknown()
             row = _reconcile_completed(row)

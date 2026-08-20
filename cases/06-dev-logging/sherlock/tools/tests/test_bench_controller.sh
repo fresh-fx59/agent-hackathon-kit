@@ -174,8 +174,11 @@ class ControllerFixture:
         self.capture = self.base / "target-env.json"
         self.corpus_capture = self.base / "target-corpus.txt"
         self.term_marker = self.base / "term-marker"
+        self.child_pid = self.base / "group-child.pid"
+        self.breach_status = self.base / "breach-status.json"
         self.validator_marker = self.base / "validator-marker"
         self.validator_count = self.base / "validator-count"
+        self.manifest_verify_count = self.base / "manifest-verify-count"
         self.corpus = self.base / "corpus"; self.corpus.mkdir()
         (self.corpus / "a.log").write_text("evidence\n", encoding="utf-8")
         self.assets = {}
@@ -189,9 +192,14 @@ class ControllerFixture:
         self.validator_tool = self.base / "validator-tool.py"
         self.health_tool = self.base / "health-tool.py"
         self.target_tool = self.base / "target-tool.sh"
+        self.group_child_tool = self.base / "group-child.py"
+        self.crash_controller_tool = self.base / "crash-controller.py"
         self._write_tools()
 
     def close(self):
+        if self.child_pid.exists():
+            try: os.kill(int(self.child_pid.read_text()),signal.SIGKILL)
+            except (OSError,ValueError): pass
         self.tmp.cleanup()
 
     def _write_tools(self):
@@ -211,6 +219,11 @@ if mode == "create":
     with os.fdopen(fd,"w") as f: json.dump(row,f,sort_keys=True,separators=(",",":")); f.write("\n"); f.flush(); os.fsync(f.fileno())
     raise SystemExit(0)
 if mode == "verify":
+    count=os.environ.get("FAKE_MANIFEST_VERIFY_COUNT")
+    if count:
+        try: n=int(open(count).read())
+        except Exception: n=0
+        open(count,"w").write(str(n+1))
     path=os.path.join(sys.argv[2],"run-manifest.json")
     row=json.load(open(path));
     if set(row)!={"schema","run_tag","manifest_sha256"}: raise SystemExit(2)
@@ -242,6 +255,16 @@ swap=os.environ.get("FAKE_SWAP_PATH")
 if swap:
     if not os.path.isabs(swap): swap=os.path.join(trace,swap)
     os.unlink(swap); os.symlink(os.environ["FAKE_SWAP_TARGET"],swap)
+mutation=os.environ.get("FAKE_MUTATE_MANIFEST")
+if mutation:
+    path=os.path.join(trace,"run-manifest.json")
+    if mutation == "extra":
+        changed=json.load(open(path)); changed["tampered"]=True
+        open(path,"w").write(json.dumps(changed,separators=(",",":"))+"\n")
+    elif mutation == "duplicate":
+        raw=open(path).read().strip(); open(path,"w").write('{"schema":1,'+raw[1:]+"\n")
+    elif mutation == "oversized":
+        with open(path,"a") as target: target.write(" "*(1024*1024+1))
 raise SystemExit(0)
 ''', encoding="utf-8"); self.validator_tool.chmod(0o755)
         self.health_tool.write_text(r'''#!/usr/bin/env python3
@@ -256,6 +279,25 @@ row={"schema":1,"checked_at":z(now),"expires_at":z(now+datetime.timedelta(minute
 "verdict":os.environ.get("FAKE_HEALTH_VERDICT","HEALTHY")}
 with open(os.environ["PROBE_RECEIPT_PATH"],"w") as f: json.dump(row,f); f.write("\n")
 ''', encoding="utf-8"); self.health_tool.chmod(0o755)
+        self.group_child_tool.write_text(r'''#!/usr/bin/env python3
+import os,signal,sys,time
+proc,pidfile=sys.argv[1:]
+pid=os.getpid(); pgid=os.getpgrp(); ppid=os.getppid()
+directory=os.path.join(proc,str(pid)); os.mkdir(directory)
+fields=["S",str(ppid),str(pgid),str(pgid)]+["0"]*15+["101"]
+open(os.path.join(directory,"stat"),"w").write(str(pid)+" (group-child) "+" ".join(fields)+"\n")
+open(os.path.join(directory,"cmdline"),"wb").write(b"fixture-group-child\\0")
+open(pidfile,"w").write(str(pid)+"\n")
+signal.signal(signal.SIGTERM,signal.SIG_IGN)
+while True: time.sleep(.1)
+''',encoding="utf-8"); self.group_child_tool.chmod(0o755)
+        self.crash_controller_tool.write_text(f'''#!/usr/bin/env python3
+import glob,json,os,signal
+status=glob.glob({str(self.controllers)!r}+"/controller-*/status.json")[0]
+open({str(self.breach_status)!r},"wb").write(open(status,"rb").read())
+owner=json.load(open({str(self.controllers / 'paid-lane-owner.json')!r}))
+os.kill(owner["pid"],signal.SIGKILL)
+''',encoding="utf-8"); self.crash_controller_tool.chmod(0o755)
         executable(self.target_tool, f'''
 mkdir -p "{self.proc}/$$"
 python3 - "{self.proc}/$$/stat" "$$" <<'PY2'
@@ -272,20 +314,49 @@ PY2
 printf '%s\n' "$SHERLOCK_CORPUS" > "{self.corpus_capture}"
 touch "$SHERLOCK_TRACE/.runner-ready"
 for i in $(seq 1 200); do [ -f "$SHERLOCK_TRACE/controller-process.json" ] && break; sleep .01; done
-if [ "${{FAKE_TARGET_MODE:-candidate}}" = "breach" ] || [ "${{FAKE_TARGET_MODE:-candidate}}" = "breach-exit" ]; then
-  trap 'touch "{self.term_marker}"; exit 0' TERM
+if [ "${{FAKE_TARGET_MODE:-candidate}}" = "breach-child" ] || [ "${{FAKE_TARGET_MODE:-candidate}}" = "leader-exit-child" ]; then
+  python3 "{self.group_child_tool}" "{self.proc}" "{self.child_pid}" >/dev/null 2>&1 &
+  for i in $(seq 1 200); do [ -f "{self.child_pid}" ] && break; sleep .01; done
+fi
+if [ "${{FAKE_TARGET_MODE:-candidate}}" = "breach" ] || [ "${{FAKE_TARGET_MODE:-candidate}}" = "breach-exit" ] || [ "${{FAKE_TARGET_MODE:-candidate}}" = "breach-child" ] || [ "${{FAKE_TARGET_MODE:-candidate}}" = "breach-crash-controller" ]; then
+  if [ "${{FAKE_TARGET_MODE:-candidate}}" = "breach-crash-controller" ]; then
+    trap 'python3 "{self.crash_controller_tool}"; touch "{self.term_marker}"; exit 0' TERM
+  else
+    trap 'touch "{self.term_marker}"; exit 0' TERM
+  fi
   python3 - "$SHERLOCK_TRACE/upstream-budget-state.json" <<'PY2'
 import json,sys
 p=sys.argv[1]; row=json.load(open(p)); row.update({{"verdict":"EXCEEDED","reason":"MAX_UPSTREAM_ATTEMPTS","attempts_charged":row["limits"]["max_upstream_attempts"]}}); json.dump(row,open(p,"w"));
 PY2
   [ "${{FAKE_TARGET_MODE:-candidate}}" = "breach-exit" ] && exit 4
   while :; do sleep .1; done
+elif [ "${{FAKE_TARGET_MODE:-candidate}}" = "bad-budget-reason" ]; then
+  python3 - "$SHERLOCK_TRACE/upstream-budget-state.json" <<'PY2'
+import json,sys
+p=sys.argv[1]; row=json.load(open(p)); row.update({{"verdict":"EXCEEDED","reason":"x"*10000}}); json.dump(row,open(p,"w"))
+PY2
+  while :; do sleep .1; done
+elif [ "${{FAKE_TARGET_MODE:-candidate}}" = "oversized-budget" ]; then
+  python3 - "$SHERLOCK_TRACE/upstream-budget-state.json" <<'PY2'
+import sys
+with open(sys.argv[1],"a") as target: target.write(" "*(1024*1024+1))
+PY2
+elif [ "${{FAKE_TARGET_MODE:-candidate}}" = "deep-budget" ]; then
+  python3 - "$SHERLOCK_TRACE/upstream-budget-state.json" <<'PY2'
+import sys
+open(sys.argv[1],"w").write("["*2000+"]"*2000)
+PY2
 elif [ "${{FAKE_TARGET_MODE:-candidate}}" = "wait" ]; then
   while [ ! -f "{self.base}/release-target" ]; do sleep .05; done
 elif [ "${{FAKE_TARGET_MODE:-candidate}}" = "none" ]; then
   exit 4
 elif [ "${{FAKE_TARGET_MODE:-candidate}}" = "symlink-dir" ]; then
   ln -s "{self.base}" "$SHERLOCK_TRACE/linked-directory"
+elif [ "${{FAKE_TARGET_MODE:-candidate}}" = "many-artifacts" ]; then
+  python3 - "$SHERLOCK_TRACE" <<'PY2'
+import os,sys
+for index in range(4100): open(os.path.join(sys.argv[1],"artifact-%04d"%index),"wb").close()
+PY2
 fi
 printf '{{"schema":1}}\\n' > "$SHERLOCK_TRACE/candidate.json"
 ''')
@@ -324,6 +395,7 @@ printf '{{"schema":1}}\\n' > "$SHERLOCK_TRACE/candidate.json"
             "SHERLOCK_BASE_URL": "http://127.0.0.1:9/v1",
             "FAKE_VALIDITY": "true",
             "FAKE_VALIDATOR_COUNT": str(self.validator_count),
+            "FAKE_MANIFEST_VERIFY_COUNT": str(self.manifest_verify_count),
         })
         env.update(updates)
         return env
@@ -344,6 +416,14 @@ class PersistentControllerTests(unittest.TestCase):
 
     def tearDown(self):
         self.fx.close()
+
+    def assert_process_gone(self, pid, timeout=3):
+        deadline=time.time()+timeout
+        while time.time()<deadline:
+            try: os.kill(pid,0)
+            except OSError: return
+            time.sleep(.02)
+        self.fail("process %s survived"%pid)
 
     def test_done_bootstraps_and_reuses_strict_key_exact_link_receipt_and_seal(self):
         first=self.fx.run(); self.assertEqual(first.returncode,0,(first.stdout,first.stderr))
@@ -403,6 +483,24 @@ class PersistentControllerTests(unittest.TestCase):
         resumed=self.fx.run("--resume",controller.name,env=self.fx.env())
         self.assertNotEqual(resumed.returncode,0); self.assertEqual(self.fx.capture.stat().st_mtime_ns,capture_mtime)
 
+    def test_breach_kills_term_ignoring_descendant_after_leader_exits(self):
+        result=self.fx.run(env=self.fx.env(FAKE_TARGET_MODE="breach-child"),timeout=30)
+        self.assertNotEqual(result.returncode,0,(result.stdout,result.stderr))
+        child=int(self.fx.child_pid.read_text()); self.assert_process_gone(child)
+        controller=self.fx.controller_dir(); link=json.loads((controller/"controller-child.json").read_text())
+        evidence=json.loads((Path(link["child_trace"])/"controller-termination.json").read_text())
+        self.assertTrue(evidence["sigterm_sent"]); self.assertTrue(evidence["sigkill_sent"])
+        self.assertEqual(evidence["survivors"],[])
+
+    def test_normal_leader_exit_cannot_validate_while_group_child_survives(self):
+        env=self.fx.env(FAKE_TARGET_MODE="leader-exit-child",
+                        SHERLOCK_BUDGET_MAX_WALL_SECONDS="1")
+        result=self.fx.run(env=env,timeout=30)
+        self.assertNotEqual(result.returncode,0,(result.stdout,result.stderr))
+        child=int(self.fx.child_pid.read_text()); self.assert_process_gone(child)
+        status=json.loads((self.fx.controller_dir()/"status.json").read_text())
+        self.assertEqual((status["phase"],status["reason"]),("BLOCKED","MAX_WALL_SECONDS"))
+
     def test_budget_breach_remains_controller_owned_if_child_exits_immediately(self):
         result=self.fx.run(env=self.fx.env(FAKE_TARGET_MODE="breach-exit"),timeout=30)
         self.assertNotEqual(result.returncode,0)
@@ -412,6 +510,24 @@ class PersistentControllerTests(unittest.TestCase):
         receipt=json.loads((trace/"controller-receipt.json").read_text())
         self.assertEqual((receipt["verdict"],receipt["reason"]),("EXCEEDED","MAX_UPSTREAM_ATTEMPTS"))
         self.assertTrue((trace/"sealed").is_file())
+
+    def test_breach_intent_and_receipt_are_durable_before_term_crash(self):
+        env=self.fx.env(FAKE_TARGET_MODE="breach-crash-controller")
+        first=subprocess.Popen(["bash",str(CONTROLLER)],env=env,
+                               stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+        deadline=time.time()+15
+        while not self.fx.breach_status.exists() and time.time()<deadline: time.sleep(.02)
+        self.assertTrue(self.fx.breach_status.exists()); first.wait(timeout=5)
+        snapshot=json.loads(self.fx.breach_status.read_text())
+        self.assertEqual((snapshot["phase"],snapshot["reason"]),("BLOCKED","MAX_UPSTREAM_ATTEMPTS"))
+        controller=self.fx.controller_dir(); link=json.loads((controller/"controller-child.json").read_text())
+        receipt=json.loads((Path(link["child_trace"])/"controller-receipt.json").read_text())
+        self.assertEqual((receipt["verdict"],receipt["reason"]),("EXCEEDED","MAX_UPSTREAM_ATTEMPTS"))
+        capture_mtime=self.fx.capture.stat().st_mtime_ns
+        resumed=self.fx.run("--resume",controller.name)
+        self.assertNotEqual(resumed.returncode,0)
+        self.assertEqual(self.fx.capture.stat().st_mtime_ns,capture_mtime)
+        self.assertEqual(json.loads((controller/"status.json").read_text())["phase"],"BLOCKED")
 
     def test_fresh_controller_cannot_bypass_lock_and_exact_resume_reclaims(self):
         env=self.fx.env(FAKE_TARGET_MODE="wait")
@@ -455,6 +571,68 @@ class PersistentControllerTests(unittest.TestCase):
         self.assertEqual(resumed.returncode,0,(resumed.stdout,resumed.stderr))
         self.assertEqual((trace/"trace-manifest.json").read_bytes(),manifest)
         self.assertTrue((trace/"sealed").is_file())
+
+    def test_duplicate_authenticated_link_key_blocks_resume_unknown(self):
+        first=self.fx.run(); self.assertEqual(first.returncode,0)
+        controller=self.fx.controller_dir(); link_path=controller/"controller-child.json"
+        raw=link_path.read_text().strip(); link_path.write_text('{"schema":1,'+raw[1:]+"\n")
+        resumed=self.fx.run("--resume",controller.name)
+        self.assertNotEqual(resumed.returncode,0)
+        self.assertEqual(json.loads((controller/"status.json").read_text())["phase"],"BLOCKED_UNKNOWN")
+
+    def test_duplicate_authenticated_terminal_key_blocks_resume_unknown(self):
+        first=self.fx.run(); self.assertEqual(first.returncode,0)
+        controller=self.fx.controller_dir(); link=json.loads((controller/"controller-child.json").read_text())
+        terminal=Path(link["child_trace"])/"trace-manifest.json"
+        raw=terminal.read_text().strip(); terminal.write_text('{"schema":1,'+raw[1:]+"\n")
+        resumed=self.fx.run("--resume",controller.name)
+        self.assertNotEqual(resumed.returncode,0)
+        self.assertEqual(json.loads((controller/"status.json").read_text())["phase"],"BLOCKED_UNKNOWN")
+
+    def test_oversized_authenticated_link_blocks_without_unbounded_parse(self):
+        first=self.fx.run(); self.assertEqual(first.returncode,0)
+        controller=self.fx.controller_dir(); link=controller/"controller-child.json"
+        with link.open("a") as target: target.write(" "*(1024*1024+1))
+        resumed=self.fx.run("--resume",controller.name)
+        self.assertNotEqual(resumed.returncode,0)
+        self.assertEqual(json.loads((controller/"status.json").read_text())["phase"],"BLOCKED_UNKNOWN")
+
+    def test_manifest_is_reauthenticated_after_validator_before_done(self):
+        for mutation in ("extra","duplicate","oversized","symlink"):
+            with self.subTest(mutation=mutation):
+                if self.fx.capture.exists() or any(self.fx.controllers.glob("controller-*")):
+                    self.fx.close(); self.fx=ControllerFixture(self)
+                if mutation == "symlink":
+                    outside=self.fx.base/"outside-manifest.json"
+                    outside.write_text('{"schema":1}\n',encoding="utf-8")
+                    env=self.fx.env(FAKE_SWAP_PATH="run-manifest.json",
+                                    FAKE_SWAP_TARGET=str(outside))
+                else:
+                    env=self.fx.env(FAKE_MUTATE_MANIFEST=mutation)
+                result=self.fx.run(env=env)
+                self.assertNotEqual(result.returncode,0,(mutation,result.stdout,result.stderr))
+                status=json.loads((self.fx.controller_dir()/"status.json").read_text())
+                self.assertEqual(status["phase"],"BLOCKED_UNKNOWN")
+                self.assertEqual(self.fx.manifest_verify_count.read_text(),
+                                 "2" if mutation == "extra" else "1")
+
+    def test_malformed_or_oversized_budget_and_inventory_fail_boundedly(self):
+        cases=(("bad-budget-reason","BUDGET_STATE_UNKNOWN"),
+               ("oversized-budget","BUDGET_STATE_UNKNOWN"),
+               ("deep-budget","BUDGET_STATE_UNKNOWN"),
+               ("many-artifacts","TRACE_ARTIFACT_LIMIT"))
+        for mode,reason in cases:
+            with self.subTest(mode=mode):
+                if self.fx.capture.exists() or any(self.fx.controllers.glob("controller-*")):
+                    self.fx.close(); self.fx=ControllerFixture(self)
+                result=self.fx.run(env=self.fx.env(FAKE_TARGET_MODE=mode),timeout=30)
+                self.assertNotEqual(result.returncode,0,(mode,result.stdout,result.stderr))
+                controller=self.fx.controller_dir(); status=json.loads((controller/"status.json").read_text())
+                self.assertEqual((status["phase"],status["reason"]),("BLOCKED_UNKNOWN",reason))
+                link=json.loads((controller/"controller-child.json").read_text()); trace=Path(link["child_trace"])
+                self.assertFalse((trace/"sealed").exists())
+                if (trace/"controller-receipt.json").exists():
+                    self.assertNotEqual(json.loads((trace/"controller-receipt.json").read_text()).get("reason"),"x"*10000)
 
     def test_crash_after_validator_start_resumes_without_second_validation(self):
         release=self.fx.base/"release-validator"
