@@ -39,4 +39,4 @@ The secret-shape detector is intentionally conservative and may reject benign st
 
 ## Commit
 
-`e7f35f6e2280e3bf910adbcf058db13c9b3a2f1b`
+`c2ae4d45b5292667c1e8684d39a69d05a1f7f4a1`
