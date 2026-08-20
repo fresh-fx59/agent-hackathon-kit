@@ -40,11 +40,13 @@ SHAPE="${PROBE_SHAPE:-history}"
 NTOOLS="${PROBE_TOOLS:-25}"
 RECEIPT_PATH="${PROBE_RECEIPT_PATH:-}"
 ENDPOINT_LABEL="${PROBE_ENDPOINT_LABEL:-${BASE_URL}}"
+LANE_LABEL="${PROBE_LANE:-${ENDPOINT_LABEL}}"
+PROVIDER_LABEL="${PROBE_PROVIDER:-${ENDPOINT_LABEL}}"
 EXPECTED_MODEL="${PROBE_EXPECTED_RETURNED_MODEL:-DeepSeek-V4-Flash}"
 export PROBE_URL="$BASE_URL" PROBE_MODEL="$MODEL" PROBE_SIZES="$SIZES_KB" \
        PROBE_N="$REPS" PROBE_OK="$OK_PCT" PROBE_BAD="$BAD_PCT" PROBE_SHAPE="$SHAPE" \
        PROBE_TOOLS="$NTOOLS" PROBE_RECEIPT="$RECEIPT_PATH" PROBE_ENDPOINT="$ENDPOINT_LABEL" \
-       PROBE_EXPECTED="$EXPECTED_MODEL"
+       PROBE_LANE="$LANE_LABEL" PROBE_PROVIDER="$PROVIDER_LABEL" PROBE_EXPECTED="$EXPECTED_MODEL"
 
 python3 - <<'PY'
 import datetime, json, os, sys, tempfile, time, urllib.error, urllib.request
@@ -181,9 +183,10 @@ for kb in sizes:
                 try:
                     name = json.loads(text).get("model")
                 except ValueError:
+                    error_code = "MALFORMED_JSON"
                     pass
             rows.append({"size_kb": kb, "status": 200, "duration_s": time.time() - t0,
-                         "returned_model": name, "error_code": None,
+                         "returned_model": name, "error_code": error_code,
                          "request_bytes": len(payload), "response_bytes": response_bytes,
                          "attempt": r + 1})
         except Exception as e:
@@ -257,8 +260,8 @@ if receipt:
                  "error_code", "duration_s", "request_bytes", "response_bytes", "attempt")} for r in rows]
     doc = {"schema": 1, "checked_at": iso(now),
            "expires_at": iso(now + datetime.timedelta(minutes=15)),
-           "lane": os.environ.get("PROBE_ENDPOINT", "")[:200],
-           "provider": os.environ.get("PROBE_ENDPOINT", "")[:200],
+           "lane": os.environ.get("PROBE_LANE", "")[:200],
+           "provider": os.environ.get("PROBE_PROVIDER", "")[:200],
            "requested_model": model[:200], "shape": shape, "tools": len(TOOLS),
            "sizes_kb": sizes, "history": safe_rows,
            "verdict": "HEALTHY" if receipt_healthy else "DEGRADED",

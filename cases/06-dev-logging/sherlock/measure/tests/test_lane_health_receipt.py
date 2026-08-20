@@ -32,6 +32,9 @@ class FakeProvider:
                 elif mode == "malformed":
                     body = b'data: {"model":"DeepSeek-V4-Flash"}\ndata: not-json\n'
                     self.send_response(200)
+                elif mode == "malformed_json":
+                    body = b"not-json"
+                    self.send_response(200)
                 else:
                     model = "Wrong-Model" if mode == "wrong" else "DeepSeek-V4-Flash"
                     body = ("data: " + json.dumps({"model": model}) +
@@ -67,7 +70,8 @@ class LaneHealthReceiptTests(unittest.TestCase):
         env = dict(os.environ)
         env.update(SHERLOCK_API_KEY="dummy-secret", PROBE_BASE_URL=provider.url,
                    PROBE_REPS="1", PROBE_SIZES_KB="100 250 400",
-                   PROBE_RECEIPT_PATH=str(receipt), PROBE_ENDPOINT_LABEL="local-test")
+                   PROBE_RECEIPT_PATH=str(receipt), PROBE_ENDPOINT_LABEL="local-test",
+                   PROBE_LANE="local-lane", PROBE_PROVIDER="local-provider")
         env.update(extra)
         proc = subprocess.run(["bash", str(PROBE)], env=env, text=True,
                               capture_output=True, timeout=30)
@@ -79,18 +83,26 @@ class LaneHealthReceiptTests(unittest.TestCase):
         self.assertTrue(receipt.exists(), proc.stdout + proc.stderr)
         row = json.loads(receipt.read_text())
         self.assertEqual(row["verdict"], "HEALTHY")
-        run_manifest.validate_health(str(receipt), "local-test", "local-test",
+        run_manifest.validate_health(str(receipt), "local-lane", "local-provider",
                                      "[SP]deepseek-v4-flash", "DeepSeek-V4-Flash")
         self.assertEqual(set(row["sizes_kb"]), {100, 250, 400})
 
     def test_wrong_identity_malformed_sse_and_non200_are_not_healthy(self):
-        for mode in ("wrong", "malformed", "non200"):
+        for mode in ("wrong", "malformed", "malformed_json", "non200"):
             with self.subTest(mode=mode):
                 proc, receipt = self.run_probe(mode)
                 self.assertNotEqual(proc.returncode, 0)
                 self.assertTrue(receipt.exists(), proc.stdout + proc.stderr)
                 row = json.loads(receipt.read_text())
                 self.assertNotEqual(row["verdict"], "HEALTHY")
+                if mode == "malformed_json":
+                    self.assertEqual(row["history"][0]["error_code"], "MALFORMED_JSON")
+
+    def test_receipt_keeps_lane_and_provider_identities_distinct(self):
+        _proc, receipt = self.run_probe()
+        row = json.loads(receipt.read_text())
+        self.assertEqual(row["lane"], "local-lane")
+        self.assertEqual(row["provider"], "local-provider")
 
     def test_receipt_is_secret_safe_and_replaced_atomically(self):
         proc, receipt = self.run_probe()
@@ -108,7 +120,7 @@ class LaneHealthReceiptTests(unittest.TestCase):
         row["expires_at"] = "2020-01-01T00:15:00Z"
         receipt.write_text(json.dumps(row))
         with self.assertRaises(run_manifest.ManifestError):
-            run_manifest.validate_health(str(receipt), "local-test", "local-test",
+            run_manifest.validate_health(str(receipt), "local-lane", "local-provider",
                                          "[SP]deepseek-v4-flash", "DeepSeek-V4-Flash")
 
     def test_bad_config_fails_without_traceback_or_receipt_claim(self):
