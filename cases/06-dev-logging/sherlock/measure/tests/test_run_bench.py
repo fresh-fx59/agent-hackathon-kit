@@ -138,8 +138,10 @@ class BenchRunnerRig:
         env.update(extra_env or {})
         p = subprocess.run(["bash", RUNNER, arm], capture_output=True,
                            text=True, env=env, timeout=120)
-        with open(log, "rb") as fh:
-            argv = fh.read().decode("utf-8").split("\0")
+        argv = []
+        if os.path.exists(log):
+            with open(log, "rb") as fh:
+                argv = fh.read().decode("utf-8").split("\0")
         rows = []
         led = env["BENCH_LEDGER"]
         if os.path.exists(led):
@@ -153,7 +155,8 @@ class BenchRunnerRig:
 
 class TheBenchRunnerUsesTheSameUpstreamLane(BenchRunnerRig, unittest.TestCase):
     def test_the_qwen_child_receives_the_copied_skill_root(self):
-        _argv, _seen, _rows, p = self.go(arm="v28")
+        _argv, _seen, _rows, p = self.go(arm="v29")
+        self.assertEqual(p.returncode, 0, "stderr: %s" % p.stderr[-800:])
         with open(self._stub_log + ".skill-root", encoding="utf-8") as fh:
             skill_root = fh.read()
         self.assertTrue(skill_root.endswith("/.qwen/skills/log-rca"),
