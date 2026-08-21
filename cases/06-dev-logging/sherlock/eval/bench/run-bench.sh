@@ -293,6 +293,9 @@ PY
 if [ "$ARM" != "none" ]; then
   mkdir -p "$W/.qwen/skills"
   cp -r "$SKILLS/$ARM" "$W/.qwen/skills/log-rca" || exit 1
+  export QWEN_SKILL_ROOT="$W/.qwen/skills/log-rca"
+else
+  unset QWEN_SKILL_ROOT
 fi
 
 # THE PROMPT IS A PROPERTY OF THE CORPUS, NOT OF THE RUNNER.
