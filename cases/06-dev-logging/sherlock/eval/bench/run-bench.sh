@@ -21,7 +21,7 @@ BASE_URL="${SHERLOCK_BASE_URL:-https://linkapi.ai/v1}"
 MODEL="${SHERLOCK_MODEL:-[SP]deepseek-v4-flash}"
 if [ -n "${SHERLOCK_TIMEOUT+x}" ]; then
   TIMEOUT="$SHERLOCK_TIMEOUT"
-elif [ "$ARM" = "v30" ]; then
+elif [ "$ARM" = "v30" ] || [ "$ARM" = "v31" ]; then
   TIMEOUT=5400
 else
   TIMEOUT=2700
@@ -248,7 +248,7 @@ W="$(mktemp -d "${TMPDIR:-/tmp}/bench-XXXXXX")"
 RUN_CORPUS="$W/corpus"
 mkdir -p "$RUN_CORPUS"
 cp -a "$CORPUS/." "$RUN_CORPUS/"
-if [ "$ARM" = "v30" ]; then
+if [ "$ARM" = "v30" ] || [ "$ARM" = "v31" ]; then
   mkdir -p "$W/work"
   if [ -n "${SHERLOCK_SEED_WORK:-}" ]; then
     [ -d "$SHERLOCK_SEED_WORK" ] && [ ! -L "$SHERLOCK_SEED_WORK" ] || {
@@ -257,10 +257,10 @@ if [ "$ARM" = "v30" ]; then
     }
     cp -a "$SHERLOCK_SEED_WORK/." "$W/work/" || exit 1
   fi
-  python3 "$SKILLS/v30/tools/stage-corpus.py" "$RUN_CORPUS" \
+  python3 "$SKILLS/$ARM/tools/stage-corpus.py" "$RUN_CORPUS" \
     --map "$W/work/path-map.tsv" > "$TRACE/path-stage.json" || exit 1
   if [ -n "${SHERLOCK_SEED_WORK:-}" ]; then
-    python3 "$SKILLS/v30/tools/checkpoint.py" init --work "$W/work" \
+    python3 "$SKILLS/$ARM/tools/checkpoint.py" init --work "$W/work" \
       > "$TRACE/checkpoint-pre.json" || exit 1
   fi
 fi
@@ -284,13 +284,17 @@ EXCLUDE_JSON=''
 if [ "${SHERLOCK_ALLOW_SUBAGENT:-0}" != "1" ]; then
   EXCLUDE_JSON=', "tools": { "exclude": ["agent"] }'
 fi
-if [ "$ARM" = "v30" ]; then
+if [ "$ARM" = "v30" ] || [ "$ARM" = "v31" ]; then
   case "$REQUEST_TIMEOUT_MS:$MAX_RETRIES" in
     *[!0-9:]*|:*|*:) echo "✗ invalid v30 request timeout or retry count" >&2; exit 1 ;;
   esac
   mkdir -p "$W/.qwen"
-  printf '{ "model": { "generationConfig": { "contextWindowSize": %s, "timeout": %s, "maxRetries": %s } }%s }\n' \
-    "$CTX_WINDOW" "$REQUEST_TIMEOUT_MS" "$MAX_RETRIES" "$EXCLUDE_JSON" > "$W/.qwen/settings.json"
+  MEMORY_JSON=''
+  if [ "$ARM" = "v31" ]; then
+    MEMORY_JSON=', "memory": { "enableManagedAutoMemory": false, "enableDreams": false }, "model_fallback": { "enabled": false }'
+  fi
+  printf '{ "model": { "generationConfig": { "contextWindowSize": %s, "timeout": %s, "maxRetries": %s } }%s%s }\n' \
+    "$CTX_WINDOW" "$REQUEST_TIMEOUT_MS" "$MAX_RETRIES" "$EXCLUDE_JSON" "$MEMORY_JSON" > "$W/.qwen/settings.json"
 elif [ "$CTX_WINDOW" != "0" ]; then
   mkdir -p "$W/.qwen"
   printf '{ "model": { "generationConfig": { "contextWindowSize": %s } }%s }\n' \
@@ -351,7 +355,7 @@ else
   echo "  to a different question. Write the prompt file first." >&2
   exit 1
 fi
-if [ "$ARM" = "v30" ] && [ -n "${SHERLOCK_SEED_WORK:-}" ]; then
+if { [ "$ARM" = "v30" ] || [ "$ARM" = "v31" ]; } && [ -n "${SHERLOCK_SEED_WORK:-}" ]; then
   PROMPT="$PROMPT
 
 Продолжи расследование из сохранённого checkpoint в $W/work. Сначала прочитай
@@ -359,6 +363,13 @@ work/checkpoint.json. Не повторяй MAP и TRIAGE, если state=ready_
 Используй новый безопасный путь корпуса $RUN_CORPUS и work/path-map.tsv.
 Сразу собери work/report.md, затем выполни triagecheck и citecheck и исправь
 только ошибки проверки. Последний ответ должен дословно повторять work/report.md."
+fi
+
+if [ "$ARM" = "v31" ]; then
+  # r4 answered in one request with stats.skills.totalCalls == 0. Name the skill.
+  PROMPT="/sherlock
+
+$PROMPT"
 fi
 
 # THE SAME UPSTREAM LANE AS run-case.sh. This runner used to talk to linkapi
@@ -393,7 +404,7 @@ START=$(date +%s)
 # A stream can break after the agent has already mapped most of the corpus. Keep
 # its QWEN_HOME and resume the same session with bounded exponential backoff;
 # never replace useful mid-session work with a fresh, empty investigation.
-if [ "$ARM" = "v30" ]; then
+if [ "$ARM" = "v30" ] || [ "$ARM" = "v31" ]; then
   RESUME_MAX_ATTEMPTS="${SHERLOCK_RESUME_MAX_ATTEMPTS:-0}"
 else
   RESUME_MAX_ATTEMPTS="${SHERLOCK_RESUME_MAX_ATTEMPTS:-2}"
@@ -494,7 +505,8 @@ sys.exit(1)
 PY
 }
 
-run_qwen 0 -p "$PROMPT" || true
+QWEN_RC=0
+if run_qwen 0 -p "$PROMPT"; then QWEN_RC=0; else QWEN_RC=$?; fi
 while RESUME_SESSION="$(broken_session)" \
   && [ "$RESUME_ATTEMPTS" -lt "$RESUME_MAX_ATTEMPTS" ]; do
   RESUME_ATTEMPTS=$((RESUME_ATTEMPTS + 1))
@@ -505,7 +517,7 @@ while RESUME_SESSION="$(broken_session)" \
     --upstream-log "$TRACE.upstream.jsonl" --inflight-path "$TRACE/upstream-inflight.json"
   echo "  ⚠ stream failed; preserving session $RESUME_SESSION and retrying in ${BACKOFF}s (attempt $RESUME_ATTEMPTS/$RESUME_MAX_ATTEMPTS)" >&2
   sleep "$BACKOFF"
-  run_qwen "$RESUME_ATTEMPTS" --resume "$RESUME_SESSION" -p "The previous provider stream failed. Continue the same investigation from saved state. Do not restart mapping; finish the unresolved worklist and deliver the report." || true
+  if run_qwen "$RESUME_ATTEMPTS" --resume "$RESUME_SESSION" -p "The previous provider stream failed. Continue the same investigation from saved state. Do not restart mapping; finish the unresolved worklist and deliver the report."; then QWEN_RC=0; else QWEN_RC=$?; fi
 done
 python3 - "$TRACE/recovery.json" "$RESUME_ATTEMPTS" "$RESUME_SESSION" <<'PY'
 import json, sys
@@ -514,7 +526,7 @@ with open(sys.argv[1], "w", encoding="utf-8") as fh:
     fh.write("\n")
 PY
 save_trace
-[ -f "$TRACE/candidate.json" ] && RC=0 || RC=2
+if [ -f "$TRACE/candidate.json" ] && [ "${QWEN_RC:-2}" -eq 0 ]; then RC=0; else RC=2; fi
 if [ "$RC" -eq 0 ]; then
   state_set --run-tag "$STAMP" --phase FINISHED_UNCHECKED --dataset "$DATASET" --arm "$ARM" --trace-dir "$TRACE" \
     --attempt "$RESUME_ATTEMPTS" --session-id "${LAST_SESSION:-$RESUME_SESSION}" --upstream-log "$TRACE.upstream.jsonl" \
