@@ -141,5 +141,24 @@ class UngroundedMessageTest(unittest.TestCase):
         self.assertGreater(row["report_evidence"]["blocking"], 0)
 
 
+class SkillVersionTest(unittest.TestCase):
+    """v31's own tools must agree that the arm is version 31, not 30."""
+
+    def test_marker_version_is_31(self):
+        logmap = (SHERLOCK / "skills" / "v31" / "tools" / "logmap.py").read_text()
+        self.assertIn('"version": 31,', logmap)
+        self.assertNotIn('"version": 30,', logmap)
+
+    def test_stopcheck_requires_version_31(self):
+        stop = (SHERLOCK / "skills" / "v31" / "tools" / "stopcheck.py").read_text()
+        self.assertIn("if version != 31:", stop)
+
+    def test_v30_is_untouched(self):
+        logmap = (SHERLOCK / "skills" / "v30" / "tools" / "logmap.py").read_text()
+        stop = (SHERLOCK / "skills" / "v30" / "tools" / "stopcheck.py").read_text()
+        self.assertIn('"version": 30,', logmap)
+        self.assertIn("if version != 30:", stop)
+
+
 if __name__ == "__main__":
     unittest.main()

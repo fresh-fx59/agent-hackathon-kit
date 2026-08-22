@@ -363,7 +363,7 @@ def write_active_marker(corpus, out_dir, mode="single", worklists=None, hosts=No
     if mode not in ("single", "multi"):
         return
     data = {
-        "version": 30,
+        "version": 31,
         "active": True,
         "workspace": workspace,
         "skill_root": _real(os.path.dirname(os.path.dirname(__file__))),

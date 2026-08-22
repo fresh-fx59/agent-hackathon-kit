@@ -266,7 +266,7 @@ def validate_active_marker(data, workspace):
     version = data.get("version")
     if type(version) is not int:
         raise ActiveStateError("Sherlock: active marker has invalid version; rerun logmap MAP step.")
-    if version != 30:
+    if version != 31:
         return False
     workspace_value = data.get("workspace")
     if not isinstance(workspace_value, str) or not workspace_value:
