@@ -344,7 +344,8 @@ safe=("HOME","PATH","LANG","LC_ALL","LC_CTYPE","TMPDIR","SHERLOCK_ALLOW_SUBAGENT
       "SHERLOCK_BUDGET_MAX_UPSTREAM_ATTEMPTS","SHERLOCK_BUDGET_MAX_REQUEST_BYTES",
       "SHERLOCK_BUDGET_MAX_WALL_SECONDS","SHERLOCK_BUDGET_MAX_CONSECUTIVE_PROVIDER_FAILURES",
       "BENCH_RUNS","QWEN_BIN","SHERLOCK_MODEL","SHERLOCK_BASE_URL",
-      "SHERLOCK_EXPECTED_RETURNED_IDENTITY")
+      "SHERLOCK_EXPECTED_RETURNED_IDENTITY","SHERLOCK_SEED_WORK",
+      "SHERLOCK_REQUEST_TIMEOUT_MS","SHERLOCK_MAX_RETRIES")
 json.dump({{name:os.environ.get(name) for name in safe}},open(sys.argv[2],"w"))
 PY2
 printf '%s\n' "$SHERLOCK_CORPUS" > "{self.corpus_capture}"
@@ -595,7 +596,9 @@ os.stat=guarded_stat
         env=self.fx.env(HOME=str(custom_home),TMPDIR=str(custom_tmp),LANG="C",LC_ALL="C",
                         PATH=str(injected_path)+os.pathsep+os.environ.get("PATH",""),
                         SHERLOCK_ALLOW_SUBAGENT="1",JUDGE_API_KEY="fixture-judge-secret",
-                        ARBITRARY_SECRET_SENTINEL="must-not-cross")
+                        ARBITRARY_SECRET_SENTINEL="must-not-cross",
+                        SHERLOCK_SEED_WORK="/checkpoint/work",
+                        SHERLOCK_REQUEST_TIMEOUT_MS="900000", SHERLOCK_MAX_RETRIES="0")
         result=self.fx.run(env=env); self.assertEqual(result.returncode,0,(result.stdout,result.stderr))
         names=set(json.loads(self.fx.target_env_names.read_text()))
         forbidden={"JUDGE_API_KEY","ARBITRARY_SECRET_SENTINEL","SHERLOCK_CONTROLLER_ROOT",
@@ -617,6 +620,9 @@ os.stat=guarded_stat
         self.assertEqual(runtime["SHERLOCK_TRACE"],link["child_trace"])
         self.assertEqual(runtime["SHERLOCK_CORPUS"],str(self.fx.controller_dir()/"staged-corpus"))
         self.assertEqual(runtime["SHERLOCK_REQUIRE_ATTRIBUTION"],"1")
+        self.assertEqual(runtime["SHERLOCK_SEED_WORK"],"/checkpoint/work")
+        self.assertEqual(runtime["SHERLOCK_REQUEST_TIMEOUT_MS"],"900000")
+        self.assertEqual(runtime["SHERLOCK_MAX_RETRIES"],"0")
         self.assertEqual([runtime[name] for name in (
             "SHERLOCK_BUDGET_MAX_UPSTREAM_ATTEMPTS","SHERLOCK_BUDGET_MAX_REQUEST_BYTES",
             "SHERLOCK_BUDGET_MAX_WALL_SECONDS","SHERLOCK_BUDGET_MAX_CONSECUTIVE_PROVIDER_FAILURES")],
