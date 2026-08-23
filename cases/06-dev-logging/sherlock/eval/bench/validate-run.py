@@ -135,6 +135,87 @@ def load_candidate(trace_fd, manifest):
         bounded_number(usage[key], True)
     return row, data
 
+MIN_MAIN_REQUESTS = 2
+
+
+def terminal_exit(code):
+    """An unknown terminal is never zero: v31 reports it as unknown."""
+    return code if type(code) is int else "unknown"
+
+
+def skill_receipt(final):
+    """Reject a session that never loaded the skill or never investigated.
+
+    r4 returned a healthy HTTP-200 stream, exit 0 and fabricated JSON while
+    stats.skills.totalCalls was 0: the main model answered in one request and
+    every tool call belonged to the managed auto-memory extractor.
+    """
+    stats = final.get("stats") if isinstance(final.get("stats"), dict) else {}
+    skills = stats.get("skills") if isinstance(stats.get("skills"), dict) else {}
+    tools = stats.get("tools") if isinstance(stats.get("tools"), dict) else {}
+    models = stats.get("models") if isinstance(stats.get("models"), dict) else {}
+    skill_calls = skills.get("totalCalls") if type(skills.get("totalCalls")) is int else 0
+    tool_calls = tools.get("totalCalls") if type(tools.get("totalCalls")) is int else 0
+    main_requests = 0
+    for model in models.values():
+        if not isinstance(model, dict):
+            continue
+        by_source = model.get("bySource") if isinstance(model.get("bySource"), dict) else {}
+        main = by_source.get("main") if isinstance(by_source.get("main"), dict) else {}
+        api = main.get("api") if isinstance(main.get("api"), dict) else {}
+        requests = api.get("totalRequests")
+        if type(requests) is int:
+            main_requests += requests
+    reasons = []
+    if skill_calls < 1:
+        reasons.append("no_skill_load")
+    if main_requests < MIN_MAIN_REQUESTS:
+        reasons.append("no_investigation")
+    return {"skill_calls": skill_calls, "tool_calls": tool_calls,
+            "main_requests": main_requests, "reasons": reasons}
+
+
+MAX_ATTEMPT_RECEIPT = 1 << 20
+
+
+def terminal_receipt(trace_fd):
+    """Read the runner's own attempt receipt; never invent a zero exit.
+
+    v30 exited 0 whenever a parseable candidate existed and left
+    candidate.transport.exit_code null, so a killed or crashed session looked
+    identical to a clean one.
+    """
+    rows = []
+    try:
+        fd = os.open("attempts.jsonl", os.O_RDONLY, dir_fd=trace_fd)
+    except OSError:
+        fd = None
+    if fd is not None:
+        with os.fdopen(fd, "rb") as handle:
+            data = handle.read(MAX_ATTEMPT_RECEIPT + 1)
+        if len(data) > MAX_ATTEMPT_RECEIPT:
+            data = b""
+        for line in data.decode("utf-8", "replace").splitlines():
+            if not line.strip():
+                continue
+            try:
+                row = json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(row, dict):
+                rows.append(row)
+    last = rows[-1] if rows else {}
+    code = terminal_exit(last.get("exit_code"))
+    duration = last.get("duration_s") if isinstance(last.get("duration_s"), (int, float)) else None
+    reasons = []
+    if code == "unknown":
+        reasons.append("exit_unknown")
+    elif code != 0:
+        reasons.append("exit_nonzero")
+    return {"exit_code": code, "duration_s": duration, "attempts": len(rows),
+            "reasons": reasons}
+
+
 def result_facts(data, candidate):
     try:
         stream = json.loads(data.decode("utf-8"))
@@ -461,6 +542,10 @@ def validate_fresh(trace, trace_fd, manifest, candidate, candidate_data):
         reasons.append(error.code)
     except Exception:
         reasons.append("inventory_target_failed")
+    receipt = skill_receipt(final)
+    terminal = terminal_receipt(trace_fd)
+    reasons.extend(terminal["reasons"])
+    reasons.extend(receipt["reasons"])
     contamination_row = contamination(manifest, message, artifact, delivered, work_blobs,
                                       extras["answer_key"], extras["prompt"], skill_blobs, corpus_blobs,
                                       settings_pre, settings_saved, result_data)
@@ -471,7 +556,8 @@ def validate_fresh(trace, trace_fd, manifest, candidate, candidate_data):
            "upstream_sha256": sha(upstream_data), "work_sha256": work_digest,
            "artifact_only": artifact_only, "transport": transport, "usage": usage,
            "delivery": delivery, "inventory": inventory_row, "identity": identity,
-           "checkers": checker_rows, "contamination": contamination_row}
+           "checkers": checker_rows, "contamination": contamination_row,
+           "skill_receipt": receipt, "terminal": terminal}
     authority_tmp.cleanup()
     return row
 

@@ -19,7 +19,13 @@ ARM="${1:-unknown}"
 CORPUS="${SHERLOCK_CORPUS:-}"
 BASE_URL="${SHERLOCK_BASE_URL:-https://linkapi.ai/v1}"
 MODEL="${SHERLOCK_MODEL:-[SP]deepseek-v4-flash}"
-TIMEOUT="${SHERLOCK_TIMEOUT:-2700}"
+if [ -n "${SHERLOCK_TIMEOUT+x}" ]; then
+  TIMEOUT="$SHERLOCK_TIMEOUT"
+elif [ "$ARM" = "v30" ] || [ "$ARM" = "v31" ]; then
+  TIMEOUT=5400
+else
+  TIMEOUT=2700
+fi
 RUNS="${BENCH_RUNS:-$HERE/runs}"
 CONTROLLED=0
 if [ -n "${SHERLOCK_RUN_TAG:-}" ] || [ -n "${SHERLOCK_TRACE:-}" ]; then
@@ -242,6 +248,22 @@ W="$(mktemp -d "${TMPDIR:-/tmp}/bench-XXXXXX")"
 RUN_CORPUS="$W/corpus"
 mkdir -p "$RUN_CORPUS"
 cp -a "$CORPUS/." "$RUN_CORPUS/"
+if [ "$ARM" = "v30" ] || [ "$ARM" = "v31" ]; then
+  mkdir -p "$W/work"
+  if [ -n "${SHERLOCK_SEED_WORK:-}" ]; then
+    [ -d "$SHERLOCK_SEED_WORK" ] && [ ! -L "$SHERLOCK_SEED_WORK" ] || {
+      echo "✗ SHERLOCK_SEED_WORK must be a real directory" >&2
+      exit 1
+    }
+    cp -a "$SHERLOCK_SEED_WORK/." "$W/work/" || exit 1
+  fi
+  python3 "$SKILLS/$ARM/tools/stage-corpus.py" "$RUN_CORPUS" \
+    --map "$W/work/path-map.tsv" > "$TRACE/path-stage.json" || exit 1
+  if [ -n "${SHERLOCK_SEED_WORK:-}" ]; then
+    python3 "$SKILLS/$ARM/tools/checkpoint.py" init --work "$W/work" \
+      > "$TRACE/checkpoint-pre.json" || exit 1
+  fi
+fi
 # The trajectory is the ONLY way to tell "never opened the file" from "opened it
 # and closed it wrongly" from "found it and discarded it" — and that is exactly
 # the question every arm since v5 exists to answer. It used to be deleted on
@@ -252,6 +274,8 @@ export QWEN_HOME="$W/home"; mkdir -p "$QWEN_HOME"
 # the 649 MB corpus, so a 177,000-token ceiling hurts here most of all.
 # → measure/run-case.sh for why the default is 400,000 and not 1,048,576.
 CTX_WINDOW="${SHERLOCK_CONTEXT_WINDOW:-400000}"
+REQUEST_TIMEOUT_MS="${SHERLOCK_REQUEST_TIMEOUT_MS:-900000}"
+MAX_RETRIES="${SHERLOCK_MAX_RETRIES:-0}"
 # Qwen's `agent` tool launches a subagent that does not inherit the project
 # `.qwen/skills/` directory. The result is a one-turn no-skill answer from the
 # empty runner directory. This exact failure is characterised in run-case.sh;
@@ -260,7 +284,18 @@ EXCLUDE_JSON=''
 if [ "${SHERLOCK_ALLOW_SUBAGENT:-0}" != "1" ]; then
   EXCLUDE_JSON=', "tools": { "exclude": ["agent"] }'
 fi
-if [ "$CTX_WINDOW" != "0" ]; then
+if [ "$ARM" = "v30" ] || [ "$ARM" = "v31" ]; then
+  case "$REQUEST_TIMEOUT_MS:$MAX_RETRIES" in
+    *[!0-9:]*|:*|*:) echo "✗ invalid v30 request timeout or retry count" >&2; exit 1 ;;
+  esac
+  mkdir -p "$W/.qwen"
+  MEMORY_JSON=''
+  if [ "$ARM" = "v31" ]; then
+    MEMORY_JSON=', "memory": { "enableManagedAutoMemory": false, "enableDreams": false }, "model_fallback": { "enabled": false }'
+  fi
+  printf '{ "model": { "generationConfig": { "contextWindowSize": %s, "timeout": %s, "maxRetries": %s } }%s%s }\n' \
+    "$CTX_WINDOW" "$REQUEST_TIMEOUT_MS" "$MAX_RETRIES" "$EXCLUDE_JSON" "$MEMORY_JSON" > "$W/.qwen/settings.json"
+elif [ "$CTX_WINDOW" != "0" ]; then
   mkdir -p "$W/.qwen"
   printf '{ "model": { "generationConfig": { "contextWindowSize": %s } }%s }\n' \
     "$CTX_WINDOW" "$EXCLUDE_JSON" > "$W/.qwen/settings.json"
@@ -293,6 +328,9 @@ PY
 if [ "$ARM" != "none" ]; then
   mkdir -p "$W/.qwen/skills"
   cp -r "$SKILLS/$ARM" "$W/.qwen/skills/log-rca" || exit 1
+  export QWEN_SKILL_ROOT="$W/.qwen/skills/log-rca"
+else
+  unset QWEN_SKILL_ROOT
 fi
 
 # THE PROMPT IS A PROPERTY OF THE CORPUS, NOT OF THE RUNNER.
@@ -316,6 +354,22 @@ else
   echo "  A corpus without its own question would be scored against an answer" >&2
   echo "  to a different question. Write the prompt file first." >&2
   exit 1
+fi
+if { [ "$ARM" = "v30" ] || [ "$ARM" = "v31" ]; } && [ -n "${SHERLOCK_SEED_WORK:-}" ]; then
+  PROMPT="$PROMPT
+
+Продолжи расследование из сохранённого checkpoint в $W/work. Сначала прочитай
+work/checkpoint.json. Не повторяй MAP и TRIAGE, если state=ready_for_synthesis.
+Используй новый безопасный путь корпуса $RUN_CORPUS и work/path-map.tsv.
+Сразу собери work/report.md, затем выполни triagecheck и citecheck и исправь
+только ошибки проверки. Последний ответ должен дословно повторять work/report.md."
+fi
+
+if [ "$ARM" = "v31" ]; then
+  # r4 answered in one request with stats.skills.totalCalls == 0. Name the skill.
+  PROMPT="/sherlock
+
+$PROMPT"
 fi
 
 # THE SAME UPSTREAM LANE AS run-case.sh. This runner used to talk to linkapi
@@ -350,7 +404,11 @@ START=$(date +%s)
 # A stream can break after the agent has already mapped most of the corpus. Keep
 # its QWEN_HOME and resume the same session with bounded exponential backoff;
 # never replace useful mid-session work with a fresh, empty investigation.
-RESUME_MAX_ATTEMPTS="${SHERLOCK_RESUME_MAX_ATTEMPTS:-2}"
+if [ "$ARM" = "v30" ] || [ "$ARM" = "v31" ]; then
+  RESUME_MAX_ATTEMPTS="${SHERLOCK_RESUME_MAX_ATTEMPTS:-0}"
+else
+  RESUME_MAX_ATTEMPTS="${SHERLOCK_RESUME_MAX_ATTEMPTS:-2}"
+fi
 RESUME_BACKOFF_S="${SHERLOCK_RESUME_BACKOFF_S:-15}"
 RESUME_ATTEMPTS=0
 RESUME_SESSION=""
@@ -447,7 +505,8 @@ sys.exit(1)
 PY
 }
 
-run_qwen 0 -p "$PROMPT" || true
+QWEN_RC=0
+if run_qwen 0 -p "$PROMPT"; then QWEN_RC=0; else QWEN_RC=$?; fi
 while RESUME_SESSION="$(broken_session)" \
   && [ "$RESUME_ATTEMPTS" -lt "$RESUME_MAX_ATTEMPTS" ]; do
   RESUME_ATTEMPTS=$((RESUME_ATTEMPTS + 1))
@@ -458,7 +517,7 @@ while RESUME_SESSION="$(broken_session)" \
     --upstream-log "$TRACE.upstream.jsonl" --inflight-path "$TRACE/upstream-inflight.json"
   echo "  ⚠ stream failed; preserving session $RESUME_SESSION and retrying in ${BACKOFF}s (attempt $RESUME_ATTEMPTS/$RESUME_MAX_ATTEMPTS)" >&2
   sleep "$BACKOFF"
-  run_qwen "$RESUME_ATTEMPTS" --resume "$RESUME_SESSION" -p "The previous provider stream failed. Continue the same investigation from saved state. Do not restart mapping; finish the unresolved worklist and deliver the report." || true
+  if run_qwen "$RESUME_ATTEMPTS" --resume "$RESUME_SESSION" -p "The previous provider stream failed. Continue the same investigation from saved state. Do not restart mapping; finish the unresolved worklist and deliver the report."; then QWEN_RC=0; else QWEN_RC=$?; fi
 done
 python3 - "$TRACE/recovery.json" "$RESUME_ATTEMPTS" "$RESUME_SESSION" <<'PY'
 import json, sys
@@ -467,7 +526,7 @@ with open(sys.argv[1], "w", encoding="utf-8") as fh:
     fh.write("\n")
 PY
 save_trace
-[ -f "$TRACE/candidate.json" ] && RC=0 || RC=2
+if [ -f "$TRACE/candidate.json" ] && [ "${QWEN_RC:-2}" -eq 0 ]; then RC=0; else RC=2; fi
 if [ "$RC" -eq 0 ]; then
   state_set --run-tag "$STAMP" --phase FINISHED_UNCHECKED --dataset "$DATASET" --arm "$ARM" --trace-dir "$TRACE" \
     --attempt "$RESUME_ATTEMPTS" --session-id "${LAST_SESSION:-$RESUME_SESSION}" --upstream-log "$TRACE.upstream.jsonl" \

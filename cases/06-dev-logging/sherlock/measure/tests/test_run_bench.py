@@ -34,6 +34,10 @@ _spec.loader.exec_module(D)
 STUB = r"""#!/usr/bin/env bash
 printf '%s\0' "$@" >> "$QWEN_STUB_LOG"
 [ -f .qwen/settings.json ] && cp .qwen/settings.json "$QWEN_STUB_LOG.settings"
+printf '%s' "${QWEN_SKILL_ROOT:-}" > "$QWEN_STUB_LOG.skill-root"
+if [ -n "${QWEN_SKILL_ROOT:-}" ] && [ -f "$QWEN_SKILL_ROOT/SKILL.md" ]; then
+  printf 'present' > "$QWEN_STUB_LOG.skill-root-state"
+fi
 M=""
 while [ $# -gt 0 ]; do
   case "$1" in --model) M="$2"; shift 2 ;; *) shift ;; esac
@@ -107,7 +111,7 @@ class StubProvider:
 class BenchRunnerRig:
     """The stub rig: a fake `qwen`, a stub provider, a throwaway corpus."""
 
-    def go(self, extra_env=None):
+    def go(self, extra_env=None, arm="none"):
         prov = StubProvider()
         self.addCleanup(prov.close)
         d = tempfile.mkdtemp()
@@ -132,10 +136,12 @@ class BenchRunnerRig:
                     "BENCH_LEDGER": os.path.join(d, "runs-bench.jsonl"),
                     "BENCH_RUNS": os.path.join(d, "runs")})
         env.update(extra_env or {})
-        p = subprocess.run(["bash", RUNNER, "none"], capture_output=True,
+        p = subprocess.run(["bash", RUNNER, arm], capture_output=True,
                            text=True, env=env, timeout=120)
-        with open(log, "rb") as fh:
-            argv = fh.read().decode("utf-8").split("\0")
+        argv = []
+        if os.path.exists(log):
+            with open(log, "rb") as fh:
+                argv = fh.read().decode("utf-8").split("\0")
         rows = []
         led = env["BENCH_LEDGER"]
         if os.path.exists(led):
@@ -148,6 +154,16 @@ class BenchRunnerRig:
 
 
 class TheBenchRunnerUsesTheSameUpstreamLane(BenchRunnerRig, unittest.TestCase):
+    def test_the_qwen_child_receives_the_copied_skill_root(self):
+        _argv, _seen, _rows, p = self.go(arm="v29")
+        self.assertEqual(p.returncode, 0, "stderr: %s" % p.stderr[-800:])
+        with open(self._stub_log + ".skill-root", encoding="utf-8") as fh:
+            skill_root = fh.read()
+        self.assertTrue(skill_root.endswith("/.qwen/skills/log-rca"),
+                        "stderr: %s" % p.stderr[-800:])
+        with open(self._stub_log + ".skill-root-state", encoding="utf-8") as fh:
+            self.assertEqual(fh.read(), "present")
+
     def test_the_cli_is_given_the_clean_id(self):
         argv, _seen, _rows, p = self.go()
         self.assertEqual(self.cli_model(argv), "deepseek-v4-flash",

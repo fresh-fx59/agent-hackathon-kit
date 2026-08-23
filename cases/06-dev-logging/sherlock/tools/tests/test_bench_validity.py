@@ -142,9 +142,14 @@ class ValidityFixture:
         self.write_target_worklist()
         (self.trace / ".sherlock").mkdir()
         self.write_marker()
+        # v31: a valid run must prove the skill loaded, that the main model
+        # actually investigated, and its real terminal exit.
         self.result = {"type":"result", "is_error":False, "num_turns":2,
-                       "usage":{"input_tokens":10,"output_tokens":5}, "result":delivered}
+                       "usage":{"input_tokens":10,"output_tokens":5}, "result":delivered,
+                       "stats":{"skills":{"totalCalls":1}, "tools":{"totalCalls":4},
+                                "models":{"qwen-real":{"bySource":{"main":{"api":{"totalRequests":4}}}}}}}
         self.write_result()
+        self.write_attempts()
         if artifact is not None:
             (self.work / "report.md").write_text(artifact, encoding="utf-8")
         self.write_upstream([{"run_tag":"run-001", "requested_model":"qwen-target",
@@ -164,6 +169,11 @@ class ValidityFixture:
 
     def write_target_worklist(self, body="G1\tPROVEN\tA1\thost/a.log:1\tn=1\trecord\n"):
         (self.work / "worklist.tsv").write_text(body, encoding="utf-8")
+
+    def write_attempts(self, exit_code=0, duration_s=7):
+        (self.trace / "attempts.jsonl").write_text(
+            json.dumps({"attempt":0, "session_id":"s1", "exit_code":exit_code,
+                        "duration_s":duration_s}) + "\n", encoding="utf-8")
 
     def write_result(self):
         (self.trace / "out.json").write_text(json.dumps([self.result]), encoding="utf-8")
