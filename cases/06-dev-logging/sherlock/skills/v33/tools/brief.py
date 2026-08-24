@@ -2,6 +2,7 @@
 """brief — write the per-phase instruction files a subagent reads from disk.
 
     python3 brief.py --work ./work --corpus ./logs --skill-root <BASE> --phase all
+    python3 brief.py --install-agents <PROJECT>/.qwen/agents
 
 Why this exists. Measured 2026-08-24 with a logging proxy in front of the
 provider, on qwen-code 0.21.1: a trivial request is 83,705 bytes; the same
@@ -150,16 +151,254 @@ def render(phase, work, corpus, skill_root):
     return body.format(**fields)
 
 
+# ---------------------------------------------------------------------------
+# Named agent definitions.
+#
+# A skill directory cannot ship these: qwen-code only discovers definitions in
+# `<project>/.qwen/agents/*.md`, `~/.qwen/agents/*.md` or an extension's
+# `agents/*.md` — a flat directory, `.md` only, no recursion. So the skill
+# installs them at run time, and `loadSubagent()` reads from disk on every call,
+# which means a definition written during a session resolves on the FIRST call
+# by name; only the advertised roster is stale.
+#
+# The point of the exercise: an agent definition's Markdown BODY becomes the
+# CHILD's system prompt (`parseSubagentContent` -> `promptConfig.systemPrompt`).
+# The PARENT only ever carries `- **name**: description` per agent
+# (`updateDescriptionAndSchema`). So phase prose moved into a definition body
+# costs the parent tens of bytes instead of tens of kilobytes.
+#
+# The child does NOT inherit qwen-code's core system prompt, so each body has to
+# be self-sufficient. `tools:` is deliberately ABSENT from the frontmatter: an
+# explicit allowlist would silently drop `skill` and `write_file`.
+#
+# Bodies are ENGLISH because they are instructions. The artefacts stay RUSSIAN,
+# and every literal the python gates parse is reproduced verbatim below.
+# ---------------------------------------------------------------------------
+
+AGENTS = ("sherlock-triage", "sherlock-draft")
+
+RU_CONTRACT = u"""## Output language (never translate the literals below)
+
+Your own reasoning may be English, but THE REPORT AND EVERY ARTEFACT FIELD MUST
+BE WRITTEN IN RUSSIAN. The python gates match these strings byte for byte:
+`## \u041d\u0430\u0445\u043e\u0434\u043a\u0438`, `## \u041e\u0442\u043a\u043b\u043e\u043d\u0451\u043d\u043d\u044b\u0435 \u043a\u0430\u043d\u0434\u0438\u0434\u0430\u0442\u044b`, `## \u041f\u043e\u043a\u0440\u044b\u0442\u0438\u0435`, `\u0443\u043b\u0438\u043a\u0438:`,
+`\u0447\u0435\u043c \u043e\u043f\u0440\u043e\u0432\u0435\u0440\u0433\u0430\u043b:`, `\u0430\u0442\u0440\u0438\u0431\u0443\u0446\u0438\u044f:`, `\u0438\u0441\u0445\u043e\u0434:` with exactly one of
+`\u0443\u0441\u043f\u0435\u0445|\u043f\u043e\u043f\u044b\u0442\u043a\u0430|\u043d\u043e\u0440\u043c\u0430`. Worklist verdict letters stay `D`, `N`, `X`.
+Translating or re-spelling any of them fails the gate."""
+
+TRIAGE_DESC = (
+    "Triages a pre-built log worklist for the Sherlock log-RCA skill: turns "
+    "every unresolved row into a D (defect), N (normal) or X (not enough data) "
+    "verdict, each backed by a path:line verbatim quote or a numbered bulk "
+    "rule, writes the verdicts back to the worklist, and proves the result "
+    "with triagecheck.py until it exits 0. Use it for the TRIAGE phase, after "
+    "logmap.py has produced the worklist and brief.py has produced "
+    "work/brief-triage.md, whenever the parent must not read the log corpus "
+    "itself. Prompt it with ONE line: the absolute path of its brief file. It "
+    "returns a short fixed summary of counts and gate exit codes; its artefact "
+    "fields stay in Russian. Do not use it to write the final report."
+)
+
+TRIAGE_BODY = u"""You are a log triage specialist. Row by row, you decide whether a suspicious
+group of log records is a real defect, ordinary behaviour, or something the
+available data cannot settle. You are precise, you never guess a path, and you
+never let a verdict stand without evidence attached to it.
+
+Your prompt names ONE file: the absolute path of your brief. Read it before
+anything else. That brief carries every absolute path you need - the log corpus,
+the worklist, the rules file, the corpus map, the skill's tools directory and
+the full skill instruction. Never invent, shorten or guess a path that is not in
+the brief, and never assume a working directory. If the brief cannot be read,
+say exactly that and stop.
+
+## Procedure
+
+1. Read the brief. Then read the section of the full skill instruction it points
+   you at, completely, before you set a single verdict.
+2. Read the corpus map and the worklist. Every worklist row starts unresolved.
+3. For each row, replace the placeholder with one letter and WRITE THE FILE
+   BACK: `D` for a defect, `N` for normal, `X` for not enough data.
+4. No verdict travels alone. Each carries either a `path:line` reference with a
+   verbatim quote, or the number of a bulk rule from the rules file. A bulk rule
+   needs a claim and its receipts; without them the row stays unresolved.
+5. Rows on the strong axes named in the brief cannot be closed by a bulk rule.
+   Close those one at a time, by name.
+6. Run the triagecheck command exactly as the brief spells it, and keep fixing
+   rows until it exits 0. A non-zero gate is never a finished result.
+7. Answer with the lines the brief demands, and nothing else.
+
+## Notes
+
+* Read as much of the corpus as you need. Your context is your own; only your
+  final message leaves this subagent, so keep that message under 20 lines.
+* Quote, never paraphrase. A citation that does not match the file byte for byte
+  fails the gate.
+* Use the scripts in the brief's tools directory. Do not write your own log
+  parser, do not install anything, do not reach the network.
+* A missing log line is not proof that nothing happened. That is an `X`.
+* Do not spawn further subagents, and do not start the report. DRAFT is a
+  separate phase with its own worker and its own brief.
+
+""" + RU_CONTRACT + u"""
+
+## Report
+
+Reply with exactly the lines your brief specifies, in its order, in Russian: no
+preamble, no narration of your process, no apology. If a gate is still non-zero,
+report that number on its line rather than hiding it."""
+
+DRAFT_DESC = (
+    "Writes the final Russian root-cause report for the Sherlock log-RCA "
+    "skill, working only from artefacts already on disk: an already-triaged "
+    "worklist, the rules file, the corpus map and the checkpoint. It then "
+    "proves the report with citecheck.py, triagecheck.py and statecheck.py "
+    "until every one of the three exits 0. Use it for the DRAFT phase, after "
+    "TRIAGE has left verdicts in the worklist and brief.py has produced "
+    "work/brief-draft.md. Prompt it with ONE line: the absolute path of its "
+    "brief file. It reads only the log lines it cites, writes the report file "
+    "named in the brief, and returns a short fixed summary with each gate's "
+    "exit code. Never use it to investigate from scratch or to set verdicts."
+)
+
+DRAFT_BODY = u"""You are a root-cause report writer. You do not re-run an investigation: the
+verdicts, the rules, the corpus map and the checkpoint are already on disk, and
+your job is to turn them into one report that survives three mechanical gates.
+You are exact with citations and you never soften a gate's exit code.
+
+Your prompt names ONE file: the absolute path of your brief. Read it before
+anything else. That brief carries every absolute path you need - the log corpus,
+the triaged worklist, the rules file, the corpus map, the checkpoint, the report
+format, the output report path and the skill's tools directory. Never invent,
+shorten or guess a path that is not in the brief, and never assume a working
+directory. If the brief cannot be read, say exactly that and stop.
+
+## Procedure
+
+1. Read the brief. Then read the report-format file it names, as your first real
+   action, and follow its structure literally.
+2. Read the triaged worklist, the rules file, the corpus map and the checkpoint.
+   Do not open the corpus wholesale: read only the lines you are going to cite.
+3. Write the complete report to the path the brief gives you. Every finding is
+   its own block with the four mandatory field lines. The rejected-candidates
+   section and the coverage section are mandatory and must not be empty.
+4. A coverage row that carries an observation must quote the line the corpus map
+   flagged for that file. An arbitrary line from the file does not count.
+5. Run all three gate commands exactly as the brief spells them - citecheck,
+   triagecheck, statecheck - and keep repairing the report until each exits 0.
+   statecheck reads from the corpus toward the report: every group it names must
+   be answered, as a finding or as an explicit normal with a quote.
+6. Do not invent a timeline. Take correlations from the logjoin command in the
+   brief and cite its output.
+7. Answer with the lines the brief demands, and nothing else.
+
+## Notes
+
+* Quote, never paraphrase; a citation that does not match the file byte for byte
+  fails citecheck.
+* Claim only what a quoted line supports. Uncertainty belongs in the
+  refutation field, never in a hedged verdict word.
+* Use the scripts in the brief's tools directory. Do not install anything and do
+  not reach the network.
+* Do not spawn further subagents. Do not paste the report into your reply.
+
+""" + RU_CONTRACT + u"""
+
+## Report
+
+Reply with exactly the lines your brief specifies, in its order, in Russian: no
+preamble, no narration, and never the report body itself. If a gate is still
+non-zero, report that number on its line rather than hiding it."""
+
+DEFS = {
+    "sherlock-triage": (TRIAGE_DESC, TRIAGE_BODY),
+    "sherlock-draft": (DRAFT_DESC, DRAFT_BODY),
+}
+
+
+def agent_text(name):
+    """The exact bytes of one definition file. Deterministic: same input, same
+    output, so a rerun is a no-op rather than a diff."""
+    desc, body = DEFS[name]
+    return (
+        "---\n"
+        'name: %s\n'
+        'description: "%s"\n'
+        "approvalMode: yolo\n"
+        "maxTurns: 30\n"
+        "---\n"
+        "\n"
+        "%s\n" % (name, desc, body)
+    )
+
+
+def install_agents(dest, force=False, out=sys.stdout):
+    """Write both definitions into `dest` (the project's .qwen/agents).
+
+    Atomic (tmp + os.replace), idempotent (byte-identical rerun is a no-op) and
+    non-destructive: a file whose content differs is left alone unless --force,
+    and then what was overwritten is printed.
+    """
+    dest = os.path.abspath(dest)
+    try:
+        os.makedirs(dest, exist_ok=True)
+    except OSError as exc:
+        sys.stderr.write("brief: \u043d\u0435 \u0441\u043e\u0437\u0434\u0430\u0442\u044c \u043a\u0430\u0442\u0430\u043b\u043e\u0433 %s: %s\n" % (dest, exc))
+        return 2
+    conflicts = []
+    for name in AGENTS:
+        path = os.path.join(dest, name + ".md")
+        text = agent_text(name)
+        old = None
+        if os.path.exists(path):
+            try:
+                with open(path, "r", encoding="utf-8") as fh:
+                    old = fh.read()
+            except OSError:
+                old = None
+            if old == text:
+                out.write("%s (\u0431\u0435\u0437 \u0438\u0437\u043c\u0435\u043d\u0435\u043d\u0438\u0439)\n" % path)
+                continue
+            if not force:
+                conflicts.append(path)
+                sys.stderr.write(
+                    "brief: %s \u0438\u0437\u043c\u0435\u043d\u0451\u043d \u0432\u0440\u0443\u0447\u043d\u0443\u044e \u2014 \u043d\u0435 \u0442\u0440\u043e\u0433\u0430\u044e; \u043f\u0435\u0440\u0435\u0437\u0430\u043f\u0438\u0441\u0430\u0442\u044c: --force\n" % path)
+                continue
+        tmp = path + ".tmp.%d" % os.getpid()
+        with open(tmp, "w", encoding="utf-8") as fh:
+            fh.write(text)
+        os.replace(tmp, path)
+        if old is None:
+            out.write("%s (%d \u0431\u0430\u0439\u0442)\n" % (path, len(text.encode("utf-8"))))
+        else:
+            out.write("%s (%d \u0431\u0430\u0439\u0442, \u043f\u0435\u0440\u0435\u0437\u0430\u043f\u0438\u0441\u0430\u043d \u043f\u043e\u0432\u0435\u0440\u0445 %d \u0431\u0430\u0439\u0442)\n"
+                      % (path, len(text.encode("utf-8")), len(old.encode("utf-8"))))
+    return 3 if conflicts else 0
+
+
 def main():
     ap = argparse.ArgumentParser(
         description="написать файлы-задания для фазовых субагентов")
-    ap.add_argument("--work", required=True, help="каталог состояния (./work)")
-    ap.add_argument("--corpus", required=True, help="корень корпуса логов")
-    ap.add_argument("--skill-root", required=True,
+    ap.add_argument("--work", help="каталог состояния (./work)")
+    ap.add_argument("--corpus", help="корень корпуса логов")
+    ap.add_argument("--skill-root",
                     help="базовый каталог навыка (его выдают первой строкой)")
     ap.add_argument("--phase", default="all", choices=("all",) + PHASES)
+    ap.add_argument("--install-agents", metavar="DIR",
+                    help="записать определения субагентов в <DIR> "
+                         "(это <проект>/.qwen/agents) и выйти")
+    ap.add_argument("--force", action="store_true",
+                    help="перезаписать определение, изменённое вручную")
     a = ap.parse_args()
 
+    if a.install_agents:
+        return install_agents(a.install_agents, force=a.force)
+
+    missing = [n for n in ("work", "corpus", "skill_root")
+               if not getattr(a, n)]
+    if missing:
+        sys.stderr.write("brief: нужны аргументы: %s\n"
+                         % ", ".join("--" + m.replace("_", "-") for m in missing))
+        return 2
     if not os.path.isdir(a.corpus):
         sys.stderr.write("brief: нет корпуса: %s\n" % a.corpus)
         return 2
