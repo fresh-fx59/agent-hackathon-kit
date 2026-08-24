@@ -494,12 +494,22 @@ class TheModelMustNotFanOutToASubagent(unittest.TestCase):
     SKILL-NEVER-LOADED and **3 of those 4 carry SUBAGENT-SPAWNED** — D09 rep1
     (first tool call was `agent`, 109-char final message), D01, D04 rep2. Not one
     subagent run loaded the arm. Meanwhile every skill-loaded, subagent-free row
-    is `ok`. The subagent does not inherit `.qwen/skills/`, and a headless
-    `qwen -p` fan-out loses the report on top of that.
+    is `ok`. CORRECTED 2026-08-24: this is not because the subagent fails to
+    inherit `.qwen/skills/` — measured on 0.21.1, a `general-purpose` subagent
+    DOES see it and DOES call `skill` successfully (23 skills listed, including
+    this project's own; `skill` is absent from qwen-code's
+    EXCLUDED_TOOLS_FOR_SUBAGENTS and the child Config is
+    `Object.create(parentConfig)`). The v11 failure was some other fan-out
+    pathology — a headless `qwen -p` fan-out losing the report is still
+    plausible, but it was never isolated further because the runner just
+    removed the option instead.
 
-    So the runner removes the option. `excludeTools` is a supported setting and
-    the tool is literally named `agent`; verified on 0.21.1 that the init record
-    then lists 60 tools instead of 61, with `skill` still present.
+    So the runner removes the option, kept off by default so fan-out stays one
+    deliberately-fixed variable rather than reopened mid-series, not because
+    skill delivery is known to break under it. `excludeTools` is a supported
+    setting and the tool is literally named `agent`; verified on 0.21.1 that
+    the init record then lists 60 tools instead of 61, with `skill` still
+    present.
 
     This CHANGES WHAT A RUN DOES, so meta records it and rows from either side
     are never pooled — the same discipline `skill_delivery` already gets. Restore
