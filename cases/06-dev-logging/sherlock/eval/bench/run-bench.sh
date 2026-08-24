@@ -242,6 +242,131 @@ try:
 finally:
     if os.path.exists(temporary): os.unlink(temporary)
 PY
+  # PERSIST THE TREE THE MODEL WAS ACTUALLY SCORED AGAINST. The staged corpus
+  # is not the source corpus: `stage-corpus.py` renames every path containing
+  # `%` or whitespace under a `rendered/` prefix (138 of 143 files on winevtx),
+  # so a citation like `rendered/Microsoft-Windows-WMI-Activity-4Operational.jsonl:147`
+  # resolves in the staged tree and NOWHERE in the original. This directory used
+  # to die with $W, and reconstructing it from work/path-map.tsv is both fragile
+  # and exactly the step that produced a false "the model fabricated its
+  # citations" verdict on a run whose report was in fact clean.
+  #
+  # Hardlinks, not copies: $W and $TRACE are on the same filesystem, so this
+  # costs 143 directory entries (~4 KB) instead of 90 MB. The links share inodes
+  # with the pristine corpus, so the source must be read-only for the guarantee
+  # to hold — hence the post-run digest below, which is the receipt that the
+  # scored bytes are still the bytes that were scored.
+  if [ -d "$W/corpus" ]; then
+    cp -al "$W/corpus" "$TRACE/staged-corpus" 2>/dev/null \
+      || cp -a "$W/corpus" "$TRACE/staged-corpus" \
+      || echo "  ⚠ could not persist the staged corpus" >&2
+    if [ -d "$TRACE/staged-corpus" ]; then
+      ( cd "$TRACE/staged-corpus" && find . -type f -print0 | sort -z \
+          | xargs -0 -r sha256sum ) > "$TRACE/staged-corpus.sha256" 2>/dev/null \
+        || echo "  ⚠ could not digest the staged corpus" >&2
+    fi
+  fi
+
+  # RECORD THE GATES' OWN VERDICTS. Without this, "the model said it was clean"
+  # and "it is clean" are indistinguishable in the artifacts: the only surviving
+  # gate output is a tool result inside the trajectory, i.e. model-side text.
+  # Both the exit code AND the parsed --json payload are kept, because the exit
+  # code alone lies: citecheck's --ledger branch returns early on the ledger
+  # numbers and skips the blocking-defect check entirely, so a report with
+  # blocking citation defects exits 0. Deriving `verdict` from `blocking` is what
+  # validate-run.py already does, and it makes the exit-code bug visible instead
+  # of authoritative. The tool sha is recorded because a verdict from this arm's
+  # citecheck is not a verdict from the next arm's.
+  # KEEP THE TOOLS THAT DID THE GRADING. `replay.sh` must not point into $W,
+  # which is about to be deleted, and it must not point at the repo either: the
+  # repo moves under you, and a verdict from this arm's citecheck is not a
+  # verdict from a later one. The arm snapshots its skill at run start, so this
+  # copy is the exact grader — and the digests above plus these tools make a
+  # trace self-contained for re-validation.
+  ARM_TOOLS="$(dirname "$(ls "$W"/.qwen/skills/*/tools/citecheck.py 2>/dev/null | head -1)" 2>/dev/null)"
+  if [ -n "$ARM_TOOLS" ] && [ -d "$ARM_TOOLS" ]; then
+    cp -a "$ARM_TOOLS" "$TRACE/gate-tools" 2>/dev/null \
+      || echo "  ⚠ could not persist the gate tools" >&2
+  fi
+  if [ -d "$W/corpus" ] && [ -s "$W/work/report.md" ]; then
+    GATE_TOOLS="$ARM_TOOLS"
+    if [ -n "$GATE_TOOLS" ] && [ -d "$GATE_TOOLS" ]; then
+      python3 - "$TRACE/gates.json" "$GATE_TOOLS" "$W" <<'PY' || echo "  ⚠ gate recording failed" >&2
+import hashlib, json, os, subprocess, sys
+target, tools, workspace = sys.argv[1:]
+def sha(path):
+    try:
+        with open(path, "rb") as fh: return hashlib.sha256(fh.read()).hexdigest()
+    except OSError: return None
+gates = {
+    "citecheck": ["citecheck.py", "work/report.md", "--corpus", "corpus",
+                  "--require-quote", "--ledger", "work/worklist.tsv", "--json"],
+    "triagecheck": ["triagecheck.py", "--worklist", "work/worklist.tsv",
+                    "--rules", "work/rules.tsv", "--corpus", "corpus", "--json"],
+    "statecheck": ["statecheck.py", "--corpus", "corpus",
+                   "--report", "work/report.md", "--json"],
+}
+out = {"schema": 1, "verdict": "clean", "gates": {}}
+for name, argv in gates.items():
+    script = os.path.join(tools, argv[0])
+    command = ["python3", script] + argv[1:]
+    row = {"argv": command, "tool_sha256": sha(script)}
+    try:
+        done = subprocess.run(command, cwd=workspace, capture_output=True,
+                              text=True, timeout=1800)
+        row["exit_code"] = done.returncode
+        row["stderr_tail"] = (done.stderr or "")[-2000:]
+        payload = None
+        for line in (done.stdout or "").splitlines():
+            line = line.strip()
+            if line.startswith("{"):
+                try: payload = json.loads(line)
+                except ValueError: continue
+        row["json"] = payload
+        blocking = None
+        if isinstance(payload, dict):
+            for key in ("blocking", "blocking_defects"):
+                if isinstance(payload.get(key), int): blocking = payload[key]; break
+        row["blocking"] = blocking
+        # A gate is clean only if BOTH signals say so. An exit 0 with blocking>0
+        # is the citecheck --ledger bug; a non-zero exit with no json is a crash.
+        if done.returncode != 0 or (blocking or 0) > 0: out["verdict"] = "blocking"
+    except Exception as error:                       # a crashed gate is not a pass
+        row["exit_code"] = None; row["error"] = repr(error)[:500]
+        out["verdict"] = "blocking"
+    out["gates"][name] = row
+with open(target, "w", encoding="utf-8") as fh:
+    json.dump(out, fh, ensure_ascii=False, indent=1, sort_keys=True); fh.write("\n")
+print("  gates.json verdict=%s" % out["verdict"])
+PY
+    else
+      echo "  ⚠ no gate tools found under $W/.qwen/skills/*/tools — gates.json not written" >&2
+    fi
+  fi
+
+  # REPLAY. Ten lines that remove the human error this whole change exists for:
+  # pointing --corpus at the original corpus instead of the staged one. A future
+  # validator runs this script and nothing else.
+  {
+    printf '#!/usr/bin/env bash\n'
+    printf '# Re-validate this run with NO reconstruction and no access to the\n'
+    printf '# original corpus. Generated by run-bench.sh at %s.\n' "$STAMP"
+    printf '# arm=%s dataset=%s\n' "$ARM" "$DATASET"
+    printf 'set -u\n'
+    printf 'HERE="$(cd "$(dirname "$0")" && pwd -P)"\n'
+    printf 'C="$HERE/staged-corpus"   # the tree the model was scored against\n'
+    printf 'T="$HERE/gate-tools"      # the exact grader this run used\n'
+    printf 'T="${SHERLOCK_GATE_TOOLS:-$T}"\n'
+    printf '[ -d "$C" ] || { echo "no staged-corpus in this trace" >&2; exit 2; }\n'
+    printf '[ -d "$T" ] || { echo "no gate-tools in this trace; set SHERLOCK_GATE_TOOLS" >&2; exit 2; }\n'
+    printf 'cd "$HERE" || exit 2\n'
+    printf 'python3 "$T/citecheck.py" work/report.md --corpus "$C" --require-quote --ledger work/worklist.tsv; echo "citecheck rc=$?"\n'
+    printf 'python3 "$T/triagecheck.py" --worklist work/worklist.tsv --rules work/rules.tsv --corpus "$C"; echo "triagecheck rc=$?"\n'
+    printf 'python3 "$T/statecheck.py" --corpus "$C" --report work/report.md; echo "statecheck rc=$?"\n'
+    printf 'echo "recorded verdicts:"; python3 -c "import json;d=json.load(open(\"$HERE/gates.json\"));print(d[\"verdict\"], {k:v.get(\"exit_code\") for k,v in d[\"gates\"].items()})" 2>/dev/null || true\n'
+  } > "$TRACE/replay.sh"
+  chmod +x "$TRACE/replay.sh"
+
   rm -rf "$W"
   W=""
 }
@@ -429,6 +554,36 @@ if [ "$ARM" = "v31" ] || [ "$ARM" = "v32" ] || [ "$ARM" = "v33" ] || [ "$ARM" = 
 
 $PROMPT"
 fi
+
+# WHAT WAS ACTUALLY SENT. The prompt is assembled here with $RUN_CORPUS
+# interpolated into it, and until now it was written NOWHERE in the trace — it
+# survived only as model-side text inside the trajectory jsonl. A run whose
+# exact input cannot be read back is a run whose result cannot be reproduced or
+# even argued about, which is the same defect class as the trajectory that used
+# to be deleted on exit. One file, written before the model can influence it.
+mkdir -p "$TRACE"
+printf '%s' "$PROMPT" > "$TRACE/prompt-sent.txt"
+PROMPT_SHA="$(sha256sum "$TRACE/prompt-sent.txt" | cut -d" " -f1)"
+# And NAME THE CORPUS. `grep -rl` over a finished trace found the source corpus
+# path in no artifact at all: `status.json` carries `dataset: winevtx` and
+# nothing else, so post-hoc validation had to guess which directory the run was
+# scored against — and guessing wrong produces a confident false accusation
+# that the model fabricated its citations.
+CORPUS_SOURCE="$(cd "$CORPUS" && pwd -P)"
+ARM_COMMIT="$(git -C "$HERE" rev-parse HEAD 2>/dev/null || echo unknown)"
+# NOTE the absence of a dataset field: test_bench_dataset_truth.py guards
+# against this runner writing accepted-ledger fields, and the dataset already
+# lives in status.json. One writer per fact.
+python3 - "$TRACE/run-inputs.json" "$CORPUS_SOURCE" "$RUN_CORPUS" "$PROMPT_SHA" "$ARM_COMMIT" "$ARM" <<'PY'
+import json, sys
+target, corpus_source, staged_root, prompt_sha, arm_commit, arm = sys.argv[1:]
+with open(target, "w", encoding="utf-8") as fh:
+    json.dump({"schema": 1, "arm": arm,
+               "corpus_source": corpus_source, "staged_root": staged_root,
+               "prompt_sha256": prompt_sha, "prompt_file": "prompt-sent.txt",
+               "arm_commit": arm_commit}, fh, ensure_ascii=False, sort_keys=True)
+    fh.write("\n")
+PY
 
 # THE SAME UPSTREAM LANE AS run-case.sh. This runner used to talk to linkapi
 # directly, which cost it two things: no row could be attributed to an upstream
