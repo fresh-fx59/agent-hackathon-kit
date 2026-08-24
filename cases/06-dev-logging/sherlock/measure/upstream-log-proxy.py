@@ -387,14 +387,33 @@ def _err_text(payload):
 
 
 def _scan_obj(obj, state):
-    """Pull the two things we care about out of one response object."""
+    """Pull what we care about out of one response object.
+
+    `usage` and `finish_reason` were BOTH being read and thrown away here, and
+    both absences cost real diagnostic time. qwen-code sends
+    `stream_options={"include_usage": true}`, so every stream already carries a
+    usage object — dropping it is why "did the English translation cut TOKENS
+    or only BYTES?" could not be answered from any run log and needed an
+    offline tokenizer with a documented caveat instead. It also means a run
+    that clamps on TOKENS could only ever be checked in BYTES, through an
+    estimated 3.42 bytes/token. `finish_reason` is the whole difference between
+    "the max_tokens clamp truncated us" (length), "the model stopped" (stop),
+    and qwen's own NO_FINISH_REASON throw (absent) — the r2 empty-HTTP-200
+    diagnosis had to be reconstructed from a source read of the CLI bundle.
+    Both are integers and a short enum: no message text, no corpus, nothing new
+    for `_scrub` to worry about.
+    """
     if not isinstance(obj, dict):
         return
     if obj.get("model") and not state["returned_model"]:
         state["returned_model"] = obj["model"]
+    if isinstance(obj.get("usage"), dict):
+        state["usage"] = obj["usage"]          # last one wins: the final chunk
     for ch in obj.get("choices") or []:
         if not isinstance(ch, dict):
             continue
+        if ch.get("finish_reason"):
+            state["finish_reason"] = ch["finish_reason"]
         for key in ("message", "delta"):
             part = ch.get(key)
             if isinstance(part, dict) and part.get("tool_calls"):
@@ -452,6 +471,20 @@ class Proxy(BaseHTTPRequestHandler):
             except Exception:
                 pass
 
+        # LOG THE OUTBOUND OUTPUT BUDGET. `prompt + max_tokens` is what the
+        # provider checks, not the prompt alone, and an unclamped qwen-code
+        # auto-escalates max_tokens with a 64K floor — which is how a request
+        # whose prompt fits still comes back an empty HTTP 200 (vllm#3851).
+        # request_bytes alone could never show that, so every past diagnosis of
+        # a truncated run had to guess at this number. One integer, no body.
+        request_max_tokens = None
+        try:
+            request_max_tokens = (json.loads(body or b"{}") or {}).get("max_tokens")
+        except Exception:
+            pass
+        if not isinstance(request_max_tokens, int):
+            request_max_tokens = None
+
         headers = {k: v for k, v in self.headers.items()
                    if k.lower() not in _HOP}
         # identity so the body stays scannable; the client gets it un-encoded,
@@ -464,7 +497,8 @@ class Proxy(BaseHTTPRequestHandler):
             _update_inflight(request_id, {
                 "started_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
                 "request_bytes": len(body), "path": self.path,
-                "requested_model": requested, "attempt": _attempt(),
+                "requested_model": requested, "request_max_tokens": request_max_tokens,
+                "attempt": _attempt(),
                 "run_tag": RUN_TAG, "pid": os.getpid(), "proxy_instance": PROXY_INSTANCE,
             })
         except OSError:
@@ -473,6 +507,7 @@ class Proxy(BaseHTTPRequestHandler):
         # splice an HTTP error into SSE after many successful turns; the client
         # sees malformed JSON while a status-only ledger says success.
         state = {"returned_model": None, "tool_call": False, "error": None,
+                 "usage": None, "finish_reason": None,
                  "stream_events": 0, "stream_parse_errors": 0,
                  "stream_complete": None, "stream_bytes": 0,
                  "response_valid": False}
@@ -507,7 +542,7 @@ class Proxy(BaseHTTPRequestHandler):
                     except Exception:
                         why = None
                     try:
-                        record(requested_model=requested, returned_model=None,
+                        record(request_max_tokens=request_max_tokens, requested_model=requested, returned_model=None,
                                tool_call=False, status=status, attempt=attempt,
                                duration_ms=int((time.time() - t_try) * 1000),
                                sent_model=sent, request_bytes=len(body),
@@ -529,7 +564,7 @@ class Proxy(BaseHTTPRequestHandler):
                 break
             except Exception as e:                   # DNS, TLS, refused, timeout
                 try:
-                    record(requested_model=requested, returned_model=None,
+                    record(request_max_tokens=request_max_tokens, requested_model=requested, returned_model=None,
                            tool_call=False, status=None, error=str(e)[:300],
                            attempt=attempt,
                            duration_ms=int((time.time() - t0) * 1000), sent_model=sent,
@@ -566,9 +601,10 @@ class Proxy(BaseHTTPRequestHandler):
               except BudgetUnknown:
                   pass
               try:
-                  record(requested_model=requested,
+                  record(request_max_tokens=request_max_tokens, requested_model=requested,
                          returned_model=state["returned_model"], attempt=attempt,
                          tool_call=state["tool_call"], status=status,
+                         usage=state["usage"], finish_reason=state["finish_reason"],
                          duration_ms=int((time.time() - t0) * 1000), sent_model=sent,
                          request_bytes=len(body), path=self.path, stream=streaming,
                          upstream_error=state["error"], stream_events=state["stream_events"],

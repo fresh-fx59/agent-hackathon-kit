@@ -186,9 +186,9 @@ PY
     : > "$TRACE/upstream-completed.jsonl"
   fi
   sync || return 1
-  python3 - "$TRACE" "$STAMP" <<'PY' || return 1
+  python3 - "$TRACE" "$STAMP" "${QWEN_RC:-}" "$(( $(date +%s) - START ))" <<'PY' || return 1
 import json, os, sys, tempfile
-trace, run_tag = sys.argv[1:]
+trace, run_tag, raw_rc, raw_duration = sys.argv[1:]
 out = os.path.join(trace, "out.json")
 try:
     with open(out, encoding="utf-8") as handle: stream = json.load(handle)
@@ -203,14 +203,33 @@ final = results[0][1]; text = final.get("result") or ""
 errored = (final.get("is_error") is True or text.lstrip().startswith("[API Error")
            or ("[API Error" in text and len(text) < 400))
 usage = final.get("usage") if isinstance(final.get("usage"), dict) else {}
+# An UNMEASURED value is null; a value we hold is never null. Both halves of
+# that rule were broken here. `exit_code` and `duration_s` were hard-coded None
+# while the runner held both — the named v30 r4 defect, which v31 only worked
+# around by teaching validate-run.py to read attempts.jsonl instead of fixing
+# the source. And `usage` was nulled out on error, so the v34 r2 run that burned
+# 9,901,649 input tokens before dying recorded {null, null, null}: a refused run
+# is NOT free, and a metered provider makes that a bill nobody can reconstruct.
+# Record the numbers unconditionally and put the failure in its own field.
+def _int_or_none(value):
+    try: return int(value)
+    except (TypeError, ValueError): return None
+
+# `stats` is what Qwen already computed and we threw away: per-tool call counts,
+# per-identity token splits, TTFB, and files.totalLinesAdded — which is a
+# single-field alarm for exactly the v34 r1 failure (model wrote NOTHING to
+# disk, yet the run exited 0). Counters and tool names only, no file contents.
 candidate = {"schema": 1, "run_tag": run_tag, "result_stream": "out.json",
              "work_root": "work", "artifact": "work/report.md",
              "upstream_completed": "upstream-completed.jsonl",
-             "transport": {"exit_code": None, "status": "error" if errored else "success",
-                           "duration_s": None},
-             "usage": {"turns": None if errored else final.get("num_turns"),
-                       "input_tokens": None if errored else usage.get("input_tokens"),
-                       "output_tokens": None if errored else usage.get("output_tokens")}}
+             "transport": {"exit_code": _int_or_none(raw_rc),
+                           "status": "error" if errored else "success",
+                           "duration_s": _int_or_none(raw_duration)},
+             "stats": final.get("stats"),
+             "usage": {"turns": final.get("num_turns"),
+                       "input_tokens": usage.get("input_tokens"),
+                       "output_tokens": usage.get("output_tokens"),
+                       "errored": errored}}
 fd, temporary = tempfile.mkstemp(prefix=".candidate.", dir=trace)
 try:
     with os.fdopen(fd, "w", encoding="utf-8") as handle:
@@ -272,8 +291,34 @@ export QWEN_HOME="$W/home"; mkdir -p "$QWEN_HOME"
 
 # STATE THE CONTEXT WINDOW OUTRIGHT, same as run-case.sh. This is the runner on
 # the 649 MB corpus, so a 177,000-token ceiling hurts here most of all.
-# → measure/run-case.sh for why the default is 400,000 and not 1,048,576.
-CTX_WINDOW="${SHERLOCK_CONTEXT_WINDOW:-400000}"
+# → measure/run-case.sh for the history of this number.
+# MEASURED 2026-08-24: the provider's REAL context window on this lane is
+# 262,000 tokens, not 400,000 and not DeepSeek-V4-Flash's advertised 1,048,576.
+# A 400,000 window put Qwen's auto-compaction threshold at 0.85 x 400,000 =
+# 340,000 tokens, so compaction could NEVER fire before the provider refused
+# the request: the fatal v34 r2 request was 828,403 bytes = ~242,000 tokens at
+# the measured 3.42 bytes/token, under the fake ceiling and over the real one.
+# The default is now 200,000 - deliberately BELOW the real 262,000 so that
+# prompt + max_tokens still fits (200,000 + 32,768 = 232,768 < 262,000) and
+# compaction fires at 0.85 x 200,000 = 170,000 tokens, with real headroom left.
+# Raise it only with a new measurement of the provider's limit; 0 writes nothing.
+CTX_WINDOW="${SHERLOCK_CONTEXT_WINDOW:-200000}"
+# CLAMP THE OUTPUT BUDGET TOO. Unclamped, qwen-code auto-escalates max_tokens
+# (`shouldEscalateMaxOutputTokens`, with a 64K floor) so `prompt + max_tokens`
+# overflows the provider window even when the prompt alone fits - the documented
+# cause of an empty HTTP 200 (vllm#3851). Setting `samplingParams.max_tokens`
+# makes `hasUserMaxTokensOverride` true in qwen-code 0.21.1 and disables that
+# escalation; the value is sealed into the settings snapshot, so it is auditable
+# per run rather than living in an env var nobody records. 32,768 covers the
+# largest report we have ever produced (53,435 bytes ~= 15.6k tokens) twice over.
+# 0 writes nothing and restores the old auto-escalating behaviour.
+MAX_OUT="${SHERLOCK_MAX_OUTPUT_TOKENS:-32768}"
+case "$MAX_OUT" in *[!0-9]*|'') echo "✗ invalid SHERLOCK_MAX_OUTPUT_TOKENS" >&2; exit 1 ;; esac
+SAMPLING_JSON=''
+if [ "$MAX_OUT" != "0" ]; then
+  SAMPLING_JSON=", \"samplingParams\": { \"max_tokens\": $MAX_OUT }"
+fi
+
 REQUEST_TIMEOUT_MS="${SHERLOCK_REQUEST_TIMEOUT_MS:-900000}"
 MAX_RETRIES="${SHERLOCK_MAX_RETRIES:-0}"
 # CORRECTED 2026-08-24: a `general-purpose` subagent launched by the `agent`
@@ -306,12 +351,12 @@ if [ "$ARM" = "v30" ] || [ "$ARM" = "v31" ] || [ "$ARM" = "v32" ] || [ "$ARM" = 
   if [ "$ARM" = "v31" ] || [ "$ARM" = "v32" ] || [ "$ARM" = "v33" ] || [ "$ARM" = "v34" ]; then
     MEMORY_JSON=', "memory": { "enableManagedAutoMemory": false, "enableDreams": false }, "model_fallback": { "enabled": false }'
   fi
-  printf '{ "model": { "generationConfig": { "contextWindowSize": %s, "timeout": %s, "maxRetries": %s } }%s%s }\n' \
-    "$CTX_WINDOW" "$REQUEST_TIMEOUT_MS" "$MAX_RETRIES" "$EXCLUDE_JSON" "$MEMORY_JSON" > "$W/.qwen/settings.json"
+  printf '{ "model": { "generationConfig": { "contextWindowSize": %s%s, "timeout": %s, "maxRetries": %s } }%s%s }\n' \
+    "$CTX_WINDOW" "$SAMPLING_JSON" "$REQUEST_TIMEOUT_MS" "$MAX_RETRIES" "$EXCLUDE_JSON" "$MEMORY_JSON" > "$W/.qwen/settings.json"
 elif [ "$CTX_WINDOW" != "0" ]; then
   mkdir -p "$W/.qwen"
-  printf '{ "model": { "generationConfig": { "contextWindowSize": %s } }%s }\n' \
-    "$CTX_WINDOW" "$EXCLUDE_JSON" > "$W/.qwen/settings.json"
+  printf '{ "model": { "generationConfig": { "contextWindowSize": %s%s } }%s }\n' \
+    "$CTX_WINDOW" "$SAMPLING_JSON" "$EXCLUDE_JSON" > "$W/.qwen/settings.json"
 elif [ -n "$EXCLUDE_JSON" ]; then
   mkdir -p "$W/.qwen"
   printf '{ "tools": { "exclude": ["agent"] } }\n' > "$W/.qwen/settings.json"
@@ -539,7 +584,22 @@ with open(sys.argv[1], "w", encoding="utf-8") as fh:
     fh.write("\n")
 PY
 save_trace
-if [ -f "$TRACE/candidate.json" ] && [ "${QWEN_RC:-2}" -eq 0 ]; then RC=0; else RC=2; fi
+# A RUN THAT PRODUCED NO DELIVERABLE IS NOT A SUCCESS. v34 r1 exited 0 with
+# phase FINISHED_UNCHECKED and no work/report.md at all: the model wrote its
+# report as chat prose and nothing objected. `validate-run.py` has always had
+# the check (`missing_deliverable`), but it is only reached through
+# bench-controller.sh, and every paid launcher calls THIS script directly — so
+# on the metered path it was dead code. The artifact test belongs here, on the
+# only line that decides the exit code. Kept as its own RC (3) so
+# "delivered nothing" is never confused with "transport failed" (2).
+if [ ! -f "$TRACE/candidate.json" ] || [ "${QWEN_RC:-2}" -ne 0 ]; then
+  RC=2
+elif [ ! -s "$TRACE/work/report.md" ]; then
+  echo "✗ run exited 0 but produced no work/report.md — not a success" >&2
+  RC=3
+else
+  RC=0
+fi
 if [ "$RC" -eq 0 ]; then
   state_set --run-tag "$STAMP" --phase FINISHED_UNCHECKED --dataset "$DATASET" --arm "$ARM" --trace-dir "$TRACE" \
     --attempt "$RESUME_ATTEMPTS" --session-id "${LAST_SESSION:-$RESUME_SESSION}" --upstream-log "$TRACE.upstream.jsonl" \

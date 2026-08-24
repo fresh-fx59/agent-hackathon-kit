@@ -88,13 +88,38 @@ export QWEN_HOME="$W/home"; mkdir -p "$QWEN_HOME"
 # local provider: the same 312,713-token prompt is refused with
 # `hard limit: 177000` under the prefixed id and sent once this is set.
 #
-# Default 400,000, NOT DeepSeek-V4-Flash's true 1,048,576. The arm's own
-# procedure needs ~250k (SKILL.md's mandated per-candidate windows and citation
-# re-reads); 400k clears that with margin. The largest request ever PROVEN on
-# this provider lane is 580 KB ≈ 145k tokens, and cost is Σ(context) over turns,
-# so an unbounded window is an unbounded bill in unmeasured territory. Raise it
-# with SHERLOCK_CONTEXT_WINDOW once that measurement exists; 0 writes nothing.
-CTX_WINDOW="${SHERLOCK_CONTEXT_WINDOW:-400000}"
+# SUPERSEDED 2026-08-24 (kept for the reasoning): the old default was 400,000,
+# chosen because the arm's procedure needs ~250k (SKILL.md's mandated
+# per-candidate windows and citation re-reads) and because cost is Σ(context)
+# over turns, so an unbounded window is an unbounded bill. That number was a
+# guess at the provider's ceiling, and the guess was wrong - see below.
+# MEASURED 2026-08-24: the provider's REAL context window on this lane is
+# 262,000 tokens, not 400,000 and not DeepSeek-V4-Flash's advertised 1,048,576.
+# A 400,000 window put Qwen's auto-compaction threshold at 0.85 x 400,000 =
+# 340,000 tokens, so compaction could NEVER fire before the provider refused
+# the request: the fatal v34 r2 request was 828,403 bytes = ~242,000 tokens at
+# the measured 3.42 bytes/token, under the fake ceiling and over the real one.
+# The default is now 200,000 - deliberately BELOW the real 262,000 so that
+# prompt + max_tokens still fits (200,000 + 32,768 = 232,768 < 262,000) and
+# compaction fires at 0.85 x 200,000 = 170,000 tokens, with real headroom left.
+# Raise it only with a new measurement of the provider's limit; 0 writes nothing.
+CTX_WINDOW="${SHERLOCK_CONTEXT_WINDOW:-200000}"
+# CLAMP THE OUTPUT BUDGET TOO. Unclamped, qwen-code auto-escalates max_tokens
+# (`shouldEscalateMaxOutputTokens`, with a 64K floor) so `prompt + max_tokens`
+# overflows the provider window even when the prompt alone fits - the documented
+# cause of an empty HTTP 200 (vllm#3851). Setting `samplingParams.max_tokens`
+# makes `hasUserMaxTokensOverride` true in qwen-code 0.21.1 and disables that
+# escalation; the value is sealed into the settings snapshot, so it is auditable
+# per run rather than living in an env var nobody records. 32,768 covers the
+# largest report we have ever produced (53,435 bytes ~= 15.6k tokens) twice over.
+# 0 writes nothing and restores the old auto-escalating behaviour.
+MAX_OUT="${SHERLOCK_MAX_OUTPUT_TOKENS:-32768}"
+case "$MAX_OUT" in *[!0-9]*|'') echo "✗ invalid SHERLOCK_MAX_OUTPUT_TOKENS" >&2; exit 1 ;; esac
+SAMPLING_JSON=''
+if [ "$MAX_OUT" != "0" ]; then
+  SAMPLING_JSON=", \"samplingParams\": { \"max_tokens\": $MAX_OUT }"
+fi
+
 
 # AND TAKE AWAY THE SUBAGENT. `reconcile.py --arm v11` over the nine recorded
 # rows: 4 carry SKILL-NEVER-LOADED and THREE OF THOSE FOUR also carry
@@ -124,8 +149,8 @@ if [ "${SHERLOCK_ALLOW_SUBAGENT:-0}" != "1" ]; then
 fi
 if [ "$CTX_WINDOW" != "0" ]; then
   mkdir -p "$W/.qwen"
-  printf '{ "model": { "generationConfig": { "contextWindowSize": %s } }%s }\n' \
-    "$CTX_WINDOW" "$EXCLUDE_JSON" > "$W/.qwen/settings.json"
+  printf '{ "model": { "generationConfig": { "contextWindowSize": %s%s } }%s }\n' \
+    "$CTX_WINDOW" "$SAMPLING_JSON" "$EXCLUDE_JSON" > "$W/.qwen/settings.json"
 elif [ -n "$EXCLUDE_JSON" ]; then
   mkdir -p "$W/.qwen"
   printf '{ "tools": { "exclude": ["agent"] } }\n' > "$W/.qwen/settings.json"
