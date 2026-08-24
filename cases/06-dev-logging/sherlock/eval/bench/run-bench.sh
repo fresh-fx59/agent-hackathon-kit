@@ -21,7 +21,7 @@ BASE_URL="${SHERLOCK_BASE_URL:-https://linkapi.ai/v1}"
 MODEL="${SHERLOCK_MODEL:-[SP]deepseek-v4-flash}"
 if [ -n "${SHERLOCK_TIMEOUT+x}" ]; then
   TIMEOUT="$SHERLOCK_TIMEOUT"
-elif [ "$ARM" = "v30" ] || [ "$ARM" = "v31" ] || [ "$ARM" = "v32" ] || [ "$ARM" = "v33" ] || [ "$ARM" = "v34" ] || [ "$ARM" = "v35" ]; then
+elif [ "$ARM" = "v30" ] || [ "$ARM" = "v31" ] || [ "$ARM" = "v32" ] || [ "$ARM" = "v33" ] || [ "$ARM" = "v34" ] || [ "$ARM" = "v35" ] || [ "$ARM" = "v36" ]; then
   TIMEOUT=5400
 else
   TIMEOUT=2700
@@ -267,7 +267,7 @@ W="$(mktemp -d "${TMPDIR:-/tmp}/bench-XXXXXX")"
 RUN_CORPUS="$W/corpus"
 mkdir -p "$RUN_CORPUS"
 cp -a "$CORPUS/." "$RUN_CORPUS/"
-if [ "$ARM" = "v30" ] || [ "$ARM" = "v31" ] || [ "$ARM" = "v32" ] || [ "$ARM" = "v33" ] || [ "$ARM" = "v34" ] || [ "$ARM" = "v35" ]; then
+if [ "$ARM" = "v30" ] || [ "$ARM" = "v31" ] || [ "$ARM" = "v32" ] || [ "$ARM" = "v33" ] || [ "$ARM" = "v34" ] || [ "$ARM" = "v35" ] || [ "$ARM" = "v36" ]; then
   mkdir -p "$W/work"
   if [ -n "${SHERLOCK_SEED_WORK:-}" ]; then
     [ -d "$SHERLOCK_SEED_WORK" ] && [ ! -L "$SHERLOCK_SEED_WORK" ] || {
@@ -342,13 +342,13 @@ EXCLUDE_JSON=''
 if [ "${SHERLOCK_ALLOW_SUBAGENT:-0}" != "1" ]; then
   EXCLUDE_JSON=', "tools": { "exclude": ["agent"] }'
 fi
-if [ "$ARM" = "v30" ] || [ "$ARM" = "v31" ] || [ "$ARM" = "v32" ] || [ "$ARM" = "v33" ] || [ "$ARM" = "v34" ] || [ "$ARM" = "v35" ]; then
+if [ "$ARM" = "v30" ] || [ "$ARM" = "v31" ] || [ "$ARM" = "v32" ] || [ "$ARM" = "v33" ] || [ "$ARM" = "v34" ] || [ "$ARM" = "v35" ] || [ "$ARM" = "v36" ]; then
   case "$REQUEST_TIMEOUT_MS:$MAX_RETRIES" in
     *[!0-9:]*|:*|*:) echo "✗ invalid v30 request timeout or retry count" >&2; exit 1 ;;
   esac
   mkdir -p "$W/.qwen"
   MEMORY_JSON=''
-  if [ "$ARM" = "v31" ] || [ "$ARM" = "v32" ] || [ "$ARM" = "v33" ] || [ "$ARM" = "v34" ] || [ "$ARM" = "v35" ]; then
+  if [ "$ARM" = "v31" ] || [ "$ARM" = "v32" ] || [ "$ARM" = "v33" ] || [ "$ARM" = "v34" ] || [ "$ARM" = "v35" ] || [ "$ARM" = "v36" ]; then
     MEMORY_JSON=', "memory": { "enableManagedAutoMemory": false, "enableDreams": false }, "model_fallback": { "enabled": false }'
   fi
   printf '{ "model": { "generationConfig": { "contextWindowSize": %s%s, "timeout": %s, "maxRetries": %s } }%s%s }\n' \
@@ -413,7 +413,7 @@ else
   echo "  to a different question. Write the prompt file first." >&2
   exit 1
 fi
-if { [ "$ARM" = "v30" ] || [ "$ARM" = "v31" ] || [ "$ARM" = "v32" ] || [ "$ARM" = "v33" ] || [ "$ARM" = "v34" ] || [ "$ARM" = "v35" ]; } && [ -n "${SHERLOCK_SEED_WORK:-}" ]; then
+if { [ "$ARM" = "v30" ] || [ "$ARM" = "v31" ] || [ "$ARM" = "v32" ] || [ "$ARM" = "v33" ] || [ "$ARM" = "v34" ] || [ "$ARM" = "v35" ] || [ "$ARM" = "v36" ]; } && [ -n "${SHERLOCK_SEED_WORK:-}" ]; then
   PROMPT="$PROMPT
 
 Продолжи расследование из сохранённого checkpoint в $W/work. Сначала прочитай
@@ -423,7 +423,7 @@ work/checkpoint.json. Не повторяй MAP и TRIAGE, если state=ready_
 только ошибки проверки. Последний ответ должен дословно повторять work/report.md."
 fi
 
-if [ "$ARM" = "v31" ] || [ "$ARM" = "v32" ] || [ "$ARM" = "v33" ] || [ "$ARM" = "v34" ] || [ "$ARM" = "v35" ]; then
+if [ "$ARM" = "v31" ] || [ "$ARM" = "v32" ] || [ "$ARM" = "v33" ] || [ "$ARM" = "v34" ] || [ "$ARM" = "v35" ] || [ "$ARM" = "v36" ]; then
   # r4 answered in one request with stats.skills.totalCalls == 0. Name the skill.
   PROMPT="/sherlock
 
@@ -462,7 +462,7 @@ START=$(date +%s)
 # A stream can break after the agent has already mapped most of the corpus. Keep
 # its QWEN_HOME and resume the same session with bounded exponential backoff;
 # never replace useful mid-session work with a fresh, empty investigation.
-if [ "$ARM" = "v30" ] || [ "$ARM" = "v31" ] || [ "$ARM" = "v32" ] || [ "$ARM" = "v33" ] || [ "$ARM" = "v34" ] || [ "$ARM" = "v35" ]; then
+if [ "$ARM" = "v30" ] || [ "$ARM" = "v31" ] || [ "$ARM" = "v32" ] || [ "$ARM" = "v33" ] || [ "$ARM" = "v34" ] || [ "$ARM" = "v35" ] || [ "$ARM" = "v36" ]; then
   RESUME_MAX_ATTEMPTS="${SHERLOCK_RESUME_MAX_ATTEMPTS:-0}"
 else
   RESUME_MAX_ATTEMPTS="${SHERLOCK_RESUME_MAX_ATTEMPTS:-2}"
