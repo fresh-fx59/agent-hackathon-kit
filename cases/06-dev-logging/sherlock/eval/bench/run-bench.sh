@@ -585,10 +585,27 @@ try:
     has_report = os.path.getsize(report_path) > 0
 except OSError:
     has_report = False
-stalled = (not broken) and not has_report and tool_calls == 0
+# WIDENED after v35 r2. The first cut of this only resumed a stall with ZERO
+# tool calls, on the theory that a run which did work and still delivered
+# nothing was failing for a reason a retry would not fix. That theory was
+# wrong, and it excluded the exact shape of the v34 r1 failure: 12 tool calls,
+# every reference file read, and then the report written as chat prose. The
+# session on disk holds ALL of that work, so resuming it is strictly cheaper
+# and strictly more likely to deliver than starting a fresh paid run from
+# nothing — and the attempt count already bounds the downside.
+#
+# So the rule is the artifact, not the effort: NO REPORT ⇒ RESUMABLE. The two
+# shapes stay distinguishable in attempts.jsonl because they need different
+# diagnoses — `stalled_no_tool_calls` means the model never started, which
+# points at the skill's first-turn instruction; `no_deliverable` means it
+# worked and did not write, which points at the write-back step.
+stalled = (not broken) and not has_report
 if not broken and not stalled:
     sys.exit(1)
-note("broken_stream" if broken else "stalled_no_tool_calls")
+if broken:
+    note("broken_stream")
+else:
+    note("stalled_no_tool_calls" if tool_calls == 0 else "no_deliverable")
 session = final.get("session_id") or next(
     (r.get("session_id") for r in rows if isinstance(r, dict) and r.get("session_id")), "")
 if session:
