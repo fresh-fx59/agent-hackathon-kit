@@ -54,6 +54,7 @@ accounted (or when only the census was asked for), 1 when any group is
 unaccounted, 2 on usage error.
 """
 import argparse
+import calendar
 import gzip
 import json
 import os
@@ -113,6 +114,25 @@ def _open(path):
     return open(path, "r", encoding="utf-8", errors="replace")
 
 
+TS_RE = re.compile(r"(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2}):(\d{2})")
+
+
+def record_time(system):
+    """-> epoch seconds of a Windows record, or None. UTC, as the export is."""
+    tc = system.get("TimeCreated")
+    if isinstance(tc, dict):
+        a = tc.get("#attributes")
+        raw = (a or {}).get("SystemTime") if isinstance(a, dict) else tc.get("SystemTime")
+    else:
+        raw = None
+    if not raw:
+        return None
+    m = TS_RE.match(str(raw))
+    if not m:
+        return None
+    return calendar.timegm(tuple(int(x) for x in m.groups()) + (0, 0, 0))
+
+
 def _eventid(system):
     e = system.get("EventID")
     if isinstance(e, dict):
@@ -146,7 +166,7 @@ def _flatten(data):
 
 
 def classify(rec):
-    """-> (class, actor, subject) for a catalogued record, else None."""
+    """-> (class, actor, subject, eventid, epoch) for a catalogued record."""
     ev = rec.get("Event") if isinstance(rec, dict) else None
     if not isinstance(ev, dict):
         return None
@@ -178,7 +198,7 @@ def classify(rec):
         if data.get(f):
             subject = data[f]
             break
-    return label, (actor or "-"), subject[:MAX_EXEMPLAR], eid
+    return label, (actor or "-"), subject[:MAX_EXEMPLAR], eid, record_time(system)
 
 
 def census(corpus):
@@ -206,15 +226,18 @@ def census(corpus):
                     hit = classify(rec)
                     if hit is None:
                         continue
-                    label, actor, subject, eid = hit
+                    label, actor, subject, eid, ts = hit
                     key = (rel, label, actor)
                     g = groups.get(key)
                     if g is None:
                         g = groups[key] = {"file": rel, "class": label, "actor": actor,
-                                           "eventids": set(), "lines": [], "exemplar": subject}
+                                           "eventids": set(), "lines": [], "records": [],
+                                           "exemplar": subject}
                         order.append(key)
                     g["eventids"].add(eid)
                     g["lines"].append(n)
+                    g["records"].append({"line": n, "ts": ts, "eventid": eid,
+                                         "subject": subject})
     return [groups[k] for k in order]
 
 
@@ -322,7 +345,8 @@ def main():
     if a.json:
         json.dump({"version": VERSION,
                    "groups": [{k: (sorted(v) if isinstance(v, set) else v)
-                               for k, v in g.items()} for g in groups],
+                               for k, v in g.items() if k != "records"}
+                              for g in groups],
                    "total_records": sum(len(g["lines"]) for g in groups),
                    "unaccounted": len(bad)},
                   sys.stdout, ensure_ascii=False, indent=1)

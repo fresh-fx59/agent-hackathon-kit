@@ -46,6 +46,7 @@ import json
 import os
 import re
 import sys
+import time
 
 TS_PATTERNS = [
     ("iso", re.compile(r"\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:[.,]\d+)?"
@@ -69,6 +70,10 @@ try:
     import logmap as _logmap
 except Exception:                                     # noqa: BLE001 - optional
     _logmap = None
+try:
+    import statecheck as _statecheck
+except Exception:                                     # noqa: BLE001 - optional
+    _statecheck = None
 
 
 def ref(rel, start, end):
@@ -286,11 +291,260 @@ def render(d):
     return "\n".join(out)
 
 
+
+# --- --window: sessions, and what changed inside them ------------------------
+#
+# Why this mode exists. The corpus's decisive fact was not a record, it was an
+# INTERVAL: an inbound RDP session, and twelve minutes into it a service
+# install. Both halves were in the corpus, in two different channels, and the
+# only thing joining them was a model noticing two timestamps. Measured: neither
+# arm noticed unaided under v31.
+#
+# So the join is done here, deterministically. Sessions come from the two places
+# Windows records them; the changes come from `statecheck`'s catalogue, which is
+# the same census the report must answer to. No severity words, no ranking — an
+# interval and a membership test.
+SESSION_OPEN = {
+    ("Microsoft-Windows-TerminalServices-LocalSessionManager", 21): "вход в сеанс",
+    ("Microsoft-Windows-TerminalServices-LocalSessionManager", 25): "переподключение",
+}
+SESSION_CLOSE = {
+    ("Microsoft-Windows-TerminalServices-LocalSessionManager", 23): "выход",
+    ("Microsoft-Windows-TerminalServices-LocalSessionManager", 24): "отключение",
+}
+# 4624 logon types that mean a human at a keyboard or a remote desktop:
+# 2 interactive, 7 unlock, 10 RemoteInteractive, 11 cached interactive.
+INTERACTIVE_LOGON_TYPES = (2, 7, 10, 11)
+SESSION_MAX_S = 12 * 3600     # an unclosed session is not an open-ended licence
+PRIVATE_RE = re.compile(
+    r"^(?:127\.|10\.|192\.168\.|169\.254\.|172\.(?:1[6-9]|2\d|3[01])\.|::1$|fe80:|-$|$)")
+
+
+def _stamp(ts):
+    y, mo, d, h, mi, sec = time.gmtime(ts)[:6]
+    return "%04d-%02d-%02dT%02d:%02d:%02dZ" % (y, mo, d, h, mi, sec)
+
+
+def routable(addr):
+    """A source address that came from outside this machine's own network."""
+    if not addr:
+        return False
+    return not PRIVATE_RE.match(str(addr).strip())
+
+
+def _walk_json(root):
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [d for d in dirnames
+                       if d not in (".git", "node_modules", "__pycache__")]
+        for fn in sorted(filenames):
+            ap = os.path.join(dirpath, fn)
+            if looks_binary(ap):
+                continue
+            yield ap, os.path.relpath(ap, root).replace(os.sep, "/")
+
+
+def _event_data(ev):
+    for key in ("EventData", "UserData"):
+        d = ev.get(key)
+        if isinstance(d, dict):
+            if key == "UserData":
+                inner = d.get("EventXML")
+                if isinstance(inner, dict):
+                    d = inner
+            flat = {k: v for k, v in d.items()
+                    if isinstance(v, (str, int, float))}
+            if flat:
+                return flat
+    return {}
+
+
+def sessions_of(root):
+    """-> list of session dicts, each with a window and where it is written."""
+    if _statecheck is None:
+        return []
+    opens, closes = [], []
+    for path, rel in _walk_json(root):
+        try:
+            fh = opener(path)(path, "rt", encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        with fh:
+            for n, raw in enumerate(fh, 1):
+                raw = raw.strip()
+                if not raw.startswith("{"):
+                    continue
+                try:
+                    ev = json.loads(raw).get("Event")
+                except ValueError:
+                    continue
+                if not isinstance(ev, dict):
+                    continue
+                system = ev.get("System")
+                if not isinstance(system, dict):
+                    continue
+                eid = _statecheck._eventid(system)
+                prov = _statecheck._provider(system)
+                ts = _statecheck.record_time(system)
+                if eid is None or ts is None:
+                    continue
+                data = _event_data(ev)
+                key = (prov, eid)
+                if key in SESSION_OPEN:
+                    opens.append({"file": rel, "line": n, "ts": ts,
+                                  "kind": SESSION_OPEN[key],
+                                  "user": str(data.get("User") or "-"),
+                                  "address": str(data.get("Address") or "-"),
+                                  "handle": "session:%s" % data.get("SessionID")})
+                elif key in SESSION_CLOSE:
+                    closes.append({"ts": ts, "line": n, "file": rel,
+                                   "handle": "session:%s" % data.get("SessionID")})
+                elif eid == 4624 and prov == "Microsoft-Windows-Security-Auditing":
+                    try:
+                        lt = int(data.get("LogonType"))
+                    except (TypeError, ValueError):
+                        continue
+                    if lt not in INTERACTIVE_LOGON_TYPES:
+                        continue
+                    opens.append({"file": rel, "line": n, "ts": ts,
+                                  "kind": "вход 4624 тип %d" % lt,
+                                  "user": str(data.get("TargetUserName") or "-"),
+                                  "address": str(data.get("IpAddress") or "-"),
+                                  "handle": "logon:%s" % data.get("TargetLogonId")})
+                elif eid == 4634 and prov == "Microsoft-Windows-Security-Auditing":
+                    closes.append({"ts": ts, "line": n, "file": rel,
+                                   "handle": "logon:%s" % data.get("TargetLogonId")})
+
+    closes.sort(key=lambda c: c["ts"])
+    out = []
+    for o in sorted(opens, key=lambda x: x["ts"]):
+        end = None
+        for c in closes:
+            if c["handle"] == o["handle"] and c["ts"] >= o["ts"]:
+                end = c
+                break
+        o["end"] = end
+        o["end_ts"] = end["ts"] if end else o["ts"] + SESSION_MAX_S
+        o["closed"] = end is not None
+        o["routable"] = routable(o["address"])
+        o["start_text"] = _stamp(o["ts"])
+        o["end_text"] = _stamp(o["end_ts"])
+        out.append(o)
+    return out
+
+
+def window_join(root, only_routable=True):
+    """Sessions × state changes. -> the join, as data."""
+    sessions = sessions_of(root)
+    changes = []
+    if _statecheck is not None:
+        for g in _statecheck.census(root):
+            for rec in g["records"]:
+                if rec["ts"] is None:
+                    continue
+                changes.append({"file": g["file"], "line": rec["line"],
+                                "ts": rec["ts"], "class": g["class"],
+                                "actor": g["actor"], "eventid": rec["eventid"],
+                                "subject": rec["subject"]})
+    changes.sort(key=lambda c: c["ts"])
+    rows = []
+    for s in sessions:
+        if only_routable and not s["routable"]:
+            continue
+        inside = [dict(c, after_s=c["ts"] - s["ts"]) for c in changes
+                  if s["ts"] <= c["ts"] <= s["end_ts"]]
+        rows.append({"session": s, "changes": inside,
+                     "groups": [{"class": b["class"], "actor": b["actor"],
+                                 "n": b["n"],
+                                 "first": "%s:%d" % (b["first"]["file"], b["first"]["line"]),
+                                 "after_s": b["first"]["after_s"],
+                                 "subject": b["first"]["subject"]}
+                                for b in group_changes(inside)]})
+    return {"corpus": os.path.abspath(root),
+            "sessions_total": len(sessions),
+            "sessions_reported": len(rows),
+            "state_changes_total": len(changes),
+            "only_routable": only_routable,
+            "windows": rows,
+            "statecheck_available": _statecheck is not None}
+
+
+def _hhmm(seconds):
+    seconds = int(seconds)
+    if seconds < 3600:
+        return "%d мин" % (seconds // 60)
+    return "%d ч %02d мин" % (seconds // 3600, (seconds % 3600) // 60)
+
+
+WINDOW_GROUPS_SHOWN = 12
+WINDOW_MEMBERS_SHOWN = 3
+
+
+def group_changes(changes):
+    """Collapse a window's changes the same way `statecheck` collapses a corpus.
+
+    A first RDP logon registers several hundred firewall rules in the same
+    second, all of them by the platform. Printed one per line that burst buries
+    the single record that matters. Grouped by (class, actor) it is one line,
+    and — rarest group first — the odd one is at the top where it belongs.
+    """
+    buckets = {}
+    for c in changes:
+        key = (c["class"], c["actor"])
+        b = buckets.setdefault(key, {"class": c["class"], "actor": c["actor"],
+                                     "n": 0, "first": c, "members": []})
+        b["n"] += 1
+        if len(b["members"]) < WINDOW_MEMBERS_SHOWN:
+            b["members"].append(c)
+    return sorted(buckets.values(), key=lambda b: (b["n"], b["first"]["ts"]))
+
+
+def render_window(d):
+    out = []
+    if not d["statecheck_available"]:
+        return ["! statecheck.py рядом не найден — окна построить нечем"]
+    out.append("сеансов всего: %d, показано: %d%s; изменений состояния в корпусе: %d"
+               % (d["sessions_total"], d["sessions_reported"],
+                  " (только маршрутизируемые адреса)" if d["only_routable"] else "",
+                  d["state_changes_total"]))
+    out.append("группы внутри окна — от самой редкой к самой частой; редкая группа "
+               "и есть повод смотреть")
+    if not d["windows"]:
+        out.append("ни одного сеанса с внешнего адреса не найдено")
+    for w in d["windows"]:
+        s = w["session"]
+        out.append("")
+        out.append("%s · %s · %s · %s → %s%s"
+                   % (s["kind"], s["user"], s["address"], s["start_text"],
+                      ref(s["file"], s["line"], s["line"]),
+                      "" if s["closed"] else "  (закрытие не найдено, окно ограничено 12 ч)"))
+        groups = group_changes(w["changes"])
+        if not groups:
+            out.append("  изменений состояния внутри сеанса нет")
+        for b in groups[:WINDOW_GROUPS_SHOWN]:
+            out.append("  %-22s ×%-4d субъект %s" % (b["class"], b["n"], b["actor"]))
+            for c in b["members"]:
+                out.append("    +%-9s %s  %s"
+                           % (_hhmm(c["after_s"]), ref(c["file"], c["line"], c["line"]),
+                              c["subject"]))
+            if b["n"] > len(b["members"]):
+                out.append("    … ещё %d записей этой же группы"
+                           % (b["n"] - len(b["members"])))
+        if len(groups) > WINDOW_GROUPS_SHOWN:
+            out.append("  … ещё %d групп не показано"
+                       % (len(groups) - WINDOW_GROUPS_SHOWN))
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser(
         description="Проследить идентификатор по всем файлам корпуса: где есть, "
                     "в каких строках, в каком временном окне — и где его НЕТ.")
-    ap.add_argument("ids", nargs="+", help="id заказа, correlation_id, IP, что угодно")
+    ap.add_argument("ids", nargs="*", help="id заказа, correlation_id, IP, что угодно")
+    ap.add_argument("--window", action="store_true",
+                    help="не искать id, а построить окна сеансов и сложить в них "
+                         "изменения состояния (нужен statecheck.py рядом)")
+    ap.add_argument("--all-addresses", action="store_true",
+                    help="--window: показывать и локальные адреса тоже")
     ap.add_argument("--corpus", default=".", help="корень корпуса логов")
     ap.add_argument("--no-canon", dest="canon", action="store_false",
                     help="искать буквально, без сворачивания регистра и -_.")
@@ -303,6 +557,13 @@ def main():
 
     if not os.path.isdir(args.corpus):
         sys.exit("нет такого каталога: %s" % args.corpus)
+    if args.window:
+        w = window_join(args.corpus, not args.all_addresses)
+        print(json.dumps(w, ensure_ascii=False, indent=1) if args.json
+              else "\n".join(render_window(w)))
+        return 0 if w["statecheck_available"] else 2
+    if not args.ids:
+        sys.exit("нужен хотя бы один id, либо --window")
     d = run(args.ids, args.corpus, args.canon, args.substring, args.max_hits)
     print(json.dumps(d, ensure_ascii=False, indent=1) if args.json else render(d))
     return 1 if any(e["total_hits"] == 0 for e in d["per_id"]) else 0
