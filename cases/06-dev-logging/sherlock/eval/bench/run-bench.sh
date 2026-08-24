@@ -528,9 +528,31 @@ run_qwen() {
   return "$rc"
 }
 
+# WHY A CLEAN STOP CAN ALSO NEED A RESUME. v35 r1 on the paid corpus made ONE
+# upstream call: HTTP 200, complete 1,542-event stream, `finish_reason: stop`,
+# `tool_call: false`, 32,896 prompt / 3,521 completion tokens — every one of
+# those completion tokens a `thoughts` token. The model narrated its plan ("Я
+# проверю наличие инструментов навыка… Затем выполню пошаговое расследование")
+# and stopped without calling a single tool. Nothing was broken: not the
+# transport, not the stream, not the provider. But nothing was delivered
+# either, and `broken_session` only looked for API errors, so the run had no
+# second chance at a first turn that simply stalled.
+#
+# A stall is resumable for exactly the same reason a broken stream is — the
+# session is on disk and the work is not lost — so it goes through the same
+# machinery rather than a parallel path. The reason is written to a file
+# because this function's stdout is the session id.
 broken_session() {
-  python3 - "$W/out.json" <<'PY'
-import json, re, sys
+  python3 - "$W/out.json" "$TRACE/work/report.md" "$W/.resume-reason" <<'PY'
+import json, os, re, sys
+report_path, reason_path = sys.argv[2], sys.argv[3]
+
+def note(reason):
+    try:
+        with open(reason_path, "w", encoding="utf-8") as fh: fh.write(reason + "\n")
+    except OSError:
+        pass
+
 try:
     raw = open(sys.argv[1], encoding="utf-8", errors="replace").read()
 except OSError:
@@ -543,6 +565,7 @@ except ValueError:
     # all prior work because the final record is not parseable.
     match = re.search(r'"session_id"\s*:\s*"([0-9a-f-]{16,})"', raw)
     if match:
+        note("broken_stream")
         print(match.group(1))
         sys.exit(0)
     sys.exit(1)
@@ -552,8 +575,20 @@ final = next((r for r in rows if isinstance(r, dict) and r.get("type") == "resul
 text = final.get("result") or ""
 broken = (not final or final.get("is_error") or text.lstrip().startswith("[API Error")
           or ("[API Error" in text and len(text) < 400))
-if not broken:
+# A CLEAN STOP THAT DELIVERED NOTHING IS ALSO A REASON TO CONTINUE. Judge it on
+# the artifact and on whether the model actually did anything, never on the
+# prose — a plan announced in the final message reads exactly like a report.
+stats = final.get("stats") if isinstance(final.get("stats"), dict) else {}
+tools = stats.get("tools") if isinstance(stats.get("tools"), dict) else {}
+tool_calls = tools.get("totalCalls")
+try:
+    has_report = os.path.getsize(report_path) > 0
+except OSError:
+    has_report = False
+stalled = (not broken) and not has_report and tool_calls == 0
+if not broken and not stalled:
     sys.exit(1)
+note("broken_stream" if broken else "stalled_no_tool_calls")
 session = final.get("session_id") or next(
     (r.get("session_id") for r in rows if isinstance(r, dict) and r.get("session_id")), "")
 if session:
@@ -568,14 +603,14 @@ if run_qwen 0 -p "$PROMPT"; then QWEN_RC=0; else QWEN_RC=$?; fi
 while RESUME_SESSION="$(broken_session)" \
   && [ "$RESUME_ATTEMPTS" -lt "$RESUME_MAX_ATTEMPTS" ]; do
   RESUME_ATTEMPTS=$((RESUME_ATTEMPTS + 1))
-  ATTEMPT_REASON="broken_stream"
+  ATTEMPT_REASON="$(cat "$W/.resume-reason" 2>/dev/null || echo broken_stream)"
   BACKOFF=$((RESUME_BACKOFF_S * (2 ** (RESUME_ATTEMPTS - 1))))
   state_event RECOVERY_DECIDED --run-tag "$STAMP" --phase QWEN_RUNNING --dataset "$DATASET" --arm "$ARM" \
-    --trace-dir "$TRACE" --attempt "$RESUME_ATTEMPTS" --session-id "$RESUME_SESSION" --reason broken_stream \
+    --trace-dir "$TRACE" --attempt "$RESUME_ATTEMPTS" --session-id "$RESUME_SESSION" --reason "$ATTEMPT_REASON" \
     --upstream-log "$TRACE.upstream.jsonl" --inflight-path "$TRACE/upstream-inflight.json"
-  echo "  ⚠ stream failed; preserving session $RESUME_SESSION and retrying in ${BACKOFF}s (attempt $RESUME_ATTEMPTS/$RESUME_MAX_ATTEMPTS)" >&2
+  echo "  ⚠ $ATTEMPT_REASON; preserving session $RESUME_SESSION and retrying in ${BACKOFF}s (attempt $RESUME_ATTEMPTS/$RESUME_MAX_ATTEMPTS)" >&2
   sleep "$BACKOFF"
-  if run_qwen "$RESUME_ATTEMPTS" --resume "$RESUME_SESSION" -p "The previous provider stream failed. Continue the same investigation from saved state. Do not restart mapping; finish the unresolved worklist and deliver the report."; then QWEN_RC=0; else QWEN_RC=$?; fi
+  if run_qwen "$RESUME_ATTEMPTS" --resume "$RESUME_SESSION" -p "The previous attempt ended without delivering the report. Continue the same investigation from saved state. Do not restart mapping and do not describe what you are about to do: call the tools, write the verdicts back, and write work/report.md. Your final message must be the report itself."; then QWEN_RC=0; else QWEN_RC=$?; fi
 done
 python3 - "$TRACE/recovery.json" "$RESUME_ATTEMPTS" "$RESUME_SESSION" <<'PY'
 import json, sys
