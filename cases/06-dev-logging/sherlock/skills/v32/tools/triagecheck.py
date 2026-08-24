@@ -125,7 +125,7 @@ EXCURSION = ("rare", "new", "peak")
 # a rule closes a class, and these two rows are by construction not a class.
 # They are also rare enough that naming them costs a handful of rows on a
 # corpus of thousands (measured; see `skills/DESIGN-EVIDENCE.md`, section v24).
-STRONG = ("new", "peak", "odd", "minor")
+STRONG = ("new", "peak", "odd", "minor", "late")
 
 # v32 adds two more, for the same reason and on stronger evidence.  is
 # "this record is the only one of its class that says this" and  is "this

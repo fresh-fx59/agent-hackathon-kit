@@ -663,6 +663,57 @@ def classify_verdict(cell):
     return "open", "непонятный вердикт: %s" % cell[:40]
 
 
+def flagged_lines(path):
+    """-> {basename: {line numbers}} that `logmap` put on the worklist.
+
+    P7. A coverage row says "I looked at this file and it is normal", and it
+    proves it with one quoted line. Any line used to pass. Measured on the run
+    that missed the intrusion: the coverage row for `System.jsonl` quoted line
+    192 — a real line, a true quote, and 71 lines away from the service install
+    that made the whole corpus interesting. Quoting an arbitrary line proves
+    that the file was opened, not that the flagged content was read.
+
+    So the quote must land on a line the mapper actually flagged for that file.
+    The index is built from the worklist's reference column, which is where
+    `logmap` writes `path:line` for every row it emitted.
+    """
+    out = {}
+    try:
+        fh = open(path, encoding="utf-8", errors="replace")
+    except OSError:
+        return out
+    with fh:
+        for raw in fh:
+            if raw.startswith("#") or not raw.strip():
+                continue
+            cells = raw.rstrip("\n").split("\t")
+            if len(cells) < 4:
+                continue
+            ref = cells[3].strip()
+            if ":" not in ref:
+                continue
+            head, _, tail = ref.rpartition(":")
+            if not tail.isdigit() or not head:
+                continue
+            out.setdefault(os.path.basename(head).lower(), set()).add(int(tail))
+    return out
+
+
+def _flagged_for(flagged, path):
+    """The flagged lines of one coverage path, whatever spelling it uses."""
+    if not flagged or not path:
+        return None
+    base = os.path.basename(path).lower()
+    hit = flagged.get(base)
+    if hit:
+        return hit
+    # `logmap` writes `rendered/Foo-4Admin.jsonl` where the report may write the
+    # percent-escaped original `Foo%4Admin.jsonl`. Compare on the shape both
+    # spellings share.
+    key = base.replace("%4", "-4")
+    return flagged.get(key)
+
+
 def read_ledger(path):
     """-> (rows, closed_ids) from a worklist.tsv the model has written back."""
     rows, closed = [], set()
@@ -1224,6 +1275,8 @@ def report_evidence(report, checked=None):
     cov_unsupported, cov_smuggled, cov_malformed = [], [], []
     cov_traversal, cov_ambiguous, cov_missing_path = [], [], []
     cov_false_empty, cov_false_binary, cov_duplicate_paths = [], [], []
+    cov_unflagged_citation = []
+    flagged = (checked or {}).get("flagged") or {}
     cov_observed = cov_no_address = 0
     corpus = (checked or {}).get("corpus")
     if corpus and os.path.isdir(corpus):
@@ -1262,6 +1315,11 @@ def report_evidence(report, checked=None):
                     c.get("verdict") == "ok" and c.get("via") == "quote"
                     and c.get("resolved") == row["resolved_path"] for c in cites):
                 cov_mismatched_citation.append(row)
+            else:
+                want = _flagged_for(flagged, row.get("path") or row.get("normalized_path"))
+                if want and not any(
+                        c.get("verdict") == "ok" and c.get("line") in want for c in cites):
+                    cov_unflagged_citation.append(row)
         elif status in COVERAGE_NO_ADDRESS:
             cov_no_address += 1
             if cites:
@@ -1294,7 +1352,7 @@ def report_evidence(report, checked=None):
                 + (1 if coverage_missing_section else 0)
                 + (1 if coverage_empty_section else 0)
                 + len(cov_missing_citation) + len(cov_invalid_citation)
-                + len(cov_mismatched_citation)
+                + len(cov_mismatched_citation) + len(cov_unflagged_citation)
                 + len(cov_unsupported) + len(cov_smuggled) + len(cov_malformed)
                 + len(cov_traversal) + len(cov_ambiguous) + len(cov_missing_path)
                 + len(cov_false_empty) + len(cov_false_binary)
@@ -1330,6 +1388,7 @@ def report_evidence(report, checked=None):
                      "missing_citation": [r["report_line"] for r in cov_missing_citation],
                      "invalid_citation": [r["report_line"] for r in cov_invalid_citation],
                      "mismatched_citation": [r["report_line"] for r in cov_mismatched_citation],
+                     "unflagged_citation": [r["report_line"] for r in cov_unflagged_citation],
                      "traversal_path": [r["report_line"] for r in cov_traversal],
                      "ambiguous_path": [{"line": r["report_line"], "path": r["path"],
                                          "candidates": resolve_coverage_path(
@@ -1396,6 +1455,9 @@ def render_report_evidence(e):
     if c["missing_citation"] or c["invalid_citation"]:
         out.append("  строки покрытия с наблюдением без проверяемой цитаты: %s"
                    % ", ".join(str(x) for x in c["missing_citation"] + c["invalid_citation"]))
+    if c.get("unflagged_citation"):
+        out.append("  строки покрытия, цитата которых не попала ни в одну строку, отмеченную logmap: %s"
+                   % ", ".join(str(x) for x in c["unflagged_citation"]))
     if c.get("mismatched_citation"):
         out.append("  цитата наблюдения указывает не на файл своей строки покрытия: %s"
                    % ", ".join(str(x) for x in c["mismatched_citation"]))
@@ -1702,6 +1764,8 @@ def main():
 
     d = check(text, args.corpus, args.min_overlap, args.min_tokens,
               args.require_quote)
+    if args.ledger and os.path.exists(args.ledger):
+        d["flagged"] = flagged_lines(args.ledger)
     d["outcomes"] = outcomes_of(text)
     d["report_evidence"] = report_evidence(text, d)
 
@@ -1712,6 +1776,7 @@ def main():
         handed = open(args.delivered, encoding="utf-8", errors="replace").read()
         dd = check(handed, args.corpus, args.min_overlap, args.min_tokens,
                    args.require_quote)
+        dd["flagged"] = d.get("flagged") or {}
         dd["path"] = args.delivered
         dd["outcomes"] = outcomes_of(handed)
         dd["report_evidence"] = report_evidence(handed, dd)
@@ -1725,6 +1790,9 @@ def main():
         body, left = ledger(d, text, args.ledger,
                             None if args.report == "-" else args.report)
         d["ledger"] = {"unresolved_total": left}
+    d.pop("flagged", None)
+    if isinstance(d.get("delivered"), dict):
+        d["delivered"].pop("flagged", None)
     print(json.dumps(d, ensure_ascii=False, indent=1) if args.json else render(d))
     if args.delivered and not args.json:
         print(render_delivery(d["delivered"]))

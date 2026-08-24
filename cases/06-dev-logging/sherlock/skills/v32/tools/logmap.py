@@ -2237,6 +2237,7 @@ class FileReport(object):
         # unrotated case. Written down rather than hidden.
         self.new_rows = []
         self.peak_rows = []
+        self.late_tokens = {}     # axis 8: token -> (first_at, start, end, display)
         self.rate_rows = []
         self.bg_rows = []
         self.out_rows = []
@@ -2327,6 +2328,7 @@ def analyse(path, rel, args):
     # case the floor exists for.
     hour_first = {}
     first_rec = last_rec = None
+    late_tokens = {}
     # axis 5: the population of parties, and the record each one entered on.
     # Bounded by ACTOR_CARD_MAX — past it the field is churn and the axis is off
     # for this file, which is recorded rather than inferred.
@@ -2420,6 +2422,7 @@ def analyse(path, rel, args):
                     ts_lo = at
                 if ts_hi is None or at > ts_hi:
                     ts_hi = at
+                scan_late_tokens(text, at, start, end, shown, late_tokens)
                 w = tmpl_ts.get(tmpl)
                 if w is None:
                     tmpl_ts[tmpl] = [at, at]
@@ -2541,6 +2544,8 @@ def analyse(path, rel, args):
     # ---- axis 4 -----------------------------------------------------------
     rep.out_rows = outcome_rows(rep.outcome_axis, status_hist, rep.status_bucket,
                                 status_first, ts_lo, ts_hi)
+
+    rep.late_tokens = late_tokens
 
     # ---- axis 5 + 6 -------------------------------------------------------
     # STREAMS ONLY, for the same measured reason the floor is stream-only: a
@@ -2936,6 +2941,108 @@ def floor_rows(status_hist, status_first, level_hist, level_tmpl, first_seen,
         if rec is not None:
             add(1, (rec[0], rec[1]), "edge", "%s · %s" % (label, rec[2]))
     return rows[:FALLBACK_PER_FILE], why
+
+
+# axis 8 — the late arrival, at CORPUS scope.
+#
+# Axis 5 asks "who entered this FILE late?" and answers it inside one stream.
+# That is the wrong window for a tool that is installed once and then used: the
+# install writes one record in one file, so inside that file it is not late, it
+# is the only occurrence. Measured on the winevtx corpus: `3proxy` appears in
+# System.jsonl, in the firewall channel and in the RDP channels, always in the
+# last third of the corpus window, and axis 5 emitted NOTHING for any of them.
+#
+# So this axis conditions on the corpus window instead of the file's, and it
+# only speaks about tokens that name an executable, a script or a service —
+# things that get INSTALLED. Two occurrences in two different files, because a
+# token that lives in exactly one file is that file's business and already has
+# four axes looking at it.
+LATE_TOKEN_RE = re.compile(
+    r"(?:\A|[^A-Za-z0-9_.+-])"
+    r"([A-Za-z0-9][A-Za-z0-9_.+-]{2,63}\.(?:exe|dll|sys|ps1|bat|cmd|vbs|scr|jar|py|sh))"
+    r"(?![A-Za-z0-9_.-])", re.IGNORECASE)
+LATE_TOKEN_CAP = 400          # distinct tokens kept per file
+LATE_TOKEN_FILES_MIN = 2      # present in at least two files
+LATE_TOKEN_ROWS = 6           # rows added to the whole corpus, never per file
+LATE_TOKEN_SHARE = 0.5        # first seen past the halfway point of the window
+# Tokens every Windows or Linux corpus is full of. This is NOT a severity list:
+# it names nothing suspicious, it only drops the platform's own furniture, which
+# is present from the first record and therefore can never be late anyway. Kept
+# small on purpose — the arithmetic does the work.
+LATE_TOKEN_SKIP = frozenset((
+    "svchost.exe", "services.exe", "lsass.exe", "csrss.exe", "wininit.exe",
+    "winlogon.exe", "explorer.exe", "smss.exe", "dllhost.exe", "taskhostw.exe",
+    "rundll32.exe", "conhost.exe", "spoolsv.exe", "msmpeng.exe", "setup.exe",
+    "cmd.exe", "powershell.exe", "python.exe", "bash.sh",
+))
+
+
+def scan_late_tokens(text, at, start, end, shown, into):
+    """Record the earliest sighting of every install-shaped token in a record."""
+    if at is None:
+        return
+    for raw in LATE_TOKEN_RE.findall(text):
+        token = raw.lower()
+        if token in LATE_TOKEN_SKIP:
+            continue
+        prev = into.get(token)
+        if prev is None:
+            if len(into) >= LATE_TOKEN_CAP:
+                continue
+            into[token] = (at, start, end, squeeze(shown)[:DISPLAY_MAX])
+        elif at < prev[0]:
+            into[token] = (at, start, end, squeeze(shown)[:DISPLAY_MAX])
+
+
+def late_token_rows(reports, args):
+    """Corpus-scope axis 8. Mutates `reports`; -> the rows it added.
+
+    Ranked by lateness, like axis 5 and for the same reason: the rarest token in
+    a corpus is background churn, the latest one is a change of state.
+    """
+    lo = hi = None
+    for r in reports:
+        if r.error:
+            continue
+        if r.ts_lo is not None and (lo is None or r.ts_lo < lo):
+            lo = r.ts_lo
+        if r.ts_hi is not None and (hi is None or r.ts_hi > hi):
+            hi = r.ts_hi
+    if lo is None or hi is None or hi <= lo:
+        return []
+    cut = lo + (hi - lo) * LATE_TOKEN_SHARE
+
+    where = {}
+    for r in reports:
+        if r.error:
+            continue
+        for token, seen in (getattr(r, "late_tokens", None) or {}).items():
+            best = where.get(token)
+            if best is None or seen[0] < best[1][0]:
+                where.setdefault(token, [set(), seen, r])
+            entry = where[token]
+            entry[0].add(r.rel)
+            if seen[0] < entry[1][0]:
+                entry[1], entry[2] = seen, r
+
+    late = []
+    for token, (files, seen, owner) in where.items():
+        if len(files) < LATE_TOKEN_FILES_MIN or seen[0] <= cut:
+            continue
+        late.append((seen[0], token, files, seen, owner))
+    late.sort(reverse=True)
+
+    added = []
+    for _at, token, files, seen, owner in late[:LATE_TOKEN_ROWS]:
+        at, start, end, disp = seen
+        share = 100.0 * (at - lo) / (hi - lo)
+        row = (len(files), start, end, "late", None,
+               "ПОЗДНИЙ ОБЪЕКТ %s: впервые на %.0f%% окна корпуса, в %d файлах · %s"
+               % (token, share, len(files), disp), owner.rel, "")
+        owner.groups, owner.group_total = merge_ranked(
+            [row], owner.groups, owner.group_total, args.per_file_cap)
+        added.append(row)
+    return added
 
 
 def actor_rows(actor_hist, actor_first, actor_ord, seen, over):
@@ -3619,6 +3726,13 @@ EXTRA_LEGEND = (
       "#   обычно просто фоновая мелочь, а вот появившийся поздно — смена "
       "состояния. Ось молчит, когда у поля нет популяции (новый адрес почти "
       "на каждой записи).\n")),
+    ("late",
+     ("# ось «поздний» (late): исполняемый объект (.exe/.dll/.ps1/...), которого "
+      "НЕ БЫЛО в первой половине окна ВСЕГО КОРПУСА и который встречается "
+      "минимум в двух файлах.\n",
+      "#   Ось 5 смотрит внутрь одного файла, и потому молчит про то, что "
+      "поставили один раз: в своём файле такая запись не поздняя, она "
+      "единственная. Здесь окно — весь корпус.\n")),
     ("peak",
      ("# ось «выброс» (peak): час, в котором медиана измерения ушла вверх "
       "минимум в 3 раза от обычной по файлу И ВЕРНУЛАСЬ — соседние часы в "
@@ -4385,6 +4499,10 @@ def main():
     # the cut. Nothing is re-read — every file kept its per-template residue.
     # Rotation families are keyed by directory, so they never cross a host.
     stitch(reports, args)
+    # Axis 8 needs every file's earliest sighting of a token, so it can only run
+    # once the whole corpus has been read — and after `stitch`, whose rebuild of
+    # `groups` would otherwise drop the rows.
+    late_token_rows(reports, args)
 
     hosts = None
     hp = None
