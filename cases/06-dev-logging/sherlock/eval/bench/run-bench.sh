@@ -276,10 +276,23 @@ export QWEN_HOME="$W/home"; mkdir -p "$QWEN_HOME"
 CTX_WINDOW="${SHERLOCK_CONTEXT_WINDOW:-400000}"
 REQUEST_TIMEOUT_MS="${SHERLOCK_REQUEST_TIMEOUT_MS:-900000}"
 MAX_RETRIES="${SHERLOCK_MAX_RETRIES:-0}"
-# Qwen's `agent` tool launches a subagent that does not inherit the project
-# `.qwen/skills/` directory. The result is a one-turn no-skill answer from the
-# empty runner directory. This exact failure is characterised in run-case.sh;
-# keep the target bench on the same, skill-loaded execution path.
+# CORRECTED 2026-08-24: a `general-purpose` subagent launched by the `agent`
+# tool DOES see the project `.qwen/skills/` directory (qwen-code 0.21.1,
+# measured on this box against the subscription broker) — it listed 23 skills
+# including this project's own `sherlock` and successfully called `skill`.
+# Source-side: `skill` is absent from EXCLUDED_TOOLS_FOR_SUBAGENTS, and the
+# child's Config is `Object.create(parentConfig)`, so targetDir and the skill
+# manager come from the parent. The old "does not inherit" claim above this
+# line was wrong; see run-case.sh for what the v11 SUBAGENT-SPAWNED rows were
+# actually evidence of. The real hazards are: an explicit subagent `tools:`
+# allowlist that omits `skill` silently drops both the tool AND the catalogue
+# (`willHaveSkillTool()`), and top-level subagents default to running in the
+# BACKGROUND unless `run_in_background: false` is passed. `agent` still stays
+# excluded here by default — not because fan-out is known to break skill
+# delivery, but to hold fan-out as ONE deliberately-fixed variable in a
+# reproducible bench arm rather than reopen it mid-series. Keep the target
+# bench on the same, skill-loaded execution path; flip
+# SHERLOCK_ALLOW_SUBAGENT=1 for a measured control arm.
 EXCLUDE_JSON=''
 if [ "${SHERLOCK_ALLOW_SUBAGENT:-0}" != "1" ]; then
   EXCLUDE_JSON=', "tools": { "exclude": ["agent"] }'

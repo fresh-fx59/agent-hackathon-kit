@@ -100,12 +100,22 @@ CTX_WINDOW="${SHERLOCK_CONTEXT_WINDOW:-400000}"
 # rows: 4 carry SKILL-NEVER-LOADED and THREE OF THOSE FOUR also carry
 # SUBAGENT-SPAWNED — D09 rep1 (first tool call was `agent`, 109-char final
 # message), D01, D04 rep2. Not one subagent run loaded the arm; every
-# skill-loaded subagent-free row is `ok`. The subagent does not inherit
-# `.qwen/skills/`, and a headless `qwen -p` fan-out loses the report on top.
+# skill-loaded subagent-free row is `ok`. CORRECTED 2026-08-24: this is NOT
+# because the subagent fails to inherit `.qwen/skills/` — measured today on
+# 0.21.1, a `general-purpose` subagent DOES see it and DOES call `skill`
+# successfully (23 skills listed, including this project's own; `skill` is
+# absent from EXCLUDED_TOOLS_FOR_SUBAGENTS and the child Config is
+# `Object.create(parentConfig)`, so targetDir and the skill manager are
+# inherited). The v11 failure was some other fan-out pathology — a headless
+# `qwen -p` fan-out losing the report is still plausible, but it was never
+# isolated further because the runner just removed the option instead.
 # `excludeTools` is supported and the tool is named `agent`; verified on 0.21.1
 # that the init record then lists 60 tools instead of 61, `skill` still present.
 # This CHANGES WHAT A RUN DOES — meta records it, so rows from either side of
-# this change are never pooled. SHERLOCK_ALLOW_SUBAGENT=1 gives it back.
+# this change are never pooled. Kept excluded by default so this bench holds
+# fan-out as one deliberately-fixed variable, not because skill delivery is
+# known to break under it. SHERLOCK_ALLOW_SUBAGENT=1 gives it back for a
+# measured control arm.
 SUBAGENT_AVAILABLE=true
 EXCLUDE_JSON=''
 if [ "${SHERLOCK_ALLOW_SUBAGENT:-0}" != "1" ]; then
