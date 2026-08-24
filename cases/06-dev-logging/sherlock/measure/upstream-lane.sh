@@ -77,6 +77,20 @@ upstream_lane_start() {
   port="$(python3 -c 'import socket
 s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1]); s.close()')"
 
+# KEEP THE BODIES BY DEFAULT ON A REAL RUN. The ledger records rich metadata per
+# call and no content, so "what exactly was sent, and what exactly came back?"
+# was unanswerable after the fact: diagnosing an empty HTTP 200 meant reading the
+# CLI's minified bundle, and the prompt as sent existed nowhere. Bodies live
+# beside the ledger, gzipped, one file per request — see the proxy's REPLAYABLE
+# TRACES note. They contain the full prompt, hence corpus log content, so they
+# are exactly as sensitive as the corpus. Set SHERLOCK_UPSTREAM_BODIES=0 to opt
+# out; the proxy writes nothing at all when UPSTREAM_BODY_DIR is empty.
+  local body_dir=""
+  if [ "${SHERLOCK_UPSTREAM_BODIES:-1}" = "1" ]; then
+    body_dir="${log_path%.jsonl}.bodies"
+    mkdir -p "$body_dir" 2>/dev/null || body_dir=""
+  fi
+
   if [ "$strict" = 1 ]; then
     if [ -z "$inflight_path" ] || [ -z "${SHERLOCK_EXPECTED_RETURNED_IDENTITY:-}" ] || \
        [ -z "${SHERLOCK_BUDGET_MAX_UPSTREAM_ATTEMPTS:-}" ] || \
@@ -101,7 +115,8 @@ s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1]); s.clos
     env UPSTREAM_BASE="$up_base" UPSTREAM_LOG="$log_path" UPSTREAM_INFLIGHT="$inflight_path" \
       RUN_TAG="$run_tag" RUN_ATTEMPT_FILE="$attempt_path" UPSTREAM_MODEL="$model" LISTEN_PORT="$port" \
       UPSTREAM_RETRY_MAX="${SHERLOCK_UPSTREAM_RETRY:-6}" \
-      UPSTREAM_RETRY_BASE_MS="${SHERLOCK_UPSTREAM_RETRY_BASE_MS:-2000}" "${budget_env[@]}" \
+      UPSTREAM_RETRY_BASE_MS="${SHERLOCK_UPSTREAM_RETRY_BASE_MS:-2000}" \
+      UPSTREAM_BODY_DIR="$body_dir" "${budget_env[@]}" \
       python3 "$proxy" >/dev/null 2>>"${log_path%.jsonl}.proxy.err" &
   else
     # Bash 3.2 treats an empty-array expansion as unbound under `set -u`.
@@ -110,6 +125,7 @@ s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1]); s.clos
       RUN_TAG="$run_tag" RUN_ATTEMPT_FILE="$attempt_path" UPSTREAM_MODEL="$model" LISTEN_PORT="$port" \
       UPSTREAM_RETRY_MAX="${SHERLOCK_UPSTREAM_RETRY:-6}" \
       UPSTREAM_RETRY_BASE_MS="${SHERLOCK_UPSTREAM_RETRY_BASE_MS:-2000}" \
+      UPSTREAM_BODY_DIR="$body_dir" \
       python3 "$proxy" >/dev/null 2>>"${log_path%.jsonl}.proxy.err" &
   fi
   LANE_PROXY_PID=$!

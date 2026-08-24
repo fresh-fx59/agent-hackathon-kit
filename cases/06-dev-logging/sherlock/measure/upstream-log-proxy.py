@@ -25,8 +25,13 @@ It is deliberately dumb: it forwards bytes, it never rewrites a request, and it
 never logs the Authorization header. If it cannot parse a response it records
 `returned_model: null` rather than guessing — an unmeasured value is null, never
 a default. → measure/probes/upstream-split.sh
+
+Set UPSTREAM_BODY_DIR to also keep every request and response body on disk, so a
+finished run can be replayed instead of inferred. See the REPLAYABLE TRACES note
+below for the layout and for what those files contain.
 """
 import fcntl
+import gzip
 import json
 import os
 import re
@@ -71,6 +76,42 @@ UPSTREAM_MODEL = os.environ.get("UPSTREAM_MODEL", "")
 # Off by default (0) so the proxy stays a pass-through unless a runner asks.
 UPSTREAM_RETRY_MAX = int(os.environ.get("UPSTREAM_RETRY_MAX", "0") or 0)
 UPSTREAM_RETRY_BASE_MS = int(os.environ.get("UPSTREAM_RETRY_BASE_MS", "2000") or 2000)
+
+# REPLAYABLE TRACES. Everything above this line is metadata ABOUT a call, and no
+# amount of it answers the first question anyone asks of a finished run: what
+# exactly was sent to the model, and what exactly did it answer? That gap has
+# been paid for twice already. The r2 empty-HTTP-200 had to be diagnosed by
+# reading qwen-code's own minified bundle, because no request body existed to
+# look at. And a run's gate output survived only as model-side prose in the
+# trajectory, so "did the tool really say that?" was unanswerable. Bodies are
+# big — a winevtx request peaks near 620 KB and a run makes ~113 calls — so this
+# is opt-in, lands OUTSIDE the JSONL, and is gzipped.
+#
+# WHAT THE CAPTURED FILES CONTAIN, plainly: the request file is the WHOLE prompt
+# — system prompt, skill body, every tool result, and therefore the corpus log
+# lines the model was fed. The response file is the model's whole answer. These
+# files are as sensitive as the corpus itself; treat a body directory the way
+# you treat the corpus directory.
+#
+# There is NO credential in them. The key travels in the Authorization header,
+# and headers are never written here: `headers` is built once in `_relay` and
+# handed to urllib, and nothing in this file serialises it. Verified by
+# inspection of every write path (record(), _write_budget, _update_inflight,
+# _capture_write) — only `record()` touches the ledger and only bodies reach
+# BODY_DIR. `_scrub` is deliberately NOT applied to a captured body: it exists
+# to keep a key out of a provider's error prose, and running those patterns over
+# a 620 KB prompt would rewrite the one thing a replay needs, the exact bytes.
+BODY_DIR = os.environ.get("UPSTREAM_BODY_DIR", "")
+# Generous on purpose: 32 MiB is ~50x the largest request measured on this lane,
+# so the cap only fires on something already pathological — and when it fires it
+# says so in the row rather than leaving a short file that reads as complete.
+_BODY_MAX_DEFAULT = 32 * 1024 * 1024
+BODY_MAX_BYTES = int(os.environ.get("UPSTREAM_BODY_MAX_BYTES") or _BODY_MAX_DEFAULT)
+if BODY_MAX_BYTES <= 0:
+    # A zero or negative cap would capture nothing while marking every row
+    # truncated: a file that exists, is empty, and blames the body. Refuse the
+    # value instead of encoding it — the same rule as `_positive_env`.
+    raise ValueError("UPSTREAM_BODY_MAX_BYTES must be a positive integer")
 
 
 def _positive_env(name):
@@ -386,6 +427,73 @@ def _err_text(payload):
     return payload.decode("utf-8", "replace").strip()[:_ERR_CHARS] or None
 
 
+def _capture_new(request_id):
+    return {"request_id": request_id, "request_file": None, "response_file": None,
+            "request_truncated": False, "response_truncated": False, "error": None}
+
+
+def _capture_row(capture):
+    """The fields that make the JSONL -> file join explicit instead of guessed.
+
+    Empty when capture is off, so a run without UPSTREAM_BODY_DIR keeps writing
+    rows with exactly the keys every previous run wrote — the ledger's shape is
+    already parsed by validate-run.py and by hand-written probes, and a new key
+    appearing unbidden is how a "no-op" flag breaks a reader.
+    """
+    if not BODY_DIR:
+        return {}
+    return {"request_id": capture["request_id"],
+            "body_request_file": capture["request_file"],
+            "body_response_file": capture["response_file"],
+            "body_request_truncated": capture["request_truncated"],
+            "body_response_truncated": capture["response_truncated"],
+            "body_capture_error": capture["error"]}
+
+
+def _capture_write(name, chunks, capture, which):
+    """gzip `chunks` into BODY_DIR/name, temp-then-rename, and never raise.
+
+    This code sits in the paid request path, so every failure mode has to end as
+    a note in the row. A capture that could abort or stall a relay would trade
+    away the run it is trying to observe — the same trade `_update_inflight` and
+    the `record()` call sites already refuse with their bare `except OSError`.
+    Temp-then-rename means a reader never finds a half-written .gz and mistakes
+    a truncated member for a truncated body.
+    """
+    total = 0
+    truncated = False
+    kept = []
+    for chunk in chunks:
+        room = BODY_MAX_BYTES - total
+        if room <= 0:
+            truncated = True
+            break
+        if len(chunk) > room:
+            kept.append(chunk[:room])
+            total += room
+            truncated = True
+            break
+        kept.append(chunk)
+        total += len(chunk)
+    temporary = os.path.join(BODY_DIR, ".%s.%d.%s.tmp"
+                             % (name, os.getpid(), uuid.uuid4().hex))
+    try:
+        os.makedirs(BODY_DIR, exist_ok=True)
+        with gzip.open(temporary, "wb", compresslevel=6) as target:
+            for chunk in kept:
+                target.write(chunk)
+        os.replace(temporary, os.path.join(BODY_DIR, name))
+    except Exception as exc:
+        try:
+            os.unlink(temporary)
+        except OSError:
+            pass
+        capture["error"] = ("%s: %s" % (which, exc))[:300]
+        return
+    capture[which + "_file"] = name
+    capture[which + "_truncated"] = truncated
+
+
 def _scan_obj(obj, state):
     """Pull what we care about out of one response object.
 
@@ -493,6 +601,13 @@ class Proxy(BaseHTTPRequestHandler):
         req = urllib.request.Request(self._upstream_url(), data=body or None,
                                      headers=headers, method=self.command)
         request_id = uuid.uuid4().hex
+        capture = _capture_new(request_id)
+        if BODY_DIR:
+            # The bytes captured are the bytes actually SENT — after the
+            # UPSTREAM_MODEL rewrite above, not as the client wrote them. A
+            # replay has to reproduce what the provider saw, and the rewrite is
+            # exactly the kind of proxy-side edit a reader would never guess.
+            _capture_write("%s.req.json.gz" % request_id, [body], capture, "request")
         try:
             _update_inflight(request_id, {
                 "started_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
@@ -510,7 +625,7 @@ class Proxy(BaseHTTPRequestHandler):
                  "usage": None, "finish_reason": None,
                  "stream_events": 0, "stream_parse_errors": 0,
                  "stream_complete": None, "stream_bytes": 0,
-                 "response_valid": False}
+                 "response_valid": False, "res_chunks": []}
         status = None
         attempt = 0
         try:
@@ -538,11 +653,19 @@ class Proxy(BaseHTTPRequestHandler):
                     # and discarded here, which is why every 400 in this ledger
                     # is a bare status code with no reason attached.
                     try:
-                        why = _err_text(e.read())
+                        raw = e.read()
                     except Exception:
-                        why = None
+                        raw = b""
+                    why = _err_text(raw)
+                    if BODY_DIR:
+                        # upstream_error keeps 300 chars so the ledger stays
+                        # readable; the file keeps all of it, which is where a
+                        # provider's structured refusal actually lives.
+                        _capture_write("%s.a%d.res.json.gz" % (request_id, attempt),
+                                       [raw], capture, "response")
                     try:
-                        record(request_max_tokens=request_max_tokens, requested_model=requested, returned_model=None,
+                        record(**_capture_row(capture),
+                               request_max_tokens=request_max_tokens, requested_model=requested, returned_model=None,
                                tool_call=False, status=status, attempt=attempt,
                                duration_ms=int((time.time() - t_try) * 1000),
                                sent_model=sent, request_bytes=len(body),
@@ -564,7 +687,8 @@ class Proxy(BaseHTTPRequestHandler):
                 break
             except Exception as e:                   # DNS, TLS, refused, timeout
                 try:
-                    record(request_max_tokens=request_max_tokens, requested_model=requested, returned_model=None,
+                    record(**_capture_row(capture),
+                           request_max_tokens=request_max_tokens, requested_model=requested, returned_model=None,
                            tool_call=False, status=None, error=str(e)[:300],
                            attempt=attempt,
                            duration_ms=int((time.time() - t0) * 1000), sent_model=sent,
@@ -600,8 +724,16 @@ class Proxy(BaseHTTPRequestHandler):
                   _record_budget_result(success)
               except BudgetUnknown:
                   pass
+              if BODY_DIR:
+                  # Written in the same `finally` that records the row, so a
+                  # client disconnect mid-stream still leaves the bytes that DID
+                  # arrive on disk — a partial stream is the case worth reading.
+                  _capture_write("%s.a%d.res.%s.gz"
+                                 % (request_id, attempt, "sse" if streaming else "json"),
+                                 state["res_chunks"], capture, "response")
               try:
-                  record(request_max_tokens=request_max_tokens, requested_model=requested,
+                  record(**_capture_row(capture),
+                         request_max_tokens=request_max_tokens, requested_model=requested,
                          returned_model=state["returned_model"], attempt=attempt,
                          tool_call=state["tool_call"], status=status,
                          usage=state["usage"], finish_reason=state["finish_reason"],
@@ -637,6 +769,8 @@ class Proxy(BaseHTTPRequestHandler):
 
     def _pump_whole(self, resp, status, state):
         payload = resp.read()
+        if BODY_DIR:
+            state["res_chunks"].append(payload)
         # The body is read exactly once and then relayed verbatim, so recording
         # the reason cannot consume the client's copy — a proxy that logs why and
         # hands the client an empty 400 has moved the blindness, not removed it.
@@ -661,6 +795,11 @@ class Proxy(BaseHTTPRequestHandler):
         self.close_connection = True
         for raw in resp:
             state["stream_bytes"] += len(raw)
+            if BODY_DIR:
+                # Appended before the relay write so a client that hangs up
+                # cannot cost us the chunk we already read off the wire. Raw,
+                # unparsed: the concatenation IS the stream as it arrived.
+                state["res_chunks"].append(raw)
             self.wfile.write(raw)
             self.wfile.flush()
             line = raw.strip()
