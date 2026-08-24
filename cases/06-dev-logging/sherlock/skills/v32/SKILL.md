@@ -5,7 +5,7 @@ hooks:
   Stop:
     - hooks:
         - type: command
-          command: "for p in \"$QWEN_SKILL_ROOT/tools/stopcheck.py\" ./.*/skills/*/tools/stopcheck.py \"$HOME\"/.*/skills/*/tools/stopcheck.py; do [ -f \"$p\" ] && exec python3 \"$p\"; done"
+          command: "python3 \"$QWEN_SKILL_ROOT/tools/stopcheck.py\""
 ---
 
 # Sherlock — расследование инцидентов по логам
@@ -16,6 +16,13 @@ hooks:
 
 ## ОБЯЗАТЕЛЬНЫЙ АВТОМАТ v32: CHECKPOINT → SYNTHESIS → VERIFY → DELIVER
 
+**`<БАЗОВЫЙ_КАТАЛОГ_НАВЫКА>` — это абсолютный путь, который тебе уже выдали.**
+Первая строка при загрузке навыка: «Base directory for this skill: …». Подставляй
+её в каждую команду ниже и НЕ угадывай путь: каталог навыка не совпадает с твоим
+рабочим каталогом, и относительный `tools/logmap.py` не разрешится. Если этой
+строки нет, найди инструменты один раз — `ls -d */tools/logmap.py ../*/tools/logmap.py
+~/.*/skills/*/tools/logmap.py 2>/dev/null` — и дальше используй найденный каталог.
+
 Длинную инструкцию легко забыть. Поэтому держи состояние на диске и не переходи
 дальше, пока файл и команда текущего состояния не выполнены. Если уже есть
 `work/checkpoint.json`, сначала прочитай его. При состоянии
@@ -24,7 +31,7 @@ hooks:
 
 1. **MAP** — первым действием запусти:
 
-       python3 "$(ls "$QWEN_SKILL_ROOT"/tools/logmap.py ./.*/skills/*/tools/logmap.py ~/.*/skills/*/tools/logmap.py 2>/dev/null | head -1)" <КАТАЛОГ_ЛОГОВ> --out ./work
+       python3 <БАЗОВЫЙ_КАТАЛОГ_НАВЫКА>/tools/logmap.py <КАТАЛОГ_ЛОГОВ> --out ./work
 
    Затем прочитай `work/map.txt`, `work/worklist.tsv`, `work/axis3.tsv`. Если есть
    `work/hosts.tsv`, работай по файлам `work/map-<хост>.txt` и
@@ -33,7 +40,7 @@ hooks:
    `work/worklist.tsv` или в каждый `work/worklist-<хост>.tsv`. Массовые закрытия
    запиши в `work/rules.tsv`. Проверка:
 
-       python3 "$(ls "$QWEN_SKILL_ROOT"/tools/triagecheck.py ./.*/skills/*/tools/triagecheck.py ~/.*/skills/*/tools/triagecheck.py 2>/dev/null | head -1)" --worklist ./work/worklist.tsv --rules ./work/rules.tsv --corpus <КАТАЛОГ_ЛОГОВ>
+       python3 <БАЗОВЫЙ_КАТАЛОГ_НАВЫКА>/tools/triagecheck.py --worklist ./work/worklist.tsv --rules ./work/rules.tsv --corpus <КАТАЛОГ_ЛОГОВ>
 
    При нескольких хостах выполни эту команду для каждого `work/worklist-<хост>.tsv`.
 3. **DRAFT** — только теперь, непосредственно перед написанием черновика, прочитай
@@ -41,13 +48,13 @@ hooks:
    `work/report.md`.
 4. **VERIFY** — проверь тот же файл, который собираешься сдавать:
 
-       python3 "$(ls "$QWEN_SKILL_ROOT"/tools/citecheck.py ./.*/skills/*/tools/citecheck.py ~/.*/skills/*/tools/citecheck.py 2>/dev/null | head -1)" work/report.md --corpus <КАТАЛОГ_ЛОГОВ> --require-quote --ledger ./work/worklist.tsv
+       python3 <БАЗОВЫЙ_КАТАЛОГ_НАВЫКА>/tools/citecheck.py work/report.md --corpus <КАТАЛОГ_ЛОГОВ> --require-quote --ledger ./work/worklist.tsv
 
    При нескольких хостах выполни с `--ledger` для каждого `work/worklist-<хост>.tsv`.
 
    И перепись изменений состояния — она проверяет не твои ссылки, а корпус:
 
-       python3 "$(ls "$QWEN_SKILL_ROOT"/tools/statecheck.py ./.*/skills/*/tools/statecheck.py ~/.*/skills/*/tools/statecheck.py 2>/dev/null | head -1)" --corpus <КАТАЛОГ_ЛОГОВ> --report work/report.md
+       python3 <БАЗОВЫЙ_КАТАЛОГ_НАВЫКА>/tools/statecheck.py --corpus <КАТАЛОГ_ЛОГОВ> --report work/report.md
 
    Каждая её группа должна быть названа в отчёте: находкой или явным «норма» с
    цитатой. Ненулевой код — ты о чём-то не сказал ни слова.
@@ -123,7 +130,7 @@ hooks:
 
 **Первое действие — эта команда, раньше любого `ls`, `grep` и `read_file`:**
 
-    python3 "$(ls "$QWEN_SKILL_ROOT"/tools/logmap.py ./.*/skills/*/tools/logmap.py ~/.*/skills/*/tools/logmap.py 2>/dev/null | head -1)" <КАТАЛОГ_ЛОГОВ> --out ./work
+    python3 <БАЗОВЫЙ_КАТАЛОГ_НАВЫКА>/tools/logmap.py <КАТАЛОГ_ЛОГОВ> --out ./work
 
 `<КАТАЛОГ_ЛОГОВ>` — подставь путь из задачи целиком, как он там написан (обычно он
 абсолютный). Каталога `./logs` в твоём рабочем каталоге, скорее всего, **нет**. Если
@@ -430,14 +437,14 @@ hooks:
 обязан был быть, — это улика, и сам ты её не увидишь), и отказывается подтвердить
 несуществующую связь между двумя сущностями (`verdict: not-in-corpus`).
 
-    python3 "$(ls "$QWEN_SKILL_ROOT"/tools/logjoin.py ./.*/skills/*/tools/logjoin.py ~/.*/skills/*/tools/logjoin.py 2>/dev/null | head -1)" ORD-77421 --corpus <КАТАЛОГ_ЛОГОВ>
-    python3 "$(ls "$QWEN_SKILL_ROOT"/tools/logjoin.py ./.*/skills/*/tools/logjoin.py ~/.*/skills/*/tools/logjoin.py 2>/dev/null | head -1)" c-8f3a2b91 10.42.12.31 --corpus <КАТАЛОГ_ЛОГОВ> --json
+    python3 <БАЗОВЫЙ_КАТАЛОГ_НАВЫКА>/tools/logjoin.py ORD-77421 --corpus <КАТАЛОГ_ЛОГОВ>
+    python3 <БАЗОВЫЙ_КАТАЛОГ_НАВЫКА>/tools/logjoin.py c-8f3a2b91 10.42.12.31 --corpus <КАТАЛОГ_ЛОГОВ> --json
 
 **Когда идентификатора ещё нет, есть окно.** `--window` не ищет ничего: он
 строит интервалы `[вход, выход]` интерактивных сеансов с внешних адресов и
 раскладывает по ним изменения состояния из переписи `statecheck`:
 
-    python3 "$(ls "$QWEN_SKILL_ROOT"/tools/logjoin.py ./.*/skills/*/tools/logjoin.py ~/.*/skills/*/tools/logjoin.py 2>/dev/null | head -1)" --window --corpus <КАТАЛОГ_ЛОГОВ>
+    python3 <БАЗОВЫЙ_КАТАЛОГ_НАВЫКА>/tools/logjoin.py --window --corpus <КАТАЛОГ_ЛОГОВ>
 
 Внутри окна группы идут **от самой редкой к самой частой**, и субъект каждой
 группы напечатан рядом. Первый вход на машину регистрирует двести правил
@@ -456,11 +463,11 @@ hooks:
 Перед сдачей перечитай каждую строку, на которую ссылаешься, по её точному адресу
 `файл:строка`. Затем прогони отчёт через проверку — это **один** вызов:
 
-    python3 "$(ls "$QWEN_SKILL_ROOT"/tools/citecheck.py ./.*/skills/*/tools/citecheck.py ~/.*/skills/*/tools/citecheck.py 2>/dev/null | head -1)" work/report.md --corpus <КАТАЛОГ_ЛОГОВ> --require-quote --ledger ./work/worklist.tsv
+    python3 <БАЗОВЫЙ_КАТАЛОГ_НАВЫКА>/tools/citecheck.py work/report.md --corpus <КАТАЛОГ_ЛОГОВ> --require-quote --ledger ./work/worklist.tsv
 
 И вторая проверка — на чём держится сам разбор списка:
 
-    python3 "$(ls "$QWEN_SKILL_ROOT"/tools/triagecheck.py ./.*/skills/*/tools/triagecheck.py ~/.*/skills/*/tools/triagecheck.py 2>/dev/null | head -1)" --worklist ./work/worklist.tsv --rules ./work/rules.tsv --corpus <КАТАЛОГ_ЛОГОВ>
+    python3 <БАЗОВЫЙ_КАТАЛОГ_НАВЫКА>/tools/triagecheck.py --worklist ./work/worklist.tsv --rules ./work/rules.tsv --corpus <КАТАЛОГ_ЛОГОВ>
 
 Она раскладывает закрытые строки по трём корзинам — **поимённо** (своя ссылка с
 цитатой или блок находки), **по правилу** (`#R1` из `rules.tsv`) и **без опоры**
@@ -542,7 +549,7 @@ hooks:
 именно пара «фраза + адрес». Положи текст поставки в файл и проверь его вместе с
 черновиком:
 
-    python3 "$(ls "$QWEN_SKILL_ROOT"/tools/citecheck.py ./.*/skills/*/tools/citecheck.py ~/.*/skills/*/tools/citecheck.py 2>/dev/null | head -1)" work/report.md --corpus <КАТАЛОГ_ЛОГОВ> --delivered handover.md
+    python3 <БАЗОВЫЙ_КАТАЛОГ_НАВЫКА>/tools/citecheck.py work/report.md --corpus <КАТАЛОГ_ЛОГОВ> --delivered handover.md
 
 Ненулевой возврат означает одно из двух: в поставке есть ссылка, которой не было
 в подтверждённом наборе, либо её собственная проверка не зелёная — включая
@@ -568,7 +575,7 @@ hooks:
 `triagecheck` — твои вердикты. Ни один не видит того, о чём ты промолчал. Третий
 идёт с другой стороны — от корпуса к отчёту:
 
-    python3 "$(ls "$QWEN_SKILL_ROOT"/tools/statecheck.py ./.*/skills/*/tools/statecheck.py ~/.*/skills/*/tools/statecheck.py 2>/dev/null | head -1)" --corpus <КАТАЛОГ_ЛОГОВ> --report work/report.md
+    python3 <БАЗОВЫЙ_КАТАЛОГ_НАВЫКА>/tools/statecheck.py --corpus <КАТАЛОГ_ЛОГОВ> --report work/report.md
 
 Он один раз проходит корпус и выписывает **каждую** запись об изменении
 состояния: установка службы, задание планировщика, автозапуск, подписка WMI,
