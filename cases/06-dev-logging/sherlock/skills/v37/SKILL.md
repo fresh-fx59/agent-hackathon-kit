@@ -304,6 +304,12 @@ there.
 
 ## 7. Step 4. Checking and delivery
 
+**NEVER TYPE THE COVERAGE TABLE BY HAND EITHER:**
+
+    python3 <SKILL_BASE_DIR>/tools/covermap.py --corpus <LOG_DIR> --worklist ./work/worklist.tsv --header
+
+One row per corpus file, quoting the `logmap`-flagged line — preferring the one triage called a defect. Every file must appear: `citecheck` blocks on any that does not, and «не смотрел» does NOT discharge a file, because nothing can check it. Paste the output as the «Покрытие» section; statuses are read off the files, never invented.
+
 **NEVER TYPE A CITATION BY HAND** — that is what re-reading the address means now:
 
     python3 <SKILL_BASE_DIR>/tools/cite.py --corpus <LOG_DIR> System.jsonl:263 --contains 3proxy
