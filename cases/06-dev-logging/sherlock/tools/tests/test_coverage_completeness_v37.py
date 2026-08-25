@@ -100,6 +100,57 @@ class TestDeletingRowsMustNotHelp(Base):
         return int(m.group(1))
 
 
+class TestTheCheckCannotBeGamed(Base):
+    """The first version of this fix created a new cheapest path to green.
+
+    MEASURED on the real v36 report: appending one «| path | не смотрел |
+    причина=лимит |» row per uncovered file — 12,368 bytes of mechanical string,
+    zero investigation — took blocking from 134 to 5. A review caught it.
+
+    «не смотрел» is an admission, not coverage. The other no-address statuses
+    stay valid because citecheck verifies them against the file itself.
+    """
+
+    def report_with(self, rows):
+        body = HEAD + ("## Покрытие\n\n| путь | статус | улики |\n"
+                       "| --- | --- | --- |\n")
+        for name, status, detail in rows:
+            body += "| %s | %s | %s |\n" % (name, status, detail)
+        return body + "\n## ВЕРДИКТ\n\nчисто\n"
+
+    def blocking_for(self, rows):
+        import re
+        path = os.path.join(self.dir, "g.md")
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(self.report_with(rows))
+        out = subprocess.run([sys.executable, V37, path, "--corpus", self.corpus,
+                              "--require-quote"], capture_output=True, text=True).stdout
+        m = re.search(r"v26: (\d+) блокирующих", out)
+        return int(m.group(1)), out
+
+    def test_ne_smotrel_does_not_discharge_a_file(self):
+        real = [("a.jsonl", "наблюдение", "a.jsonl:1 «ServiceName»")]
+        skipped = real + [("b.jsonl", "не смотрел", "причина=лимит"),
+                          ("c.jsonl", "не смотрел", "причина=лимит")]
+        bare, _ = self.blocking_for(real)
+        gamed, out = self.blocking_for(skipped)
+        self.assertEqual(gamed, bare,
+                         "«не смотрел» rows must buy nothing (bare=%d gamed=%d)"
+                         % (bare, gamed))
+        self.assertIn("НЕ СМОТРЕЛ", out)
+
+    def test_verified_no_address_statuses_still_discharge(self):
+        """«пусто» is checked against the file, so it is real coverage."""
+        with open(os.path.join(self.corpus, "b.jsonl"), "w"):
+            pass                                    # genuinely empty now
+        rows = [("a.jsonl", "наблюдение", "a.jsonl:1 «ServiceName»"),
+                ("b.jsonl", "пусто", "байт=0"),
+                ("c.jsonl", "наблюдение", "c.jsonl:1 «ServiceName»")]
+        _n, out = self.blocking_for(rows)
+        self.assertNotIn("НЕ ПОКРЫТО", out)
+        self.assertNotIn("НЕ СМОТРЕЛ", out)
+
+
 class TestV36StillCarriesTheDefect(Base):
     """v36 has a paid result attached; it is frozen and must stay broken."""
 

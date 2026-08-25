@@ -1363,9 +1363,23 @@ def report_evidence(report, checked=None):
     #
     # Nothing is exempt: the row grammar already has «пусто», «двоичный»,
     # «нечитабельно» and «не смотрел», so every file on disk can be answered.
-    cov_uncovered = []
+    #
+    # «не смотрел» IS AN ADMISSION, NOT COVERAGE. The first version of this check
+    # counted any row as coverage, which made 12,368 bytes of «| path | не
+    # смотрел | причина=лимит |» the new cheapest path to green: on the real v36
+    # report it took blocking from 134 to 5. That is the same lie in a new shape.
+    #
+    # The other no-address statuses stay valid because they are MACHINE-CHECKED
+    # against the file — `cov_false_empty` catches «пусто» on a non-empty file
+    # and `cov_false_binary` catches «двоичный» on text. Only «не смотрел» is
+    # unverifiable by construction, so only it fails to discharge the file.
+    cov_uncovered, cov_unexamined = [], []
     if by_rel and not index_truncated:
+        examined = {resolved for resolved, rows in path_rows.items()
+                    if any((r.get("status") or "").strip().lower() != "не смотрел"
+                           for r in rows)}
         cov_uncovered = sorted(set(by_rel) - set(path_rows))
+        cov_unexamined = sorted(set(path_rows) - examined)
 
     blocking = (len(attr_missing) + len(attr_invalid) + len(finding_dupes)
                 + (1 if rejected_missing_section else 0)
@@ -1382,7 +1396,7 @@ def report_evidence(report, checked=None):
                 + len(cov_traversal) + len(cov_ambiguous) + len(cov_missing_path)
                 + len(cov_false_empty) + len(cov_false_binary)
                 + len(cov_duplicate_paths)
-                + len(cov_uncovered)
+                + len(cov_uncovered) + len(cov_unexamined)
                 + (1 if index_truncated else 0))
     return {
         "grammar": {
@@ -1426,6 +1440,7 @@ def report_evidence(report, checked=None):
                      "false_binary": [r["report_line"] for r in cov_false_binary],
                      "duplicate_paths": cov_duplicate_paths,
                      "uncovered_paths": cov_uncovered,
+                    "unexamined_paths": cov_unexamined,
                      "index_truncated": index_truncated,
                      "unsupported_no_address": [r["report_line"] for r in cov_unsupported],
                      "invalid_no_address_detail": [r["report_line"] for r in cov_smuggled],
@@ -1471,9 +1486,18 @@ def render_report_evidence(e):
             out.append("    · %s" % path)
         if len(unc) > 20:
             out.append("    · … и ещё %d" % (len(unc) - 20))
-        out.append("  Каждый файл корпуса обязан получить строку. Не смотрел — "
-                   "так и напиши: «не смотрел» + причина=лимит. Удаление строки "
-                   "теперь только ухудшает счёт.")
+        out.append("  Каждый файл корпуса обязан получить строку.")
+    unex = c.get("unexamined_paths") or []
+    if unex:
+        out.append("  НЕ СМОТРЕЛ: %d файлов закрыты признанием, а не проверкой"
+                   % len(unex))
+        for path in unex[:20]:
+            out.append("    · %s" % path)
+        if len(unex) > 20:
+            out.append("    · … и ещё %d" % (len(unex) - 20))
+        out.append("  «не смотрел» — это честная запись, но она НЕ закрывает файл: "
+                   "её нечем проверить. «пусто» и «двоичный» закрывают, потому что "
+                   "их сверяют с файлом. Посмотри — или оставь и не жди зелёного.")
     if a["missing"]:
         out.append("  находки без атрибуции: %s" % ", ".join("Н-%s" % x for x in a["missing"]))
     for bad in a["invalid"][:8]:
@@ -1537,18 +1561,28 @@ def render_report_evidence(e):
     return "\n".join(out)
 
 
-def _blocking_total(d, report):
-    """The same sum `ledger()` prints as «осталось N», without the rendering.
+def _blocking_total(d, report, ledger_path=None, report_path=None):
+    """The stop number, taken from `ledger()` itself when there is a ledger.
 
-    Kept next to it deliberately: two definitions of "how many defects" is how a
-    gate ends up reporting one number and exiting on another.
+    The first version of this re-derived the sum and got it WRONG — it dropped
+    `unproven` (findings with no confirmed quote), `open_rows` (unparsed ledger
+    rows) and two of the six BAD verdicts, so it printed 160 where the gate
+    printed «осталось 161», and a report with 200 open rows would have reported
+    blocking: 0. A review caught it. Its own docstring had warned that two
+    definitions of "how many defects" is how a gate reports one number and exits
+    on another — and then was one.
+
+    So there is one definition. With a ledger, ask `ledger()`. Without one, fall
+    back to the parts that exist, and say so via the `ledger` key in the JSON.
     """
+    if ledger_path:
+        _body, total = ledger(d, report, ledger_path, report_path)
+        return total
     summary = d.get("summary") or {}
-    bad = sum(summary.get(k, 0) for k in
-              ("wrong-content", "out-of-range", "missing-file", "no-quote"))
+    bad = sum(summary.get(k, 0) for k in BAD)
     o = d.get("outcomes") or {}
     ev = d.get("report_evidence") or report_evidence(report, d)
-    return (bad + len(d.get("non_references") or [])
+    return (bad + (summary.get("не-ссылка") or 0)
             + (o.get("blocking") or 0) + (ev.get("blocking") or 0))
 
 
@@ -1860,7 +1894,9 @@ def main():
         # `ledger()` computes it and returns it beside the human render; the
         # JSON carried only the parts, so run-bench.sh's blocking check was
         # dead for this gate. Recomputed here from the same pieces.
-        d["blocking"] = _blocking_total(d, text)
+        d["blocking"] = _blocking_total(
+            d, text, args.ledger,
+            None if args.report == "-" else args.report)
     print(json.dumps(d, ensure_ascii=False, indent=1) if args.json else render(d))
     if args.delivered and not args.json:
         print(render_delivery(d["delivered"]))

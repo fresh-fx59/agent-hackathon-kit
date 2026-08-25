@@ -69,8 +69,13 @@ GOOD = (b'data: {"id":"x","model":"deepseek-v4-flash-0731","choices":'
 
 
 class Upstream(BaseHTTPRequestHandler):
-    """Serves whatever `Upstream.script` says, with an optional silent gap."""
+    """Serves whatever `Upstream.script` says, with an optional silent gap.
+
+    `drip` sends N content-free keepalives before the body — the attack that
+    defeats a per-read timeout, because every chunk resets it.
+    """
     script = (0.0, GOOD)
+    drip = (0, 0.0)
 
     def log_message(self, *args):
         pass
@@ -78,12 +83,17 @@ class Upstream(BaseHTTPRequestHandler):
     def do_POST(self):
         self.rfile.read(int(self.headers.get("Content-Length") or 0))
         delay, body = self.script
+        count, gap = self.drip
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream")
         self.end_headers()
         # The whole point: headers land at once, the body does not.
         time.sleep(delay)
         try:
+            for _ in range(count):
+                self.wfile.write(USAGE_ONLY.split(b"data: [DONE]")[0])
+                self.wfile.flush()
+                time.sleep(gap)
             self.wfile.write(body)
             self.wfile.flush()
         except Exception:
@@ -94,6 +104,7 @@ class ProxyCase(unittest.TestCase):
     ENV = {}
 
     def setUp(self):
+        Upstream.drip = (0, 0.0)
         self.tmp = tempfile.TemporaryDirectory()
         self.root = pathlib.Path(self.tmp.name)
         self.upstream = ThreadingHTTPServer(("127.0.0.1", 0), Upstream)
@@ -173,6 +184,33 @@ class TestFirstTokenDeadline(ProxyCase):
         row = self.receipt()
         self.assertGreater(row.get("content_events") or 0, 0, row)
         self.assertIsInstance(row.get("ttft_ms"), int, row)
+
+
+class TestKeepaliveCannotResetTheDeadline(ProxyCase):
+    """settimeout() bounds ONE read; a drip resets it forever.
+
+    MEASURED on the first version of this fix: 20 usage-only chunks 0.4 s apart
+    ran 8.06 s against a 0.8 s deadline with content_events=0 and NO error. The
+    deadline is a budget now, not an idle timeout.
+    """
+    ENV = {"UPSTREAM_FIRST_TOKEN_MS": "800"}
+
+    def test_content_free_keepalives_do_not_extend_the_budget(self):
+        Upstream.script = (0.0, USAGE_ONLY)
+        Upstream.drip = (20, 0.4)               # 8 s of keepalives
+        elapsed = self.post()
+        self.assertLess(elapsed, 3.0,
+                        "a dripping dud ran %.2fs against a 0.8s budget" % elapsed)
+        self.assertEqual(self.receipt().get("upstream_error"),
+                         "first_token_deadline_exceeded")
+
+    def test_a_slow_first_token_still_wins_if_it_arrives_in_time(self):
+        Upstream.script = (0.0, GOOD)
+        Upstream.drip = (1, 0.3)
+        self.post()
+        row = self.receipt()
+        self.assertIsNone(row.get("upstream_error"), row)
+        self.assertGreater(row.get("content_events") or 0, 0)
 
 
 class TestDeadlineOffByDefault(ProxyCase):

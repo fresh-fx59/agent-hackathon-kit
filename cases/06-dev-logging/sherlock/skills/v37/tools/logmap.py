@@ -116,6 +116,7 @@ import argparse
 import calendar
 import gzip
 import json
+import hashlib
 import os
 import random
 import re
@@ -3862,15 +3863,26 @@ def write_worklist_views(out_dir, lines, header):
 
     head = "".join(header)
     written = []
+    taken = {}
     for axis in sorted(by_axis):
+        slug = _slug_axis(axis, taken)
         chunk, size, part = [], 0, 0
         def flush():
             if not chunk:
                 return
-            name = "view-%s-%02d.tsv" % (_slug_axis(axis), part)
+            name = "view-%s-%02d.tsv" % (slug, part)
             _write_text_atomic(out_dir, name, head + "".join(chunk))
-            written.append((name, axis, len(chunk),
-                            len(head.encode("utf-8")) + size,
+            total = len(head.encode("utf-8")) + size
+            if total > VIEW_READ_CAP:
+                # NEVER SILENTLY. One row can exceed the whole budget, and the
+                # index promises every view fits a single read. An oversized
+                # view is legal — dropping the row would be a silent cap — but
+                # it must announce itself, in the file and in the index.
+                sys.stderr.write(
+                    "logmap: %s = %d байт, больше предела чтения %d — "
+                    "одна строка не влезает целиком; читай её по адресу.\n"
+                    % (name, total, VIEW_READ_CAP))
+            written.append((name, axis, len(chunk), total,
                             _row_id(chunk[0]), _row_id(chunk[-1])))
         for line in by_axis[axis]:
             n = len(line.encode("utf-8"))
@@ -3885,10 +3897,28 @@ def write_worklist_views(out_dir, lines, header):
     return written
 
 
-def _slug_axis(axis):
+def _slug_axis(axis, taken=None):
+    """A filename-safe, COLLISION-FREE slug for one axis name.
+
+    The first version mapped every non-ASCII character to "-" and fell back to
+    "x", so `всплеск`, `редкое` and the built-in fallback label `прочее` all
+    became `view-x-01.tsv` and silently overwrote each other — rows lost with no
+    complaint, which is precisely the failure the union test exists to catch.
+    Two ASCII axes sharing a 24-character prefix collided the same way.
+
+    So the slug is disambiguated against what has already been handed out, with
+    a short hash of the real axis name as the tiebreaker.
+    """
     keep = [c if (c.isalnum() and c.isascii()) else "-" for c in axis.lower()]
-    slug = "".join(keep).strip("-") or "x"
-    return slug[:24]
+    slug = "".join(keep).strip("-")[:24].strip("-")
+    digest = hashlib.sha256(axis.encode("utf-8")).hexdigest()[:6]
+    if not slug:
+        slug = "ax-" + digest
+    if taken is not None and taken.get(slug, axis) != axis:
+        slug = "%s-%s" % (slug, digest)
+    if taken is not None:
+        taken[slug] = axis
+    return slug
 
 
 def _row_id(line):
@@ -3901,8 +3931,14 @@ def write_worklist_index(out_dir, written, total_rows):
            "# ЧИТАЙ СРЕЗ, НЕ worklist.tsv. Каждый срез влезает в одно чтение;\n",
            "# worklist.tsv (%d строк) — леджер для citecheck/triagecheck, не для чтения.\n"
            % total_rows]
+    over = [w for w in written if w[3] > VIEW_READ_CAP]
+    if over:
+        out.append("# ВНИМАНИЕ: %d срез(ов) больше предела чтения %d байт — "
+                   "помечены ЦЕЛИКОМ-НЕ-ВЛЕЗЕТ.\n" % (len(over), VIEW_READ_CAP))
     for name, axis, rows, size, first, last in written:
-        out.append("%s\t%s\t%d\t%d\t%s\t%s\n" % (name, axis, rows, size, first, last))
+        flag = "\tЦЕЛИКОМ-НЕ-ВЛЕЗЕТ" if size > VIEW_READ_CAP else ""
+        out.append("%s\t%s\t%d\t%d\t%s\t%s%s\n"
+                   % (name, axis, rows, size, first, last, flag))
     return _write_text_atomic(out_dir, "worklist-index.tsv", "".join(out))
 
 

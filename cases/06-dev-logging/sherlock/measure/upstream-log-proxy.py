@@ -683,6 +683,7 @@ class Proxy(BaseHTTPRequestHandler):
                  "usage": None, "finish_reason": None,
                  "stream_events": 0, "stream_parse_errors": 0,
                  "content_events": 0, "ttft_ms": None, "stream_started_at": None,
+                 "deadline_unenforceable": False,
                  "stream_complete": None, "stream_bytes": 0,
                  "response_valid": False, "res_chunks": []}
         status = None
@@ -800,6 +801,7 @@ class Proxy(BaseHTTPRequestHandler):
                          request_bytes=len(body), path=self.path, stream=streaming,
                          upstream_error=state["error"], stream_events=state["stream_events"],
                          content_events=state["content_events"], ttft_ms=state["ttft_ms"],
+                         deadline_unenforceable=state["deadline_unenforceable"] or None,
                          stream_parse_errors=state["stream_parse_errors"],
                          stream_complete=state["stream_complete"], stream_bytes=state["stream_bytes"])
               except OSError:
@@ -857,6 +859,18 @@ class Proxy(BaseHTTPRequestHandler):
         """
         it = iter(resp)
         while True:
+            # TWO CLOCKS, because one is not enough. settimeout() bounds a
+            # SINGLE read, so an upstream that drips a usage-only keepalive
+            # faster than the deadline resets it forever: MEASURED at 8.06 s
+            # against a 0.8 s deadline, zero content, no error recorded. The
+            # elapsed check below is the budget; the socket timeout is what
+            # catches the stream that says nothing at all.
+            if (UPSTREAM_FIRST_TOKEN_MS and not state["content_events"]
+                    and state["stream_started_at"] is not None
+                    and (time.time() - state["stream_started_at"]) * 1000
+                    > UPSTREAM_FIRST_TOKEN_MS):
+                state["error"] = "first_token_deadline_exceeded"
+                return
             try:
                 raw = next(it)
             except StopIteration:
@@ -885,9 +899,11 @@ class Proxy(BaseHTTPRequestHandler):
         state["stream_started_at"] = time.time()
         sock = _stream_socket(resp) if UPSTREAM_FIRST_TOKEN_MS else None
         if UPSTREAM_FIRST_TOKEN_MS and sock is None:
-            # Never pretend to be armed. A deadline that cannot be enforced is
-            # reported, not assumed.
-            state["error"] = "first_token_deadline_unenforceable"
+            # Never pretend to be armed. Recorded in its own field, NOT in
+            # `error`: `_scan_obj` only fills `error` when it is empty, so
+            # putting a diagnostic there would mask a real rate_limit_error
+            # spliced into the 200 body — the two fixes cancelling out.
+            state["deadline_unenforceable"] = True
         if sock is not None:
             sock.settimeout(UPSTREAM_FIRST_TOKEN_MS / 1000.0)
         for raw in self._iter_with_deadline(resp, state, sock):

@@ -333,7 +333,7 @@ for name, argv in gates.items():
                 continue
             if isinstance(candidate, dict):
                 payload = candidate
-            break
+                break
         if payload is None:                      # one object per line, older gates
             for line in text.splitlines():
                 line = line.strip()
@@ -822,11 +822,16 @@ save_trace
 # same process, and was never consulted. Any caller reading $? saw success on a
 # report its own gates had rejected. Kept as its own code so "refused" is never
 # confused with "transport failed" (2) or "delivered nothing" (3).
+# A guard whose own error path is a false green is not a guard. An unreadable
+# or malformed gates.json means the verdict is UNKNOWN, and unknown is not clean.
 GATE_VERDICT=""
 if [ -f "$TRACE/gates.json" ]; then
   GATE_VERDICT="$(python3 -c 'import json,sys
-try: print(json.load(open(sys.argv[1])).get("verdict") or "")
-except Exception: print("")' "$TRACE/gates.json" 2>/dev/null || echo "")"
+try:
+    v = json.load(open(sys.argv[1])).get("verdict")
+    print(v if isinstance(v, str) and v else "unreadable")
+except Exception: print("unreadable")' "$TRACE/gates.json" 2>/dev/null || echo "unreadable")"
+  [ -n "$GATE_VERDICT" ] || GATE_VERDICT="unreadable"
 fi
 if [ ! -f "$TRACE/candidate.json" ] || [ "${QWEN_RC:-2}" -ne 0 ]; then
   RC=2

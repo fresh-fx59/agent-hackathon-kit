@@ -130,6 +130,54 @@ class TestSlicedViews(Base):
             self.assertFalse(name.startswith("worklist-"), name)
 
 
+class TestSlicingEdges(unittest.TestCase):
+    """Two silent-loss modes a review found in the first version of this fix."""
+
+    def setUp(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("lm", LOGMAP)
+        self.lm = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(self.lm)
+        self.out = tempfile.mkdtemp()
+
+    def rows_in(self, name):
+        with open(os.path.join(self.out, name), encoding="utf-8") as fh:
+            return {l for l in fh if not l.startswith("#") and l.strip()}
+
+    def test_non_ascii_axes_get_distinct_files(self):
+        """`всплеск`, `редкое` and the fallback label `прочее` all slugged to
+        "x" and overwrote each other — half the rows vanished with no complaint.
+        `прочее` is _axis_of's own default, so this was reachable by default."""
+        rows = ["g%s%d\t?\t%s\tf.jsonl:%d\tn=1\tзапись\n" % (a[:2], i, a, i)
+                for a in ("всплеск", "редкое", "прочее") for i in range(3)]
+        written = self.lm.write_worklist_views(self.out, rows, ["# hdr\n"])
+        self.assertEqual(len({w[0] for w in written}), 3, written)
+        union = set()
+        for name, *_ in written:
+            union |= self.rows_in(name)
+        self.assertEqual(union, set(rows), "rows lost to a slug collision")
+
+    def test_long_ascii_axes_sharing_a_prefix_do_not_collide(self):
+        a, b = "x" * 30 + "aaa", "x" * 30 + "bbb"
+        rows = ["r%d\t?\t%s\tf.jsonl:1\tn=1\tz\n" % (i, ax)
+                for i, ax in enumerate((a, b))]
+        written = self.lm.write_worklist_views(self.out, rows, ["# hdr\n"])
+        self.assertEqual(len({w[0] for w in written}), 2, written)
+
+    def test_a_row_over_the_budget_is_announced_not_dropped(self):
+        """Dropping it would be a silent cap; shipping it silently makes the
+        index's promise false. So it ships and says so."""
+        big = ["B001\t?\tax\tf.jsonl:1\tn=1\t%s\n" % ("q" * 60000)]
+        written = self.lm.write_worklist_views(self.out, big, ["# hdr\n"])
+        self.lm.write_worklist_index(self.out, written, 1)
+        self.assertEqual(self.rows_in(written[0][0]), set(big), "row was dropped")
+        self.assertGreater(written[0][3], self.lm.VIEW_READ_CAP)
+        index = open(os.path.join(self.out, "worklist-index.tsv"),
+                     encoding="utf-8").read()
+        self.assertIn("ЦЕЛИКОМ-НЕ-ВЛЕЗЕТ", index)
+        self.assertIn("ВНИМАНИЕ", index)
+
+
 class TestV36StillCarriesTheDefect(Base):
     def test_v36_writes_no_views(self):
         self.run_logmap(V36_LOGMAP)
