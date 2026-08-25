@@ -809,6 +809,63 @@ with open(sys.argv[1], "w", encoding="utf-8") as fh:
     fh.write("\n")
 PY
 save_trace
+# LANE INTEGRITY, AND WHY IT OUTRANKS EVERY OTHER VERDICT BELOW. The v37 full
+# run scored, gated and reported normally while linkapi had answered 93 of its
+# 180 calls as `deepseek-v4-pro-0813` instead of the flash model the run
+# committed to. Every number that run produced describes a mixture of two
+# models, and its prompt-cache hit rate had collapsed 68.1 % -> 28.0 % in plain
+# sight of this harness. RC 2/3/4 all say something about the REPORT; this one
+# says the run measured the wrong thing, so it is checked first and has its own
+# code (5) — never confused with "transport failed" (2), "delivered nothing"
+# (3) or "its own gates refused it" (4).
+#
+# The live guard in the proxy already aborts on the offending call, which is
+# where the money is saved. This is the second reading, over the finished
+# ledger, and it exists because the guard's own failure mode — a proxy that
+# died, or never carried the expected identity — looks exactly like "nothing
+# wrong". So absence of proof is a breach here: a missing, empty or malformed
+# ledger is RC 5, not a pass. The verdict is written to an artifact because a
+# diagnosis that lives only in stderr is a diagnosis nobody reads.
+LANE_BREACH=""
+LANE_DETAIL=""
+# Built as an array, never as `${LANE_BREACH:+--reason "$LANE_BREACH"}`: that
+# form keeps the quote characters literally and hands state_set a reason with
+# quotes baked into it. Expanded at the call site with the ${a[@]+"${a[@]}"}
+# guard, because bash 3.2 reads an empty array as unbound under `set -u`.
+LANE_REASON_ARG=()
+if [ -n "${LANE_PROXY_PID:-}" ] || [ -f "${LANE_ABORT_PATH:-}" ]; then
+  LANE_AUDIT_ARGS=(--ledger "$TRACE.upstream.jsonl"
+                   --abort "${LANE_ABORT_PATH:-}"
+                   --expected "${SHERLOCK_EXPECTED_RETURNED_IDENTITY:-}"
+                   --cache-min-rate "${SHERLOCK_CACHE_MIN_RATE:-0.50}"
+                   --cache-min-calls "${SHERLOCK_CACHE_MIN_CALLS:-20}")
+  if [ "${SHERLOCK_CACHE_GUARD:-1}" = "0" ]; then
+    LANE_AUDIT_ARGS+=(--no-cache-guard)
+  fi
+  if LANE_BREACH="$(python3 "$MEASURE_DIR/lane-audit.py" "${LANE_AUDIT_ARGS[@]}" \
+      2>"$TRACE/lane-integrity.txt")"; then
+    LANE_BREACH=""
+  else
+    LANE_AUDIT_RC=$?
+    # A tool that could not run is not a clean lane. Same rule as the gates:
+    # unknown is not clean.
+    if [ -z "$LANE_BREACH" ]; then
+      LANE_BREACH="LANE_AUDIT_FAILED"
+    fi
+    LANE_DETAIL="$(sed -n '1,3p' "$TRACE/lane-integrity.txt" 2>/dev/null || true)"
+    LANE_REASON_ARG=(--reason "$LANE_BREACH")
+    echo "  rc=$LANE_AUDIT_RC $LANE_DETAIL" >&2
+  fi
+  python3 - "$TRACE/lane-integrity.json" "$LANE_BREACH" "$LANE_DETAIL" <<'PY'
+import json, sys
+target, breach, detail = sys.argv[1:4]
+with open(target, "w", encoding="utf-8") as fh:
+    json.dump({"schema": 1, "verdict": "breach" if breach else "clean",
+               "reason": breach or None, "detail": detail or None},
+              fh, ensure_ascii=False, sort_keys=True)
+    fh.write("\n")
+PY
+fi
 # A RUN THAT PRODUCED NO DELIVERABLE IS NOT A SUCCESS. v34 r1 exited 0 with
 # phase FINISHED_UNCHECKED and no work/report.md at all: the model wrote its
 # report as chat prose and nothing objected. `validate-run.py` has always had
@@ -833,7 +890,10 @@ try:
 except Exception: print("unreadable")' "$TRACE/gates.json" 2>/dev/null || echo "unreadable")"
   [ -n "$GATE_VERDICT" ] || GATE_VERDICT="unreadable"
 fi
-if [ ! -f "$TRACE/candidate.json" ] || [ "${QWEN_RC:-2}" -ne 0 ]; then
+if [ -n "$LANE_BREACH" ]; then
+  echo "✗ lane integrity: $LANE_BREACH — this run did not measure the model it committed to" >&2
+  RC=5
+elif [ ! -f "$TRACE/candidate.json" ] || [ "${QWEN_RC:-2}" -ne 0 ]; then
   RC=2
 elif [ ! -s "$TRACE/work/report.md" ]; then
   echo "✗ run exited 0 but produced no work/report.md — not a success" >&2
@@ -854,10 +914,12 @@ if [ "$RC" -eq 0 ]; then
   TERMINAL_WRITTEN=1
 else
   state_set --run-tag "$STAMP" --phase RUN_FAILED --dataset "$DATASET" --arm "$ARM" --trace-dir "$TRACE" \
-    --attempt "$RESUME_ATTEMPTS" --exit-code "$RC" --upstream-log "$TRACE.upstream.jsonl" \
+    --attempt "$RESUME_ATTEMPTS" --exit-code "$RC" ${LANE_REASON_ARG[@]+"${LANE_REASON_ARG[@]}"} \
+    --upstream-log "$TRACE.upstream.jsonl" \
     --inflight-path "$TRACE/upstream-inflight.json"
   state_event RUN_FAILED --run-tag "$STAMP" --phase RUN_FAILED --dataset "$DATASET" --arm "$ARM" --trace-dir "$TRACE" \
-    --attempt "$RESUME_ATTEMPTS" --exit-code "$RC" --upstream-log "$TRACE.upstream.jsonl" \
+    --attempt "$RESUME_ATTEMPTS" --exit-code "$RC" ${LANE_REASON_ARG[@]+"${LANE_REASON_ARG[@]}"} \
+    --upstream-log "$TRACE.upstream.jsonl" \
     --inflight-path "$TRACE/upstream-inflight.json"
   TERMINAL_WRITTEN=1
 fi
