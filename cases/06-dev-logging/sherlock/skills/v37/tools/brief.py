@@ -39,7 +39,9 @@ import sys
 
 VERSION = 36
 
-PHASES = ("triage", "draft")
+# Only the phase that is actually delegated. See AGENTS above:
+# the parent writes the report itself.
+PHASES = ("triage",)
 
 TRIAGE = """# Задача: разбор рабочего списка (фаза TRIAGE)
 
@@ -53,9 +55,21 @@ TRIAGE = """# Задача: разбор рабочего списка (фаза
 * рабочий список: `{worklist}`
 * правила массовых закрытий: `{rules}`
 * карта корпуса: `{map}`
-* инструменты навыка: `{tools}`
-* полная инструкция навыка: `{skill_md}` — прочитай раздел «Шаг 2. Разбор
-  рабочего списка» целиком, прежде чем ставить первый вердикт.
+* оглавление срезов: `{worklist_index}` — читай СРЕЗЫ `view-<ось>-NN.tsv`,
+  каждый влезает в одно чтение. `worklist.tsv` — леджер для проверок, правки
+  пиши в него, но НЕ читай его целиком.
+* инструменты навыка (ЗАПУСКАТЬ, НЕ ЧИТАТЬ): `{tools}`
+
+**НЕ ЧИТАЙ исходники инструментов и НЕ ЧИТАЙ SKILL.md.** Этот бриф — полный
+контракт: всё, что нужно, ниже. На прогоне v36 чтение `citecheck.py` (25 раз),
+`SKILL.md` и `reference/*.md` стоило ≈5,07 млн токенов — 27 % прогона — и не
+дало ничего, чего нет здесь. Нужен формат вывода — он в разделе «Что вернуть».
+Нужно поведение проверки — запусти её и прочитай её же вывод.
+
+**ТВОЙ РЕЗУЛЬТАТ — ФАЙЛ, А НЕ ОТВЕТ.** Пиши в `{worklist}` по мере работы, а не
+одним куском в конце. Если ходы кончаются — запиши то, что уже есть, и верни
+короткий отчёт. Родитель смотрит на диск, а не на твой статус: на прогоне v36
+ребёнок упал на лимите ходов, вернул пустую строку, и его работа была не видна.
 
 ## Что сделать
 
@@ -140,6 +154,7 @@ def render(phase, work, corpus, skill_root):
         "worklist": os.path.abspath(w("worklist.tsv")),
         "rules": os.path.abspath(w("rules.tsv")),
         "map": os.path.abspath(w("map.txt")),
+        "worklist_index": os.path.abspath(w("worklist-index.tsv")),
         "checkpoint": os.path.abspath(w("checkpoint.json")),
         "report": os.path.abspath(w("report.md")),
         "tools": os.path.abspath(os.path.join(skill_root, "tools")),
@@ -147,7 +162,7 @@ def render(phase, work, corpus, skill_root):
         "report_format": os.path.abspath(
             os.path.join(skill_root, "reference", "report-format.md")),
     }
-    body = {"triage": TRIAGE, "draft": DRAFT}[phase]
+    body = {"triage": TRIAGE}[phase]
     return body.format(**fields)
 
 
@@ -175,7 +190,16 @@ def render(phase, work, corpus, skill_root):
 # and every literal the python gates parse is reproduced verbatim below.
 # ---------------------------------------------------------------------------
 
-AGENTS = ("sherlock-triage", "sherlock-draft")
+# THE REPORT PHASE IS NOT DELEGATED. Not because children are bad — because on
+# the v36 winevtx run the parent wrote the report ITSELF both before and after
+# spawning draft children, so the delegation bought a second author for a
+# single-author job: sherlock-draft died at MAX_TURNS with ZERO write_file calls,
+# and general-purpose wrote a 33,326-byte report and then died before returning,
+# so the parent read its failure status, concluded it had nothing, and spent 29
+# minutes re-deriving a report that was already on the disk beside it.
+# Triage stays delegated: it is genuine bulk work and its disk side-effects were
+# the one thing that survived.
+AGENTS = ("sherlock-triage",)
 
 RU_CONTRACT = u"""## Output language (never translate the literals below)
 
@@ -311,7 +335,6 @@ non-zero, report that number on its line rather than hiding it."""
 
 DEFS = {
     "sherlock-triage": (TRIAGE_DESC, TRIAGE_BODY),
-    "sherlock-draft": (DRAFT_DESC, DRAFT_BODY),
 }
 
 
