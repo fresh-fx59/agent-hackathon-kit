@@ -50,11 +50,10 @@ instead of tens of kilobytes:
     python3 <SKILL_BASE_DIR>/tools/brief.py --install-agents ./.qwen/agents
 
 The definition is read from disk on EVERY call, so it will work by name on the
-first try even if it is not yet visible in the agent list. **You MUST then run
-steps 2 and 3 as `agent` calls** — `subagent_type: "sherlock-triage"` and
-`"sherlock-draft"`, one at a time, each with MANDATORY `run_in_background: false`
-(otherwise it goes to the background and you get no result), and with a short
-prompt — one file reference, not a retelling:
+first try even if it is not yet visible in the agent list. **You MUST run step 2 as an `agent` call** — `subagent_type: "sherlock-triage"`, with MANDATORY `run_in_background: false` (otherwise it goes to the background and you get no result), and a short prompt — one file reference, not a retelling.
+**Step 3 you write yourself** — measured: on v36 a draft child wrote a 33,326-byte report and died before returning, and the parent, reading its failure status, spent 29 minutes re-deriving a report already on the disk beside it.
+
+**A CHILD'S ANSWER IS NOT ITS WORK.** When a subagent returns empty or failed, `ls -la work/` and read the files before concluding anything: a child that runs out of turns returns `""` while its edits are already on disk.
 
     Прочитай <АБСОЛЮТНЫЙ ПУТЬ>/work/brief-triage.md и выполни его. Ответь только теми строками, которые он требует.
 
@@ -87,8 +86,8 @@ You do NOT read the corpus yourself: you run `logmap.py`, read `map.txt` and
    **Step 2 is over only when `triagecheck` exits zero.** A line still carrying
    `?`, or a verdict that lives in a message instead of in the file, is an
    unfinished step 2 — and while one remains, step 3 must not start.
-3. **DRAFT** — via the `sherlock-draft` subagent from `work/brief-draft.md` (or
-   yourself, if there is no `agent`).
+3. **DRAFT** — YOURSELF, in this session. Not delegated: this is one author's
+   job and the measurement says so.
    Only now, immediately before writing the draft, read
    `reference/report-format.md` (do not read it at the start). Write the full
    report into `work/report.md`.
@@ -157,10 +156,10 @@ message "couldn't do it, give me access" is a failed investigation.
 
 ## 3. One thread, and the only two delegations in it
 
-**The automaton's two phase subagents are the ONLY delegation there is, and they
-are MANDATORY, not a choice:** `agent` with `subagent_type` `sherlock-triage`
-then `sherlock-draft`, one at a time, `run_in_background: false`, each answering
-before the next starts. **Everything else is forbidden** — no
+**The triage subagent is the ONLY delegation there is, and it is MANDATORY, not
+a choice:** `agent` with `subagent_type` `sherlock-triage`,
+`run_in_background: false`, answering before you go on. The report is yours.
+**Everything else is forbidden** — no
 `create_sub_session`, no subagent you invented, no "I'll run several agents in
 parallel", no forking the investigation itself. Measured: on the single run where
 the investigation forked freely, the helper crashed and the parent decided "the

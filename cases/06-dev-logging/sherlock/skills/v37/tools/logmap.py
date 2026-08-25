@@ -116,6 +116,7 @@ import argparse
 import calendar
 import gzip
 import json
+import hashlib
 import os
 import random
 import re
@@ -3812,7 +3813,133 @@ def write_worklist(out_dir, rows, rate_rows, name="worklist.tsv", body=None):
         if has_kind(lines, kind):
             out.extend(legend)
     out.extend(lines)
-    return _write_text_atomic(out_dir, name, "".join(out))
+    path = _write_text_atomic(out_dir, name, "".join(out))
+    if name == "worklist.tsv":
+        header = out[:len(out) - len(lines)]
+        written = write_worklist_views(out_dir, lines, header)
+        if written:
+            write_worklist_index(out_dir, written, len(lines))
+    return path
+
+
+# ONE READ, ONE SLICE. MEASURED on the v36 winevtx run: `work/worklist.tsv` was
+# 134,772 bytes and cost ~7.43M amplified prompt tokens — 40% of the whole run —
+# because the parent and all three children each read it whole, got it truncated
+# at the harness ceiling, and then re-paged it in overlapping windows.
+#
+# The map head has printed «НЕ читай всё разом» for versions and all four did it
+# anyway. That is the evidence that an instruction is not the mechanism here: a
+# file that CAN be read whole will be read whole. So the view is what gets read,
+# and it is sized so it always fits.
+#
+# Split by BYTES, not by a row count. Rows run from ~200 to ~2000 bytes, so
+# "N rows per view" would still overflow on a dense axis — which is a cap that
+# moves the cliff to the next unusually wide worklist rather than removing it.
+VIEW_READ_CAP = 25062          # measured harness ceiling on one tool result
+VIEW_BUDGET = 22000            # headroom for the header the view carries
+
+
+def _axis_of(line):
+    parts = line.split("\t")
+    return parts[2].strip() if len(parts) > 2 and parts[2].strip() else "прочее"
+
+
+def write_worklist_views(out_dir, lines, header):
+    """Per-axis slices of the worklist, each readable in a single call.
+
+    Returns [(name, axis, rows, bytes, first_id, last_id)]. The canonical
+    `worklist.tsv` is untouched: `citecheck --ledger` and `triagecheck
+    --worklist` still read it, and these are additive views.
+
+    Named `view-*` on purpose: `worklist-<host>.tsv` is a real per-host artifact
+    that `_valid_generated_host_artifact` validates, and a view must never be
+    mistaken for one.
+    """
+    by_axis = {}
+    for line in lines:
+        if not line.strip() or line.startswith("#"):
+            continue
+        by_axis.setdefault(_axis_of(line), []).append(line)
+
+    head = "".join(header)
+    written = []
+    taken = {}
+    for axis in sorted(by_axis):
+        slug = _slug_axis(axis, taken)
+        chunk, size, part = [], 0, 0
+        def flush():
+            if not chunk:
+                return
+            name = "view-%s-%02d.tsv" % (slug, part)
+            _write_text_atomic(out_dir, name, head + "".join(chunk))
+            total = len(head.encode("utf-8")) + size
+            if total > VIEW_READ_CAP:
+                # NEVER SILENTLY. One row can exceed the whole budget, and the
+                # index promises every view fits a single read. An oversized
+                # view is legal — dropping the row would be a silent cap — but
+                # it must announce itself, in the file and in the index.
+                sys.stderr.write(
+                    "logmap: %s = %d байт, больше предела чтения %d — "
+                    "одна строка не влезает целиком; читай её по адресу.\n"
+                    % (name, total, VIEW_READ_CAP))
+            written.append((name, axis, len(chunk), total,
+                            _row_id(chunk[0]), _row_id(chunk[-1])))
+        for line in by_axis[axis]:
+            n = len(line.encode("utf-8"))
+            if chunk and size + n > VIEW_BUDGET - len(head.encode("utf-8")):
+                part += 1
+                flush()
+                chunk, size = [], 0
+            chunk.append(line)
+            size += n
+        part += 1
+        flush()
+    return written
+
+
+def _slug_axis(axis, taken=None):
+    """A filename-safe, COLLISION-FREE slug for one axis name.
+
+    The first version mapped every non-ASCII character to "-" and fell back to
+    "x", so `всплеск`, `редкое` and the built-in fallback label `прочее` all
+    became `view-x-01.tsv` and silently overwrote each other — rows lost with no
+    complaint, which is precisely the failure the union test exists to catch.
+    Two ASCII axes sharing a 24-character prefix collided the same way.
+
+    So the slug is disambiguated against what has already been handed out, with
+    a short hash of the real axis name as the tiebreaker.
+    """
+    keep = [c if (c.isalnum() and c.isascii()) else "-" for c in axis.lower()]
+    slug = "".join(keep).strip("-")[:24].strip("-")
+    digest = hashlib.sha256(axis.encode("utf-8")).hexdigest()[:6]
+    if not slug:
+        slug = "ax-" + digest
+    if taken is not None and taken.get(slug, axis) != axis:
+        slug = "%s-%s" % (slug, digest)
+    if taken is not None:
+        taken[slug] = axis
+    return slug
+
+
+def _row_id(line):
+    return line.split("\t")[0].strip()
+
+
+def write_worklist_index(out_dir, written, total_rows):
+    """A table of contents small enough to read before choosing a view."""
+    out = ["# срез\tось\tстрок\tбайт\tот\tдо\n",
+           "# ЧИТАЙ СРЕЗ, НЕ worklist.tsv. Каждый срез влезает в одно чтение;\n",
+           "# worklist.tsv (%d строк) — леджер для citecheck/triagecheck, не для чтения.\n"
+           % total_rows]
+    over = [w for w in written if w[3] > VIEW_READ_CAP]
+    if over:
+        out.append("# ВНИМАНИЕ: %d срез(ов) больше предела чтения %d байт — "
+                   "помечены ЦЕЛИКОМ-НЕ-ВЛЕЗЕТ.\n" % (len(over), VIEW_READ_CAP))
+    for name, axis, rows, size, first, last in written:
+        flag = "\tЦЕЛИКОМ-НЕ-ВЛЕЗЕТ" if size > VIEW_READ_CAP else ""
+        out.append("%s\t%s\t%d\t%d\t%s\t%s%s\n"
+                   % (name, axis, rows, size, first, last, flag))
+    return _write_text_atomic(out_dir, "worklist-index.tsv", "".join(out))
 
 
 def write_host_map(out_dir, name, mine, trunc, rows, rate_rows, args, wl):
@@ -4286,6 +4413,14 @@ def worklist_note(rows, rate_rows, trunc, args, hosts, ledger=None):
     else:
         a("D / N / X и запиши файл обратно. `citecheck.py --ledger work/worklist.tsv`")
         a("печатает, сколько `?` осталось.")
+    a("")
+    a("ЧИТАЙ СРЕЗЫ, НЕ worklist.tsv. work/worklist-index.tsv — оглавление на")
+    a("несколько сотен байт: одна строка на срез `view-<ось>-NN.tsv`, с осью,")
+    a("числом строк и диапазоном id. Каждый срез влезает в ОДНО чтение целиком.")
+    a("worklist.tsv — леджер для citecheck/triagecheck, а не текст для чтения:")
+    a("на прогоне v36 он весил 134 772 байта и обошёлся в ~7,43 млн токенов —")
+    a("40 % прогона, — потому что его читали целиком, получали обрезку и")
+    a("дочитывали страницами. Правки пиши в worklist.tsv, читай из срезов.")
     return out
 
 

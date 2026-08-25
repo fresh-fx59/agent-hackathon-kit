@@ -810,6 +810,14 @@ def monitor_and_finish(root, controller, controller_id, trace, tag, manifest_sha
     rc = child.wait() if child is not None else 0
     budget = budget_read(budget_path, tag, limits)
     write_receipt(trace, tag, manifest_sha, budget, limits, time.monotonic() - started, key)
+    # RC 4 = DELIVERED, THEN REFUSED BY ITS OWN GATES. It is not a runner
+    # failure and must still be validated and scored: it is the single most
+    # informative outcome this eval produces, and it is exactly what the v36
+    # winevtx run was. Bucketing it with transport failures would have thrown
+    # that run away. 2 (transport) and 3 (no deliverable) still short-circuit.
+    RC_GATES_BLOCKING = 4
+    if rc == RC_GATES_BLOCKING and (trace / "candidate.json").is_file():
+        rc = 0
     if rc != 0 or not (trace / "candidate.json").is_file():
         persist(controller, controller_id, "RUNNER_FAILED", tag, manifest_sha,
                 "RUNNER_NONZERO" if rc else "CANDIDATE_MISSING")

@@ -356,6 +356,13 @@ def main():
                               for g in groups],
                    "total_records": sum(len(g["lines"]) for g in groups),
                    "unaccounted": len(bad),
+                   # THE NUMBER THE RUNNER READS, at top level and under the
+                   # name every gate uses. run-bench.sh looked for "blocking"
+                   # and no gate but triagecheck emitted it, so its
+                   # both-signals check fell back to the exit code alone —
+                   # which is the signal its own comment calls a liar.
+                   "blocking": len(bad) + (1 if no_report else 0)
+                               + (1 if empty_census else 0),
                    "no_report": no_report,
                    "empty_census": empty_census},
                   sys.stdout, ensure_ascii=False, indent=1)

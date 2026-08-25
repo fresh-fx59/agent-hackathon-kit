@@ -34,6 +34,7 @@ import fcntl
 import gzip
 import json
 import os
+import socket
 import re
 import stat
 import tempfile
@@ -76,6 +77,24 @@ UPSTREAM_MODEL = os.environ.get("UPSTREAM_MODEL", "")
 # Off by default (0) so the proxy stays a pass-through unless a runner asks.
 UPSTREAM_RETRY_MAX = int(os.environ.get("UPSTREAM_RETRY_MAX", "0") or 0)
 UPSTREAM_RETRY_BASE_MS = int(os.environ.get("UPSTREAM_RETRY_BASE_MS", "2000") or 2000)
+# DO NOT RIDE A DEAD STREAM. urlopen's timeout is a PER-SOCKET-READ deadline, not
+# a call budget, so `for raw in resp:` on a stream that sends nothing blocks for
+# up to UPSTREAM_READ_TIMEOUT — half an hour. MEASURED on the v36 winevtx run: 20
+# of 185 calls returned a well-formed SSE stream carrying no content, costing
+# 2,094,389 prompt tokens for zero output and 2,927 s; two ran 311 s and 502 s.
+# The ~126 s client stream timeout never applies, because this proxy owns the
+# upstream socket.
+#
+# Keyed on CONTENT, deliberately. `returned_model == "[SP]deepseek-v4-flash"`
+# predicted the dud 11 times out of 11 on that run, but aborting on an alias
+# blacklist is a special case that moves the cliff the day the provider picks a
+# different one. A deadline on "no content yet" catches every signature,
+# including the ones not yet seen.
+# Off by default (0) so the proxy stays a pass-through unless a runner asks.
+UPSTREAM_FIRST_TOKEN_MS = int(os.environ.get("UPSTREAM_FIRST_TOKEN_MS", "0") or 0)
+# The long read timeout, named once instead of inlined at the urlopen call,
+# because the first-token deadline has to restore exactly this value.
+UPSTREAM_READ_TIMEOUT = float(os.environ.get("UPSTREAM_READ_TIMEOUT", "1800") or 1800)
 
 # REPLAYABLE TRACES. Everything above this line is metadata ABOUT a call, and no
 # amount of it answers the first question anyone asks of a finished run: what
@@ -494,6 +513,27 @@ def _capture_write(name, chunks, capture, which):
     capture[which + "_truncated"] = truncated
 
 
+def _stream_socket(resp):
+    """The raw socket under an HTTPResponse, or None if it cannot be reached.
+
+    Needed because the deadline CANNOT live inside `for raw in resp:` — that
+    loop calls readline() and blocks there, so a check in the loop body only
+    runs once a line has already arrived, which is exactly the event that is
+    never coming. The deadline has to be armed on the socket itself.
+    """
+    fp = getattr(resp, "fp", None)
+    for attr in ("_sock", "raw"):
+        obj = getattr(fp, attr, None)
+        if obj is None:
+            continue
+        if hasattr(obj, "settimeout"):
+            return obj
+        inner = getattr(obj, "_sock", None)
+        if hasattr(inner, "settimeout"):
+            return inner
+    return fp if hasattr(fp, "settimeout") else None
+
+
 def _scan_obj(obj, state):
     """Pull what we care about out of one response object.
 
@@ -513,6 +553,15 @@ def _scan_obj(obj, state):
     """
     if not isinstance(obj, dict):
         return
+    # A REFUSAL SPLICED INTO A 200 IS STILL A REFUSAL. The v36 run's ledger
+    # reported "0 non-200s" while three calls carried
+    # {"error":{"message":"Concurrency limit exceeded for account, ...}} in the
+    # body. Only the type and a short reason are kept: never the message text,
+    # which can echo the request.
+    err = obj.get("error")
+    if isinstance(err, dict) and not state["error"]:
+        kind = err.get("type") or err.get("code") or "error"
+        state["error"] = "upstream_error_in_200:%s" % str(kind)[:64]
     if obj.get("model") and not state["returned_model"]:
         state["returned_model"] = obj["model"]
     if isinstance(obj.get("usage"), dict):
@@ -526,6 +575,15 @@ def _scan_obj(obj, state):
             part = ch.get(key)
             if isinstance(part, dict) and part.get("tool_calls"):
                 state["tool_call"] = True
+            # CONTENT, not merely "an event". A usage-only chunk is an event and
+            # carries nothing; that distinction is the whole deadline.
+            if isinstance(part, dict) and (part.get("content")
+                                           or part.get("tool_calls")
+                                           or part.get("reasoning_content")):
+                if not state["content_events"] and state.get("stream_started_at"):
+                    state["ttft_ms"] = int(
+                        (time.time() - state["stream_started_at"]) * 1000)
+                state["content_events"] += 1
 
 
 class Proxy(BaseHTTPRequestHandler):
@@ -624,6 +682,8 @@ class Proxy(BaseHTTPRequestHandler):
         state = {"returned_model": None, "tool_call": False, "error": None,
                  "usage": None, "finish_reason": None,
                  "stream_events": 0, "stream_parse_errors": 0,
+                 "content_events": 0, "ttft_ms": None, "stream_started_at": None,
+                 "deadline_unenforceable": False,
                  "stream_complete": None, "stream_bytes": 0,
                  "response_valid": False, "res_chunks": []}
         status = None
@@ -640,7 +700,7 @@ class Proxy(BaseHTTPRequestHandler):
                 self._budget_refusal()
                 return
             try:
-                resp = urllib.request.urlopen(req, timeout=1800)
+                resp = urllib.request.urlopen(req, timeout=UPSTREAM_READ_TIMEOUT)
                 status = resp.getcode()
                 break
             except urllib.error.HTTPError as e:
@@ -740,6 +800,8 @@ class Proxy(BaseHTTPRequestHandler):
                          duration_ms=int((time.time() - t0) * 1000), sent_model=sent,
                          request_bytes=len(body), path=self.path, stream=streaming,
                          upstream_error=state["error"], stream_events=state["stream_events"],
+                         content_events=state["content_events"], ttft_ms=state["ttft_ms"],
+                         deadline_unenforceable=state["deadline_unenforceable"] or None,
                          stream_parse_errors=state["stream_parse_errors"],
                          stream_complete=state["stream_complete"], stream_bytes=state["stream_bytes"])
               except OSError:
@@ -787,13 +849,64 @@ class Proxy(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(payload)
 
+    def _iter_with_deadline(self, resp, state, sock):
+        """Yield stream lines, giving up if no CONTENT arrives in time.
+
+        A usage-only chunk is an event and carries nothing, so the deadline is
+        keyed on content, not on events. Once one real delta lands the socket is
+        put back on the long read timeout: a call that has started answering is
+        alive and may take as long as it takes.
+        """
+        it = iter(resp)
+        while True:
+            # TWO CLOCKS, because one is not enough. settimeout() bounds a
+            # SINGLE read, so an upstream that drips a usage-only keepalive
+            # faster than the deadline resets it forever: MEASURED at 8.06 s
+            # against a 0.8 s deadline, zero content, no error recorded. The
+            # elapsed check below is the budget; the socket timeout is what
+            # catches the stream that says nothing at all.
+            if (UPSTREAM_FIRST_TOKEN_MS and not state["content_events"]
+                    and state["stream_started_at"] is not None
+                    and (time.time() - state["stream_started_at"]) * 1000
+                    > UPSTREAM_FIRST_TOKEN_MS):
+                state["error"] = "first_token_deadline_exceeded"
+                return
+            try:
+                raw = next(it)
+            except StopIteration:
+                return
+            except socket.timeout:
+                if state["content_events"]:
+                    raise
+                state["error"] = "first_token_deadline_exceeded"
+                return
+            except OSError as exc:                 # ssl/socket timeouts subclass it
+                if not state["content_events"] and "timed out" in str(exc).lower():
+                    state["error"] = "first_token_deadline_exceeded"
+                    return
+                raise
+            yield raw
+            if (sock is not None and state["content_events"]
+                    and sock.gettimeout() != UPSTREAM_READ_TIMEOUT):
+                sock.settimeout(UPSTREAM_READ_TIMEOUT)
+
     def _pump_stream(self, resp, state):
         # No Content-Length is known up front and chunked framing is one more
         # thing to get wrong, so the response ends at connection close.
         self._relay_headers(resp, 200, extra=[("Connection", "close")])
         self.end_headers()
         self.close_connection = True
-        for raw in resp:
+        state["stream_started_at"] = time.time()
+        sock = _stream_socket(resp) if UPSTREAM_FIRST_TOKEN_MS else None
+        if UPSTREAM_FIRST_TOKEN_MS and sock is None:
+            # Never pretend to be armed. Recorded in its own field, NOT in
+            # `error`: `_scan_obj` only fills `error` when it is empty, so
+            # putting a diagnostic there would mask a real rate_limit_error
+            # spliced into the 200 body — the two fixes cancelling out.
+            state["deadline_unenforceable"] = True
+        if sock is not None:
+            sock.settimeout(UPSTREAM_FIRST_TOKEN_MS / 1000.0)
+        for raw in self._iter_with_deadline(resp, state, sock):
             state["stream_bytes"] += len(raw)
             if BODY_DIR:
                 # Appended before the relay write so a client that hangs up

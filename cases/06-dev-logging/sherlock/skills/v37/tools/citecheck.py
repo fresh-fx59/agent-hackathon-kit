@@ -182,8 +182,13 @@ def looks_binary(path):
         return True
 
 
-def index_corpus(root):
-    """relpath -> abspath, plus basename -> [relpath]. One walk, no content read."""
+def index_corpus_ex(root):
+    """relpath -> abspath, basename -> [relpath], and DID THE WALK TRUNCATE.
+
+    The third value exists because coverage completeness is scored against this
+    index. A silently short index would understate the uncovered set, which is
+    the same shape of lie the completeness check was added to stop.
+    """
     by_rel, by_base = {}, {}
     n = 0
     for dirpath, dirnames, filenames in os.walk(root):
@@ -196,7 +201,13 @@ def index_corpus(root):
             by_base.setdefault(fn, []).append(rel)
             n += 1
             if n >= MAX_INDEX_FILES:
-                return by_rel, by_base
+                return by_rel, by_base, True
+    return by_rel, by_base, False
+
+
+def index_corpus(root):
+    """relpath -> abspath, plus basename -> [relpath]. One walk, no content read."""
+    by_rel, by_base, _truncated = index_corpus_ex(root)
     return by_rel, by_base
 
 
@@ -1279,8 +1290,9 @@ def report_evidence(report, checked=None):
     flagged = (checked or {}).get("flagged") or {}
     cov_observed = cov_no_address = 0
     corpus = (checked or {}).get("corpus")
+    index_truncated = False
     if corpus and os.path.isdir(corpus):
-        by_rel, by_base = index_corpus(corpus)
+        by_rel, by_base, index_truncated = index_corpus_ex(corpus)
     else:
         by_rel, by_base = {}, {}
     path_rows = {}
@@ -1342,6 +1354,33 @@ def report_evidence(report, checked=None):
             cov_duplicate_paths.append({"path": resolved,
                                         "lines": [r["report_line"] for r in rows]})
 
+    # COMPLETENESS. Scoring only the rows the report chose to show made deletion
+    # the cheapest way to raise the score: on the v36 winevtx run a 33,326-byte
+    # report with 128 coverage rows scored «осталось 80», and the 18,052-byte
+    # rewrite that kept 16 of them scored «осталось 32» — 65 ok citations and the
+    # attacker IP thrown away for a better number. A corpus file with no row is
+    # now a defect, so removing a row can only ever cost.
+    #
+    # Nothing is exempt: the row grammar already has «пусто», «двоичный»,
+    # «нечитабельно» and «не смотрел», so every file on disk can be answered.
+    #
+    # «не смотрел» IS AN ADMISSION, NOT COVERAGE. The first version of this check
+    # counted any row as coverage, which made 12,368 bytes of «| path | не
+    # смотрел | причина=лимит |» the new cheapest path to green: on the real v36
+    # report it took blocking from 134 to 5. That is the same lie in a new shape.
+    #
+    # The other no-address statuses stay valid because they are MACHINE-CHECKED
+    # against the file — `cov_false_empty` catches «пусто» on a non-empty file
+    # and `cov_false_binary` catches «двоичный» on text. Only «не смотрел» is
+    # unverifiable by construction, so only it fails to discharge the file.
+    cov_uncovered, cov_unexamined = [], []
+    if by_rel and not index_truncated:
+        examined = {resolved for resolved, rows in path_rows.items()
+                    if any((r.get("status") or "").strip().lower() != "не смотрел"
+                           for r in rows)}
+        cov_uncovered = sorted(set(by_rel) - set(path_rows))
+        cov_unexamined = sorted(set(path_rows) - examined)
+
     blocking = (len(attr_missing) + len(attr_invalid) + len(finding_dupes)
                 + (1 if rejected_missing_section else 0)
                 + (1 if rejected_empty_section else 0)
@@ -1356,7 +1395,9 @@ def report_evidence(report, checked=None):
                 + len(cov_unsupported) + len(cov_smuggled) + len(cov_malformed)
                 + len(cov_traversal) + len(cov_ambiguous) + len(cov_missing_path)
                 + len(cov_false_empty) + len(cov_false_binary)
-                + len(cov_duplicate_paths))
+                + len(cov_duplicate_paths)
+                + len(cov_uncovered) + len(cov_unexamined)
+                + (1 if index_truncated else 0))
     return {
         "grammar": {
             "finding_attribution": "атрибуция: установлена|не установлена",
@@ -1398,6 +1439,9 @@ def report_evidence(report, checked=None):
                      "false_empty": [r["report_line"] for r in cov_false_empty],
                      "false_binary": [r["report_line"] for r in cov_false_binary],
                      "duplicate_paths": cov_duplicate_paths,
+                     "uncovered_paths": cov_uncovered,
+                    "unexamined_paths": cov_unexamined,
+                     "index_truncated": index_truncated,
                      "unsupported_no_address": [r["report_line"] for r in cov_unsupported],
                      "invalid_no_address_detail": [r["report_line"] for r in cov_smuggled],
                      "content_claim_in_no_address": [r["report_line"] for r in cov_smuggled],
@@ -1430,6 +1474,30 @@ def render_report_evidence(e):
                       len(c.get("traversal_path") or []) + len(c.get("ambiguous_path") or [])
                       + len(c.get("missing_path") or []),
                       len(c.get("duplicate_paths") or [])))
+    unc = c.get("uncovered_paths") or []
+    if c.get("index_truncated"):
+        out.append("  ИНДЕКС КОРПУСА ОБРЕЗАН на %d файлах — полноту покрытия "
+                   "проверить нечем. Разбей корпус или подними MAX_INDEX_FILES; "
+                   "молча зачесть неполный список нельзя." % MAX_INDEX_FILES)
+    if unc:
+        out.append("  НЕ ПОКРЫТО: %d файлов корпуса нет в таблице покрытия"
+                   % len(unc))
+        for path in unc[:20]:
+            out.append("    · %s" % path)
+        if len(unc) > 20:
+            out.append("    · … и ещё %d" % (len(unc) - 20))
+        out.append("  Каждый файл корпуса обязан получить строку.")
+    unex = c.get("unexamined_paths") or []
+    if unex:
+        out.append("  НЕ СМОТРЕЛ: %d файлов закрыты признанием, а не проверкой"
+                   % len(unex))
+        for path in unex[:20]:
+            out.append("    · %s" % path)
+        if len(unex) > 20:
+            out.append("    · … и ещё %d" % (len(unex) - 20))
+        out.append("  «не смотрел» — это честная запись, но она НЕ закрывает файл: "
+                   "её нечем проверить. «пусто» и «двоичный» закрывают, потому что "
+                   "их сверяют с файлом. Посмотри — или оставь и не жди зелёного.")
     if a["missing"]:
         out.append("  находки без атрибуции: %s" % ", ".join("Н-%s" % x for x in a["missing"]))
     for bad in a["invalid"][:8]:
@@ -1491,6 +1559,31 @@ def render_report_evidence(e):
     if e["blocking"]:
         out.append("  исправь грамматику: наблюдение = path:line + дословная цитата; без адреса — только закрытая деталь доступа вида байт=0, формат=двоичный, ошибка=код или причина=лимит.")
     return "\n".join(out)
+
+
+def _blocking_total(d, report, ledger_path=None, report_path=None):
+    """The stop number, taken from `ledger()` itself when there is a ledger.
+
+    The first version of this re-derived the sum and got it WRONG — it dropped
+    `unproven` (findings with no confirmed quote), `open_rows` (unparsed ledger
+    rows) and two of the six BAD verdicts, so it printed 160 where the gate
+    printed «осталось 161», and a report with 200 open rows would have reported
+    blocking: 0. A review caught it. Its own docstring had warned that two
+    definitions of "how many defects" is how a gate reports one number and exits
+    on another — and then was one.
+
+    So there is one definition. With a ledger, ask `ledger()`. Without one, fall
+    back to the parts that exist, and say so via the `ledger` key in the JSON.
+    """
+    if ledger_path:
+        _body, total = ledger(d, report, ledger_path, report_path)
+        return total
+    summary = d.get("summary") or {}
+    bad = sum(summary.get(k, 0) for k in BAD)
+    o = d.get("outcomes") or {}
+    ev = d.get("report_evidence") or report_evidence(report, d)
+    return (bad + (summary.get("не-ссылка") or 0)
+            + (o.get("blocking") or 0) + (ev.get("blocking") or 0))
 
 
 def ledger(d, report, path, report_path=None):
@@ -1796,6 +1889,14 @@ def main():
     d.pop("flagged", None)
     if isinstance(d.get("delivered"), dict):
         d["delivered"].pop("flagged", None)
+    if args.json:
+        # The stop number, at top level and under the name every gate uses.
+        # `ledger()` computes it and returns it beside the human render; the
+        # JSON carried only the parts, so run-bench.sh's blocking check was
+        # dead for this gate. Recomputed here from the same pieces.
+        d["blocking"] = _blocking_total(
+            d, text, args.ledger,
+            None if args.report == "-" else args.report)
     print(json.dumps(d, ensure_ascii=False, indent=1) if args.json else render(d))
     if args.delivered and not args.json:
         print(render_delivery(d["delivered"]))
