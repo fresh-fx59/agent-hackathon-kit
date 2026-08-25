@@ -363,7 +363,7 @@ PY
     printf 'python3 "$T/citecheck.py" work/report.md --corpus "$C" --require-quote --ledger work/worklist.tsv; echo "citecheck rc=$?"\n'
     printf 'python3 "$T/triagecheck.py" --worklist work/worklist.tsv --rules work/rules.tsv --corpus "$C"; echo "triagecheck rc=$?"\n'
     printf 'python3 "$T/statecheck.py" --corpus "$C" --report work/report.md; echo "statecheck rc=$?"\n'
-    printf 'echo "recorded verdicts:"; python3 -c "import json;d=json.load(open(\"$HERE/gates.json\"));print(d[\"verdict\"], {k:v.get(\"exit_code\") for k,v in d[\"gates\"].items()})" 2>/dev/null || true\n'
+    printf 'echo "recorded verdicts:"; python3 -c %s 2>/dev/null || true\n' "'import json;d=json.load(open(\"gates.json\"));print(d[\"verdict\"], {k:v.get(\"exit_code\") for k,v in d[\"gates\"].items()})'"
   } > "$TRACE/replay.sh"
   chmod +x "$TRACE/replay.sh"
 
