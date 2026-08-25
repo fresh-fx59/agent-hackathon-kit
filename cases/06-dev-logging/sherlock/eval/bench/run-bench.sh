@@ -18,7 +18,7 @@ QWEN="${QWEN_BIN:-$HOME/.local/bin/qwen}"
 ARM="${1:-unknown}"
 CORPUS="${SHERLOCK_CORPUS:-}"
 BASE_URL="${SHERLOCK_BASE_URL:-https://linkapi.ai/v1}"
-MODEL="${SHERLOCK_MODEL:-[SP]deepseek-v4-flash}"
+MODEL="${SHERLOCK_MODEL:-[SP]deepseek-v4-flash-0731}"
 if [ -n "${SHERLOCK_TIMEOUT+x}" ]; then
   TIMEOUT="$SHERLOCK_TIMEOUT"
 elif [ "$ARM" = "v30" ] || [ "$ARM" = "v31" ] || [ "$ARM" = "v32" ] || [ "$ARM" = "v33" ] || [ "$ARM" = "v34" ] || [ "$ARM" = "v35" ] || [ "$ARM" = "v36" ] || [ "$ARM" = "v37" ]; then

@@ -83,7 +83,7 @@ for try in $(seq 1 "$MAX_TRIES"); do
   timeout 2400 $SEC eval_linkapi_key --env SHERLOCK_API_KEY -- \
     $SEC eval_broker_api_key --env JUDGE_API_KEY -- \
     env SHERLOCK_BASE_URL=https://linkapi.ai/v1 \
-        SHERLOCK_MODEL='[SP]deepseek-v4-flash' \
+        SHERLOCK_MODEL='[SP]deepseek-v4-flash-0731' \
         JUDGE_BASE_URL=http://127.0.0.1:8317/v1 JUDGE_MODEL=gpt-5.5 \
         bash gate.sh 1 "$ARM" "$CASE" 2>&1 | tail -4
 

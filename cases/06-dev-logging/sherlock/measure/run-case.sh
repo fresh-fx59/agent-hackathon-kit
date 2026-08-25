@@ -17,7 +17,7 @@ QWEN="${QWEN_BIN:-$HOME/.local/bin/qwen}"
 SKILLS="${SHERLOCK_SKILLS:-$(cd "$HERE/.." && pwd)/skills}"
 RUNS="${SHERLOCK_RUNS:-$HERE/runs}"
 BASE_URL="${SHERLOCK_BASE_URL:-https://linkapi.ai/v1}"
-MODEL="${SHERLOCK_MODEL:-[SP]deepseek-v4-flash}"
+MODEL="${SHERLOCK_MODEL:-[SP]deepseek-v4-flash-0731}"
 TIMEOUT="${SHERLOCK_TIMEOUT:-2700}"
 : "${SHERLOCK_API_KEY:?set SHERLOCK_API_KEY (use with-secret.sh eval_linkapi_key --env SHERLOCK_API_KEY -- ...)}"
 

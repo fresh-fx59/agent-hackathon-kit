@@ -18,14 +18,23 @@
 #     requests it answered as two identities ~19x apart on whether they emit a
 #     tool call. qwen-code stamps only the REQUESTED name, so without a
 #     pass-through no recorded row can ever be attributed to an upstream.
+#     SINCE 2026-08-26 the runners request the PINNED id
+#     `[SP]deepseek-v4-flash-0731` instead of the alias: on the v37 full run the
+#     alias fanned 180 calls across deepseek-v4-pro-0813 (93) and
+#     deepseek-v4-flash-0731 (81), i.e. two provider cache pools, and the cache
+#     rate fell 68.1% -> 28.0% (fresh prompt tokens 5.92M -> 13.38M). The
+#     pass-through stays: attribution is still how we prove the pin held.
 #
 #  2. THE MODEL-ID SPLIT. qwen-code sizes its context window from the model id
 #     STRING. Its own normalize() turns "[SP]deepseek-v4-flash" into
 #     "[sp]deepseek-v4-flash", which matches nothing in its table, so it falls
 #     back to DEFAULT_TOKEN_LIMIT = 200,000 — and the "177,000 hard limit" error
 #     follows from that. The same table gives the clean id /^deepseek-v4/ =>
-#     1,000,000. Verified by running qwen-code's own normalize() against its own
-#     table. The provider needs the prefix to route; qwen-code must not see it.
+#     1,000,000. The pinned id is unchanged here: the tag-strip below yields
+#     `deepseek-v4-flash-0731`, which matches the SAME /^deepseek-v4/ rule (and
+#     is also listed verbatim at 1,000,000), so the window is identical.
+#     Verified by running qwen-code's own normalize() against its own table.
+#     The provider needs the prefix to route; qwen-code must not see it.
 #     So: the CLI gets the clean id, the proxy restores the alias on the way out.
 #
 #  3. RIDING OUT A BURST. linkapi's 400s are transient and minute-scale, and are

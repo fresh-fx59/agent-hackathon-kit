@@ -32,7 +32,7 @@ ARM="${2:?usage: run-kb.sh <dataset-dir> <cold|warm> [rep]}"
 REP="${3:-1}"
 
 BASE_URL="${SHERLOCK_BASE_URL:-https://linkapi.ai/v1}"
-MODEL="${SHERLOCK_MODEL:-[SP]deepseek-v4-flash}"
+MODEL="${SHERLOCK_MODEL:-[SP]deepseek-v4-flash-0731}"
 TIMEOUT="${SHERLOCK_TIMEOUT:-900}"
 : "${SHERLOCK_API_KEY:?set SHERLOCK_API_KEY via with-secret.sh eval_linkapi_key --env SHERLOCK_API_KEY -- …}"
 

@@ -24,7 +24,7 @@
 set -uo pipefail
 
 BASE_URL="${PROBE_BASE_URL:-${SHERLOCK_BASE_URL:-https://linkapi.ai/v1}}"
-MODEL="${SHERLOCK_MODEL:-[SP]deepseek-v4-flash}"
+MODEL="${SHERLOCK_MODEL:-[SP]deepseek-v4-flash-0731}"
 SIZES_KB="${PROBE_SIZES_KB:-100 250 400}"
 REPS="${PROBE_REPS:-2}"
 # A batch is worth starting at <=10 % and never at >=35 %; between the two it is
