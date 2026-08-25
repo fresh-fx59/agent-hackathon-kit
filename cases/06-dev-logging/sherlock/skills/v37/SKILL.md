@@ -316,6 +316,13 @@ One row per corpus file, quoting the `logmap`-flagged line — preferring the on
 
 It prints `путь:строка — «дословная цитата»`; paste it verbatim, then write your claim beside it. The quote comes from `citecheck`'s own builder, so what `cite.py` prints, `citecheck` accepts; `--contains` centres it on the token that matters. **A refusal means the claim is wrong, not the tool** — re-read the line or drop the claim, never paste a citation it declined. Why a tool: `reference/tools.md`.
 
+**A CLAIM ABOUT A POPULATION HAS ITS OWN CITATION** — «93 разных источника, 8 из них больше 1000 отказов» has no single line to quote, so do not delete it and do not fake a line for it. Ask for the number and paste what comes back:
+
+    python3 <SKILL_BASE_DIR>/tools/cite.py --corpus <LOG_DIR> --file Security.jsonl --aggregate 'distinct(Event.EventData.IpAddress, Event.EventData.IpAddress!=-)'
+    агрегат: Security.jsonl · distinct(Event.EventData.IpAddress, Event.EventData.IpAddress!=-) = 93 · `jq …`
+
+`citecheck` **re-runs the predicate over the corpus and compares the count exactly** — the trailing command is a rendering for a human, never executed. Use it for every census, ratio and «сколько всего» in the report: how many distinct sources, how many records of one code versus another, how many in a window. Predicates: `count(поле=значение, …)`, `distinct(поле, …)`, `distinct_over(поле, N, …)`; operators `=`, `!=`, `~=` (substring), `>=`/`<=` (lexicographic, so ISO time works). One verified aggregate proves a finding on its own. Measured: the run that passed all three gates named **4** attacker IPs of 93, and never stated that `0xc0000064` (нет такой учётки) fired 25355 times against `0xc000006a` (учётка есть, пароль неверный) 8098 — the difference between noise and a target list. It did not fail to cite that; nothing told it the form existed. Full grammar and every refusal: `reference/report-format.md`.
+
 Then run the report through the check — this is **one** call:
 
     python3 <SKILL_BASE_DIR>/tools/citecheck.py work/report.md --corpus <LOG_DIR> --require-quote --ledger ./work/worklist.tsv
