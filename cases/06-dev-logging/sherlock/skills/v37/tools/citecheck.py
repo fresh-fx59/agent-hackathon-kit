@@ -182,8 +182,13 @@ def looks_binary(path):
         return True
 
 
-def index_corpus(root):
-    """relpath -> abspath, plus basename -> [relpath]. One walk, no content read."""
+def index_corpus_ex(root):
+    """relpath -> abspath, basename -> [relpath], and DID THE WALK TRUNCATE.
+
+    The third value exists because coverage completeness is scored against this
+    index. A silently short index would understate the uncovered set, which is
+    the same shape of lie the completeness check was added to stop.
+    """
     by_rel, by_base = {}, {}
     n = 0
     for dirpath, dirnames, filenames in os.walk(root):
@@ -196,7 +201,13 @@ def index_corpus(root):
             by_base.setdefault(fn, []).append(rel)
             n += 1
             if n >= MAX_INDEX_FILES:
-                return by_rel, by_base
+                return by_rel, by_base, True
+    return by_rel, by_base, False
+
+
+def index_corpus(root):
+    """relpath -> abspath, plus basename -> [relpath]. One walk, no content read."""
+    by_rel, by_base, _truncated = index_corpus_ex(root)
     return by_rel, by_base
 
 
@@ -1279,8 +1290,9 @@ def report_evidence(report, checked=None):
     flagged = (checked or {}).get("flagged") or {}
     cov_observed = cov_no_address = 0
     corpus = (checked or {}).get("corpus")
+    index_truncated = False
     if corpus and os.path.isdir(corpus):
-        by_rel, by_base = index_corpus(corpus)
+        by_rel, by_base, index_truncated = index_corpus_ex(corpus)
     else:
         by_rel, by_base = {}, {}
     path_rows = {}
@@ -1342,6 +1354,19 @@ def report_evidence(report, checked=None):
             cov_duplicate_paths.append({"path": resolved,
                                         "lines": [r["report_line"] for r in rows]})
 
+    # COMPLETENESS. Scoring only the rows the report chose to show made deletion
+    # the cheapest way to raise the score: on the v36 winevtx run a 33,326-byte
+    # report with 128 coverage rows scored «осталось 80», and the 18,052-byte
+    # rewrite that kept 16 of them scored «осталось 32» — 65 ok citations and the
+    # attacker IP thrown away for a better number. A corpus file with no row is
+    # now a defect, so removing a row can only ever cost.
+    #
+    # Nothing is exempt: the row grammar already has «пусто», «двоичный»,
+    # «нечитабельно» and «не смотрел», so every file on disk can be answered.
+    cov_uncovered = []
+    if by_rel and not index_truncated:
+        cov_uncovered = sorted(set(by_rel) - set(path_rows))
+
     blocking = (len(attr_missing) + len(attr_invalid) + len(finding_dupes)
                 + (1 if rejected_missing_section else 0)
                 + (1 if rejected_empty_section else 0)
@@ -1356,7 +1381,9 @@ def report_evidence(report, checked=None):
                 + len(cov_unsupported) + len(cov_smuggled) + len(cov_malformed)
                 + len(cov_traversal) + len(cov_ambiguous) + len(cov_missing_path)
                 + len(cov_false_empty) + len(cov_false_binary)
-                + len(cov_duplicate_paths))
+                + len(cov_duplicate_paths)
+                + len(cov_uncovered)
+                + (1 if index_truncated else 0))
     return {
         "grammar": {
             "finding_attribution": "атрибуция: установлена|не установлена",
@@ -1398,6 +1425,8 @@ def report_evidence(report, checked=None):
                      "false_empty": [r["report_line"] for r in cov_false_empty],
                      "false_binary": [r["report_line"] for r in cov_false_binary],
                      "duplicate_paths": cov_duplicate_paths,
+                     "uncovered_paths": cov_uncovered,
+                     "index_truncated": index_truncated,
                      "unsupported_no_address": [r["report_line"] for r in cov_unsupported],
                      "invalid_no_address_detail": [r["report_line"] for r in cov_smuggled],
                      "content_claim_in_no_address": [r["report_line"] for r in cov_smuggled],
@@ -1430,6 +1459,21 @@ def render_report_evidence(e):
                       len(c.get("traversal_path") or []) + len(c.get("ambiguous_path") or [])
                       + len(c.get("missing_path") or []),
                       len(c.get("duplicate_paths") or [])))
+    unc = c.get("uncovered_paths") or []
+    if c.get("index_truncated"):
+        out.append("  ИНДЕКС КОРПУСА ОБРЕЗАН на %d файлах — полноту покрытия "
+                   "проверить нечем. Разбей корпус или подними MAX_INDEX_FILES; "
+                   "молча зачесть неполный список нельзя." % MAX_INDEX_FILES)
+    if unc:
+        out.append("  НЕ ПОКРЫТО: %d файлов корпуса нет в таблице покрытия"
+                   % len(unc))
+        for path in unc[:20]:
+            out.append("    · %s" % path)
+        if len(unc) > 20:
+            out.append("    · … и ещё %d" % (len(unc) - 20))
+        out.append("  Каждый файл корпуса обязан получить строку. Не смотрел — "
+                   "так и напиши: «не смотрел» + причина=лимит. Удаление строки "
+                   "теперь только ухудшает счёт.")
     if a["missing"]:
         out.append("  находки без атрибуции: %s" % ", ".join("Н-%s" % x for x in a["missing"]))
     for bad in a["invalid"][:8]:
