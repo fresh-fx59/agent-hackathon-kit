@@ -56,8 +56,17 @@ class BenchV30Resume(unittest.TestCase):
             })
             run = subprocess.run(["bash", str(RUNNER), "v30"], env=env,
                                  text=True, capture_output=True, timeout=30)
-            self.assertEqual(run.returncode, 0, run.stderr + run.stdout)
+            # RC 4 = delivered, then refused by its own gates. This fixture's
+            # report is a stub ("Final report"), so of course it fails them —
+            # and reaching 4 rather than 2 or 3 is exactly what this test wants
+            # to prove: the seeded run went all the way through delivery.
+            # It asserted 0 until 2026-08-25, when the run's exit code began
+            # reflecting the gate verdict; a stub report scoring "success" was
+            # the false green this suite is supposed to catch.
+            self.assertEqual(run.returncode, 4, run.stderr + run.stdout)
             trace = next(runs.iterdir())
+            self.assertEqual(json.loads((trace / "gates.json").read_text())["verdict"],
+                             "blocking")
             settings = json.loads((trace / "qwen-settings-pre.json").read_text())
             self.assertEqual(settings["model"]["generationConfig"]["timeout"], 900000)
             self.assertEqual(settings["model"]["generationConfig"]["maxRetries"], 0)

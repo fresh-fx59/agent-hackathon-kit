@@ -316,12 +316,30 @@ for name, argv in gates.items():
                               text=True, timeout=1800)
         row["exit_code"] = done.returncode
         row["stderr_tail"] = (done.stderr or "")[-2000:]
+        # PRETTY JSON IS STILL JSON. This scanned line by line and json.loads()ed
+        # a single line, but citecheck prints json.dumps(..., indent=1), so its
+        # first line is a bare "{" and every parse raised — leaving blocking=null
+        # on all three gates of the v36 winevtx run and making the both-signals
+        # check below dead code. Take the last balanced object in the stream, so
+        # a human render printed before the JSON does not matter.
         payload = None
-        for line in (done.stdout or "").splitlines():
-            line = line.strip()
-            if line.startswith("{"):
-                try: payload = json.loads(line)
-                except ValueError: continue
+        text = done.stdout or ""
+        for start in range(len(text)):
+            if text[start] != "{":
+                continue
+            try:
+                candidate, _end = json.JSONDecoder().raw_decode(text[start:])
+            except ValueError:
+                continue
+            if isinstance(candidate, dict):
+                payload = candidate
+            break
+        if payload is None:                      # one object per line, older gates
+            for line in text.splitlines():
+                line = line.strip()
+                if line.startswith("{"):
+                    try: payload = json.loads(line)
+                    except ValueError: continue
         row["json"] = payload
         blocking = None
         if isinstance(payload, dict):
@@ -799,11 +817,25 @@ save_trace
 # on the metered path it was dead code. The artifact test belongs here, on the
 # only line that decides the exit code. Kept as its own RC (3) so
 # "delivered nothing" is never confused with "transport failed" (2).
+# RC=4 — DELIVERED BUT REFUSED. The v36 winevtx run exited 0 while gates.json
+# said verdict=blocking: the file is computed a few hundred lines above, in this
+# same process, and was never consulted. Any caller reading $? saw success on a
+# report its own gates had rejected. Kept as its own code so "refused" is never
+# confused with "transport failed" (2) or "delivered nothing" (3).
+GATE_VERDICT=""
+if [ -f "$TRACE/gates.json" ]; then
+  GATE_VERDICT="$(python3 -c 'import json,sys
+try: print(json.load(open(sys.argv[1])).get("verdict") or "")
+except Exception: print("")' "$TRACE/gates.json" 2>/dev/null || echo "")"
+fi
 if [ ! -f "$TRACE/candidate.json" ] || [ "${QWEN_RC:-2}" -ne 0 ]; then
   RC=2
 elif [ ! -s "$TRACE/work/report.md" ]; then
   echo "✗ run exited 0 but produced no work/report.md — not a success" >&2
   RC=3
+elif [ -n "$GATE_VERDICT" ] && [ "$GATE_VERDICT" != "clean" ]; then
+  echo "✗ report delivered but its own gates say verdict=$GATE_VERDICT — not a success" >&2
+  RC=4
 else
   RC=0
 fi

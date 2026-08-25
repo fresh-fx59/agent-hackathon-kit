@@ -1537,6 +1537,21 @@ def render_report_evidence(e):
     return "\n".join(out)
 
 
+def _blocking_total(d, report):
+    """The same sum `ledger()` prints as «осталось N», without the rendering.
+
+    Kept next to it deliberately: two definitions of "how many defects" is how a
+    gate ends up reporting one number and exiting on another.
+    """
+    summary = d.get("summary") or {}
+    bad = sum(summary.get(k, 0) for k in
+              ("wrong-content", "out-of-range", "missing-file", "no-quote"))
+    o = d.get("outcomes") or {}
+    ev = d.get("report_evidence") or report_evidence(report, d)
+    return (bad + len(d.get("non_references") or [])
+            + (o.get("blocking") or 0) + (ev.get("blocking") or 0))
+
+
 def ledger(d, report, path, report_path=None):
     rows, closed = read_ledger(path)
     open_rows = [r for r in rows
@@ -1840,6 +1855,12 @@ def main():
     d.pop("flagged", None)
     if isinstance(d.get("delivered"), dict):
         d["delivered"].pop("flagged", None)
+    if args.json:
+        # The stop number, at top level and under the name every gate uses.
+        # `ledger()` computes it and returns it beside the human render; the
+        # JSON carried only the parts, so run-bench.sh's blocking check was
+        # dead for this gate. Recomputed here from the same pieces.
+        d["blocking"] = _blocking_total(d, text)
     print(json.dumps(d, ensure_ascii=False, indent=1) if args.json else render(d))
     if args.delivered and not args.json:
         print(render_delivery(d["delivered"]))
