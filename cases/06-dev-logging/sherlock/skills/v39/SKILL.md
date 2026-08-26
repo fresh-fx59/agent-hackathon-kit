@@ -144,6 +144,18 @@ You do NOT read the corpus yourself: you run `logmap.py`, read `map.txt` and
    Only now, immediately before writing the draft, read
    `reference/report-format.md` (do not read it at the start). Write the full
    report into `work/report.md`.
+   **WRITE IT INCREMENTALLY, AND START THE MOMENT `work/checkpoint.json` READS
+   `ready_for_synthesis`** — not at the end. Append each finished section to
+   `work/report.md` as soon as it is written: «## Находки» first, one `### Н-n`
+   block at a time, then «## Отклонённые кандидаты»,
+   «## Принадлежность учётных записей», «## Покрытие», «## Окно записей».
+   Delete the `СИНТЕЗ НЕ ЗАВЕРШЁН` line as the LAST action of synthesis; while it
+   stands the Stop hook refuses delivery. Measured on the v38 paid run: 7
+   `write_file` calls in 2 h 42 m, **not one of them to `report.md`**, 181
+   `read_file`, 162 `run_shell_command` — and the run died 35 minutes after
+   `ready_for_synthesis` holding a 192-byte stub. A run that dies mid-synthesis
+   must leave a partial report worth reading, because on this lane runs DO die
+   mid-synthesis.
    **EVERY citation is produced by a tool, and there are TWO of them.** One line
    → `cite.py <путь>:<строка>`. A NUMBER over many lines — «93 источника», «25355
    отказов», «8 из них больше 1000 раз» — → `cite.py --file <путь> --aggregate
@@ -524,11 +536,18 @@ to know what it counts as a state change and how a group is closed.
    account is named in a finding without a checked first-appearance row, its
    claimed first appearance does not survive the corpus, or it is called
    «посторонний» with no earlier owner named;
-8. **the report text is not yet entirely inside your final message.**
+8. `work/report.md` holds no real `### Н-n` or `### К-n` block — and does not
+   state `Находок нет: <причина>` outright — **or it still carries the line
+   `СИНТЕЗ НЕ ЗАВЕРШЁН`**. A stub is not a report: `stopcheck` blocks delivery on
+   either, and `checkpoint.py init` rewrites its own placeholder on every call, so
+   it can never freeze at a stale count beside a `checkpoint.json` that already
+   says `ready_for_synthesis` (that pair, 13 из 262 against 262/262, is the v38
+   failure this item exists to stop);
+9. **the report text is not yet entirely inside your final message.**
    If you deliver an abridgement rather than the draft verbatim, it must pass
    `citecheck … --delivered <файл поставки>` with a zero return.
 
-Items 1–7 print numbers, not self-assessment. Only the last act — pasting the
+Items 1–8 print numbers, not self-assessment. Only the last act — pasting the
 text into the message — is unverifiable, which is exactly why it gets forgotten: a
 green `citecheck` feels like the finish line though it only permits delivery.
 While the report lives only in a file, zero has been done. "There is enough
@@ -561,6 +580,16 @@ MUST read `<SKILL_BASE_DIR>/reference/tools.md` §"Бюджет: почему о
 - **No final message while `work/report.md` does not exist on disk** and
   `triagecheck`, `citecheck` and `statecheck` have not each exited zero. Writing
   the report straight into chat is a failed run even if the prose is perfect.
+- **NEVER read or grep a gate's source code.** `citecheck.py`, `triagecheck.py`,
+  `statecheck.py`, `stopcheck.py`, `rollover.py`, `covermap.py`, `logmap.py` and
+  `checkpoint.py` are graders, not documentation. Every actionable message they
+  print names the ABSOLUTE path of the file to edit and the exact string to write;
+  that message is the whole contract. If it is still not enough, that is a
+  **defect in the gate, to be reported, not a puzzle to solve** — write one line
+  about it in the report's «Чего я не знаю» section and move on. Measured:
+  reverse-engineering the grader cost the v38 run its last 90 minutes — 8
+  `read_file` + 4 `grep_search` on `citecheck.py`, grepping
+  `ENUM_DECODE_RE|def enum_decode_ok` — and produced nothing at all.
 - **Never invent a log line.** A quote is only what you read.
 - **Never type a number either.** Every count, share and «сколько всего» in the
   report comes from `cite.py --aggregate` and is pasted verbatim, command and

@@ -7,6 +7,7 @@ if there is no valid active marker for this workspace the hook allows Stop.
 import io
 import json
 import os
+import re
 import signal
 import stat
 import subprocess
@@ -690,6 +691,69 @@ def retire(path, workspace, deadline=None):
         check_deadline(deadline)
 
 
+# ==========================================================================
+# fix 5c — A STUB IS NOT A REPORT, AND MUST NOT REACH DELIVERY
+# ==========================================================================
+# MEASURED, v38 paid run 20260826T132832Z-v38: 7 `write_file` calls in 2 h 42 m
+# (2 failed), 181 `read_file`, 162 `run_shell_command`, 3 `agent` calls costing
+# 65 minutes — and NOT ONE write to `report.md`. Every write went to helper python
+# scripts. After `checkpoint.json` reached `ready_for_synthesis` at 15:35Z the run
+# made 124 more upstream calls, 58 of them discarded, and died at 16:10Z holding a
+# 192-byte stub. Nothing in the Stop path could tell that apart from a report.
+#
+# TWO TERMS, NAMED, SUMMED, AND EACH ASSERTED BY A TEST. This project's signature
+# defect is a blocking term that is computed and printed but absent from the exit
+# code; `substance_defect_keys()` exists so one test can walk every name and
+# insist each one on its own turns Stop into `block`.
+#
+# Structure only — this is not a second citecheck. `### Н-n` / `### К-n` is the
+# shape SKILL.md mandates and citecheck parses; the honest empty answer
+# «Находок нет: <причина>» stays reachable, because a gate with no honest empty
+# path teaches fabrication (the same rule as «не определяется» in 6b).
+# DELIBERATELY as permissive as citecheck's own FINDING_HEAD_RE (`[#>*-\s]{0,8}`
+# prefix, `-`/`–`/`—` separator): two gates that disagree about what a finding
+# block looks like would block a report the other accepts, and the arm would have
+# no way to satisfy both. The prefix class stays in sync with that regex.
+FINDING_HEAD_RE = re.compile(
+    r"^[ \t]*[#>*\- \t]{0,8}\*{0,2}[ \t]*[НКHK][ \t]*[-–—][ \t]*\d+[ \t]*\S", re.M)
+# Markdown prefixes allowed for the same reason: the honest empty answer must
+# not be refused because the arm bolded it.
+NO_FINDINGS_DECL_RE = re.compile(
+    r"^[ \t]*[#>*\- \t]{0,8}\*{0,2}[ \t]*Находок нет:[ \t]*\S", re.M)
+#: the placeholder line checkpoint.py writes; the arm deletes it last.
+SYNTHESIS_MARKER = "СИНТЕЗ НЕ ЗАВЕРШЁН"
+
+SUBSTANCE_REASONS = {
+    "no_finding_block":
+        "Sherlock: work/report.md has no `### Н-n` or `### К-n` block; write the "
+        "findings into the file section by section, or state "
+        "«Находок нет: <причина>» outright.",
+    "synthesis_incomplete_marker":
+        "Sherlock: work/report.md still carries the «СИНТЕЗ НЕ ЗАВЕРШЁН» "
+        "placeholder line; finish synthesis and delete it.",
+}
+
+
+def report_substance_defects(text):
+    """-> {named term: 0|1}. Sum it; never hand-write the total."""
+    has_block = bool(FINDING_HEAD_RE.search(text) or NO_FINDINGS_DECL_RE.search(text))
+    return {
+        "no_finding_block": 0 if has_block else 1,
+        "synthesis_incomplete_marker": 1 if SYNTHESIS_MARKER in text else 0,
+    }
+
+
+def substance_defect_keys():
+    return tuple(sorted(report_substance_defects("").keys()))
+
+
+def substance_reason(defects):
+    for key in substance_defect_keys():
+        if defects.get(key):
+            return SUBSTANCE_REASONS[key]
+    return None
+
+
 def _allow(reason="Sherlock inactive", retire_path=None):
     return "allow", reason, retire_path
 
@@ -744,16 +808,26 @@ def evaluate_stop(event, workspace, deadline):
         if not report:
             return _block("Sherlock: work/report.md is missing or unsafe; complete DRAFT before stopping.")
 
+        check_deadline(deadline)
+        try:
+            with open(report, encoding="utf-8", errors="replace") as fh:
+                body = fh.read()
+        except OSError:
+            return _block("Sherlock: work/report.md cannot be read; fix DRAFT before stopping.")
+
+        # fix 5c. BEFORE the children: a stub costs nothing to recognise, and
+        # naming the real problem beats «citecheck failed» on a file with no
+        # findings in it at all.
+        defects = report_substance_defects(body)
+        if sum(defects.values()):
+            return _block(substance_reason(defects))
+
         reason = check_children(corpus, out_dir, report, lists, expected_root, workspace, deadline)
         if reason:
             return _block(reason)
 
         check_deadline(deadline)
-        try:
-            with open(report, encoding="utf-8", errors="replace") as fh:
-                expected = fh.read().strip()
-        except OSError:
-            return _block("Sherlock: work/report.md cannot be read; fix DRAFT before stopping.")
+        expected = body.strip()
         check_deadline(deadline)
         got = (event.get("last_assistant_message") or "").strip()
         if got != expected:

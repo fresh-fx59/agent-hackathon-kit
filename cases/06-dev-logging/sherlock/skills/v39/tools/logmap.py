@@ -4226,6 +4226,16 @@ def outcome_map_lines(r):
     return out
 
 
+# fix 5a — see citecheck.py «A HINT MUST NAME A PATH THE ARM CAN OPEN». A printed
+# `citecheck.py --ledger …` is a basename the arm's cwd does not contain.
+TOOLS_DIR = os.path.dirname(os.path.abspath(__file__))
+
+
+def tool_cmd(name):
+    """`python3 /abs/path/<name>` — never a bare basename the arm cannot find."""
+    return "python3 %s" % os.path.join(TOOLS_DIR, name)
+
+
 def map_head(reports, corpus, worklist_name="work/worklist.tsv"):
     return ["КАРТА КОРПУСА  %s" % os.path.abspath(corpus),
             "файлов: %d · рабочий список: %s · таблица темпа: work/axis3.tsv"
@@ -4476,14 +4486,18 @@ def worklist_note(rows, rate_rows, trunc, args, hosts, ledger=None):
     a("")
     a("Каждая строка рабочего списка начинается со статуса `?`. Замени его на")
     if hosts:
-        a("D / N / X и запиши файл обратно — В ФАЙЛ СВОЕГО ХОСТА. `citecheck.py")
-        a("--ledger work/worklist-<хост>.tsv` печатает, сколько `?` осталось у")
-        a("этого хоста; хостов %d, и закончить надо каждого." % len(hosts))
+        a("D / N / X и запиши файл обратно — В ФАЙЛ СВОЕГО ХОСТА.")
+        a("`%s --ledger work/worklist-<хост>.tsv`" % tool_cmd("citecheck.py"))
+        a("печатает, сколько `?` осталось у этого хоста; хостов %d, и закончить"
+          % len(hosts))
+        a("надо каждого.")
     elif ledger:
         a("D / N / X и запиши файл обратно — В ЭТОТ файл: work/%s." % ledger)
-        a("`citecheck.py --ledger work/%s` печатает, сколько `?` осталось." % ledger)
+        a("`%s --ledger work/%s` печатает, сколько `?` осталось."
+          % (tool_cmd("citecheck.py"), ledger))
     else:
-        a("D / N / X и запиши файл обратно. `citecheck.py --ledger work/worklist.tsv`")
+        a("D / N / X и запиши файл обратно.")
+        a("`%s --ledger work/worklist.tsv`" % tool_cmd("citecheck.py"))
         a("печатает, сколько `?` осталось.")
     a("")
     a("ЧИТАЙ СРЕЗЫ, НЕ worklist.tsv. work/worklist-index.tsv — оглавление на")
