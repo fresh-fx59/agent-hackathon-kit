@@ -134,6 +134,43 @@ UPSTREAM_API_KEY_FILE = os.environ.get("UPSTREAM_API_KEY_FILE", "").strip()
 # A credential is short. This cap is not a tuning knob, it is the torn-read
 # guard: anything larger is not a key and must not be sent as one.
 _MAX_KEY_BYTES = 4096
+# THE UPSTREAM ROUTE IS A FILE TOO, FOR THE SAME REASON THE KEY IS.
+#
+# UPSTREAM_BASE, UPSTREAM_MODEL and UPSTREAM_EXPECTED_RETURNED_IDENTITY are read
+# ONCE, at import. Changing the provider or the model therefore meant killing the
+# proxy, which means killing the run: 2h42m and ~14 CNY, measured three times.
+# And it is not a hypothetical need - the three paid v38 runs failed on the
+# PROVIDER, not the harness, and the fix (CloseRouter, 1/27th the cost) is a
+# different base URL and a different model id. Being unable to change route
+# without a restart is what turned a provider outage into a lost run.
+#
+# With UPSTREAM_ROUTE_FILE set, the proxy reads a small JSON object on EVERY
+# relayed call and uses it for that call:
+#
+#   {"schema": 1,
+#    "base": "https://api.closerouter.dev/v1",
+#    "model": "deepseek/deepseek-v4-flash-0731",
+#    "expected_returned_identity": "deepseek/deepseek-v4-flash-0731",
+#    "key_file": "/abs/path/upstream.key",   # optional, overrides the env one
+#    "generation": 3}                        # monotonic, writer-set
+#
+# BASE, MODEL AND EXPECTED IDENTITY MOVE TOGETHER, ALWAYS. This is the whole
+# reason the route is one file and not three env vars made hot-swappable one at
+# a time. `model_family` keeps the vendor prefix, so
+# same_family('deepseek/deepseek-v4-flash-0731', 'deepseek-v4-flash-0731') is
+# FALSE (measured 2026-08-26): a CloseRouter base with a linkapi identity trips
+# the lane guard on the very first call. A route in which those three can be
+# observed out of step is not a smaller bug than a restart, it is a worse one.
+# Hence Route is captured ONCE per upstream call and threaded through the relay,
+# the substitution judgement and the ledger row.
+#
+# UNSET = EXACTLY TODAY'S BEHAVIOUR, byte for byte: the module-level env values
+# govern and no route field is written to the ledger. A pass-through unless a
+# runner asks, exactly like UPSTREAM_SUBSTITUTION_RETRY_MAX.
+UPSTREAM_ROUTE_FILE = os.environ.get("UPSTREAM_ROUTE_FILE", "").strip()
+# A route is a handful of short strings. Same reasoning as _MAX_KEY_BYTES: this
+# is the torn-read guard, not a tuning knob.
+_MAX_ROUTE_BYTES = 4096
 # STREAMING IS THE ONLY CASE THAT MATTERS HERE. Every one of the 51 rows on the
 # v38 run - the substituted one included - is `"stream": true`, so a fix that
 # only handled whole JSON bodies would be a no-op on the real lane.
@@ -226,14 +263,17 @@ _BUDGET_LIMITS = {
         "UPSTREAM_MAX_CONSECUTIVE_PROVIDER_FAILURES"),
 }
 _BUDGET_ENABLED = bool(UPSTREAM_BUDGET_STATE)
-if _BUDGET_ENABLED and (not RUN_TAG or not UPSTREAM_EXPECTED_RETURNED_IDENTITY or
+if _BUDGET_ENABLED and (not RUN_TAG or
+                        not (UPSTREAM_EXPECTED_RETURNED_IDENTITY or UPSTREAM_ROUTE_FILE) or
                         any(value is None for value in _BUDGET_LIMITS.values())):
     raise ValueError("controlled proxy requires run identity and all finite limits")
 # Only statuses that are transient on this lane. A 401/404/422 is a real defect
 # in the request and retrying it just burns the context again for nothing.
 _RETRYABLE = {400, 408, 429, 500, 502, 503, 504}
 
-_BASE_PATH = urlsplit(UPSTREAM_BASE).path.rstrip("/")     # e.g. "/v1"
+# The base path (e.g. "/v1") is per-ROUTE now, not per-process: see
+# Route.base_path. Nothing may compute it from the module global any more, or a
+# swapped base would keep the old prefix.
 _LOG_LOCK = threading.Lock()
 _INFLIGHT_LOCK = threading.Lock()
 _BUDGET_LOCK = threading.Lock()
@@ -294,8 +334,12 @@ class KeyUnavailable(Exception):
         self.transient = transient
 
 
-def _read_api_key_once():
-    """Return the upstream credential, read FRESH from UPSTREAM_API_KEY_FILE.
+def _read_api_key_once(path=None):
+    """Return the upstream credential, read FRESH from the configured key file.
+
+    `path` defaults to UPSTREAM_API_KEY_FILE; a route file may name its own key
+    file, because a provider swap is also a credential swap and the two must
+    never be observable out of step (see UPSTREAM_ROUTE_FILE).
 
     NO CACHING, DELIBERATELY. The alternative — cache plus an mtime check — is
     faster and wrong at the only moment that matters: `os.replace` can land
@@ -321,7 +365,7 @@ def _read_api_key_once():
     wrong credential — or with the client's stale one — silently corrupts a
     paid measurement, which is the thing this whole lane exists to prevent.
     """
-    path = UPSTREAM_API_KEY_FILE
+    path = UPSTREAM_API_KEY_FILE if path is None else path
     nofollow = getattr(os, "O_NOFOLLOW", 0)
     try:
         before = os.lstat(path)
@@ -388,12 +432,14 @@ _KEY_READ_RETRIES = 5
 _KEY_READ_RETRY_S = 0.005
 
 
-def _read_api_key():
+def _read_api_key(path=None):
     """_read_api_key_once, retried past a racing writer. See KeyUnavailable."""
     last = None
     for attempt in range(_KEY_READ_RETRIES):
         try:
-            return _read_api_key_once()
+            # Called with NO argument when the module default applies, so a
+            # test that monkeypatches a zero-arg _read_api_key_once still works.
+            return _read_api_key_once() if path is None else _read_api_key_once(path)
         except KeyUnavailable as exc:
             if not exc.transient:
                 raise
@@ -418,6 +464,308 @@ def _strict_object(pairs):
             raise ValueError("duplicate JSON key")
         row[key] = value
     return row
+
+
+# ======================================================================
+# THE ROUTE. One provider + model + expected identity, read fresh per call.
+# ======================================================================
+class RouteUnavailable(Exception):
+    """The route file is not usable. Carries a diagnosis and a REASON CODE.
+
+    `code` exists so the fail-closed cases are NAMED rather than described:
+    a counter keyed on it is written into the ledger event and asserted by
+    measure/tests/test_upstream_route_file.py, so no refusal reason can be
+    computed, printed and never checked.
+
+    `transient` marks the faults that are a RACE with the writer rather than a
+    verdict about the file - exactly as in KeyUnavailable.
+    """
+
+    def __init__(self, message, code="ROUTE_UNUSABLE", transient=False):
+        super().__init__(message)
+        self.code = code
+        self.transient = transient
+
+
+class Route(object):
+    """ONE upstream route, captured ONCE and used for ONE upstream call.
+
+    Immutable on purpose. Rule 5 of the design: base, model and expected
+    identity used for a single relay MUST come from the same read, so a swap
+    landing mid-call can never make the proxy send model A to provider B and
+    judge the answer against identity C. Everything downstream of `_relay`
+    takes this object; nothing downstream reads the module globals.
+    """
+
+    __slots__ = ("base", "model", "expected_identity", "key_file",
+                 "generation", "base_path", "source")
+
+    def __init__(self, base, model, expected_identity, key_file, generation,
+                 source):
+        self.base = base
+        self.model = model
+        self.expected_identity = expected_identity
+        self.key_file = key_file
+        self.generation = generation
+        self.base_path = urlsplit(base).path.rstrip("/")
+        self.source = source                      # "env" | "file"
+
+    def url_for(self, path):
+        if self.base_path and path.startswith(self.base_path):
+            path = path[len(self.base_path):]
+        return self.base + (path if path.startswith("/") else "/" + path)
+
+    def ledger_fields(self):
+        """The route columns for a ledger row.
+
+        EMPTY when no route file is configured, deliberately: a run that does
+        not use the feature keeps the exact ledger shape every previous run
+        wrote, and lane_guard.audit_ledger falls back to its global --expected
+        for those rows. Same discipline as `discarded_substitution`.
+        """
+        if self.source == "env":
+            return {}
+        return {"route_generation": self.generation,
+                "route_base": self.base,
+                "route_expected_identity": self.expected_identity}
+
+
+# Named, so a provider that starts serving a broken route file shows up as a
+# count per REASON rather than as a pile of 503s. Written into the
+# `route_unavailable` ledger event and asserted by the tests.
+_ROUTE_REFUSALS = {}
+_ROUTE_LOCK = threading.Lock()
+
+
+def _note_route_refusal(code):
+    with _ROUTE_LOCK:
+        _ROUTE_REFUSALS[code] = _ROUTE_REFUSALS.get(code, 0) + 1
+        return dict(_ROUTE_REFUSALS)
+
+
+def _env_route():
+    """Today's behaviour, expressed as a Route. No file, no new failure mode."""
+    return Route(UPSTREAM_BASE, UPSTREAM_MODEL,
+                 UPSTREAM_EXPECTED_RETURNED_IDENTITY, UPSTREAM_API_KEY_FILE,
+                 None, "env")
+
+
+def _route_line(obj, key, required=True):
+    """A single-line, non-empty string field. Anything else is a refusal."""
+    if key not in obj:
+        if not required:
+            return ""
+        raise RouteUnavailable("route file has no %r field" % key,
+                               "ROUTE_FIELD_MISSING")
+    value = obj[key]
+    if not isinstance(value, str):
+        raise RouteUnavailable("route field %r is not a string" % key,
+                               "ROUTE_FIELD_NOT_STRING")
+    value = value.strip()
+    if not value:
+        raise RouteUnavailable("route field %r is empty" % key,
+                               "ROUTE_FIELD_BLANK")
+    # A control character in a model id or a URL is a header/URL-injection
+    # vector and is never part of a legitimate value.
+    if any(ord(c) < 32 or ord(c) == 127 for c in value):
+        raise RouteUnavailable(
+            "route field %r contains a control character" % key,
+            "ROUTE_FIELD_NOT_ONE_LINE")
+    return value
+
+
+# A route file names a key FILE, never a key. Any field that looks like it
+# carries a credential is a refusal, not a value to be quietly ignored: the
+# route file is not 0600-by-contract the way the key file is, and a secret that
+# lands in it would be a secret in the trace dir nobody meant to put there.
+_ROUTE_CREDENTIAL_FIELDS = ("key", "api_key", "apikey", "token", "secret",
+                            "authorization", "bearer", "password")
+
+
+def _route_from_obj(obj):
+    if not isinstance(obj, dict):
+        raise RouteUnavailable("route file is not a JSON object",
+                               "ROUTE_NOT_OBJECT")
+    for field in _ROUTE_CREDENTIAL_FIELDS:
+        if field in obj:
+            raise RouteUnavailable(
+                "route file carries a %r field - a route names a key_file "
+                "PATH, never a credential" % field, "ROUTE_CARRIES_CREDENTIAL")
+    schema = obj.get("schema")
+    if type(schema) is not int or schema != 1:
+        raise RouteUnavailable("route file schema is %r, not 1" % (schema,),
+                               "ROUTE_SCHEMA_UNSUPPORTED")
+    base = _route_line(obj, "base")
+    parts = urlsplit(base)
+    if parts.scheme not in ("http", "https") or not parts.netloc:
+        raise RouteUnavailable(
+            "route base is not an absolute http/https URL", "ROUTE_BASE_INVALID")
+    base = base.rstrip("/")
+    model = _route_line(obj, "model")
+    expected = _route_line(obj, "expected_returned_identity")
+    key_file = _route_line(obj, "key_file", required=False)
+    if key_file and not key_file.startswith("/"):
+        raise RouteUnavailable("route key_file is not an absolute path",
+                               "ROUTE_KEY_FILE_NOT_ABSOLUTE")
+    generation = obj.get("generation")
+    if generation is None:
+        generation = None
+    elif type(generation) is not int or generation < 0:
+        raise RouteUnavailable(
+            "route generation %r is not a non-negative integer" % (generation,),
+            "ROUTE_GENERATION_INVALID")
+    return Route(base, model, expected, key_file, generation, "file")
+
+
+def _read_route_once(path):
+    """Return the Route in `path`, read FRESH. Same discipline as the key.
+
+    NO CACHING, DELIBERATELY, and for the identical reason: `os.replace` can
+    land inside the same st_mtime tick as the read that preceded it, so a cache
+    keyed on mtime can serve the OLD route after a swap and never notice. The
+    cost of being unconditionally right is one open+read of a <4 KiB file per
+    upstream call whose own latency is measured in seconds. That is not a trade.
+
+    TORN READS. The writer's contract is an atomic rename, and this function
+    does not TRUST it: the (dev, ino, size) triple is checked before, at open,
+    and after the read, and a mismatch is a refusal rather than a half route.
+    The JSON parse is the second net - but only the second, because a truncated
+    JSON object can still parse (`{"schema": 1}` is a prefix of every route
+    file ever written) and would then fail as a MISSING FIELD, which is a
+    refusal too.
+
+    FAILS CLOSED, IN EVERY DIRECTION. There is no fallback to the env values
+    and no fallback to the previously-seen route. A call sent to the wrong
+    provider, or judged against the wrong expected identity, silently corrupts
+    a paid measurement - which is the thing this whole lane exists to prevent.
+    A refused call costs one call; a wrong one costs the run.
+    """
+    nofollow = getattr(os, "O_NOFOLLOW", 0)
+    try:
+        before = os.lstat(path)
+    except OSError as exc:
+        raise RouteUnavailable("route file cannot be stat'ed (%s)" % exc.strerror,
+                               "ROUTE_FILE_UNSTATABLE",
+                               transient=exc.errno == errno.ENOENT)
+    if not stat.S_ISREG(before.st_mode) or stat.S_ISLNK(before.st_mode):
+        raise RouteUnavailable("route file is not a regular file",
+                               "ROUTE_NOT_REGULAR")
+    try:
+        fd = os.open(path, os.O_RDONLY | nofollow)
+    except OSError as exc:
+        raise RouteUnavailable("route file cannot be opened (%s)" % exc.strerror,
+                               "ROUTE_FILE_UNREADABLE",
+                               transient=exc.errno == errno.ENOENT)
+    try:
+        opened = os.fstat(fd)
+        if not stat.S_ISREG(opened.st_mode):
+            raise RouteUnavailable("route file is not a regular file",
+                                   "ROUTE_NOT_REGULAR")
+        if opened.st_size > _MAX_ROUTE_BYTES:
+            raise RouteUnavailable(
+                "route file is larger than %d bytes" % _MAX_ROUTE_BYTES,
+                "ROUTE_OVERSIZED")
+        if (before.st_dev, before.st_ino) != (opened.st_dev, opened.st_ino):
+            raise RouteUnavailable("route file was replaced while being opened",
+                                   "ROUTE_REPLACED_WHILE_OPENING", transient=True)
+        chunks = []
+        total = 0
+        while total <= _MAX_ROUTE_BYTES:
+            chunk = os.read(fd, min(65536, _MAX_ROUTE_BYTES + 1 - total))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            total += len(chunk)
+        finished = os.fstat(fd)
+        if total > _MAX_ROUTE_BYTES:
+            raise RouteUnavailable(
+                "route file is larger than %d bytes" % _MAX_ROUTE_BYTES,
+                "ROUTE_OVERSIZED")
+        if (total != finished.st_size or
+                (opened.st_dev, opened.st_ino, opened.st_size) !=
+                (finished.st_dev, finished.st_ino, finished.st_size)):
+            raise RouteUnavailable("route file changed size while being read",
+                                   "ROUTE_CHANGED_WHILE_READING", transient=True)
+    finally:
+        os.close(fd)
+    raw = b"".join(chunks)
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError:
+        raise RouteUnavailable("route file is not valid UTF-8", "ROUTE_NOT_UTF8")
+    if not text.strip():
+        raise RouteUnavailable("route file is empty", "ROUTE_EMPTY")
+    try:
+        obj = json.loads(text, object_pairs_hook=_strict_object)
+    except ValueError as exc:
+        raise RouteUnavailable("route file is not parseable JSON (%s)" % exc,
+                               "ROUTE_UNPARSEABLE")
+    return _route_from_obj(obj)
+
+
+# Same bound and the same reasoning as _KEY_READ_RETRIES: a swap is one
+# rename, so losing the race is a signal to look again, not a verdict - but a
+# file that keeps changing under us must still eventually fail closed.
+_ROUTE_READ_RETRIES = 5
+_ROUTE_READ_RETRY_S = 0.005
+
+
+def _read_route(path):
+    last = None
+    for attempt in range(_ROUTE_READ_RETRIES):
+        try:
+            return _read_route_once(path)
+        except RouteUnavailable as exc:
+            if not exc.transient:
+                raise
+            last = exc
+            if attempt + 1 < _ROUTE_READ_RETRIES:
+                time.sleep(_ROUTE_READ_RETRY_S)
+    raise last
+
+
+# THE ONE FUNNEL. Every route in this process comes from here, so a future
+# in-process advance (exhausting the substitution cap and moving to the next
+# provider) has exactly one place to change: it rewrites the file this reads,
+# or it overrides `_ROUTE_SOURCE["file"]`. Nothing else in the module reads
+# UPSTREAM_ROUTE_FILE.
+_ROUTE_SOURCE = {"file": UPSTREAM_ROUTE_FILE}
+
+
+def _current_route():
+    path = _ROUTE_SOURCE["file"]
+    if not path:
+        return _env_route()
+    return _read_route(path)
+
+
+def _apply_route_model(body, route):
+    """Rewrite the request's `model` to the route's, and report both ids.
+
+    Byte-identical to the pre-route code when `route` is the env route: rewrite
+    ONLY the model field, and only when the body parses as the object we expect.
+    A proxy that reformats a request it did not fully understand is a proxy that
+    corrupts one silently.
+    """
+    requested = sent = None
+    out = body
+    if route.model and body:
+        try:
+            obj = json.loads(body)
+            if isinstance(obj, dict) and obj.get("model"):
+                requested = obj["model"]
+                obj["model"] = route.model
+                sent = route.model
+                out = json.dumps(obj, ensure_ascii=False).encode("utf-8")
+        except Exception:
+            pass
+    if requested is None:
+        try:
+            requested = (json.loads(body or b"{}") or {}).get("model")
+        except Exception:
+            pass
+    return out, requested, sent
+
 
 
 def _read_budget():
@@ -654,7 +1002,7 @@ def _write_lane_abort(row):
         pass
 
 
-def _lane_trip(reason, detail):
+def _lane_trip(reason, detail, expected=None):
     """Trip the lane, and do not let a refusal go out before the marker exists.
 
     THE RACE THIS CLOSES. The marker write is mkstemp -> write -> fsync ->
@@ -681,7 +1029,8 @@ def _lane_trip(reason, detail):
         _LANE_ABORT = {"reason": reason, "detail": detail}
     row = {"schema": 1, "run_tag": RUN_TAG, "reason": reason, "detail": detail,
            "observed_at": _budget_timestamp(),
-           "expected_returned_identity": UPSTREAM_EXPECTED_RETURNED_IDENTITY,
+           "expected_returned_identity": (
+               UPSTREAM_EXPECTED_RETURNED_IDENTITY if expected is None else expected),
            "cache_min_rate": UPSTREAM_CACHE_MIN_RATE,
            "cache_min_calls": UPSTREAM_CACHE_MIN_CALLS,
            "cache_observed": dict(_LANE_CACHE)}
@@ -703,16 +1052,22 @@ def _lane_trip(reason, detail):
         pass
 
 
-def _is_substitution(returned):
+def _is_substitution(returned, expected):
     """True only when the provider NAMED a model and it is the wrong family.
+
+    `expected` is the identity of the ROUTE THIS CALL WAS SENT ON, never the
+    module global. A route swap changes base, model and expected identity
+    together, and `model_family` keeps the vendor prefix - so judging a
+    CloseRouter answer against a linkapi identity would call every single call
+    a substitution. The per-call identity is not a refinement here, it is the
+    difference between a working swap and a lane that trips on call one.
 
     A 2xx that names nothing is NOT evidence of a substitution and is never
     retried on that basis - it is an unmeasured row, which lane-audit.py
     refuses at the end of the run as RETURNED_MODEL_UNKNOWN.
     """
-    return bool(UPSTREAM_EXPECTED_RETURNED_IDENTITY
-                and isinstance(returned, str) and returned.strip()
-                and not same_family(UPSTREAM_EXPECTED_RETURNED_IDENTITY, returned))
+    return bool(expected and isinstance(returned, str) and returned.strip()
+                and not same_family(expected, returned))
 
 
 def _note_substitution(returned, usage):
@@ -733,7 +1088,7 @@ def _note_substitution(returned, usage):
     sys.stderr.flush()
 
 
-def _lane_observe(status, returned, usage):
+def _lane_observe(status, returned, usage, expected):
     """Judge one completed call. Called after its ledger row is written.
 
     Only calls the provider actually ANSWERED are judged. A 400 or a dead
@@ -747,12 +1102,12 @@ def _lane_observe(status, returned, usage):
     """
     if not (type(status) is int and 200 <= status < 300):
         return
-    if _is_substitution(returned):
+    if _is_substitution(returned, expected):
         _lane_trip("RETURNED_MODEL_FAMILY_MISMATCH",
                    "requested %s (family %s), provider answered as %s (family %s)"
-                   % (UPSTREAM_EXPECTED_RETURNED_IDENTITY,
-                      model_family(UPSTREAM_EXPECTED_RETURNED_IDENTITY),
-                      returned, model_family(returned)))
+                   % (expected, model_family(expected),
+                      returned, model_family(returned)),
+                   expected=expected)
         return
     if not UPSTREAM_CACHE_GUARD:
         return
@@ -1007,12 +1362,6 @@ class Proxy(BaseHTTPRequestHandler):
         self._relay(self.rfile.read(n) if n else b"")
 
     # ------------------------------------------------------------------
-    def _upstream_url(self):
-        path = self.path
-        if _BASE_PATH and path.startswith(_BASE_PATH):
-            path = path[len(_BASE_PATH):]
-        return UPSTREAM_BASE + (path if path.startswith("/") else "/" + path)
-
     def _relay(self, body):
         # A tripped lane answers nothing. Checked before the body is even
         # inspected: the whole value of the guard is the call that does NOT
@@ -1020,25 +1369,6 @@ class Proxy(BaseHTTPRequestHandler):
         if _LANE_ABORT is not None:
             self._lane_refusal()
             return
-        requested = sent = None
-        if UPSTREAM_MODEL and body:
-            # Rewrite ONLY the model field, and only when the body parses as the
-            # object we expect. A proxy that reformats a request it did not
-            # fully understand is a proxy that corrupts one silently.
-            try:
-                obj = json.loads(body)
-                if isinstance(obj, dict) and obj.get("model"):
-                    requested = obj["model"]
-                    obj["model"] = UPSTREAM_MODEL
-                    sent = UPSTREAM_MODEL
-                    body = json.dumps(obj, ensure_ascii=False).encode("utf-8")
-            except Exception:
-                pass
-        if requested is None:
-            try:
-                requested = (json.loads(body or b"{}") or {}).get("model")
-            except Exception:
-                pass
 
         # LOG THE OUTBOUND OUTPUT BUDGET. `prompt + max_tokens` is what the
         # provider checks, not the prompt alone, and an unclamped qwen-code
@@ -1054,39 +1384,62 @@ class Proxy(BaseHTTPRequestHandler):
         if not isinstance(request_max_tokens, int):
             request_max_tokens = None
 
-        headers = {k: v for k, v in self.headers.items()
-                   if k.lower() not in _HOP}
-        # OWN THE CREDENTIAL. When a key file is configured the client's
-        # Authorization header is REPLACED, never merged and never trusted, so
-        # the qwen child's launch-time environment stops deciding which
-        # upstream account a paid call bills to. Read per request: see
-        # _read_api_key for why there is no cache.
-        if UPSTREAM_API_KEY_FILE:
-            try:
-                headers["Authorization"] = "Bearer " + _read_api_key()
-            except KeyUnavailable as exc:
-                # FAIL CLOSED. Not "fall back to the client's header" — that is
-                # the silent wrong-account call this feature removes. The
-                # diagnosis names the file and the fault; it cannot name a key,
-                # because no key was obtained on this path.
-                self._key_refusal(str(exc))
-                return
+        client_headers = {k: v for k, v in self.headers.items()
+                          if k.lower() not in _HOP}
         # identity so the body stays scannable; the client gets it un-encoded,
         # which is what every OpenAI-compatible client already accepts.
-        headers["Accept-Encoding"] = "identity"
+        client_headers["Accept-Encoding"] = "identity"
         # THE SUBSTITUTION LOOP, and the only thing it does is decide whether
         # to ask again. Each turn is one COMPLETE upstream call with its own
         # ledger row, its own budget reservation and its own captured bodies;
         # a turn that saw a wrong-model answer wrote nothing to the client, so
         # re-issuing is safe. `discarded` is both the counter and the cap, and
         # the last permitted turn fails closed inside `_relay_once`.
+        #
+        # ONE ROUTE PER UPSTREAM CALL. The route is read at the top of each
+        # turn, not once for the whole client request, because each turn IS a
+        # separate billed upstream call - and because the next fix (advance the
+        # route when the substitution cap is spent) has to be able to take
+        # effect between turns. Within a turn the tuple never changes: `route`
+        # is passed down and NOTHING below reads the module globals, so a swap
+        # landing mid-call cannot make this call send model A to provider B and
+        # judge it against identity C.
         discarded = 0
-        while self._relay_once(body, headers, requested, sent,
-                               request_max_tokens, discarded) == "SUBSTITUTED":
+        while True:
+            try:
+                route = _current_route()
+            except RouteUnavailable as exc:
+                # FAIL CLOSED. No fallback to the env route and no fallback to
+                # the route we saw last time: a call sent to the wrong provider
+                # silently corrupts a paid measurement.
+                self._route_refusal(exc)
+                return
+            sent_body, requested, sent = _apply_route_model(body, route)
+            headers = dict(client_headers)
+            # OWN THE CREDENTIAL. When a key file is configured the client's
+            # Authorization header is REPLACED, never merged and never trusted,
+            # so the qwen child's launch-time environment stops deciding which
+            # upstream account a paid call bills to. Read per request: see
+            # _read_api_key for why there is no cache. The ROUTE may name its
+            # own key file, because a provider swap is also a credential swap.
+            key_file = route.key_file or UPSTREAM_API_KEY_FILE
+            if key_file:
+                try:
+                    headers["Authorization"] = "Bearer " + _read_api_key(key_file)
+                except KeyUnavailable as exc:
+                    # FAIL CLOSED. Not "fall back to the client's header" — that
+                    # is the silent wrong-account call this feature removes. The
+                    # diagnosis names the file and the fault; it cannot name a
+                    # key, because no key was obtained on this path.
+                    self._key_refusal(str(exc), key_file)
+                    return
+            if self._relay_once(sent_body, headers, requested, sent,
+                                request_max_tokens, discarded, route) != "SUBSTITUTED":
+                return
             discarded += 1
 
     def _relay_once(self, body, headers, requested, sent, request_max_tokens,
-                    discarded):
+                    discarded, route):
         """One upstream call.
 
         Returns "SUBSTITUTED" when the provider answered as the wrong model
@@ -1101,8 +1454,12 @@ class Proxy(BaseHTTPRequestHandler):
         # by the back door. The hold is on whenever the feature is on; whether
         # the discarded call is re-issued or ends the run is decided after.
         hold = UPSTREAM_SUBSTITUTION_RETRY_MAX > 0
+        # Every ledger row this turn writes carries the route it was sent on,
+        # so lane_guard.audit_ledger can judge a mid-flight-swapped run row by
+        # row instead of declaring a family mismatch on every pre-swap call.
+        route_fields = route.ledger_fields()
         t0 = time.time()
-        req = urllib.request.Request(self._upstream_url(), data=body or None,
+        req = urllib.request.Request(route.url_for(self.path), data=body or None,
                                      headers=headers, method=self.command)
         request_id = uuid.uuid4().hex
         capture = _capture_new(request_id)
@@ -1176,7 +1533,7 @@ class Proxy(BaseHTTPRequestHandler):
                         _capture_write("%s.a%d.res.json.gz" % (request_id, attempt),
                                        [raw], capture, "response")
                     try:
-                        record(**_capture_row(capture),
+                        record(**_capture_row(capture), **route_fields,
                                request_max_tokens=request_max_tokens, requested_model=requested, returned_model=None,
                                tool_call=False, status=status, attempt=attempt,
                                duration_ms=int((time.time() - t_try) * 1000),
@@ -1191,7 +1548,7 @@ class Proxy(BaseHTTPRequestHandler):
                         return
                     time.sleep(min(60.0, (UPSTREAM_RETRY_BASE_MS / 1000.0)
                                    * (2 ** (attempt - 1))))
-                    req = urllib.request.Request(self._upstream_url(),
+                    req = urllib.request.Request(route.url_for(self.path),
                                                  data=body or None,
                                                  headers=headers,
                                                  method=self.command)
@@ -1199,7 +1556,7 @@ class Proxy(BaseHTTPRequestHandler):
                 break
             except Exception as e:                   # DNS, TLS, refused, timeout
                 try:
-                    record(**_capture_row(capture),
+                    record(**_capture_row(capture), **route_fields,
                            request_max_tokens=request_max_tokens, requested_model=requested, returned_model=None,
                            tool_call=False, status=None, error=str(e)[:300],
                            attempt=attempt,
@@ -1223,12 +1580,12 @@ class Proxy(BaseHTTPRequestHandler):
           streaming = "text/event-stream" in ctype.lower()
           try:
               if streaming:
-                  self._pump_stream(resp, state, hold)
+                  self._pump_stream(resp, state, hold, route.expected_identity)
               else:
-                  self._pump_whole(resp, status, state, hold)
+                  self._pump_whole(resp, status, state, hold, route.expected_identity)
           finally:
               success = (type(status) is int and 200 <= status < 300 and
-                         state["returned_model"] == UPSTREAM_EXPECTED_RETURNED_IDENTITY and
+                         state["returned_model"] == route.expected_identity and
                          ((streaming and state["stream_complete"] is True and
                            state["stream_parse_errors"] == 0) or
                           (not streaming and state["response_valid"])))
@@ -1256,7 +1613,7 @@ class Proxy(BaseHTTPRequestHandler):
                                     "substitution_attempt": discarded + 1,
                                     "substitution_retry_exhausted": not retryable}
               try:
-                  record(**_capture_row(capture), **discard_fields,
+                  record(**_capture_row(capture), **discard_fields, **route_fields,
                          request_max_tokens=request_max_tokens, requested_model=requested,
                          returned_model=state["returned_model"], attempt=attempt,
                          tool_call=state["tool_call"], status=status,
@@ -1285,13 +1642,15 @@ class Proxy(BaseHTTPRequestHandler):
                       # outcome: trip the lane exactly as before - and refuse
                       # the client rather than hand back the wrong-model body,
                       # which is STRICTER than the pre-retry behaviour.
-                      _lane_observe(status, state["returned_model"], state["usage"])
+                      _lane_observe(status, state["returned_model"], state["usage"],
+                                    route.expected_identity)
                       self._lane_refusal()
               else:
                   # AFTER the row, always. The call that trips the guard has to
                   # be in the ledger, or the artifact that explains the abort is
                   # the one call the ledger does not contain.
-                  _lane_observe(status, state["returned_model"], state["usage"])
+                  _lane_observe(status, state["returned_model"], state["usage"],
+                                route.expected_identity)
         finally:
             try:
                 _update_inflight(request_id)
@@ -1337,7 +1696,7 @@ class Proxy(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(payload)
 
-    def _key_refusal(self, why):
+    def _key_refusal(self, why, key_file=None):
         """Refuse a request we cannot credential, and say exactly why.
 
         The message is built only from the constant reasons in _read_api_key
@@ -1346,12 +1705,48 @@ class Proxy(BaseHTTPRequestHandler):
         also routed through record()'s scrubber for the same reason the
         upstream_error field is.
         """
-        detail = "proxy: upstream key unavailable: %s (%s)" % (why, UPSTREAM_API_KEY_FILE)
+        key_file = UPSTREAM_API_KEY_FILE if key_file is None else key_file
+        detail = "proxy: upstream key unavailable: %s (%s)" % (why, key_file)
         try:
             record(event="key_unavailable", path=self.path, reason=why,
-                   key_file=UPSTREAM_API_KEY_FILE, returned_model=None)
+                   key_file=key_file, returned_model=None)
         except OSError:
             pass  # observability can never be the reason a refusal is not sent
+        payload = json.dumps({"error": {"message": detail}}).encode("utf-8")
+        self.send_response(503)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(payload)))
+        self.end_headers()
+        self.wfile.write(payload)
+
+    def _route_refusal(self, exc):
+        """Refuse a request we cannot ROUTE, and say exactly why.
+
+        503 and not 403: an unusable route file is a configuration fault the
+        operator can repair with one atomic write, and the very next request
+        must then succeed - which is exactly what the key refusal already
+        does. It is deliberately NOT a lane trip: the lane is not compromised,
+        no call was made, nothing was billed, and tripping the lane would turn
+        a fat-fingered swap into a dead run.
+
+        The message is built only from the constant reasons in _read_route_once
+        and the configured PATHS - never from file CONTENT - so neither the
+        client, stderr, nor the ledger can carry a credential on this path. A
+        route file is refused outright if it carries a credential-looking
+        field, so there is nothing to leak in the first place.
+        """
+        counters = _note_route_refusal(exc.code)
+        path = _ROUTE_SOURCE["file"]
+        detail = "proxy: upstream route unavailable: %s (%s)" % (exc, path)
+        try:
+            record(event="route_unavailable", path=self.path, reason=str(exc),
+                   route_reason_code=exc.code, route_file=path,
+                   route_refusals=counters, returned_model=None)
+        except OSError:
+            pass  # observability can never be the reason a refusal is not sent
+        sys.stderr.write("upstream-log-proxy: ROUTE UNAVAILABLE %s — %s\n"
+                         % (exc.code, exc))
+        sys.stderr.flush()
         payload = json.dumps({"error": {"message": detail}}).encode("utf-8")
         self.send_response(503)
         self.send_header("Content-Type", "application/json")
@@ -1368,7 +1763,7 @@ class Proxy(BaseHTTPRequestHandler):
         for k, v in extra:
             self.send_header(k, v)
 
-    def _pump_whole(self, resp, status, state, hold=False):
+    def _pump_whole(self, resp, status, state, hold=False, expected=""):
         payload = resp.read()
         if BODY_DIR:
             state["res_chunks"].append(payload)
@@ -1385,7 +1780,7 @@ class Proxy(BaseHTTPRequestHandler):
             pass
         # THE DISCARD, on the easy path: nothing has been written yet, so a
         # wrong-model body simply never becomes a response.
-        if hold and _is_substitution(state["returned_model"]):
+        if hold and _is_substitution(state["returned_model"], expected):
             state["substituted"] = True
             return
         self._relay_headers(resp, status)
@@ -1457,7 +1852,7 @@ class Proxy(BaseHTTPRequestHandler):
                 or (started is not None and (time.time() - started) * 1000
                     > UPSTREAM_SUBSTITUTION_HOLD_MS))
 
-    def _pump_stream(self, resp, state, hold=False):
+    def _pump_stream(self, resp, state, hold=False, expected=""):
         state["stream_started_at"] = time.time()
         sock = _stream_socket(resp) if UPSTREAM_FIRST_TOKEN_MS else None
         if UPSTREAM_FIRST_TOKEN_MS and sock is None:
@@ -1506,7 +1901,7 @@ class Proxy(BaseHTTPRequestHandler):
                     continue
                 state["held"].append(raw)
                 state["held_bytes"] += len(raw)
-                if _is_substitution(state["returned_model"]):
+                if _is_substitution(state["returned_model"], expected):
                     # DISCARD. Not one byte of this stream was relayed, so the
                     # request can be re-issued as if it had never happened.
                     state["substituted"] = True
@@ -1527,6 +1922,10 @@ def main():
     srv.daemon_threads = True
     sys.stderr.write("upstream-log-proxy: 127.0.0.1:%d -> %s (log %s)\n"
                      % (LISTEN_PORT, UPSTREAM_BASE, UPSTREAM_LOG))
+    if UPSTREAM_ROUTE_FILE:
+        sys.stderr.write("upstream-log-proxy: route file %s (read per call; "
+                         "base/model/identity come from it, not the env)\n"
+                         % UPSTREAM_ROUTE_FILE)
     sys.stderr.flush()
     try:
         srv.serve_forever()

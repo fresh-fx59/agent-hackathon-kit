@@ -272,6 +272,29 @@ def cache_breach(calls, prompt_tokens, cached_tokens,
             % (rate * 100, calls, min_rate * 100, cached_tokens, prompt_tokens))
 
 
+def _ledger_declares_identity(path):
+    """True when at least one row carries a usable `route_expected_identity`.
+
+    A run that hot-swapped provider mid-flight has no single global identity to
+    pass in, so the rows carry their own. Any read failure answers False, which
+    keeps every existing reason code in its existing order.
+    """
+    try:
+        for row in _rows(path):
+            value = row.get("route_expected_identity")
+            if isinstance(value, str) and value.strip():
+                return True
+    except (OSError, ValueError, TypeError):
+        return False
+    return False
+
+
+def _bump(counter, key):
+    """One named counter, keyed by a JSON-safe label. Never a silent sum."""
+    label = key if isinstance(key, str) else json.dumps(key, sort_keys=True)
+    counter[label] = counter.get(label, 0) + 1
+
+
 def _rows(path):
     with open(path, encoding="utf-8") as source:
         for line in source:
@@ -310,6 +333,18 @@ def audit_ledger(ledger_path, expected_identity="", cache_guard=True,
     silently. The flag is honoured only when the row really does name a
     different family: it must never become a way to hide a row.
 
+    A MID-RUN ROUTE SWAP IS STILL AUDITABLE. The proxy can now change provider
+    and model on a LIVE run (UPSTREAM_ROUTE_FILE), so one ledger can legitimately
+    contain calls sent under two different expected identities. Judging every row
+    against ONE global `--expected` would then declare a family mismatch on every
+    row from the other side of the swap - the audit would refuse exactly the runs
+    the hot swap exists to rescue. So each row is judged against the identity IT
+    WAS SENT UNDER (`route_expected_identity`), and `--expected` is the fallback
+    for rows that carry none. That is not a weakening: a row with no route
+    identity is judged exactly as before, and a row WITH one is judged against a
+    value the proxy wrote at the moment it made the call, which is strictly
+    better evidence than a flag passed to the auditor afterwards.
+
     Pass a dict as `summary` to receive the accounting (accepted calls, billed
     prompt/cached tokens, discard count and cost). It is filled as the rows are
     read, so an early breach still leaves true partial counts.
@@ -318,7 +353,12 @@ def audit_ledger(ledger_path, expected_identity="", cache_guard=True,
         summary.update({"schema": 1, "accepted_calls": 0, "prompt_tokens": 0,
                         "cached_tokens": 0, "discarded_substitutions": 0,
                         "discarded_prompt_tokens": 0,
-                        "discarded_cached_tokens": 0, "discarded_by_model": {}})
+                        "discarded_cached_tokens": 0, "discarded_by_model": {},
+                        # Named per-route accounting, so a swapped run says what
+                        # it actually ran on instead of leaving a reader to
+                        # guess from the base URL.
+                        "route_rows": 0, "route_generations": {},
+                        "route_bases": {}, "route_identities": {}})
     if abort_path and os.path.exists(abort_path):
         # The live guard already stopped this run. Its reason wins: it was
         # observed on the call that caused it, with the run still alive.
@@ -335,12 +375,19 @@ def audit_ledger(ledger_path, expected_identity="", cache_guard=True,
                 "the run stopped for a reason nothing recorded" % abort_path)
 
     expected = expected_identity.strip() if isinstance(expected_identity, str) else ""
-    if identity_check and not expected:
+    # AN UNDECLARED IDENTITY IS STILL A BREACH — but a ledger whose OWN rows name
+    # the identity they were sent under HAS declared it, at the moment of the
+    # call, which is better evidence than a flag passed to the auditor
+    # afterwards. Pre-scanned rather than deferred to the row loop so the
+    # precedence of this reason over LEDGER_MISSING / LEDGER_MALFORMED is
+    # unchanged: the helper answers False on an unreadable ledger, so a run with
+    # no expected identity and no ledger still fails here exactly as before.
+    if identity_check and not expected and not _ledger_declares_identity(ledger_path):
         return "EXPECTED_IDENTITY_UNKNOWN", (
-            "no expected model identity was supplied for %s, so nothing could "
-            "check which model answered — an undeclared identity is a breach, "
-            "not a pass (use --no-identity-check for a lane that truly has none)"
-            % ledger_path)
+            "no expected model identity was supplied for %s and no row names "
+            "the route it was sent on, so nothing could check which model "
+            "answered — an undeclared identity is a breach, not a pass (use "
+            "--no-identity-check for a lane that truly has none)" % ledger_path)
 
     try:
         rows = list(_rows(ledger_path))
@@ -358,6 +405,10 @@ def audit_ledger(ledger_path, expected_identity="", cache_guard=True,
 
     calls = prompt_tokens = cached_tokens = 0
     named = 0
+    # Counted here and not only in `summary`, because `summary` is optional and
+    # a check that silently switches off when the caller passes no dict is the
+    # dead-gate shape this file exists to prevent.
+    route_identity_rows = 0
     for index, row in enumerate(rows, 1):
         for field in ("requested_model", "returned_model", "status"):
             if field not in row:
@@ -365,15 +416,45 @@ def audit_ledger(ledger_path, expected_identity="", cache_guard=True,
                     "row %d of %s has no %r field" % (index, ledger_path, field))
         status = row.get("status")
         returned = row.get("returned_model")
+        # THE IDENTITY THIS ROW WAS SENT UNDER. Present only on a run that used
+        # a route file; absent rows fall back to the global expected identity,
+        # so every pre-route ledger is judged byte-identically to before. A
+        # present-but-unusable value is NOT quietly ignored - an unreadable
+        # identity is an unmeasured row, and unmeasured is never clean.
+        row_identity = row.get("route_expected_identity")
+        if "route_expected_identity" in row:
+            if not isinstance(row_identity, str) or not row_identity.strip():
+                return "ROUTE_IDENTITY_UNREADABLE", (
+                    "row %d of %s carries a route_expected_identity that is not "
+                    "a non-empty string (%r) — the identity that row was sent "
+                    "under was never recorded, and unmeasured is not clean"
+                    % (index, ledger_path, row_identity))
+            # `identity_check=False` still means "this lane declares no
+            # identity"; a route row does not override an explicit opt-out. The
+            # blocking counter is therefore only incremented when the check is
+            # ON — otherwise --no-identity-check would start failing runs as
+            # RETURNED_MODEL_UNKNOWN, which is the opposite of what it asks for.
+            row_expected = row_identity.strip() if identity_check else ""
+            if identity_check:
+                route_identity_rows += 1
+            if summary is not None:
+                # The ACCOUNTING counter is unconditional: a reader wants to
+                # know what the run ran on either way.
+                summary["route_rows"] += 1
+                _bump(summary["route_identities"], row_expected)
+                _bump(summary["route_bases"], row.get("route_base"))
+                _bump(summary["route_generations"], row.get("route_generation"))
+        else:
+            row_expected = expected
         if row.get("discarded_substitution") is True:
             # Honoured ONLY when the row is genuinely a substitution. A flag
             # that could excuse any row would be a hole straight through the
             # identity check, so an unverifiable one is malformed, not clean.
-            if not expected or same_family(expected, returned):
+            if not row_expected or same_family(row_expected, returned):
                 return "LEDGER_MALFORMED", (
                     "row %d of %s is flagged discarded_substitution but names "
                     "%r against expected %r — the flag is not a way to hide a "
-                    "row" % (index, ledger_path, returned, expected))
+                    "row" % (index, ledger_path, returned, row_expected))
             if summary is not None:
                 try:
                     billed, hit = cache_tokens(row.get("usage"))
@@ -389,13 +470,13 @@ def audit_ledger(ledger_path, expected_identity="", cache_guard=True,
         answered = type(status) is int and 200 <= status < 300
         if not answered:
             continue
-        if expected and isinstance(returned, str) and returned.strip():
+        if row_expected and isinstance(returned, str) and returned.strip():
             named += 1
-            if not same_family(expected, returned):
+            if not same_family(row_expected, returned):
                 return "RETURNED_MODEL_FAMILY_MISMATCH", (
                     "row %d: asked for %s (family %s), the provider answered as "
                     "%s (family %s) — the run measured a model it did not request"
-                    % (index, expected, model_family(expected),
+                    % (index, row_expected, model_family(row_expected),
                        returned, model_family(returned)))
         try:
             billed, hit = cache_tokens(row.get("usage"))
@@ -413,11 +494,17 @@ def audit_ledger(ledger_path, expected_identity="", cache_guard=True,
                 summary["prompt_tokens"] = prompt_tokens
                 summary["cached_tokens"] = cached_tokens
 
-    if expected and not named:
+    # LIVE, NOT DECORATIVE. `route_identity_rows` is what makes this gate fire on
+    # a swapped run audited with no global --expected: those rows DID declare an
+    # identity, so "not one row names the model that answered" is still a breach.
+    # Without it the term would be computed and never reach a verdict.
+    if (expected or route_identity_rows) and not named:
         return "RETURNED_MODEL_UNKNOWN", (
             "%d rows in %s and not one names the model that answered, though "
             "%s was required — the identity was never measured"
-            % (len(rows), ledger_path, expected))
+            % (len(rows), ledger_path,
+               expected or "a per-row route identity on %d row(s)"
+               % route_identity_rows))
 
     if cache_guard:
         detail = cache_breach(calls, prompt_tokens, cached_tokens, min_rate, min_calls)
