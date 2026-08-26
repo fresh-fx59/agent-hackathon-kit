@@ -22,7 +22,8 @@ URL swap rather than a harness change:
     SHERLOCK_BASE_URL=http://127.0.0.1:8791/v1 bash measure/one-defect.sh v11 D04
 
 It is deliberately dumb: it forwards bytes, it never rewrites a request, and it
-never logs the Authorization header. If it cannot parse a response it records
+never logs the Authorization header (and when it OWNS that header, via
+UPSTREAM_API_KEY_FILE, it never logs the key it read either). If it cannot parse a response it records
 `returned_model: null` rather than guessing — an unmeasured value is null, never
 a default. → measure/probes/upstream-split.sh
 
@@ -30,6 +31,7 @@ Set UPSTREAM_BODY_DIR to also keep every request and response body on disk, so a
 finished run can be replayed instead of inferred. See the REPLAYABLE TRACES note
 below for the layout and for what those files contain.
 """
+import errno
 import fcntl
 import gzip
 import json
@@ -111,6 +113,27 @@ UPSTREAM_RETRY_BASE_MS = int(os.environ.get("UPSTREAM_RETRY_BASE_MS", "2000") or
 # `SHERLOCK_UPSTREAM_RETRY=0` cannot silently disable it.
 UPSTREAM_SUBSTITUTION_RETRY_MAX = int(
     os.environ.get("UPSTREAM_SUBSTITUTION_RETRY_MAX", "0") or 0)
+# THE UPSTREAM CREDENTIAL IS THE PROXY'S, NOT THE CLIENT'S.
+#
+# Until now the key was pinned into the qwen child's environment at launch
+# (run-bench.sh: OPENAI_API_KEY="$SHERLOCK_API_KEY") and this proxy relayed
+# whatever Authorization header arrived. Changing keys therefore meant killing
+# the run. That is not an academic cost: a key that routes on new-api's `auto`
+# group was measured returning a DIFFERENT model than requested on 6/20 calls,
+# where a single-group key was 20/20 clean at the same minute — and every
+# wrong-model answer is a discarded retry at a flat 0.05 CNY.
+#
+# With UPSTREAM_API_KEY_FILE set, the proxy owns the credential: it reads the
+# file itself and REPLACES the inbound Authorization header. A swap is then an
+# atomic file write, effective on the very next request, no restart.
+#
+# UNSET = EXACTLY TODAY'S BEHAVIOUR. The client's header is forwarded verbatim,
+# so every existing test and every other lane is untouched. The feature only
+# exists when a runner names a file; measure/upstream-lane.sh does.
+UPSTREAM_API_KEY_FILE = os.environ.get("UPSTREAM_API_KEY_FILE", "").strip()
+# A credential is short. This cap is not a tuning knob, it is the torn-read
+# guard: anything larger is not a key and must not be sent as one.
+_MAX_KEY_BYTES = 4096
 # STREAMING IS THE ONLY CASE THAT MATTERS HERE. Every one of the 51 rows on the
 # v38 run - the substituted one included - is `"stream": true`, so a fix that
 # only handled whole JSON bodies would be a no-op on the real lane.
@@ -255,6 +278,129 @@ def record(**row):
     with _LOG_LOCK:                       # ThreadingHTTPServer ⇒ concurrent turns
         with open(UPSTREAM_LOG, "a", encoding="utf-8") as fh:
             fh.write(line + "\n")
+
+
+class KeyUnavailable(Exception):
+    """The key file is not usable. Carries a diagnosis that never holds a key.
+
+    `transient` marks the faults that are a RACE with the writer rather than a
+    verdict about the file — the swap landed between our lstat and our open, or
+    between our open and our last read. Those are retried; everything else
+    refuses immediately.
+    """
+
+    def __init__(self, message, transient=False):
+        super().__init__(message)
+        self.transient = transient
+
+
+def _read_api_key_once():
+    """Return the upstream credential, read FRESH from UPSTREAM_API_KEY_FILE.
+
+    NO CACHING, DELIBERATELY. The alternative — cache plus an mtime check — is
+    faster and wrong at the only moment that matters: `os.replace` can land
+    inside the same mtime tick as the read that preceded it (st_mtime is
+    coarse on many filesystems, and a swap is a single fast write), so a cache
+    keyed on mtime can serve the OLD key after a swap and never notice. The
+    cost of being unconditionally right is one open+read of a <4 KiB file per
+    upstream call whose own latency is measured in seconds. That is not a
+    trade; the cache buys nothing here.
+
+    TORN READS. The writer's contract is `os.replace` (atomic rename), so a
+    reader sees either the whole old file or the whole new one. This function
+    does not TRUST that contract, because a careless writer using `>` would
+    truncate in place: the file is opened once and the (dev, ino, size) triple
+    is checked before, at open, and after the read, and a mismatch is a refusal
+    rather than a short key. The format check below is the second net — a
+    truncated key is still a plausible-looking string, so length alone cannot
+    catch it, but a key that fails the shape check certainly is rejected.
+
+    FAILS CLOSED. Every failure raises. There is no path from here that returns
+    the client's header, an empty string, or a guess. Raising a diagnosis and
+    refusing the request costs one failed call; sending a request with the
+    wrong credential — or with the client's stale one — silently corrupts a
+    paid measurement, which is the thing this whole lane exists to prevent.
+    """
+    path = UPSTREAM_API_KEY_FILE
+    nofollow = getattr(os, "O_NOFOLLOW", 0)
+    try:
+        before = os.lstat(path)
+    except OSError as exc:
+        raise KeyUnavailable("key file cannot be stat'ed (%s)" % exc.strerror,
+                             transient=exc.errno == errno.ENOENT)
+    if not stat.S_ISREG(before.st_mode) or stat.S_ISLNK(before.st_mode):
+        raise KeyUnavailable("key file is not a regular file")
+    try:
+        fd = os.open(path, os.O_RDONLY | nofollow)
+    except OSError as exc:
+        raise KeyUnavailable("key file cannot be opened (%s)" % exc.strerror,
+                             transient=exc.errno == errno.ENOENT)
+    try:
+        opened = os.fstat(fd)
+        if not stat.S_ISREG(opened.st_mode):
+            raise KeyUnavailable("key file is not a regular file")
+        if opened.st_size > _MAX_KEY_BYTES:
+            raise KeyUnavailable("key file is larger than %d bytes" % _MAX_KEY_BYTES)
+        if (before.st_dev, before.st_ino) != (opened.st_dev, opened.st_ino):
+            raise KeyUnavailable("key file was replaced while being opened", transient=True)
+        chunks = []
+        total = 0
+        while total <= _MAX_KEY_BYTES:
+            chunk = os.read(fd, min(65536, _MAX_KEY_BYTES + 1 - total))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            total += len(chunk)
+        finished = os.fstat(fd)
+        if total > _MAX_KEY_BYTES:
+            raise KeyUnavailable("key file is larger than %d bytes" % _MAX_KEY_BYTES)
+        if (total != finished.st_size or
+                (opened.st_dev, opened.st_ino, opened.st_size) !=
+                (finished.st_dev, finished.st_ino, finished.st_size)):
+            raise KeyUnavailable("key file changed size while being read", transient=True)
+    finally:
+        os.close(fd)
+    raw = b"".join(chunks)
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError:
+        raise KeyUnavailable("key file is not valid UTF-8")
+    key = text.strip()
+    if not key:
+        raise KeyUnavailable("key file is empty or only whitespace")
+    # A credential is one token. Interior whitespace or a newline means we are
+    # holding a fragment, a multi-line file, or something that is not a key —
+    # and a header value containing CR/LF is a header-injection vector.
+    if len(key.split()) != 1:
+        raise KeyUnavailable("key file does not contain exactly one token")
+    if not all(33 <= ord(c) <= 126 for c in key):
+        raise KeyUnavailable("key file contains non-printable characters")
+    return key
+
+
+# A swap is one `os.replace`, so the window in which a reader can catch the
+# file mid-substitution is microseconds wide — but this proxy reads the file on
+# EVERY paid call, so "microseconds, sometimes" is a 503 on a live run, and a
+# refused call is a burnt call. Losing the race is not a verdict about the
+# file; it is a signal to look again. Bounded, because a file that keeps
+# changing under us must still eventually fail closed rather than spin.
+_KEY_READ_RETRIES = 5
+_KEY_READ_RETRY_S = 0.005
+
+
+def _read_api_key():
+    """_read_api_key_once, retried past a racing writer. See KeyUnavailable."""
+    last = None
+    for attempt in range(_KEY_READ_RETRIES):
+        try:
+            return _read_api_key_once()
+        except KeyUnavailable as exc:
+            if not exc.transient:
+                raise
+            last = exc
+            if attempt + 1 < _KEY_READ_RETRIES:
+                time.sleep(_KEY_READ_RETRY_S)
+    raise last
 
 
 class BudgetUnknown(Exception):
@@ -910,6 +1056,21 @@ class Proxy(BaseHTTPRequestHandler):
 
         headers = {k: v for k, v in self.headers.items()
                    if k.lower() not in _HOP}
+        # OWN THE CREDENTIAL. When a key file is configured the client's
+        # Authorization header is REPLACED, never merged and never trusted, so
+        # the qwen child's launch-time environment stops deciding which
+        # upstream account a paid call bills to. Read per request: see
+        # _read_api_key for why there is no cache.
+        if UPSTREAM_API_KEY_FILE:
+            try:
+                headers["Authorization"] = "Bearer " + _read_api_key()
+            except KeyUnavailable as exc:
+                # FAIL CLOSED. Not "fall back to the client's header" — that is
+                # the silent wrong-account call this feature removes. The
+                # diagnosis names the file and the fault; it cannot name a key,
+                # because no key was obtained on this path.
+                self._key_refusal(str(exc))
+                return
         # identity so the body stays scannable; the client gets it un-encoded,
         # which is what every OpenAI-compatible client already accepts.
         headers["Accept-Encoding"] = "identity"
@@ -1170,6 +1331,28 @@ class Proxy(BaseHTTPRequestHandler):
 
     def _budget_refusal(self):
         payload = b'{"error":{"message":"proxy: paid budget unavailable"}}'
+        self.send_response(503)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(payload)))
+        self.end_headers()
+        self.wfile.write(payload)
+
+    def _key_refusal(self, why):
+        """Refuse a request we cannot credential, and say exactly why.
+
+        The message is built only from the constant reasons in _read_api_key
+        and the configured PATH — never from file CONTENT — so neither the
+        client body, stderr, nor the ledger can carry a key on this path. It is
+        also routed through record()'s scrubber for the same reason the
+        upstream_error field is.
+        """
+        detail = "proxy: upstream key unavailable: %s (%s)" % (why, UPSTREAM_API_KEY_FILE)
+        try:
+            record(event="key_unavailable", path=self.path, reason=why,
+                   key_file=UPSTREAM_API_KEY_FILE, returned_model=None)
+        except OSError:
+            pass  # observability can never be the reason a refusal is not sent
+        payload = json.dumps({"error": {"message": detail}}).encode("utf-8")
         self.send_response(503)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(payload)))
