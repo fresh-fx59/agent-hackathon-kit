@@ -445,6 +445,264 @@ def audit_route_advances(advances_path, route_span, summary=None):
     raise AssertionError("a route-advance check fired with no detail")
 
 
+# ======================================================================
+# THE COST LINE MAY NEVER PRINT A ZERO IT DID NOT MEASURE.
+#
+# The v38 full run (2026-08-26, 2h42m, real money) wrote
+# `{"accepted_calls": 0, "prompt_tokens": 0, "discarded_substitutions": 0}`
+# and printed "0 accepted calls ... 0 prompt tokens paid for nothing", while
+# its own abort marker recorded 278 calls / 27,773,863 prompt tokens and its
+# ledger held 463 rows, 183 of them discarded substitutions. `audit_ledger`
+# zeroed the summary and then returned the live guard's reason before reading
+# a single row: on the breach path its docstring's promise of "true partial
+# counts" was simply false. The one number that decides whether to spend money
+# again was a zero on the exact run where it mattered.
+#
+# So the accounting is now a SEPARATE walk that runs first and always. It
+# never returns a verdict and never raises: a row it cannot parse is COUNTED
+# as unaccountable, because a row nobody could read is not a row that cost
+# nothing. Absence of proof is not zero cost - the same fail-closed rule the
+# rest of this lane follows - so a summary that could not be computed says
+# `complete: false` with a reason, and lane-audit.py then refuses to print a
+# cost line it did not compute.
+# ======================================================================
+# An aborted stream returns NO usage block, so `discarded_prompt_tokens` is
+# genuinely 0 on the real run: the provider never told us. The same rows do
+# carry `request_bytes` (62,773,646 across the run's 183 discards), and ~4
+# bytes per token is the ordinary English/JSON ratio. That is an ESTIMATE and
+# it is kept in its own key, with its own divisor, and printed with its own
+# word. An estimate that can be mistaken for a measurement is worse than no
+# estimate at all.
+DISCARD_BYTES_PER_TOKEN = 4
+_ESTIMATE_BASIS = ("discarded request_bytes / %d bytes-per-token - an ESTIMATE, "
+                   "not a provider number" % DISCARD_BYTES_PER_TOKEN)
+
+# EVERY ACCOUNTING TERM, NAMED. The sums the report prints are built from this
+# tuple, and `_accounting_gaps` checks that each one actually reached the
+# summary; a gap makes the summary incomplete, which lane-audit.py turns into
+# LANE_ACCOUNTING_INCOMPLETE and a non-zero exit. A term that is computed and
+# printed but never reaches an exit code is the defect class that shipped in
+# every earlier PR in this series, so there is no printed-only number here.
+ACCOUNTING_TERMS = (
+    "ledger_rows", "rows_counted", "unaccountable_rows",
+    "call_rows", "event_rows",
+    # accepted_rows = calls the client actually received an answer for.
+    # accepted_calls = of those, the ones the provider reported usage for.
+    # billed_calls = every call row, because linkapi bills a FLAT 0.05 CNY per
+    # CALL: calls are the bill there and a token-only line understates it.
+    "accepted_rows", "accepted_calls", "billed_calls",
+    "prompt_tokens", "cached_tokens",
+    "discarded_substitutions", "discarded_prompt_tokens",
+    "discarded_cached_tokens", "discarded_request_bytes", "request_bytes",
+    "discarded_prompt_tokens_estimated", "estimate_bytes_per_token",
+    "cost_usd_reported", "cost_usd_reported_calls",
+    "refused_calls", "route_rows", "route_span",
+)
+
+
+# ======================================================================
+# A DETERMINISTIC 400 IS NOT A PROVIDER BURST, AND MUST NOT SPEND RETRIES.
+#
+# UPSTREAM_RETRY_MAX exists because linkapi's 400s were transient and
+# minute-scale (measured 2026-08-02). These are not. Probed against CloseRouter
+# 2026-08-26: `deepseek-v4-flash` with max_tokens=4 answers HTTP 400
+# "the output token limit was exhausted by model reasoning before an answer was
+# produced; increase max_completion_tokens/max_output_tokens" - a REASONING
+# model can spend its entire output budget on thoughts before emitting a token,
+# and a separate probe confirmed it (8 output tokens requested, all 8 returned
+# as reasoning_tokens, content empty). The v38 dead run's single 400 is the
+# sibling shape: 220 KB of request, and an SSE body reading "The
+# `reasoning_content` in the thinking mode must be passed back to the API."
+#
+# Retrying either one twelve times cannot help; both need a request change, not
+# patience. So they are matched on the provider's own words, given a NAME, and
+# kept out of the burst path entirely. The name and the request's max_tokens go
+# in the ledger row so a launcher can decide the tuning with the receipt in
+# hand - this file deliberately changes no max_tokens default.
+#
+# NOTE ALSO, and it is the other half of the same finding: an EMPTY `content`
+# is a normal response on a reasoning lane. `_scan_obj` already counts
+# `reasoning_content` as a content event, so the first-token deadline does not
+# misfire on a thinking model, and run-bench.sh's `broken_session` judges the
+# ARTIFACT (no report file) rather than empty prose. Both were re-checked with
+# this fix; neither treats "no content" as "no response".
+# ======================================================================
+_DETERMINISTIC_400 = (
+    ("OUTPUT_BUDGET_EXHAUSTED_BY_REASONING",
+     ("output token limit was exhausted by model reasoning",
+      "increase max_completion_tokens",
+      "increase max_output_tokens")),
+    ("REASONING_CONTENT_NOT_RELAYED",
+     ("reasoning_content` in the thinking mode must be passed back",
+      "reasoning_content in the thinking mode must be passed back")),
+)
+
+
+def deterministic_refusal(status, text):
+    """The named class of a 400 that retrying cannot fix, else None.
+
+    Matched on the provider's own message because that is the only place the
+    distinction lives: linkapi's transient burst and this permanent refusal are
+    the same integer.
+    """
+    if status != 400 or not text:
+        return None
+    low = str(text).lower()
+    for name, needles in _DETERMINISTIC_400:
+        for needle in needles:
+            if needle.lower() in low:
+                return name
+    return None
+
+
+def _accounting_zero():
+    """The accounting half of a fresh summary. Zeros here are placeholders and
+    they are only ever believed once `complete` is True."""
+    zeros = dict.fromkeys(ACCOUNTING_TERMS, 0)
+    zeros["cost_usd_reported"] = 0.0
+    zeros["estimate_bytes_per_token"] = DISCARD_BYTES_PER_TOKEN
+    zeros.update({
+        "schema": 2,
+        "complete": False,
+        "incomplete_reason": "the ledger was never read",
+        "estimate_basis": _ESTIMATE_BASIS,
+        "discarded_by_model": {}, "provider_refusals": {},
+        "route_generations": {}, "route_bases": {}, "route_identities": {},
+        "route_advances": 0, "route_advances_blocked": 0,
+        "route_advance_checks": {},
+        # Which verdict came from where, so a reader never has to guess whether
+        # the live guard or this audit produced the reason.
+        "abort_marker_reason": "", "ledger_verdict": "",
+    })
+    return zeros
+
+
+def _accounting_gaps(summary):
+    """Named terms that are missing or not numbers. Empty tuple = countable."""
+    return tuple(term for term in ACCOUNTING_TERMS
+                 if not isinstance(summary.get(term), (int, float))
+                 or isinstance(summary.get(term), bool))
+
+
+def _incomplete(summary, reason):
+    summary["complete"] = False
+    summary["incomplete_reason"] = reason
+
+
+def _int(value):
+    return value if type(value) is int and value > 0 else 0
+
+
+def _account_call(row, summary, identity_check):
+    """One call row into the summary. Never raises, never judges."""
+    nbytes = _int(row.get("request_bytes"))
+    summary["call_rows"] += 1
+    # THE BILL IS PER CALL on linkapi (a flat 0.05 CNY), so every call row
+    # counts here - discarded, refused or answered.
+    summary["billed_calls"] = summary["call_rows"]
+    summary["request_bytes"] += nbytes
+    status = row.get("status")
+    if type(status) is int and status >= 400:
+        summary["refused_calls"] += 1
+    refusal = row.get("upstream_refusal_class")
+    if isinstance(refusal, str) and refusal.strip():
+        _bump(summary["provider_refusals"], refusal.strip())
+    usage = row.get("usage")
+    if isinstance(usage, dict):
+        cost = usage.get("cost")
+        if type(cost) in (int, float) and cost > 0:
+            # THE PAYER'S OWN NUMBER. CloseRouter returns usage.cost in USD;
+            # measured 2026-08-26. It beats every estimate, so it gets its own
+            # key and is never mixed with one.
+            summary["cost_usd_reported"] = round(
+                summary["cost_usd_reported"] + float(cost), 6)
+            summary["cost_usd_reported_calls"] += 1
+    try:
+        billed, hit = cache_tokens(usage)
+    except UsageUnreadable:
+        billed = hit = 0
+    if "route_expected_identity" in row:
+        identity = row.get("route_expected_identity")
+        if isinstance(identity, str) and identity.strip():
+            summary["route_rows"] += 1
+            _bump(summary["route_identities"],
+                  identity.strip() if identity_check else "")
+            _bump(summary["route_bases"], row.get("route_base"))
+            _bump(summary["route_generations"], row.get("route_generation"))
+    if row.get("discarded_substitution") is True:
+        summary["discarded_substitutions"] += 1
+        summary["discarded_prompt_tokens"] += billed
+        summary["discarded_cached_tokens"] += hit
+        summary["discarded_request_bytes"] += nbytes
+        summary["discarded_prompt_tokens_estimated"] = (
+            summary["discarded_request_bytes"] // DISCARD_BYTES_PER_TOKEN)
+        name = row.get("returned_model")
+        _bump(summary["discarded_by_model"],
+              name if isinstance(name, str) else "?")
+        return
+    summary["accepted_rows"] += 1
+    if billed:
+        summary["accepted_calls"] += 1
+        summary["prompt_tokens"] += billed
+        summary["cached_tokens"] += hit
+
+
+def account_ledger(ledger_path, summary, identity_check=True):
+    """Fill `summary` from the WHOLE ledger, whatever the verdict turns out to be.
+
+    Deliberately separate from the verdict walk: the verdict can stop on row 1
+    and the accounting must still describe all 463 rows. This is the function
+    whose absence printed zeros on a 2h42m paid run.
+    """
+    try:
+        handle = open(ledger_path, encoding="utf-8")
+    except OSError as exc:
+        _incomplete(summary,
+                    "the upstream ledger %s could not be read (%s), so this "
+                    "run's cost was never measured - and absence of proof is "
+                    "not zero cost" % (ledger_path, exc))
+        return
+    with handle:
+        for line in handle:
+            if not line.strip():
+                continue
+            summary["ledger_rows"] += 1
+            try:
+                row = json.loads(line)
+            except ValueError:
+                row = None
+            if not isinstance(row, dict):
+                summary["unaccountable_rows"] += 1
+                continue
+            summary["rows_counted"] += 1
+            # A PROXY EVENT IS NOT A CALL - see the row loop below.
+            if isinstance(row.get("event"), str) and row["event"]:
+                summary["event_rows"] += 1
+                continue
+            _account_call(row, summary, identity_check)
+    summary["route_span"] = len(summary["route_identities"])
+    if not summary["ledger_rows"]:
+        _incomplete(summary,
+                    "the upstream ledger %s has no rows, so no call was ever "
+                    "attributed and no cost was ever measured" % ledger_path)
+        return
+    if summary["unaccountable_rows"]:
+        _incomplete(summary,
+                    "%d of %d rows in %s could not be parsed, so the totals "
+                    "below are a floor and not the cost of the run"
+                    % (summary["unaccountable_rows"], summary["ledger_rows"],
+                       ledger_path))
+        return
+    gaps = _accounting_gaps(summary)
+    if gaps:
+        _incomplete(summary,
+                    "the accounting terms %s were never computed for %s"
+                    % (", ".join(gaps), ledger_path))
+        return
+    summary["complete"] = True
+    summary["incomplete_reason"] = ""
+
+
 def audit_ledger(ledger_path, expected_identity="", cache_guard=True,
                  min_rate=DEFAULT_CACHE_MIN_RATE,
                  min_calls=DEFAULT_CACHE_MIN_CALLS, abort_path="",
@@ -485,40 +743,47 @@ def audit_ledger(ledger_path, expected_identity="", cache_guard=True,
     better evidence than a flag passed to the auditor afterwards.
 
     Pass a dict as `summary` to receive the accounting (accepted calls, billed
-    prompt/cached tokens, discard count and cost). It is filled as the rows are
-    read, so an early breach still leaves true partial counts.
+    prompt/cached tokens, discard count and cost). THE ACCOUNTING IS COMPUTED
+    FIRST, over the whole ledger, on EVERY exit path - clean, breach, abort
+    marker, malformed row, cache collapse. It used to be initialised to zeros
+    and then abandoned when an abort marker existed, which printed
+    "0 accepted calls, 0 prompt tokens" for a 2h42m paid run whose ledger held
+    463 rows. The live guard's reason still WINS, because it was observed with
+    the run alive; only the accounting changed.
     """
     if summary is not None:
-        summary.update({"schema": 1, "accepted_calls": 0, "prompt_tokens": 0,
-                        "cached_tokens": 0, "discarded_substitutions": 0,
-                        "discarded_prompt_tokens": 0,
-                        "discarded_cached_tokens": 0, "discarded_by_model": {},
-                        # Named per-route accounting, so a swapped run says what
-                        # it actually ran on instead of leaving a reader to
-                        # guess from the base URL.
-                        "route_rows": 0, "route_generations": {},
-                        "route_bases": {}, "route_identities": {},
-                        # A RUN THAT SPANNED PROVIDERS MUST SAY SO. See
-                        # audit_route_advances and lane-audit.py's
-                        # MULTI-ROUTE line.
-                        "route_span": 0, "route_advances": 0,
-                        "route_advances_blocked": 0,
-                        "route_advance_checks": {}})
+        summary.update(_accounting_zero())
+        account_ledger(ledger_path, summary, identity_check=identity_check)
+    # THE LIVE GUARD'S REASON WINS - but it no longer short-circuits the
+    # accounting above, and the ledger is still judged so that
+    # `ledger_verdict` records what the after-the-fact audit made of the same
+    # rows. Two independent readings of one run are worth more than one.
+    abort_verdict = None
     if abort_path and os.path.exists(abort_path):
-        # The live guard already stopped this run. Its reason wins: it was
-        # observed on the call that caused it, with the run still alive.
         try:
             with open(abort_path, encoding="utf-8") as source:
                 row = json.load(source)
             reason = row.get("reason") if isinstance(row, dict) else None
             if not isinstance(reason, str) or not reason:
                 raise ValueError("no reason")
-            return reason, str(row.get("detail") or "")[:400]
+            abort_verdict = (reason, str(row.get("detail") or "")[:400])
         except (OSError, ValueError, TypeError):
-            return "LANE_ABORT_UNREADABLE", (
+            abort_verdict = ("LANE_ABORT_UNREADABLE", (
                 "the proxy wrote an abort marker at %s and it cannot be read — "
-                "the run stopped for a reason nothing recorded" % abort_path)
+                "the run stopped for a reason nothing recorded" % abort_path))
+        if summary is not None:
+            summary["abort_marker_reason"] = abort_verdict[0]
+    verdict = _ledger_verdict(ledger_path, expected_identity, cache_guard,
+                              min_rate, min_calls, identity_check, summary,
+                              advances_path)
+    if summary is not None and verdict:
+        summary["ledger_verdict"] = verdict[0]
+    return abort_verdict or verdict
 
+
+def _ledger_verdict(ledger_path, expected_identity, cache_guard, min_rate,
+                    min_calls, identity_check, summary, advances_path):
+    """The verdict walk. Judges; does NOT do the accounting (see account_ledger)."""
     expected = expected_identity.strip() if isinstance(expected_identity, str) else ""
     # AN UNDECLARED IDENTITY IS STILL A BREACH — but a ledger whose OWN rows name
     # the identity they were sent under HAS declared it, at the moment of the
@@ -605,13 +870,6 @@ def audit_ledger(ledger_path, expected_identity="", cache_guard=True,
             route_identities_seen.add(row_identity.strip())
             if identity_check:
                 route_identity_rows += 1
-            if summary is not None:
-                # The ACCOUNTING counter is unconditional: a reader wants to
-                # know what the run ran on either way.
-                summary["route_rows"] += 1
-                _bump(summary["route_identities"], row_expected)
-                _bump(summary["route_bases"], row.get("route_base"))
-                _bump(summary["route_generations"], row.get("route_generation"))
         else:
             row_expected = expected
         if row.get("discarded_substitution") is True:
@@ -623,17 +881,6 @@ def audit_ledger(ledger_path, expected_identity="", cache_guard=True,
                     "row %d of %s is flagged discarded_substitution but names "
                     "%r against expected %r — the flag is not a way to hide a "
                     "row" % (index, ledger_path, returned, row_expected))
-            if summary is not None:
-                try:
-                    billed, hit = cache_tokens(row.get("usage"))
-                except UsageUnreadable:
-                    billed = hit = 0
-                name = returned if isinstance(returned, str) else "?"
-                summary["discarded_substitutions"] += 1
-                summary["discarded_prompt_tokens"] += billed
-                summary["discarded_cached_tokens"] += hit
-                summary["discarded_by_model"][name] = (
-                    summary["discarded_by_model"].get(name, 0) + 1)
             continue
         answered = type(status) is int and 200 <= status < 300
         if not answered:
@@ -657,10 +904,6 @@ def audit_ledger(ledger_path, expected_identity="", cache_guard=True,
             calls += 1
             prompt_tokens += billed
             cached_tokens += hit
-            if summary is not None:
-                summary["accepted_calls"] = calls
-                summary["prompt_tokens"] = prompt_tokens
-                summary["cached_tokens"] = cached_tokens
 
     # LIVE, NOT DECORATIVE. `route_identity_rows` is what makes this gate fire on
     # a swapped run audited with no global --expected: those rows DID declare an
@@ -674,8 +917,6 @@ def audit_ledger(ledger_path, expected_identity="", cache_guard=True,
                expected or "a per-row route identity on %d row(s)"
                % route_identity_rows))
 
-    if summary is not None:
-        summary["route_span"] = len(route_identities_seen)
     advance_breach = audit_route_advances(advances_path,
                                           len(route_identities_seen),
                                           summary=summary)
