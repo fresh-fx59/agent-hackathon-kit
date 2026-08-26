@@ -62,7 +62,7 @@ class TestBriefsDoNotSendChildrenToTheSource(unittest.TestCase):
     def test_triage_brief_does_not_point_at_skill_md(self):
         """Naming SKILL.md inside the PROHIBITION is right; listing it as an
         input is the defect. So this checks the input bullets, not the page."""
-        text = brief_text("v38", "triage")
+        text = brief_text("v39", "triage")
         inputs = [l for l in text.splitlines() if l.strip().startswith("* ")]
         offenders = [l for l in inputs if "SKILL.md" in l]
         self.assertEqual(offenders, [],
@@ -72,20 +72,20 @@ class TestBriefsDoNotSendChildrenToTheSource(unittest.TestCase):
                       "and it must say so, not merely omit the invitation")
 
     def test_triage_brief_forbids_reading_tool_source(self):
-        text = brief_text("v38", "triage")
+        text = brief_text("v39", "triage")
         self.assertIn("НЕ ЧИТАЙ", text.upper(),
                       "the brief must forbid reading the tools, not just omit "
                       "the invitation — citecheck.py was read 25 times")
 
     def test_gate_commands_survive(self):
         """Forbidding the SOURCE must not forbid RUNNING the gates."""
-        text = brief_text("v38", "triage")
+        text = brief_text("v39", "triage")
         self.assertIn("triagecheck.py", text)
 
     def test_brief_does_not_name_files_that_do_not_exist_yet(self):
         """The draft child burned a failed read plus a whole find(1) round
         hunting for a checkpoint.json the brief listed as an input."""
-        text = brief_text("v38", "triage")
+        text = brief_text("v39", "triage")
         for line in text.splitlines():
             if line.strip().startswith("* ") and "checkpoint.json" in line:
                 self.fail("checkpoint.json listed as an input: %r" % line)
@@ -94,7 +94,7 @@ class TestBriefsDoNotSendChildrenToTheSource(unittest.TestCase):
 class TestDraftIsNotDelegated(unittest.TestCase):
     def test_no_draft_agent_is_installed(self):
         agents = tempfile.mkdtemp()
-        root = os.path.join(SKILLS, "v38")
+        root = os.path.join(SKILLS, "v39")
         subprocess.run([sys.executable, os.path.join(root, "tools", "brief.py"),
                         "--install-agents", agents], capture_output=True,
                        text=True, check=True)
@@ -103,14 +103,14 @@ class TestDraftIsNotDelegated(unittest.TestCase):
         self.assertIn("sherlock-triage.md", installed, installed)
 
     def test_no_draft_brief_is_written(self):
-        self.assertIsNone(brief_text("v38", "draft"),
+        self.assertIsNone(brief_text("v39", "draft"),
                           "the parent writes the report; it did so both before "
                           "and after spawning draft children")
 
 
 class TestChildDeliverableIsTheFile(unittest.TestCase):
     def test_brief_says_the_file_is_the_deliverable(self):
-        text = brief_text("v38", "triage")
+        text = brief_text("v39", "triage")
         self.assertIn("ФАЙЛ", text.upper(),
                       "a child that runs out of turns returns nothing; its work "
                       "must survive on disk and the parent must look there")

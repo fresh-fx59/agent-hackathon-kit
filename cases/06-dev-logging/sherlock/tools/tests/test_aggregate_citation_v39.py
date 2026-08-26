@@ -30,10 +30,10 @@ import tempfile
 import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-V38 = os.path.normpath(os.path.join(HERE, "..", "..", "skills", "v38", "tools"))
-CITE = os.path.join(V38, "cite.py")
-CITECHECK = os.path.join(V38, "citecheck.py")
-ROLLOVER = os.path.join(V38, "rollover.py")
+V39 = os.path.normpath(os.path.join(HERE, "..", "..", "skills", "v39", "tools"))
+CITE = os.path.join(V39, "cite.py")
+CITECHECK = os.path.join(V39, "citecheck.py")
+ROLLOVER = os.path.join(V39, "rollover.py")
 
 
 def load(name, path):
@@ -415,7 +415,7 @@ def _cite_line(root, path, lineno):
 def _rollover_section(root):
     """The «Окно записей» section, from the real producer.
 
-    v38 makes a report that cites corpus files owe this section; without it
+    v39 makes a report that cites corpus files owe this section; without it
     `report_evidence()` counts a blocking defect and these tests would then be
     measuring the rollover term instead of the aggregate one.
     """

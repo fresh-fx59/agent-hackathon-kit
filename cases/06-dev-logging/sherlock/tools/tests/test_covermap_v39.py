@@ -30,9 +30,9 @@ import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SKILLS = os.path.normpath(os.path.join(HERE, "..", "..", "skills"))
-V38 = os.path.join(SKILLS, "v38", "tools")
-COVERMAP = os.path.join(V38, "covermap.py")
-CITECHECK = os.path.join(V38, "citecheck.py")
+V39 = os.path.join(SKILLS, "v39", "tools")
+COVERMAP = os.path.join(V39, "covermap.py")
+CITECHECK = os.path.join(V39, "citecheck.py")
 
 LINE = ('{"Event":{"System":{"Provider":{"#attributes":{"Name":"Service Control '
         'Manager"}},"EventID":{"#text":7045}},"EventData":{"ServiceName":"3proxy '
@@ -77,7 +77,7 @@ class Base(unittest.TestCase):
 
 class TestEveryFileGetsARow(Base):
     def test_tool_exists_and_runs(self):
-        self.assertTrue(os.path.exists(COVERMAP), "v38 must ship tools/covermap.py")
+        self.assertTrue(os.path.exists(COVERMAP), "v39 must ship tools/covermap.py")
         done = self.run_covermap()
         self.assertEqual(done.returncode, 0, done.stderr)
 

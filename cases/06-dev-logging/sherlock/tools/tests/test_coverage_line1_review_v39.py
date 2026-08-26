@@ -32,15 +32,15 @@ import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[5]
-V38 = ROOT / "cases" / "06-dev-logging" / "sherlock" / "skills" / "v38" / "tools"
-TOOL = V38 / "citecheck.py"
-COVERMAP = V38 / "covermap.py"
-LOGMAP = V38 / "logmap.py"
-ROLLOVER = V38 / "rollover.py"
+V39 = ROOT / "cases" / "06-dev-logging" / "sherlock" / "skills" / "v39" / "tools"
+TOOL = V39 / "citecheck.py"
+COVERMAP = V39 / "covermap.py"
+LOGMAP = V39 / "logmap.py"
+ROLLOVER = V39 / "rollover.py"
 
 FAILED = []
 
-# v38 (PR #79): a report citing corpus files owes an «Окно записей» section.
+# v39 (PR #79): a report citing corpus files owes an «Окно записей» section.
 # Built by the REAL producer so these tests keep measuring the coverage rule.
 CORP = None
 
