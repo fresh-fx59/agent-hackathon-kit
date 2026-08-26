@@ -100,6 +100,41 @@
 #
 # Opt out entirely with SHERLOCK_UPSTREAM_LOG=0.
 
+#  5. IT OWNS THE UPSTREAM CREDENTIAL, when SHERLOCK_API_KEY_FILE names a file.
+#
+#     The key used to be pinned into the qwen child's environment at launch
+#     (run-bench.sh: OPENAI_API_KEY="$SHERLOCK_API_KEY") and the proxy relayed
+#     whatever Authorization header arrived, so changing keys meant restarting
+#     the run — two hours and ~14 CNY. That is expensive for something we now
+#     know we need to change mid-run: a key on new-api's `auto` group was
+#     measured answering as a DIFFERENT model on 6 of 20 calls, where a
+#     single-group key was 20/20 clean at the same minute, and every
+#     wrong-model answer is a discarded retry at a flat 0.05 CNY.
+#
+#     Set SHERLOCK_API_KEY_FILE and the proxy reads that file on every request
+#     and REPLACES the client's Authorization header with it. A swap is then a
+#     file write that takes effect on the NEXT request, no restart.
+#
+#       SHERLOCK_API_KEY_FILE=<trace-dir>/upstream.key
+#
+#     MATERIALISE AND SWAP THAT FILE ONLY THROUGH THE SECRETS TOOLING. The
+#     supported command, which reads the value via
+#     .claude/skills/secret-use/with-secret.sh --file-env and installs it with
+#     an atomic rename at mode 0600, is:
+#
+#       hack/swap-upstream-key.sh [--create] <secret-name> <key-file-path>
+#
+#     Do not hand-place the file and do not `echo` a key into it: an in-place
+#     write can be read torn, and the value would land in argv and the history.
+#
+#     FAILS CLOSED. A key file that is missing, empty, whitespace, unreadable,
+#     oversized or multi-token makes the proxy REFUSE the request (503, with a
+#     diagnosis that never contains a key). It never falls back to the client's
+#     header — a call billed to the wrong account is worse than a failed call.
+#
+#     UNSET = TODAY'S BEHAVIOUR, byte for byte: the client's header is
+#     forwarded verbatim. Every other lane is unaffected.
+
 # shellcheck disable=SC2034   # these are the helper's return values
 upstream_lane_start() {
   local up_base="${1:?upstream_lane_start <upstream_base> <log> <tag> <model>}"
@@ -190,6 +225,7 @@ s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1]); s.clos
       RUN_TAG="$run_tag" RUN_ATTEMPT_FILE="$attempt_path" UPSTREAM_MODEL="$model" LISTEN_PORT="$port" \
       UPSTREAM_RETRY_MAX="${SHERLOCK_UPSTREAM_RETRY:-6}" \
       UPSTREAM_SUBSTITUTION_RETRY_MAX="${SHERLOCK_SUBSTITUTION_RETRY:-12}" \
+      UPSTREAM_API_KEY_FILE="${SHERLOCK_API_KEY_FILE:-}" \
       UPSTREAM_FIRST_TOKEN_MS="${SHERLOCK_UPSTREAM_FIRST_TOKEN_MS:-240000}" \
       UPSTREAM_RETRY_BASE_MS="${SHERLOCK_UPSTREAM_RETRY_BASE_MS:-2000}" \
       UPSTREAM_BODY_DIR="$body_dir" "${lane_env[@]}" "${budget_env[@]}" \
@@ -201,6 +237,7 @@ s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1]); s.clos
       RUN_TAG="$run_tag" RUN_ATTEMPT_FILE="$attempt_path" UPSTREAM_MODEL="$model" LISTEN_PORT="$port" \
       UPSTREAM_RETRY_MAX="${SHERLOCK_UPSTREAM_RETRY:-6}" \
       UPSTREAM_SUBSTITUTION_RETRY_MAX="${SHERLOCK_SUBSTITUTION_RETRY:-12}" \
+      UPSTREAM_API_KEY_FILE="${SHERLOCK_API_KEY_FILE:-}" \
       UPSTREAM_FIRST_TOKEN_MS="${SHERLOCK_UPSTREAM_FIRST_TOKEN_MS:-240000}" \
       UPSTREAM_RETRY_BASE_MS="${SHERLOCK_UPSTREAM_RETRY_BASE_MS:-2000}" \
       UPSTREAM_BODY_DIR="$body_dir" "${lane_env[@]}" \
