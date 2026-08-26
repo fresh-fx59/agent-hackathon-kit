@@ -14,7 +14,7 @@
 #
 # Env (all have defaults; the secret is supplied by the caller via with-secret.sh):
 #   SHERLOCK_BASE_URL   default https://linkapi.ai/v1
-#   SHERLOCK_MODEL      default [SP]deepseek-v4-flash
+#   SHERLOCK_MODEL      default [SP]deepseek-v4-flash-0731
 #   SHERLOCK_API_KEY    required
 #   SHERLOCK_TIMEOUT    default 900
 
@@ -29,7 +29,7 @@ ARM="${2:?usage: run.sh <dataset-dir> <skill-version|none> [label]}"
 LABEL="${3:-$ARM}"
 
 BASE_URL="${SHERLOCK_BASE_URL:-https://linkapi.ai/v1}"
-MODEL="${SHERLOCK_MODEL:-[SP]deepseek-v4-flash}"
+MODEL="${SHERLOCK_MODEL:-[SP]deepseek-v4-flash-0731}"
 TIMEOUT="${SHERLOCK_TIMEOUT:-900}"
 : "${SHERLOCK_API_KEY:?set SHERLOCK_API_KEY (use with-secret.sh eval_linkapi_key --env SHERLOCK_API_KEY -- ...)}"
 

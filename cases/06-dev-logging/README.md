@@ -44,7 +44,9 @@ mkdir -p ~/hack/petstore-pack && unzip -q petstore_input_pack.zip -d ~/hack/pets
 usage-строке скрипта перечислены не все) либо `none` — та же модель **без**
 навыка, это baseline.
 Обязательна `SHERLOCK_API_KEY`; остальное с умолчаниями: `SHERLOCK_BASE_URL=https://linkapi.ai/v1`,
-`SHERLOCK_MODEL=[SP]deepseek-v4-flash`, `SHERLOCK_TIMEOUT=900`,
+`SHERLOCK_MODEL=[SP]deepseek-v4-flash-0731` (пин снапшота — не заменяйте его
+плавающим алиасом `[SP]deepseek-v4-flash`, иначе провайдер снова разложит вызовы
+по двум моделям, как в v37), `SHERLOCK_TIMEOUT=900`,
 `SHERLOCK_PACK=~/hack/petstore-pack/petstore_input_pack`, `QWEN_BIN=~/.local/bin/qwen`.
 `--approval-mode yolo` раннер выставляет сам — без него Qwen отказывает и навыку, и
 `run_shell_command`, и меряется не то.

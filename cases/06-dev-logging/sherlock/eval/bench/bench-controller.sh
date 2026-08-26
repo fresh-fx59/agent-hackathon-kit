@@ -50,6 +50,10 @@ TARGET_ENV_ALLOW = {
     "SHERLOCK_REQUEST_TIMEOUT_MS", "SHERLOCK_RESUME_BACKOFF_S", "SHERLOCK_SEED_WORK",
     "SHERLOCK_RESUME_MAX_ATTEMPTS", "SHERLOCK_TIMEOUT", "SHERLOCK_UPSTREAM_LOG",
     "SHERLOCK_UPSTREAM_RETRY", "SHERLOCK_UPSTREAM_RETRY_BASE_MS", "UPSTREAM_LANE_PROXY",
+    # Lane-integrity knobs. Passed through so a cold first run against a new
+    # provider can turn the cache guard off deliberately (SHERLOCK_CACHE_GUARD=0)
+    # instead of someone discovering it cannot be turned off and deleting it.
+    "SHERLOCK_CACHE_GUARD", "SHERLOCK_CACHE_MIN_RATE", "SHERLOCK_CACHE_MIN_CALLS",
 }
 MAX_JSON_BYTES = 1024 * 1024
 MAX_ARTIFACTS = 4096

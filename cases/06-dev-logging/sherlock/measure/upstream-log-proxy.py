@@ -47,6 +47,10 @@ import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlsplit
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from lane_guard import (DEFAULT_CACHE_MIN_CALLS, DEFAULT_CACHE_MIN_RATE,
+                        cache_breach, cache_tokens, model_family, same_family)
+
 UPSTREAM_BASE = os.environ.get("UPSTREAM_BASE", "https://linkapi.ai/v1").rstrip("/")
 UPSTREAM_LOG = os.environ.get("UPSTREAM_LOG", "upstream.jsonl")
 LISTEN_PORT = int(os.environ.get("LISTEN_PORT", "8791"))
@@ -374,6 +378,170 @@ def _record_budget_result(success):
     return _budget_update(finish)
 
 
+# ===========================================================================
+# LANE INTEGRITY — abort the run, on the call that proves it, not days later.
+#
+# WHAT WENT WRONG. The v37 full run made 180 metered calls and every signal
+# this proxy owned said healthy. linkapi had silently answered 93 of them as
+# `deepseek-v4-pro-0813` while the run believed it was measuring
+# `deepseek-v4-flash`. The two identities are two provider cache pools, so the
+# prompt-cache hit rate collapsed 68.1 % -> 28.0 % and fresh prompt tokens went
+# 5.92M -> 13.38M. Nothing objected. A human found it days later by diffing
+# this ledger by hand.
+#
+# WHY THE GUARD IS HERE AND NOT IN run-bench.sh. run-bench.sh can only look
+# after the CLI has exited, i.e. after all 180 calls are billed. This process
+# sees `returned_model` on call 1 and the cumulative cache rate on call 20. The
+# money argument settles it: aborting here costs one wrong call, aborting there
+# costs the run. Both exist anyway — measure/lane-audit.py re-checks the
+# finished ledger, because a proxy that DIED is also a proxy that saw nothing,
+# and that must not read as clean.
+#
+# WHAT ABORTING MEANS, given the lane's contract. This helper never kills the
+# CLI and never exits the process: `upstream_lane_start` promises a working
+# base URL, and a proxy that vanishes mid-run would leave a stripped model id
+# pointed at nothing. Instead it does exactly what the existing paid-budget
+# breach does — refuse every subsequent request with 503 and mark the budget
+# state EXCEEDED, which bench-controller.sh already polls, terminates the run
+# group on, and persists as a BLOCKED phase with this reason code. In addition
+# it writes a standalone abort marker next to the ledger, so a run launched
+# WITHOUT the controller (every direct paid launcher) still has the diagnosis
+# in its artifacts rather than only in stderr.
+#
+# The abort is one-way and first-reason-wins: a run that trips is over, and the
+# first observation is the one that explains it.
+UPSTREAM_LANE_ABORT = os.environ.get("UPSTREAM_LANE_ABORT", "")
+# Disable for a genuinely cold lane — a first-ever run against a new provider
+# has no cache to hit and would trip this honestly. Nothing else may turn it
+# off: "the run kept failing so we disabled the check" is how v37 happens twice.
+UPSTREAM_CACHE_GUARD = os.environ.get("UPSTREAM_CACHE_GUARD", "1") != "0"
+UPSTREAM_CACHE_MIN_RATE = float(
+    os.environ.get("UPSTREAM_CACHE_MIN_RATE") or DEFAULT_CACHE_MIN_RATE)
+UPSTREAM_CACHE_MIN_CALLS = int(
+    os.environ.get("UPSTREAM_CACHE_MIN_CALLS") or DEFAULT_CACHE_MIN_CALLS)
+
+_LANE_LOCK = threading.Lock()
+_LANE_ABORT = None          # first breach, {"reason": ..., "detail": ...}
+_LANE_MARKER_WRITTEN = threading.Event()   # set once abort.json exists on disk
+_LANE_CACHE = {"calls": 0, "prompt_tokens": 0, "cached_tokens": 0}
+
+
+def _write_lane_abort(row):
+    """Durable, atomic, and never overwritten — the first reason is the reason."""
+    if not UPSTREAM_LANE_ABORT:
+        return
+    directory = os.path.dirname(os.path.abspath(UPSTREAM_LANE_ABORT))
+    try:
+        os.makedirs(directory, exist_ok=True)
+        fd, temporary = tempfile.mkstemp(prefix=".upstream-lane-abort.", dir=directory)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as target:
+                json.dump(row, target, ensure_ascii=False, sort_keys=True)
+                target.write("\n")
+                target.flush()
+                os.fsync(target.fileno())
+            os.replace(temporary, UPSTREAM_LANE_ABORT)
+        finally:
+            try:
+                os.unlink(temporary)
+            except FileNotFoundError:
+                pass
+    except OSError:
+        # The marker is one of three places the breach is recorded (ledger row,
+        # budget state, marker). Losing one must not stop the refusal.
+        pass
+
+
+def _lane_trip(reason, detail):
+    """Trip the lane, and do not let a refusal go out before the marker exists.
+
+    THE RACE THIS CLOSES. The marker write is mkstemp -> write -> fsync ->
+    os.replace. `save_trace` in run-bench.sh kills the proxy the moment the CLI
+    exits, and the CLI exits as soon as it sees the refusal. Measured on this
+    box, 11 of 12 trials: the refusal was served, the proxy was terminated
+    inside the fsync, and an orphan `.upstream-lane-abort.XXXXXXXX` was left
+    holding the complete correct row while `abort.json` never appeared. No
+    marker, no `LANE ABORT` on stderr - and combined with the dead RC-5 audit
+    the run then reported no lane verdict at all.
+
+    The fix is a barrier, not a reordering. `_LANE_ABORT` is still published
+    first, so the very next request is refused rather than relayed (the whole
+    value of the guard is the call that does NOT happen). `_lane_refusal` then
+    BLOCKS on `_LANE_MARKER_WRITTEN` before it answers, so no client can learn
+    the lane is dead until the diagnosis is durable. The fsync stays: on a
+    direct paid launcher this marker is the only artifact that carries the
+    reason, so it has to survive a crash as well as a kill.
+    """
+    global _LANE_ABORT
+    with _LANE_LOCK:
+        if _LANE_ABORT is not None:
+            return
+        _LANE_ABORT = {"reason": reason, "detail": detail}
+    row = {"schema": 1, "run_tag": RUN_TAG, "reason": reason, "detail": detail,
+           "observed_at": _budget_timestamp(),
+           "expected_returned_identity": UPSTREAM_EXPECTED_RETURNED_IDENTITY,
+           "cache_min_rate": UPSTREAM_CACHE_MIN_RATE,
+           "cache_min_calls": UPSTREAM_CACHE_MIN_CALLS,
+           "cache_observed": dict(_LANE_CACHE)}
+    _write_lane_abort(row)
+    sys.stderr.write("upstream-log-proxy: LANE ABORT %s — %s\n" % (reason, detail))
+    sys.stderr.flush()
+    _LANE_MARKER_WRITTEN.set()
+
+    def mark(state):
+        # Never downgrade an existing breach; the paid-budget reasons and this
+        # one are equally terminal and the first one is the true cause.
+        if state["verdict"] == "WITHIN":
+            state.update(verdict="EXCEEDED", reason=reason)
+        return state
+
+    try:
+        _budget_update(mark)
+    except BudgetUnknown:
+        pass
+
+
+def _lane_observe(status, returned, usage):
+    """Judge one completed call. Called after its ledger row is written.
+
+    Only calls the provider actually ANSWERED are judged. A 400 or a dead
+    socket names no model, and tripping on that would abort the run on exactly
+    the transient burst this proxy exists to ride out — that shape is already
+    covered by MAX_CONSECUTIVE_PROVIDER_FAILURES. A 2xx that names no model at
+    all is likewise not treated as a mismatch here (it is not evidence of a
+    substitution), but it is NOT treated as clean either: it fails the existing
+    `success` test above, and lane-audit.py refuses a whole ledger in which no
+    2xx row ever named a model (RETURNED_MODEL_UNKNOWN).
+    """
+    if not (type(status) is int and 200 <= status < 300):
+        return
+    if (UPSTREAM_EXPECTED_RETURNED_IDENTITY and isinstance(returned, str)
+            and returned.strip()
+            and not same_family(UPSTREAM_EXPECTED_RETURNED_IDENTITY, returned)):
+        _lane_trip("RETURNED_MODEL_FAMILY_MISMATCH",
+                   "requested %s (family %s), provider answered as %s (family %s)"
+                   % (UPSTREAM_EXPECTED_RETURNED_IDENTITY,
+                      model_family(UPSTREAM_EXPECTED_RETURNED_IDENTITY),
+                      returned, model_family(returned)))
+        return
+    if not UPSTREAM_CACHE_GUARD:
+        return
+    billed, hit = cache_tokens(usage)
+    if not billed:
+        return
+    with _LANE_LOCK:
+        _LANE_CACHE["calls"] += 1
+        _LANE_CACHE["prompt_tokens"] += billed
+        _LANE_CACHE["cached_tokens"] += hit
+        calls = _LANE_CACHE["calls"]
+        prompt_tokens = _LANE_CACHE["prompt_tokens"]
+        cached_tokens = _LANE_CACHE["cached_tokens"]
+    detail = cache_breach(calls, prompt_tokens, cached_tokens,
+                          UPSTREAM_CACHE_MIN_RATE, UPSTREAM_CACHE_MIN_CALLS)
+    if detail:
+        _lane_trip("PROMPT_CACHE_COLLAPSE", detail)
+
+
 def _update_inflight(request_id, row=None):
     """Atomically add or remove one request from the trace-local live map."""
     if not UPSTREAM_INFLIGHT:
@@ -616,6 +784,12 @@ class Proxy(BaseHTTPRequestHandler):
         return UPSTREAM_BASE + (path if path.startswith("/") else "/" + path)
 
     def _relay(self, body):
+        # A tripped lane answers nothing. Checked before the body is even
+        # inspected: the whole value of the guard is the call that does NOT
+        # happen.
+        if _LANE_ABORT is not None:
+            self._lane_refusal()
+            return
         t0 = time.time()
         requested = sent = None
         if UPSTREAM_MODEL and body:
@@ -806,11 +980,45 @@ class Proxy(BaseHTTPRequestHandler):
                          stream_complete=state["stream_complete"], stream_bytes=state["stream_bytes"])
               except OSError:
                   pass
+              # AFTER the row, always. The call that trips the guard has to be
+              # in the ledger, or the artifact that explains the abort is the
+              # one call the ledger does not contain.
+              _lane_observe(status, state["returned_model"], state["usage"])
         finally:
             try:
                 _update_inflight(request_id)
             except OSError:
                 pass
+
+    def _lane_refusal(self):
+        """403, not 503 - a lane breach is a verdict, not a transport hiccup.
+
+        qwen-code's `defaultShouldRetry` retries every 5xx, `hasRetryAfterStatus`
+        treats 503 as a Retry-After status, and
+        `FALLBACK_ELIGIBLE_STATUS_CODES = {429, 503, 529}` classes it as
+        fallback-eligible (chunks/chunk-YDJRMQU4.js:41,49 and
+        chunks/chunk-7IV52LTO.js:187 of @qwen-code/qwen-code). A 503 refusal
+        therefore burned the client's 7-attempt retry budget and then presented
+        the run's own verdict as "the provider is down" - the opposite of the
+        diagnosis. 403 is in none of those sets: not >= 500, not a rate-limit
+        code, not fallback-eligible. One refusal, one honest error.
+
+        The PAID-BUDGET refusal below deliberately keeps its 503: that path is
+        wired into MAX_CONSECUTIVE_PROVIDER_FAILURES accounting and the
+        controller's polling, and moving it is not this branch's business.
+        """
+        # Never tell the client the lane is dead before the marker that says
+        # WHY is on disk - see _lane_trip. Bounded, because a stuck disk must
+        # not turn a refusal into a hang.
+        _LANE_MARKER_WRITTEN.wait(timeout=30)
+        breach = _LANE_ABORT or {}
+        payload = json.dumps({"error": {"message": "proxy: lane aborted (%s)"
+                                        % breach.get("reason", "UNKNOWN")}}).encode()
+        self.send_response(403)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(payload)))
+        self.end_headers()
+        self.wfile.write(payload)
 
     def _budget_refusal(self):
         payload = b'{"error":{"message":"proxy: paid budget unavailable"}}'

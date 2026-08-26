@@ -166,12 +166,12 @@ class TheBenchRunnerUsesTheSameUpstreamLane(BenchRunnerRig, unittest.TestCase):
 
     def test_the_cli_is_given_the_clean_id(self):
         argv, _seen, _rows, p = self.go()
-        self.assertEqual(self.cli_model(argv), "deepseek-v4-flash",
+        self.assertEqual(self.cli_model(argv), "deepseek-v4-flash-0731",
                          "stderr: %s" % p.stderr[-800:])
 
     def test_the_provider_receives_the_aliased_id(self):
         _argv, seen, _rows, _p = self.go()
-        self.assertEqual([r.get("model") for r in seen], ["[SP]deepseek-v4-flash"])
+        self.assertEqual([r.get("model") for r in seen], ["[SP]deepseek-v4-flash-0731"])
 
     def test_the_runner_does_not_append_an_unchecked_ledger_row(self):
         _argv, _seen, rows, _p = self.go()
@@ -179,7 +179,7 @@ class TheBenchRunnerUsesTheSameUpstreamLane(BenchRunnerRig, unittest.TestCase):
 
     def test_without_the_lane_the_cli_keeps_the_alias(self):
         argv, _seen, _rows, _p = self.go({"SHERLOCK_UPSTREAM_LOG": "0"})
-        self.assertEqual(self.cli_model(argv), "[SP]deepseek-v4-flash")
+        self.assertEqual(self.cli_model(argv), "[SP]deepseek-v4-flash-0731")
 
     def test_it_states_the_context_window_too(self):
         """The 649 MB corpus is where a 177,000-token ceiling hurts most."""
@@ -190,6 +190,76 @@ class TheBenchRunnerUsesTheSameUpstreamLane(BenchRunnerRig, unittest.TestCase):
             self.assertEqual(
                 json.load(fh)["model"]["generationConfig"]["contextWindowSize"],
                 400000)
+
+
+class TheLaneIntegrityExitCode(BenchRunnerRig, unittest.TestCase):
+    """RC 5, end to end through the runner. Nothing tested this, which is why
+    the post-hoc audit shipped dead.
+
+    `save_trace` unsets LANE_PROXY_PID when it kills the proxy, and the audit
+    block a few lines later was gated on `[ -n "$LANE_PROXY_PID" ] || [ -f
+    "$LANE_ABORT_PATH" ]`. The first clause was therefore always false by then,
+    so on a healthy run the audit never ran at all: LEDGER_MISSING,
+    LEDGER_EMPTY, LEDGER_MALFORMED, RETURNED_MODEL_UNKNOWN and the post-hoc
+    cache check were unreachable, and the only thing the block could ever do was
+    re-read a marker the live guard had already written. Before the fix this
+    rig produced no `lane-integrity.json` at all.
+    """
+
+    REPORT = "# Отчёт\n\napps/api.log:1 the vendor_ref query has no index\n"
+
+    def trace(self):
+        runs = os.path.join(os.path.dirname(self._stub_log), "runs")
+        found = [os.path.join(runs, name) for name in os.listdir(runs)
+                 if os.path.isdir(os.path.join(runs, name))
+                 and not name.endswith(".bodies")]
+        self.assertEqual(len(found), 1, found)
+        return found[0]
+
+    def verdict(self):
+        path = os.path.join(self.trace(), "lane-integrity.json")
+        self.assertTrue(os.path.exists(path),
+                        "the runner wrote no lane verdict at all")
+        with open(path, encoding="utf-8") as fh:
+            return json.load(fh)
+
+    def test_a_healthy_run_writes_a_clean_lane_verdict(self):
+        # The stub's report is judged by the real gates, so this run lands on
+        # RC 4 (delivered, gates blocking). What matters here is that it is NOT
+        # RC 5 and that the audit ran at all: before the fix this produced no
+        # lane-integrity.json whatsoever.
+        _a, _s, _r, p = self.go({"QWEN_STUB_REPORT": self.REPORT})
+        self.assertNotEqual(p.returncode, 5, "stderr: %s" % p.stderr[-800:])
+        self.assertEqual(self.verdict()["verdict"], "clean")
+        self.assertIsNone(self.verdict()["reason"])
+        # …and the audit judged a real ledger, not thin air.
+        self.assertTrue(os.path.exists(self.trace() + ".upstream.jsonl"))
+
+    def test_a_substituted_model_makes_the_runner_exit_five(self):
+        # The stub provider answers as `DeepSeek-V4-Flash`; tell the lane it
+        # committed to something else and it is a substitution.
+        _a, _s, _r, p = self.go({
+            "QWEN_STUB_REPORT": self.REPORT,
+            "SHERLOCK_EXPECTED_RETURNED_IDENTITY": "[SP]some-other-model-0101"})
+        self.assertEqual(p.returncode, 5, "stderr: %s" % p.stderr[-800:])
+        verdict = self.verdict()
+        self.assertEqual(verdict["verdict"], "breach")
+        self.assertEqual(verdict["reason"], "RETURNED_MODEL_FAMILY_MISMATCH")
+        self.assertIn("lane integrity", p.stderr)
+
+    def test_the_expected_identity_defaults_to_the_model_the_run_requested(self):
+        """Finding #2: it used to default to EMPTY, and empty disabled the check.
+
+        `SHERLOCK_EXPECTED_RETURNED_IDENTITY` is required only under
+        SHERLOCK_REQUIRE_ATTRIBUTION (default 0), and the paid launcher runs
+        under `env -i`. Set nothing here, exactly as that launcher does, and the
+        guard must still be armed — proved by making the provider answer as a
+        different model with no identity variable in sight.
+        """
+        _a, _s, _r, p = self.go({"QWEN_STUB_REPORT": self.REPORT,
+                                 "SHERLOCK_MODEL": "[SP]not-the-stub-model-0101"})
+        self.assertEqual(p.returncode, 5, "stderr: %s" % p.stderr[-800:])
+        self.assertEqual(self.verdict()["reason"], "RETURNED_MODEL_FAMILY_MISMATCH")
 
 
 class TheDeliveredArtifactContract(BenchRunnerRig, unittest.TestCase):

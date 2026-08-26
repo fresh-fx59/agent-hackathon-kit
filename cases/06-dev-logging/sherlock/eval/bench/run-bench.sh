@@ -18,7 +18,18 @@ QWEN="${QWEN_BIN:-$HOME/.local/bin/qwen}"
 ARM="${1:-unknown}"
 CORPUS="${SHERLOCK_CORPUS:-}"
 BASE_URL="${SHERLOCK_BASE_URL:-https://linkapi.ai/v1}"
-MODEL="${SHERLOCK_MODEL:-[SP]deepseek-v4-flash}"
+MODEL="${SHERLOCK_MODEL:-[SP]deepseek-v4-flash-0731}"
+# THE IDENTITY THE LANE GUARD CHECKS AGAINST, and why it defaults to $MODEL.
+# It used to default to EMPTY, and an empty expected id turned the family check
+# OFF. `SHERLOCK_EXPECTED_RETURNED_IDENTITY` is only *required* under
+# SHERLOCK_REQUIRE_ATTRIBUTION, which defaults to 0, and the paid launcher that
+# produced the v37 incident (sherlock-paid-v37-full-r1.sh) runs under `env -i`
+# and sets neither. So on the exact run that got substituted, the only live
+# guard was the cache one. The run always knows which id it asked for; that is
+# the id it must be answered as. The v37 ledger's first substituted row is row 2
+# of 180 - with this on, that incident costs one call instead of the whole run.
+EXPECTED_RETURNED_IDENTITY="${SHERLOCK_EXPECTED_RETURNED_IDENTITY:-$MODEL}"
+export SHERLOCK_EXPECTED_RETURNED_IDENTITY="$EXPECTED_RETURNED_IDENTITY"
 if [ -n "${SHERLOCK_TIMEOUT+x}" ]; then
   TIMEOUT="$SHERLOCK_TIMEOUT"
 elif [ "$ARM" = "v30" ] || [ "$ARM" = "v31" ] || [ "$ARM" = "v32" ] || [ "$ARM" = "v33" ] || [ "$ARM" = "v34" ] || [ "$ARM" = "v35" ] || [ "$ARM" = "v36" ] || [ "$ARM" = "v37" ]; then
@@ -135,6 +146,14 @@ save_trace() {
   [ -n "$W" ] || return 0
   mkdir -p "$TRACE"
   if [ -n "${LANE_PROXY_PID:-}" ]; then
+    # LANE_PROXY_PID_WAS outlives the kill. The RC-5 audit below is gated on
+    # "was there a lane on this run?", and it used to read LANE_PROXY_PID -
+    # which THIS function had already unset, so on every healthy run the first
+    # clause was false, the audit never ran, and LEDGER_MISSING / LEDGER_EMPTY /
+    # LEDGER_MALFORMED / RETURNED_MODEL_UNKNOWN / the post-hoc cache check were
+    # dead code. The only time it fired was when the live guard had already
+    # written a marker, i.e. it could only re-read a verdict someone else made.
+    LANE_PROXY_PID_WAS="$LANE_PROXY_PID"
     kill "$LANE_PROXY_PID" 2>/dev/null || true
     wait "$LANE_PROXY_PID" 2>/dev/null || true
     unset LANE_PROXY_PID
@@ -809,6 +828,65 @@ with open(sys.argv[1], "w", encoding="utf-8") as fh:
     fh.write("\n")
 PY
 save_trace
+# LANE INTEGRITY, AND WHY IT OUTRANKS EVERY OTHER VERDICT BELOW. The v37 full
+# run scored, gated and reported normally while linkapi had answered 93 of its
+# 180 calls as `deepseek-v4-pro-0813` instead of the flash model the run
+# committed to. Every number that run produced describes a mixture of two
+# models, and its prompt-cache hit rate had collapsed 68.1 % -> 28.0 % in plain
+# sight of this harness. RC 2/3/4 all say something about the REPORT; this one
+# says the run measured the wrong thing, so it is checked first and has its own
+# code (5) — never confused with "transport failed" (2), "delivered nothing"
+# (3) or "its own gates refused it" (4).
+#
+# The live guard in the proxy already aborts on the offending call, which is
+# where the money is saved. This is the second reading, over the finished
+# ledger, and it exists because the guard's own failure mode — a proxy that
+# died, or never carried the expected identity — looks exactly like "nothing
+# wrong". So absence of proof is a breach here: a missing, empty or malformed
+# ledger is RC 5, not a pass. The verdict is written to an artifact because a
+# diagnosis that lives only in stderr is a diagnosis nobody reads.
+LANE_BREACH=""
+LANE_DETAIL=""
+# Built as an array, never as `${LANE_BREACH:+--reason "$LANE_BREACH"}`: that
+# form keeps the quote characters literally and hands state_set a reason with
+# quotes baked into it. Expanded at the call site with the ${a[@]+"${a[@]}"}
+# guard, because bash 3.2 reads an empty array as unbound under `set -u`.
+LANE_REASON_ARG=()
+if [ -n "${LANE_PROXY_PID_WAS:-}" ] || [ -n "${LANE_PROXY_PID:-}" ] || [ -f "${LANE_ABORT_PATH:-}" ]; then
+  LANE_AUDIT_ARGS=(--ledger "$TRACE.upstream.jsonl"
+                   --abort "${LANE_ABORT_PATH:-}"
+                   --expected "$EXPECTED_RETURNED_IDENTITY")
+  # Thresholds are NOT defaulted here. They live in measure/lane_guard.py, and a
+  # second copy in shell is a second thing to forget when they move.
+  [ -z "${SHERLOCK_CACHE_MIN_RATE:-}" ] || LANE_AUDIT_ARGS+=(--cache-min-rate "$SHERLOCK_CACHE_MIN_RATE")
+  [ -z "${SHERLOCK_CACHE_MIN_CALLS:-}" ] || LANE_AUDIT_ARGS+=(--cache-min-calls "$SHERLOCK_CACHE_MIN_CALLS")
+  if [ "${SHERLOCK_CACHE_GUARD:-1}" = "0" ]; then
+    LANE_AUDIT_ARGS+=(--no-cache-guard)
+  fi
+  if LANE_BREACH="$(python3 "$MEASURE_DIR/lane-audit.py" "${LANE_AUDIT_ARGS[@]}" \
+      2>"$TRACE/lane-integrity.txt")"; then
+    LANE_BREACH=""
+  else
+    LANE_AUDIT_RC=$?
+    # A tool that could not run is not a clean lane. Same rule as the gates:
+    # unknown is not clean.
+    if [ -z "$LANE_BREACH" ]; then
+      LANE_BREACH="LANE_AUDIT_FAILED"
+    fi
+    LANE_DETAIL="$(sed -n '1,3p' "$TRACE/lane-integrity.txt" 2>/dev/null || true)"
+    LANE_REASON_ARG=(--reason "$LANE_BREACH")
+    echo "  rc=$LANE_AUDIT_RC $LANE_DETAIL" >&2
+  fi
+  python3 - "$TRACE/lane-integrity.json" "$LANE_BREACH" "$LANE_DETAIL" <<'PY'
+import json, sys
+target, breach, detail = sys.argv[1:4]
+with open(target, "w", encoding="utf-8") as fh:
+    json.dump({"schema": 1, "verdict": "breach" if breach else "clean",
+               "reason": breach or None, "detail": detail or None},
+              fh, ensure_ascii=False, sort_keys=True)
+    fh.write("\n")
+PY
+fi
 # A RUN THAT PRODUCED NO DELIVERABLE IS NOT A SUCCESS. v34 r1 exited 0 with
 # phase FINISHED_UNCHECKED and no work/report.md at all: the model wrote its
 # report as chat prose and nothing objected. `validate-run.py` has always had
@@ -833,7 +911,10 @@ try:
 except Exception: print("unreadable")' "$TRACE/gates.json" 2>/dev/null || echo "unreadable")"
   [ -n "$GATE_VERDICT" ] || GATE_VERDICT="unreadable"
 fi
-if [ ! -f "$TRACE/candidate.json" ] || [ "${QWEN_RC:-2}" -ne 0 ]; then
+if [ -n "$LANE_BREACH" ]; then
+  echo "✗ lane integrity: $LANE_BREACH — this run did not measure the model it committed to" >&2
+  RC=5
+elif [ ! -f "$TRACE/candidate.json" ] || [ "${QWEN_RC:-2}" -ne 0 ]; then
   RC=2
 elif [ ! -s "$TRACE/work/report.md" ]; then
   echo "✗ run exited 0 but produced no work/report.md — not a success" >&2
@@ -854,10 +935,12 @@ if [ "$RC" -eq 0 ]; then
   TERMINAL_WRITTEN=1
 else
   state_set --run-tag "$STAMP" --phase RUN_FAILED --dataset "$DATASET" --arm "$ARM" --trace-dir "$TRACE" \
-    --attempt "$RESUME_ATTEMPTS" --exit-code "$RC" --upstream-log "$TRACE.upstream.jsonl" \
+    --attempt "$RESUME_ATTEMPTS" --exit-code "$RC" ${LANE_REASON_ARG[@]+"${LANE_REASON_ARG[@]}"} \
+    --upstream-log "$TRACE.upstream.jsonl" \
     --inflight-path "$TRACE/upstream-inflight.json"
   state_event RUN_FAILED --run-tag "$STAMP" --phase RUN_FAILED --dataset "$DATASET" --arm "$ARM" --trace-dir "$TRACE" \
-    --attempt "$RESUME_ATTEMPTS" --exit-code "$RC" --upstream-log "$TRACE.upstream.jsonl" \
+    --attempt "$RESUME_ATTEMPTS" --exit-code "$RC" ${LANE_REASON_ARG[@]+"${LANE_REASON_ARG[@]}"} \
+    --upstream-log "$TRACE.upstream.jsonl" \
     --inflight-path "$TRACE/upstream-inflight.json"
   TERMINAL_WRITTEN=1
 fi

@@ -4,6 +4,7 @@
 #   . "$HERE/upstream-lane.sh"
 #   upstream_lane_start <upstream_base> <log_path> <run_tag> <model>
 #   # then use: $LANE_BASE_URL  $LANE_CLIENT_MODEL  $LANE_PROXY_PID
+#   #           $LANE_ABORT_PATH  (lane-integrity marker, may not exist)
 #
 # Sourced, not executed, because it hands three values back to the caller.
 #
@@ -18,14 +19,23 @@
 #     requests it answered as two identities ~19x apart on whether they emit a
 #     tool call. qwen-code stamps only the REQUESTED name, so without a
 #     pass-through no recorded row can ever be attributed to an upstream.
+#     SINCE 2026-08-26 the runners request the PINNED id
+#     `[SP]deepseek-v4-flash-0731` instead of the alias: on the v37 full run the
+#     alias fanned 180 calls across deepseek-v4-pro-0813 (93) and
+#     deepseek-v4-flash-0731 (81), i.e. two provider cache pools, and the cache
+#     rate fell 68.1% -> 28.0% (fresh prompt tokens 5.92M -> 13.38M). The
+#     pass-through stays: attribution is still how we prove the pin held.
 #
 #  2. THE MODEL-ID SPLIT. qwen-code sizes its context window from the model id
 #     STRING. Its own normalize() turns "[SP]deepseek-v4-flash" into
 #     "[sp]deepseek-v4-flash", which matches nothing in its table, so it falls
 #     back to DEFAULT_TOKEN_LIMIT = 200,000 — and the "177,000 hard limit" error
 #     follows from that. The same table gives the clean id /^deepseek-v4/ =>
-#     1,000,000. Verified by running qwen-code's own normalize() against its own
-#     table. The provider needs the prefix to route; qwen-code must not see it.
+#     1,000,000. The pinned id is unchanged here: the tag-strip below yields
+#     `deepseek-v4-flash-0731`, which matches the SAME /^deepseek-v4/ rule (and
+#     is also listed verbatim at 1,000,000), so the window is identical.
+#     Verified by running qwen-code's own normalize() against its own table.
+#     The provider needs the prefix to route; qwen-code must not see it.
 #     So: the CLI gets the clean id, the proxy restores the alias on the way out.
 #
 #  3. RIDING OUT A BURST. linkapi's 400s are transient and minute-scale, and are
@@ -36,6 +46,23 @@
 #     5 x 400 at 171 KB and the run ended — 98,515 tokens billed, no row. The
 #     proxy waits longer than the client will, and records every attempt because
 #     every retry re-uploads the context and is therefore billed.
+#
+#  5. LANE INTEGRITY. The pin in job 1 stops the harness ASKING for an alias.
+#     It cannot stop the provider ANSWERING as something else, which is what
+#     actually happened on v37, and the harness noticed nothing for days. The
+#     proxy now aborts the lane the moment a returned model is from a different
+#     FAMILY than the requested one, and the moment the cumulative prompt-cache
+#     hit rate falls below SHERLOCK_CACHE_MIN_RATE (default 0.35) after
+#     SHERLOCK_CACHE_MIN_CALLS (default 30) billed calls. Those two numbers are
+#     derived, and re-derived, in measure/lane_guard.py — they are set against
+#     the CUMULATIVE rate at the call count, not a run's final rate, which is
+#     the difference between ~20 points of margin and ~5. The expected identity
+#     defaults to the id the lane requested, because an empty one used to turn
+#     the whole family check off. Set SHERLOCK_CACHE_GUARD=0 for a
+#     genuinely cold first run against a new provider, and for nothing else.
+#     LANE_ABORT_PATH is handed back so the runner can turn the abort into an
+#     exit code; measure/lane-audit.py re-checks the finished ledger, because a
+#     proxy that died saw nothing and "saw nothing" is not "found nothing".
 #
 #  4. A FALLBACK THAT CANNOT MAKE THINGS WORSE. If the proxy does not come up,
 #     the caller gets the DIRECT url and the ALIASED id — because with nothing in
@@ -51,12 +78,17 @@ upstream_lane_start() {
   local log_path="${2:?}" run_tag="${3:?}" model="${4:?}"
   local inflight_path="${5:-}" attempt_path="${6:-}"
   local here proxy port strict="${SHERLOCK_REQUIRE_ATTRIBUTION:-0}" budget_state=""
+  # The identity the guard checks against defaults to the id this lane actually
+  # requested. It used to default to empty, and empty disabled the check - see
+  # the note in run-bench.sh. Every caller of this helper already knows $model.
+  local expected="${SHERLOCK_EXPECTED_RETURNED_IDENTITY:-$model}"
   local -a budget_env=()
 
   # Defaults are the safe ones, so every early return below is already correct.
   LANE_BASE_URL="$up_base"
   LANE_CLIENT_MODEL="$model"
   LANE_PROXY_PID=""
+  LANE_ABORT_PATH=""
 
   if [ "${SHERLOCK_UPSTREAM_LOG:-1}" != "1" ]; then
     [ "$strict" != 1 ] || {
@@ -91,8 +123,22 @@ s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1]); s.clos
     mkdir -p "$body_dir" 2>/dev/null || body_dir=""
   fi
 
+  # The lane-integrity guard, on for every lane that has a proxy. The abort
+  # marker is deleted first so a stale one from an earlier run under the same
+  # trace name can never be read as this run's verdict.
+  local abort_path="${log_path%.jsonl}.abort.json"
+  rm -f "$abort_path" 2>/dev/null || true
+  local -a lane_env=(
+    "UPSTREAM_LANE_ABORT=$abort_path"
+    "UPSTREAM_EXPECTED_RETURNED_IDENTITY=$expected"
+    "UPSTREAM_CACHE_GUARD=${SHERLOCK_CACHE_GUARD:-1}"
+    # Empty means "use lane_guard.py's default". Do not restate the numbers here.
+    "UPSTREAM_CACHE_MIN_RATE=${SHERLOCK_CACHE_MIN_RATE:-}"
+    "UPSTREAM_CACHE_MIN_CALLS=${SHERLOCK_CACHE_MIN_CALLS:-}"
+  )
+
   if [ "$strict" = 1 ]; then
-    if [ -z "$inflight_path" ] || [ -z "${SHERLOCK_EXPECTED_RETURNED_IDENTITY:-}" ] || \
+    if [ -z "$inflight_path" ] || [ -z "$expected" ] || \
        [ -z "${SHERLOCK_BUDGET_MAX_UPSTREAM_ATTEMPTS:-}" ] || \
        [ -z "${SHERLOCK_BUDGET_MAX_REQUEST_BYTES:-}" ] || \
        [ -z "${SHERLOCK_BUDGET_MAX_WALL_SECONDS:-}" ] || \
@@ -103,7 +149,7 @@ s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1]); s.clos
     budget_state="$(dirname "$inflight_path")/upstream-budget-state.json"
     budget_env=(
       "UPSTREAM_BUDGET_STATE=$budget_state"
-      "UPSTREAM_EXPECTED_RETURNED_IDENTITY=$SHERLOCK_EXPECTED_RETURNED_IDENTITY"
+      "UPSTREAM_EXPECTED_RETURNED_IDENTITY=$expected"
       "UPSTREAM_MAX_UPSTREAM_ATTEMPTS=$SHERLOCK_BUDGET_MAX_UPSTREAM_ATTEMPTS"
       "UPSTREAM_MAX_REQUEST_BYTES=$SHERLOCK_BUDGET_MAX_REQUEST_BYTES"
       "UPSTREAM_MAX_WALL_SECONDS=$SHERLOCK_BUDGET_MAX_WALL_SECONDS"
@@ -117,7 +163,7 @@ s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1]); s.clos
       UPSTREAM_RETRY_MAX="${SHERLOCK_UPSTREAM_RETRY:-6}" \
       UPSTREAM_FIRST_TOKEN_MS="${SHERLOCK_UPSTREAM_FIRST_TOKEN_MS:-240000}" \
       UPSTREAM_RETRY_BASE_MS="${SHERLOCK_UPSTREAM_RETRY_BASE_MS:-2000}" \
-      UPSTREAM_BODY_DIR="$body_dir" "${budget_env[@]}" \
+      UPSTREAM_BODY_DIR="$body_dir" "${lane_env[@]}" "${budget_env[@]}" \
       python3 "$proxy" >/dev/null 2>>"${log_path%.jsonl}.proxy.err" &
   else
     # Bash 3.2 treats an empty-array expansion as unbound under `set -u`.
@@ -127,10 +173,11 @@ s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1]); s.clos
       UPSTREAM_RETRY_MAX="${SHERLOCK_UPSTREAM_RETRY:-6}" \
       UPSTREAM_FIRST_TOKEN_MS="${SHERLOCK_UPSTREAM_FIRST_TOKEN_MS:-240000}" \
       UPSTREAM_RETRY_BASE_MS="${SHERLOCK_UPSTREAM_RETRY_BASE_MS:-2000}" \
-      UPSTREAM_BODY_DIR="$body_dir" \
+      UPSTREAM_BODY_DIR="$body_dir" "${lane_env[@]}" \
       python3 "$proxy" >/dev/null 2>>"${log_path%.jsonl}.proxy.err" &
   fi
   LANE_PROXY_PID=$!
+  LANE_ABORT_PATH="$abort_path"
 
   if python3 - "$port" <<'PY'
 import sys, time, urllib.request
@@ -156,6 +203,7 @@ PY
     kill "$LANE_PROXY_PID" 2>/dev/null
     wait "$LANE_PROXY_PID" 2>/dev/null || true
     LANE_PROXY_PID=""
+    LANE_ABORT_PATH=""
     [ "$strict" != 1 ] || return 1
   fi
   return 0
