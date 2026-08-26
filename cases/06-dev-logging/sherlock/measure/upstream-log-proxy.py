@@ -39,6 +39,7 @@ import os
 import socket
 import re
 import stat
+import subprocess
 import tempfile
 import sys
 import threading
@@ -767,6 +768,292 @@ def _apply_route_model(body, route):
     return out, requested, sent
 
 
+# ======================================================================
+# ADVANCE THE ROUTE INSTEAD OF DYING. Exhausting the substitution cap must
+# STOP BEING FATAL.
+#
+# MEASURED on the 463-row v38 ledger (20260826T132832Z-v38.upstream.jsonl):
+# 183 of 463 answers (40 %) were the wrong model, and the per-call retry
+# histogram is a clean geometric tail - 98 calls needed 1 retry, then 46, 19,
+# 10, 2, 1, 1, 1, 1, 1, 1, 1, and ONE call needed 13 against a cap of 12. That
+# single call ended a 2h42m run and 23.15 CNY of work with a 192-byte report,
+# after 280 good calls had already landed.
+#
+# Raising the cap buys one order of magnitude and costs nothing until the
+# provider drifts again: a lottery ticket, not a fix. When a provider will not
+# serve the model we asked for, the answer is to CHANGE PROVIDER - on the live
+# run, through the route file - not to kill two hours of work.
+#
+# WHAT IS NOT WEAKENED, ON ANY PATH:
+#   * The wrong-model body is still never relayed. Not one byte, on any route.
+#   * With NO fallback list the end state is today's, exactly: _lane_trip with
+#     RETURNED_MODEL_FAMILY_MISMATCH, the client refused, and no new artifact.
+#     The feature is opt-in per launch and writes nothing when it is off.
+#   * Each route is tried at most once, and a route walked past is never
+#     returned to: the index is monotonic for the whole run.
+#   * UPSTREAM_ROUTE_ADVANCE_MAX caps advances FOR THE WHOLE RUN (default: the
+#     length of the list), so a flapping provider cannot walk the list once per
+#     call and quietly bill the run for every provider we own.
+#
+# AN INVISIBLE FAILOVER IS A LIE ABOUT THE MEASUREMENT. A report synthesised
+# across two models is a different scientific object than one from a single
+# model. So every advance is recorded twice - a `route_advance` event in the
+# ledger AND a line in TRACE.upstream.route-advances.jsonl - every ledger row
+# already carries its route_generation, and lane-audit.py prints a MULTI-ROUTE
+# RUN line the operator cannot miss and refuses a history that does not match
+# the ledger.
+# ======================================================================
+UPSTREAM_ROUTE_FALLBACKS = os.environ.get("UPSTREAM_ROUTE_FALLBACKS", "").strip()
+# Where the advance history goes. Derived from the ledger by default, so the
+# two artifacts are always named after the same trace.
+UPSTREAM_ROUTE_ADVANCES = os.environ.get("UPSTREAM_ROUTE_ADVANCES", "").strip()
+if not UPSTREAM_ROUTE_ADVANCES:
+    _stem = UPSTREAM_LOG[:-6] if UPSTREAM_LOG.endswith(".jsonl") else UPSTREAM_LOG
+    UPSTREAM_ROUTE_ADVANCES = _stem + ".route-advances.jsonl"
+# A fallback list is a handful of routes. Same reasoning as _MAX_ROUTE_BYTES.
+_MAX_FALLBACKS_BYTES = 64 * 1024
+# ONE WRITER, NOT TWO. hack/swap-upstream-route.sh already does the atomic
+# temp-file+rename, the 0600-before-rename, the printable-field refusal and the
+# refusal to LOWER a generation. A second, in-process writer would be a weaker
+# copy of all four, so the advance SHELLS OUT to the same script the operator
+# uses by hand. Advances are rare (at most len(fallbacks) per run), so the
+# subprocess costs nothing measurable.
+_DEFAULT_ROUTE_SWAP = os.path.normpath(os.path.join(
+    os.path.dirname(os.path.abspath(__file__)),
+    os.pardir, os.pardir, os.pardir, os.pardir, "hack",
+    "swap-upstream-route.sh"))
+UPSTREAM_ROUTE_SWAP = (os.environ.get("UPSTREAM_ROUTE_SWAP", "").strip()
+                       or _DEFAULT_ROUTE_SWAP)
+
+
+class FallbacksUnusable(ValueError):
+    """The fallback list is not usable. Raised AT STARTUP, never mid-run.
+
+    A fallback route we cannot parse is a route we would discover was broken
+    at the exact moment the run needed it - twenty minutes and ~14 CNY in. So
+    the whole list is validated with the SAME validator the live route file
+    goes through, before the socket is even bound.
+    """
+
+
+def _load_fallbacks(path):
+    """The ordered fallback routes, validated by `_route_from_obj` itself."""
+    if not path:
+        return []
+    if not os.path.isabs(path):
+        raise FallbacksUnusable(
+            "UPSTREAM_ROUTE_FALLBACKS must be an absolute path: %r" % path)
+    try:
+        with open(path, "rb") as source:
+            raw = source.read(_MAX_FALLBACKS_BYTES + 1)
+    except OSError as exc:
+        raise FallbacksUnusable("UPSTREAM_ROUTE_FALLBACKS %s could not be read: %s"
+                                % (path, exc.strerror))
+    if len(raw) > _MAX_FALLBACKS_BYTES:
+        raise FallbacksUnusable("UPSTREAM_ROUTE_FALLBACKS is larger than %d bytes"
+                                % _MAX_FALLBACKS_BYTES)
+    try:
+        obj = json.loads(raw.decode("utf-8"), object_pairs_hook=_strict_object)
+    except (ValueError, UnicodeDecodeError) as exc:
+        raise FallbacksUnusable(
+            "UPSTREAM_ROUTE_FALLBACKS is not parseable JSON (%s)" % exc)
+    if not isinstance(obj, list):
+        raise FallbacksUnusable(
+            "UPSTREAM_ROUTE_FALLBACKS must be a JSON array of route objects")
+    routes = []
+    for index, item in enumerate(obj, 1):
+        if not isinstance(item, dict):
+            raise FallbacksUnusable("fallback %d is not a JSON object" % index)
+        # THE GENERATION IS THE LIVE FILE'S, NOT THE LIST'S. It is the receipt
+        # for which write is live and it only ever goes up; a list entry naming
+        # one could only fight the writer. Refused rather than ignored - a
+        # silently dropped field is a promise the file appears to make and does
+        # not keep.
+        if "generation" in item:
+            raise FallbacksUnusable(
+                "fallback %d names a generation (FALLBACK_CARRIES_GENERATION) - "
+                "the generation belongs to the live route file and is set by "
+                "the writer" % index)
+        try:
+            routes.append(_route_from_obj(item))
+        except RouteUnavailable as exc:
+            raise FallbacksUnusable("fallback %d is unusable: %s (%s)"
+                                    % (index, exc, exc.code))
+    return routes
+
+
+_FALLBACKS = _load_fallbacks(UPSTREAM_ROUTE_FALLBACKS)
+if _FALLBACKS and not UPSTREAM_ROUTE_FILE:
+    # Nowhere to write the new route means no advance is possible, and a
+    # feature that is configured but inert is worse than one that is off.
+    raise FallbacksUnusable(
+        "UPSTREAM_ROUTE_FALLBACKS is set but UPSTREAM_ROUTE_FILE is not - an "
+        "advance is a write to the live route file, so there is nowhere to "
+        "advance to")
+_advance_max_raw = os.environ.get("UPSTREAM_ROUTE_ADVANCE_MAX", "").strip()
+if _advance_max_raw:
+    UPSTREAM_ROUTE_ADVANCE_MAX = int(_advance_max_raw)
+    if UPSTREAM_ROUTE_ADVANCE_MAX < 0:
+        raise ValueError("UPSTREAM_ROUTE_ADVANCE_MAX must not be negative")
+else:
+    UPSTREAM_ROUTE_ADVANCE_MAX = len(_FALLBACKS)
+
+# NAMED COUNTERS, and every one of them reaches a verdict. `advances_attempted`
+# minus `advances_performed` is the number of times the run wanted another
+# provider and did not have one; `requests_refused` is what that cost the
+# client. lane_guard.audit_ledger checks all five against the events on disk
+# (ROUTE_ADVANCE_COUNTERS_INCONSISTENT), so none of them can be computed,
+# printed and never checked - the defect every earlier PR in this series shipped.
+_ADVANCE_COUNTERS = {"advances_attempted": 0, "advances_performed": 0,
+                     "advances_blocked": 0, "routes_exhausted": 0,
+                     "requests_refused": 0}
+_ADVANCE_STATE = {"next": 0}
+_ADVANCE_LOCK = threading.Lock()
+
+
+def _advance_write(name, value):
+    with _ADVANCE_LOCK:
+        _ADVANCE_COUNTERS[name] += value
+        return dict(_ADVANCE_COUNTERS)
+
+
+def _route_summary(route, generation=None):
+    return {"base": route.base, "model": route.model,
+            "expected_identity": route.expected_identity,
+            "generation": route.generation if generation is None else generation}
+
+
+def _record_advance(row):
+    """Twice, deliberately: the ledger AND the advance history.
+
+    The ledger is what a reader of the run already opens, so the failover has
+    to be visible there. The sidecar is what survives a ledger a later tool
+    filters by `status`, and it is the file lane-audit.py checks against the
+    ledger. Neither write may be the reason an advance does not happen, so both
+    are best-effort - the counters and the trip decision do not depend on them.
+    """
+    try:
+        record(returned_model=None, **row)
+    except OSError:
+        pass
+    try:
+        directory = os.path.dirname(os.path.abspath(UPSTREAM_ROUTE_ADVANCES))
+        if directory:
+            os.makedirs(directory, exist_ok=True)
+        with _LOG_LOCK:
+            with open(UPSTREAM_ROUTE_ADVANCES, "a", encoding="utf-8") as fh:
+                fh.write(json.dumps(row, ensure_ascii=False) + "\n")
+                fh.flush()
+                os.fsync(fh.fileno())
+    except OSError:
+        pass
+
+
+def _swap_route(target, route_file):
+    """Write the next route with the ONE writer. Returns (ok, detail)."""
+    command = [UPSTREAM_ROUTE_SWAP]
+    if target.key_file:
+        command += ["--key-file", target.key_file]
+    # No --generation: the writer reads the LIVE generation and writes one past
+    # it, which is the only definition that cannot go backwards under a
+    # concurrent hand swap.
+    command += [route_file, target.base, target.model, target.expected_identity]
+    if not os.access(UPSTREAM_ROUTE_SWAP, os.X_OK):
+        return False, "no executable writer at %s" % UPSTREAM_ROUTE_SWAP
+    try:
+        done = subprocess.run(command, stdout=subprocess.PIPE,
+                              stderr=subprocess.STDOUT, timeout=60)
+    except (OSError, subprocess.SubprocessError) as exc:
+        return False, "writer failed: %s" % exc
+    if done.returncode != 0:
+        return False, ("writer exited %d: %s"
+                       % (done.returncode,
+                          done.stdout.decode("utf-8", "replace").strip()[:300]))
+    return True, ""
+
+
+def _advance_route(from_route, exhausted_attempts, request_id):
+    """Move to the next provider/model/identity. True when the caller may retry.
+
+    Called ONLY on substitution-retry exhaustion for one client request. On
+    False the caller trips the lane exactly as it did before this feature
+    existed - and when no fallback list is configured that is the first thing
+    that happens, before a counter is touched or a byte is written, so the
+    off state is byte-identical to today.
+    """
+    if not _FALLBACKS:
+        return False
+    counters = _advance_write("routes_exhausted", 1)
+    counters = _advance_write("advances_attempted", 1)
+    route_file = _ROUTE_SOURCE["file"]
+    with _ADVANCE_LOCK:
+        index = _ADVANCE_STATE["next"]
+        performed = _ADVANCE_COUNTERS["advances_performed"]
+        blocked = None
+        if not route_file:
+            blocked = "NO_ROUTE_FILE"
+        elif index >= len(_FALLBACKS):
+            # Checked BEFORE the cap: by default the cap IS the length of the
+            # list, and "there is no next provider" is the primary fact. The cap
+            # only has its own reason code when it is set lower than the list.
+            blocked = "FALLBACK_LIST_EXHAUSTED"
+        elif performed >= UPSTREAM_ROUTE_ADVANCE_MAX:
+            blocked = "ADVANCE_CAP_REACHED"
+        else:
+            # Claimed inside the lock: two concurrent exhaustions must not both
+            # take the same fallback, and a route walked past is never returned
+            # to for the rest of the run.
+            _ADVANCE_STATE["next"] = index + 1
+        target = None if blocked else _FALLBACKS[index]
+    event = {"event": "route_advance", "schema": 1, "request_id": request_id,
+             "reason": "SUBSTITUTION_RETRY_EXHAUSTED",
+             "exhausted_attempts": exhausted_attempts,
+             "route_index": index, "from": _route_summary(from_route)}
+    if blocked is None:
+        ok, detail = _swap_route(target, route_file)
+        if ok:
+            # VERIFY THE WRITE BY READING IT BACK through the same funnel every
+            # relayed call uses. A swap we cannot read is a swap that would
+            # refuse every following call with a 503; better to trip here, with
+            # the reason, than to hand the run a route nobody can read.
+            try:
+                landed = _current_route()
+            except RouteUnavailable as exc:
+                ok, detail = False, "route unreadable after the write: %s" % exc
+        if not ok:
+            blocked = "WRITER_FAILED"
+            event["writer_detail"] = detail
+        else:
+            counters = _advance_write("advances_performed", 1)
+            event["to"] = _route_summary(landed)
+            event["counters"] = counters
+            event["observed_at"] = _budget_timestamp()
+            _record_advance(event)
+            sys.stderr.write(
+                "upstream-log-proxy: ROUTE ADVANCE #%d after %d discarded "
+                "substitutions - %s (%s) -> %s (%s), generation %s\n"
+                % (counters["advances_performed"], exhausted_attempts,
+                   from_route.base, from_route.expected_identity,
+                   landed.base, landed.expected_identity, landed.generation))
+            sys.stderr.flush()
+            return True
+    # A BLOCKED ADVANCE IS A REFUSED CLIENT, always: the caller's very next act
+    # is _lane_trip + _lane_refusal. Counted here so the two numbers cannot
+    # drift apart, and so the event on disk already carries the cost.
+    _advance_write("advances_blocked", 1)
+    counters = _advance_write("requests_refused", 1)
+    event["event"] = "route_advance_blocked"
+    event["blocked_reason"] = blocked
+    event["counters"] = counters
+    event["observed_at"] = _budget_timestamp()
+    _record_advance(event)
+    sys.stderr.write("upstream-log-proxy: ROUTE ADVANCE BLOCKED %s - no route "
+                     "left to serve %s, tripping the lane\n"
+                     % (blocked, from_route.expected_identity))
+    sys.stderr.flush()
+    return False
+
+
 
 def _read_budget():
     nofollow = getattr(os, "O_NOFOLLOW", 0)
@@ -1433,10 +1720,32 @@ class Proxy(BaseHTTPRequestHandler):
                     # key, because no key was obtained on this path.
                     self._key_refusal(str(exc), key_file)
                     return
-            if self._relay_once(sent_body, headers, requested, sent,
-                                request_max_tokens, discarded, route) != "SUBSTITUTED":
+            outcome = self._relay_once(sent_body, headers, requested, sent,
+                                       request_max_tokens, discarded, route)
+            if outcome == "SUBSTITUTED":
+                discarded += 1
+                continue
+            if outcome != "EXHAUSTED":
                 return
-            discarded += 1
+            # THE CAP IS SPENT. Before this fix that was the end of the run.
+            # Nothing has reached the client - the wrong-model body was
+            # discarded, as always - so the request can be re-issued verbatim
+            # on another provider. `_advance_route` decides whether there is
+            # one; when there is not (and when no fallback list is configured
+            # at all) it answers False and we trip exactly as before.
+            spent = self._exhausted
+            if _advance_route(route, discarded + 1, spent["request_id"]):
+                # A FRESH BUDGET ON THE NEW ROUTE. The old route's discards
+                # were the old provider's failure, not this one's.
+                discarded = 0
+                continue
+            # FAIL CLOSED, with the ORIGINAL reason code: the lane really did
+            # meet a substitution it could not get past, and that is what the
+            # marker must say.
+            _lane_observe(spent["status"], spent["returned_model"],
+                          spent["usage"], route.expected_identity)
+            self._lane_refusal()
+            return
 
     def _relay_once(self, body, headers, requested, sent, request_max_tokens,
                     discarded, route):
@@ -1444,8 +1753,10 @@ class Proxy(BaseHTTPRequestHandler):
 
         Returns "SUBSTITUTED" when the provider answered as the wrong model
         family, the answer was discarded WITHOUT relaying a byte of it, and a
-        retry is still allowed. Anything else means the client has been
-        answered and `_relay` must stop.
+        retry is still allowed on THIS route. Returns "EXHAUSTED" when the same
+        thing happened and the cap is spent - the client has NOT been answered
+        and `_relay` decides whether another provider can serve it. Anything
+        else means the client has been answered and `_relay` must stop.
         """
         retryable = discarded < UPSTREAM_SUBSTITUTION_RETRY_MAX
         # HOLD ON THE LAST ATTEMPT TOO. Holding only while a retry remains
@@ -1638,13 +1949,18 @@ class Proxy(BaseHTTPRequestHandler):
                       # towards the lane: ask the provider again.
                       outcome = "SUBSTITUTED"
                   else:
-                      # FAIL CLOSED. The cap is spent, so this is the honest
-                      # outcome: trip the lane exactly as before - and refuse
-                      # the client rather than hand back the wrong-model body,
-                      # which is STRICTER than the pre-retry behaviour.
-                      _lane_observe(status, state["returned_model"], state["usage"],
-                                    route.expected_identity)
-                      self._lane_refusal()
+                      # THE CAP IS SPENT ON THIS ROUTE. Still nothing relayed,
+                      # so the decision is _relay's: advance to the next
+                      # provider, or trip the lane with this exact observation
+                      # and refuse the client. The judgement is handed up
+                      # rather than made here because only _relay knows whether
+                      # a fallback exists - and it must be made in ONE place,
+                      # or a future route would be tripped on by two.
+                      outcome = "EXHAUSTED"
+                      self._exhausted = {"request_id": request_id,
+                                         "status": status,
+                                         "returned_model": state["returned_model"],
+                                         "usage": state["usage"]}
               else:
                   # AFTER the row, always. The call that trips the guard has to
                   # be in the ledger, or the artifact that explains the abort is
@@ -1926,6 +2242,17 @@ def main():
         sys.stderr.write("upstream-log-proxy: route file %s (read per call; "
                          "base/model/identity come from it, not the env)\n"
                          % UPSTREAM_ROUTE_FILE)
+    if _FALLBACKS:
+        sys.stderr.write(
+            "upstream-log-proxy: %d fallback route(s), at most %d advance(s) "
+            "for the whole run; exhausting the substitution cap advances "
+            "instead of ending the run (history: %s)\n"
+            % (len(_FALLBACKS), UPSTREAM_ROUTE_ADVANCE_MAX,
+               UPSTREAM_ROUTE_ADVANCES))
+        for index, route in enumerate(_FALLBACKS, 1):
+            sys.stderr.write("upstream-log-proxy:   fallback %d: %s %s (identity %s)\n"
+                             % (index, route.base, route.model,
+                                route.expected_identity))
     sys.stderr.flush()
     try:
         srv.serve_forever()

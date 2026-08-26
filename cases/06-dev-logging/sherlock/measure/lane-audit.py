@@ -38,6 +38,13 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--ledger", required=True)
     parser.add_argument("--abort", default="")
+    parser.add_argument("--advances", default="",
+                        help="TRACE.upstream.route-advances.jsonl. A run "
+                             "that changed provider mid-flight is a "
+                             "different scientific object than one that "
+                             "did not, so the history is checked against "
+                             "the ledger and the span is printed where "
+                             "nobody can miss it.")
     parser.add_argument("--expected", default="",
                         help="the model id the run committed to. An EMPTY value "
                              "is a breach (EXPECTED_IDENTITY_UNKNOWN), not a "
@@ -64,7 +71,8 @@ def main(argv=None):
                           identity_check=not args.no_identity_check,
                           min_rate=args.cache_min_rate,
                           min_calls=args.cache_min_calls,
-                          abort_path=args.abort, summary=summary)
+                          abort_path=args.abort, summary=summary,
+                          advances_path=args.advances)
     if args.summary_json and summary:
         try:
             with open(args.summary_json, "w", encoding="utf-8") as target:
@@ -88,6 +96,7 @@ def _report(summary):
     """One line, always, so a rising substitution rate is impossible to miss."""
     if not summary:
         return
+    _report_routes(summary)
     discarded = summary.get("discarded_substitutions", 0)
     accepted = summary.get("accepted_calls", 0)
     total = accepted + discarded
@@ -100,6 +109,27 @@ def _report(summary):
            (" — " + ", ".join("%s x%d" % (name, count) for name, count
                               in sorted(summary.get("discarded_by_model", {}).items()))
             ) if discarded else ""))
+
+
+def _report_routes(summary):
+    """THE LINE AN OPERATOR CANNOT MISS.
+
+    A report synthesised across two models is a different scientific
+    object than one from a single model, and nothing may bury that. When
+    the run stayed on one route this prints nothing at all - the switch is
+    opt-in per launch, and a single-model arm must not learn a new line.
+    """
+    identities = summary.get("route_identities") or {}
+    if len(identities) < 2:
+        return
+    sys.stderr.write(
+        "⚠ MULTI-ROUTE RUN: this ledger spans %d routes (%d recorded "
+        "advance(s), %d blocked) — the report was synthesised across more "
+        "than one provider/model, calls per route: %s\n"
+        % (len(identities), summary.get("route_advances", 0),
+           summary.get("route_advances_blocked", 0),
+           ", ".join("%s x%d" % (name, count) for name, count
+                     in sorted(identities.items()))))
 
 
 if __name__ == "__main__":

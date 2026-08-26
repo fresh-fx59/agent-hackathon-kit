@@ -306,10 +306,149 @@ def _rows(path):
             yield row
 
 
+
+# ======================================================================
+# THE ADVANCE HISTORY IS PART OF THE VERDICT, not a log file.
+#
+# The proxy can now ADVANCE the route when substitution retries are spent
+# (fix 3): the wrong-model body is still never relayed, but instead of ending
+# the run the proxy writes the next provider/model/identity to the live route
+# file and re-issues the request. That saves runs - on the 463-row v38 ledger
+# one call needed 13 retries against a cap of 12 and ended a 2h42m run after
+# 280 good calls - and it changes what the run IS: a report synthesised across
+# two models is a different scientific object than one from a single model.
+#
+# So an advance that is not visible in the artifacts is a lie about the
+# measurement, and these are the NAMED terms that make it a breach. Every key
+# is summed into the verdict below; none of them is printed-only. That is the
+# defect every earlier PR in this series shipped, so it is asserted key by key
+# in measure/tests/test_route_advance.py.
+# ======================================================================
+ROUTE_ADVANCE_CHECKS = (
+    # The history exists and cannot be read: the run failed over for reasons
+    # nothing recorded.
+    "advance_history_unreadable",
+    # The history says we advanced and the ledger shows ONE route: the failover
+    # left no trace on the calls it changed.
+    "advance_not_in_ledger",
+    # The proxy's own named counters, checked against the events on disk. A
+    # counter that cannot be wrong is a counter nobody has to maintain.
+    "advances_performed_mismatch",
+    "advances_blocked_mismatch",
+    "advances_attempted_lt_performed",
+    "routes_exhausted_lt_attempted",
+    "requests_refused_missing",
+)
+_ADVANCE_REASON = {
+    "advance_history_unreadable": "ROUTE_ADVANCE_HISTORY_UNREADABLE",
+    "advance_not_in_ledger": "ROUTE_ADVANCE_UNRECORDED",
+    "advances_performed_mismatch": "ROUTE_ADVANCE_COUNTERS_INCONSISTENT",
+    "advances_blocked_mismatch": "ROUTE_ADVANCE_COUNTERS_INCONSISTENT",
+    "advances_attempted_lt_performed": "ROUTE_ADVANCE_COUNTERS_INCONSISTENT",
+    "routes_exhausted_lt_attempted": "ROUTE_ADVANCE_COUNTERS_INCONSISTENT",
+    "requests_refused_missing": "ROUTE_ADVANCE_COUNTERS_INCONSISTENT",
+}
+_ADVANCE_COUNTER_KEYS = ("advances_attempted", "advances_performed",
+                         "advances_blocked", "routes_exhausted",
+                         "requests_refused")
+
+
+def audit_route_advances(advances_path, route_span, summary=None):
+    """Judge the advance history against the ledger. Returns (reason, detail).
+
+    `advances_path` EMPTY means the caller does not know where the history is,
+    and then this is a no-op: every pre-fix-3 ledger is judged byte-identically
+    to before. A ledger that spans routes with NO history file is not a breach
+    either - that is what a deliberate hand swap with
+    hack/swap-upstream-route.sh looks like, and it is disclosed loudly by
+    lane-audit.py rather than refused. What IS a breach is the other direction:
+    a history that claims advances the ledger cannot show, or counters that do
+    not match the events they were written beside.
+    """
+    checks = dict.fromkeys(ROUTE_ADVANCE_CHECKS, 0)
+    detail = {}
+    events = None
+    if advances_path and os.path.exists(advances_path):
+        try:
+            with open(advances_path, encoding="utf-8") as source:
+                events = [json.loads(line) for line in source if line.strip()]
+            if not all(isinstance(event, dict) for event in events):
+                raise ValueError("a history line is not an object")
+        except (OSError, ValueError, TypeError) as exc:
+            events = None
+            checks["advance_history_unreadable"] = 1
+            detail["advance_history_unreadable"] = (
+                "the route-advance history %s exists and could not be read "
+                "(%s) - the run may have changed provider for reasons nothing "
+                "recorded" % (advances_path, exc))
+    if events:
+        performed = [e for e in events if e.get("event") == "route_advance"]
+        blocked = [e for e in events if e.get("event") == "route_advance_blocked"]
+        if summary is not None:
+            summary["route_advances"] = len(performed)
+            summary["route_advances_blocked"] = len(blocked)
+        counters = events[-1].get("counters")
+        if not isinstance(counters, dict) or not all(
+                type(counters.get(key)) is int for key in _ADVANCE_COUNTER_KEYS):
+            checks["advance_history_unreadable"] = 1
+            detail["advance_history_unreadable"] = (
+                "the last route-advance event in %s carries no readable "
+                "counters (%r) - the accounting for a run that changed "
+                "provider was never written" % (advances_path, counters))
+            counters = None
+        if len(performed) and route_span < 2:
+            checks["advance_not_in_ledger"] = 1
+            detail["advance_not_in_ledger"] = (
+                "%d route advance(s) recorded in %s but the ledger names %d "
+                "route identit(y/ies) - a failover that left no trace on the "
+                "calls it changed is not auditable"
+                % (len(performed), advances_path, route_span))
+        if counters is not None:
+            if counters["advances_performed"] != len(performed):
+                checks["advances_performed_mismatch"] = 1
+                detail["advances_performed_mismatch"] = (
+                    "advances_performed=%d but %d route_advance event(s) are on "
+                    "disk" % (counters["advances_performed"], len(performed)))
+            if counters["advances_blocked"] != len(blocked):
+                checks["advances_blocked_mismatch"] = 1
+                detail["advances_blocked_mismatch"] = (
+                    "advances_blocked=%d but %d route_advance_blocked event(s) "
+                    "are on disk" % (counters["advances_blocked"], len(blocked)))
+            if counters["advances_attempted"] < counters["advances_performed"]:
+                checks["advances_attempted_lt_performed"] = 1
+                detail["advances_attempted_lt_performed"] = (
+                    "advances_attempted=%d is less than advances_performed=%d"
+                    % (counters["advances_attempted"],
+                       counters["advances_performed"]))
+            if counters["routes_exhausted"] < counters["advances_attempted"]:
+                checks["routes_exhausted_lt_attempted"] = 1
+                detail["routes_exhausted_lt_attempted"] = (
+                    "routes_exhausted=%d is less than advances_attempted=%d - "
+                    "an advance was attempted without a route running out"
+                    % (counters["routes_exhausted"],
+                       counters["advances_attempted"]))
+            if counters["requests_refused"] < len(blocked):
+                checks["requests_refused_missing"] = 1
+                detail["requests_refused_missing"] = (
+                    "requests_refused=%d but %d advance(s) were blocked, and "
+                    "every blocked advance refuses the client it could not "
+                    "serve" % (counters["requests_refused"], len(blocked)))
+    if summary is not None:
+        summary["route_advance_checks"] = dict(checks)
+    # THE SUM IS THE GATE. Built from the named dict, so adding a key to
+    # ROUTE_ADVANCE_CHECKS cannot leave it out of the verdict by omission.
+    if not sum(checks.values()):
+        return None
+    for key in ROUTE_ADVANCE_CHECKS:
+        if checks[key]:
+            return _ADVANCE_REASON[key], detail[key]
+    raise AssertionError("a route-advance check fired with no detail")
+
+
 def audit_ledger(ledger_path, expected_identity="", cache_guard=True,
                  min_rate=DEFAULT_CACHE_MIN_RATE,
                  min_calls=DEFAULT_CACHE_MIN_CALLS, abort_path="",
-                 identity_check=True, summary=None):
+                 identity_check=True, summary=None, advances_path=""):
     """Judge a finished run's upstream ledger. Returns (reason, detail) or None.
 
     FAIL-CLOSED, deliberately and in every direction. A ledger that is absent,
@@ -358,7 +497,13 @@ def audit_ledger(ledger_path, expected_identity="", cache_guard=True,
                         # it actually ran on instead of leaving a reader to
                         # guess from the base URL.
                         "route_rows": 0, "route_generations": {},
-                        "route_bases": {}, "route_identities": {}})
+                        "route_bases": {}, "route_identities": {},
+                        # A RUN THAT SPANNED PROVIDERS MUST SAY SO. See
+                        # audit_route_advances and lane-audit.py's
+                        # MULTI-ROUTE line.
+                        "route_span": 0, "route_advances": 0,
+                        "route_advances_blocked": 0,
+                        "route_advance_checks": {}})
     if abort_path and os.path.exists(abort_path):
         # The live guard already stopped this run. Its reason wins: it was
         # observed on the call that caused it, with the run still alive.
@@ -409,7 +554,29 @@ def audit_ledger(ledger_path, expected_identity="", cache_guard=True,
     # a check that silently switches off when the caller passes no dict is the
     # dead-gate shape this file exists to prevent.
     route_identity_rows = 0
+    # Tracked unconditionally, for the same reason as route_identity_rows:
+    # `summary` is optional and a term that switches off when the caller
+    # passes no dict is the dead-gate shape this file exists to prevent.
+    route_identities_seen = set()
     for index, row in enumerate(rows, 1):
+        # A PROXY EVENT IS NOT A CALL. `route_advance`, `route_advance_blocked`
+        # and `route_unavailable` rows are written by the proxy alongside the
+        # calls, and they attribute no model because no call was attributed:
+        # they say the route CHANGED, or that no route could be read at all.
+        # Judging them as calls made the whole ledger LEDGER_MALFORMED on the
+        # first advance - measured live, 2026-08-26, on a two-provider run that
+        # had healed itself correctly.
+        #
+        # THIS IS NOT A HOLE. An event row that NAMES a model is refused: the
+        # `event` key must never become a way to slip a call past the identity
+        # check. The proxy writes returned_model=None on every event it emits.
+        if isinstance(row.get("event"), str) and row["event"]:
+            if row.get("returned_model") is not None:
+                return "LEDGER_MALFORMED", (
+                    "row %d of %s is an %r event and names returned_model %r - "
+                    "an event row is not a call and may not attribute one"
+                    % (index, ledger_path, row["event"], row.get("returned_model")))
+            continue
         for field in ("requested_model", "returned_model", "status"):
             if field not in row:
                 return "LEDGER_MALFORMED", (
@@ -435,6 +602,7 @@ def audit_ledger(ledger_path, expected_identity="", cache_guard=True,
             # ON — otherwise --no-identity-check would start failing runs as
             # RETURNED_MODEL_UNKNOWN, which is the opposite of what it asks for.
             row_expected = row_identity.strip() if identity_check else ""
+            route_identities_seen.add(row_identity.strip())
             if identity_check:
                 route_identity_rows += 1
             if summary is not None:
@@ -505,6 +673,14 @@ def audit_ledger(ledger_path, expected_identity="", cache_guard=True,
             % (len(rows), ledger_path,
                expected or "a per-row route identity on %d row(s)"
                % route_identity_rows))
+
+    if summary is not None:
+        summary["route_span"] = len(route_identities_seen)
+    advance_breach = audit_route_advances(advances_path,
+                                          len(route_identities_seen),
+                                          summary=summary)
+    if advance_breach:
+        return advance_breach
 
     if cache_guard:
         detail = cache_breach(calls, prompt_tokens, cached_tokens, min_rate, min_calls)
