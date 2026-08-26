@@ -237,3 +237,32 @@ answer. The answer of the whole report is the **strongest outcome among the
 findings**: at least one `успех` — compromise; none, but there is a `попытка` —
 attacked, success not confirmed; all `норма` — clean. A registry made only of
 `норма` cannot end with the word "compromised", and the check verifies that.
+
+## `## Окно записей` — окно записей канала
+
+Ring buffers evict. Without this section a report says «в журнале нет X» as if
+it meant «X не было», and the project has already shipped one false claim of
+exactly that shape («~402 000 записей вытеснено из Security.jsonl» — in fact
+402275…437190 over 34 916 records, i.e. nothing lost).
+
+Generate it, never type it:
+
+    python3 <SKILL_BASE_DIR>/tools/rollover.py --corpus <LOG_DIR> --report --required-only --cite <файл-улики>
+
+    # Окно записей
+
+    итог: файлов=143 каналов=93 сплошных=93 с-пропусками=0 неприменимо=50 ошибок=0
+
+    | путь | канал | окно | записей | нет |
+    | --- | --- | --- | --- | --- |
+    | Security.jsonl | Security | окно=402275–437190 | записей=34916 | нет=0 |
+
+* the `итог:` line is mandatory, exactly once, and all six counts are re-derived
+  from the corpus by `citecheck` — a wrong count blocks;
+* one row per channel WITH A GAP, and one row per channel of a file your
+  FINDINGS cite. Not one row per corpus file: the «Покрытие» table already pays
+  that price;
+* a row the corpus does not support blocks just as hard as a missing one, so
+  declaring everything «с пропусками» to be safe costs more, not less;
+* a file whose window cannot be read (corrupt JSONL, an id that is not a number,
+  an unreadable path) is a blocking defect — it is never «чисто».
