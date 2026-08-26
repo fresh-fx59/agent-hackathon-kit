@@ -697,7 +697,7 @@ def classify_verdict(cell):
 
 
 def flagged_lines(path):
-    """-> {basename: {line numbers}} that `logmap` put on the worklist.
+    """-> {reference path (and unambiguous basename): {line numbers}} flagged.
 
     P7. A coverage row says "I looked at this file and it is normal", and it
     proves it with one quoted line. Any line used to pass. Measured on the run
@@ -710,11 +710,11 @@ def flagged_lines(path):
     The index is built from the worklist's reference column, which is where
     `logmap` writes `path:line` for every row it emitted.
     """
-    out = {}
+    by_path = {}
     try:
         fh = open(path, encoding="utf-8", errors="replace")
     except OSError:
-        return out
+        return {}
     with fh:
         for raw in fh:
             if raw.startswith("#") or not raw.strip():
@@ -728,23 +728,75 @@ def flagged_lines(path):
             head, _, tail = ref.rpartition(":")
             if not tail.isdigit() or not head:
                 continue
-            out.setdefault(os.path.basename(head).lower(), set()).add(int(tail))
+            by_path.setdefault(_norm_ref(head), set()).add(int(tail))
+    # KEYED BY PATH, and by basename ONLY where the basename is unambiguous.
+    # This index used to be keyed by lowercased basename alone. That was
+    # survivable while it only had to answer «did the mapper flag ANY line of
+    # something with this name», but P8 promotes it to the authority for a
+    # CLOSED, per-file enumerated set — and with `hostA/System.jsonl` and
+    # `hostB/System.jsonl` in one corpus (the ordinary multi-host winevtx
+    # shape) the union of both files' flags authorized a citation into either.
+    # The set was then neither closed nor per-file. The v37 corpus has no
+    # duplicate basenames, which is the only reason it never showed.
+    out = dict(by_path)
+    owners = {}
+    for norm in by_path:
+        owners.setdefault(os.path.basename(norm), []).append(norm)
+    for base, paths in owners.items():
+        if len(paths) == 1 and base not in out:
+            out[base] = by_path[paths[0]]
     return out
+
+
+def _norm_ref(path):
+    """One spelling for a reference path: forward slashes, lowercase, no `./`."""
+    p = (path or "").replace("\\", "/").lower().strip()
+    while p.startswith("./"):
+        p = p[2:]
+    return p.strip("/")
+
+
+def flagged_key_for(flagged, path):
+    """-> the ONE key of a flagged index that answers `path`, or None.
+
+    Resolution order, most specific first, and AMBIGUITY NEVER RESOLVES: if two
+    entries could answer, none does. That is the whole point of #7 — one file
+    must not authorize another. Shared with `covermap.py`, whose index is keyed
+    by the worklist's own reference paths, so producer and grader read the same
+    map the same way.
+    """
+    if not flagged or not path:
+        return None
+    want = _norm_ref(path)
+    if not want:
+        return None
+    byname = {}
+    for k in flagged:
+        byname.setdefault(_norm_ref(k), k)
+    # `logmap` writes `rendered/Foo-4Admin.jsonl` where the report may write the
+    # percent-escaped original `Foo%4Admin.jsonl`. Compare on the shape both
+    # spellings share.
+    alt = want.replace("%4", "-4")
+    for probe in (want, alt):
+        if probe in byname:
+            return byname[probe]
+    hits = {k for n, k in byname.items()
+            if any(n.endswith("/" + pr) or pr.endswith("/" + n)
+                   for pr in (want, alt))}
+    if len(hits) == 1:
+        return hits.pop()
+    if hits:
+        return None    # ambiguous: no file authorizes another
+    base, balt = os.path.basename(want), os.path.basename(alt)
+    hits = {k for n, k in byname.items()
+            if os.path.basename(n) in (base, balt)}
+    return hits.pop() if len(hits) == 1 else None
 
 
 def _flagged_for(flagged, path):
     """The flagged lines of one coverage path, whatever spelling it uses."""
-    if not flagged or not path:
-        return None
-    base = os.path.basename(path).lower()
-    hit = flagged.get(base)
-    if hit:
-        return hit
-    # `logmap` writes `rendered/Foo-4Admin.jsonl` where the report may write the
-    # percent-escaped original `Foo%4Admin.jsonl`. Compare on the shape both
-    # spellings share.
-    key = base.replace("%4", "-4")
-    return flagged.get(key)
+    key = flagged_key_for(flagged, path)
+    return flagged.get(key) if key is not None else None
 
 
 COVERAGE_SMALL_FILE = 2   # a file this short has no "boring first line"
@@ -796,7 +848,17 @@ def coverage_admissible_lines(abs_path, flagged=None, rel=None):
     marks = {n for n in (flagged or ()) if isinstance(n, int) and n > 0}
     need_last = not marks
     quotable_marks, small, last_q, total = set(), set(), None, 0
-    with io.open(abs_path, encoding="utf-8", errors="replace") as fh:
+    # THROUGH `opener`, NOT `io.open` — the same reason `looks_binary` reads
+    # through gzip and says so in its own docstring. This function used to
+    # `io.open` the file, so on a `.gz` it enumerated the lines of the RAW
+    # COMPRESSED BYTES while `read_lines` (which produces the citation being
+    # graded) decoded the stream. The two sets then had nothing to do with each
+    # other, and NO line of a gzipped file could pass: the flagged line was
+    # `cov_inadmissible_line`, every admissible "line" was
+    # `cov_unflagged_citation`. There are 1486 `.gz` files in the corpora this
+    # runs on. Every reader in this file opens the stream a reader sees.
+    with opener(abs_path)(abs_path, "rt", encoding="utf-8",
+                          errors="replace") as fh:
         for i, text in enumerate(fh, 1):
             total = i
             if not (need_last or i in marks or i <= COVERAGE_SMALL_FILE):
@@ -1463,6 +1525,18 @@ def report_evidence(report, checked=None):
     cov_unflagged_citation = []
     cov_inadmissible_line, cov_false_unreadable = [], []
     flagged = (checked or {}).get("flagged") or {}
+    # DO WE KNOW WHAT THE MAPPER FLAGGED? `main` fills `flagged` only when
+    # `--ledger` is given. Without it the map is EMPTY, which is not the same
+    # fact as «the mapper flagged nothing»: the unflagged tier then applies to
+    # every file and admits only each file's LAST line, so
+    # `citecheck report.md --corpus ./logs` — the bare form printed in
+    # tools/README.md and used in the step-6 draft check — told the model its
+    # correct coverage table was wrong on every row. The official gate always
+    # passes `--ledger`, so no run was affected; the model hitting this
+    # mid-draft was, and a gate that cries wolf mid-draft gets ignored at the
+    # end. Unknown is not empty: with no ledger the coverage-LINE rule does not
+    # run at all, and says so.
+    flagged_known = "flagged" in (checked or {})
     cov_observed = cov_no_address = 0
     corpus = (checked or {}).get("corpus")
     index_truncated = False
@@ -1508,7 +1582,8 @@ def report_evidence(report, checked=None):
                 if want and not any(
                         c.get("verdict") == "ok" and c.get("line") in want for c in cites):
                     cov_unflagged_citation.append(row)
-                elif not _coverage_line_admissible(row, cites, by_rel, want):
+                elif (flagged_known
+                      and not _coverage_line_admissible(row, cites, by_rel, want)):
                     # P8: quoting line 1 of a long file, or any line of a file
                     # the mapper never flagged other than the last, proves the
                     # file was opened and nothing more. See
@@ -1536,11 +1611,24 @@ def report_evidence(report, checked=None):
                 # «двоичный». A rule that only moves the cliff is not a fix.
                 # The same function that enumerates admissible lines answers
                 # this: if the file yields a citable line, it was readable.
+                #
+                # WITH THE SAME `flagged` ARGUMENT `covermap` USED. This passed
+                # `None` and so asked a DIFFERENT question than the producer:
+                # on a file whose flagged lines are all unquotable but whose
+                # last line is quotable, `covermap` correctly wrote
+                # «нечитабельно | ошибка=нечем-цитировать» and this check then
+                # called that row a lie and blocked the run — with the only
+                # escape being a hand-typed citation, which SKILL.md forbids in
+                # capitals. A gate that blocks its own tool's output is the
+                # PR #78 infinite loop. One question, one answer.
                 try:
                     ap = by_rel[row["resolved_path"]]
                     if (not looks_binary(ap)
                             and coverage_admissible_lines(
-                                ap, None, row["resolved_path"])):
+                                ap,
+                                _flagged_for(flagged, row.get("path")
+                                             or row.get("normalized_path")),
+                                row["resolved_path"])):
                         cov_false_unreadable.append(row)
                 except Exception:                  # noqa: BLE001
                     pass   # genuinely unreadable — the row's claim stands
@@ -1642,6 +1730,8 @@ def report_evidence(report, checked=None):
                      "false_empty": [r["report_line"] for r in cov_false_empty],
                      "false_binary": [r["report_line"] for r in cov_false_binary],
                      "false_unreadable": [r["report_line"] for r in cov_false_unreadable],
+                     "line_rule": ("применено" if flagged_known
+                                   else "пропущено — нужен --ledger worklist.tsv"),
                      "duplicate_paths": cov_duplicate_paths,
                      "uncovered_paths": cov_uncovered,
                     "unexamined_paths": cov_unexamined,
@@ -1756,6 +1846,11 @@ def render_report_evidence(e):
     if c.get("false_empty"):
         out.append("  строки «пусто», чей файл не нулевого размера: %s"
                    % ", ".join(str(x) for x in c["false_empty"]))
+    if c.get("line_rule", "").startswith("пропущено"):
+        out.append("  ПРАВИЛО ДОПУСТИМОЙ СТРОКИ НЕ ПРОВЕРЕНО: нет --ledger "
+                   "work/worklist.tsv, поэтому неизвестно, что пометил logmap. "
+                   "Гейт запускается с --ledger; здесь строки покрытия по "
+                   "номеру строки не проверялись.")
     if c.get("false_unreadable"):
         out.append("  строки «нечитабельно», чей файл читается и даёт цитату: %s"
                    % ", ".join(str(x) for x in c["false_unreadable"]))
@@ -2382,8 +2477,52 @@ def _blocking_total(d, report, ledger_path=None, report_path=None):
             + (agg.get("blocking") or 0))
 
 
+WORKLIST_MANIFEST = "worklist.manifest.json"
+
+
+def worklist_removed(path):
+    """-> (ids `logmap` emitted that the ledger no longer contains, manifest?).
+
+    P8 review #5. `logmap` writes `worklist.manifest.json` next to
+    `worklist.tsv` with the ids it emitted (see `logmap.write_worklist_manifest`
+    for why). The model is meant to CLOSE rows, not delete them, and deleting
+    them was the cheapest path to green there was: dropping every reference that
+    is not `:1` shrank the recorded v37 worklist 250 -> 126 rows and took
+    `citecheck` from 59 blocking to 7, because the coverage rule's admissible
+    set is derived from the reference column of that very file. Rows this tool
+    emitted and cannot find again are reported and they block.
+
+    No manifest -> ([], False): a hand-written fixture worklist is graded
+    exactly as it was before. Tamper-EVIDENT, not tamper-proof — the same
+    process can rewrite the sidecar; what is gone is the one-`awk` bypass.
+    """
+    man = os.path.join(os.path.dirname(os.path.abspath(path)),
+                       WORKLIST_MANIFEST)
+    try:
+        with open(man, encoding="utf-8", errors="replace") as fh:
+            data = json.load(fh)
+    except (OSError, ValueError):
+        return [], False
+    want = [str(i) for i in (data.get("ids") or []) if str(i).strip()]
+    if not want:
+        return [], False
+    have = set()
+    try:
+        with open(path, encoding="utf-8", errors="replace") as fh:
+            for raw in fh:
+                if raw.startswith("#") or not raw.strip():
+                    continue
+                rid = raw.split("\t", 1)[0].strip()
+                if rid:
+                    have.add(rid)
+    except OSError:
+        return want, True
+    return [i for i in want if i not in have], True
+
+
 def ledger(d, report, path, report_path=None):
     rows, closed = read_ledger(path)
+    removed, has_manifest = worklist_removed(path)
     open_rows = [r for r in rows
                  if r["state"] == "open" and not (set(r["ids"]) & closed)]
     agg = d.get("aggregates") or {"items": [], "total": 0, "blocking": 0}
@@ -2392,7 +2531,10 @@ def ledger(d, report, path, report_path=None):
     s = d["summary"]
     bad = sum(s[k] for k in BAD)
     nonref = s["не-ссылка"]
-    out = ["", "ЛЕДЖЕР — условие остановки (все шесть чисел обязаны быть 0)",
+    out = ["", "ЛЕДЖЕР — условие остановки (все семь чисел обязаны быть 0)",
+           "  строк, удалённых из рабочего списка: %d%s"
+           % (len(removed),
+              "" if has_manifest else "  (нет worklist.manifest.json — не проверено)"),
            "  неразобранных строк: %d из %d" % (len(open_rows), len(rows)),
            "  находок без подтверждённой цитаты: %d из %d" % (len(unproven), n_find),
            "  находок без строки «исход»: %d из %d"
@@ -2425,8 +2567,17 @@ def ledger(d, report, path, report_path=None):
     if agg_block:
         out.append("")
         out.append(agg_block)
+    if removed:
+        out.append("  РАБОЧИЙ СПИСОК УКОРОЧЕН. logmap выдал %d строк; в файле "
+                   "нет %d из них: %s%s"
+                   % (len(removed) + len(rows), len(removed),
+                      ", ".join(removed[:12]),
+                      " …" if len(removed) > 12 else ""))
+        out.append("  Строку закрывают вердиктом, её не удаляют. Верни "
+                   "рабочий список logmap (или перезапусти logmap.py) и "
+                   "закрой строки вердиктом.")
     total = (len(open_rows) + len(unproven) + bad + nonref + o["blocking"]
-             + ev.get("blocking", 0) + agg["blocking"])
+             + ev.get("blocking", 0) + agg["blocking"] + len(removed))
     out.append("")
     if total:
         out.append("ИТОГ: НЕ ЗАКОНЧЕНО — осталось %d" % total)
@@ -2692,8 +2843,11 @@ def main():
         body, left = ledger(d, text, args.ledger,
                             None if args.report == "-" else args.report)
         ledger_rows = len(read_ledger(args.ledger)[0])
+        _removed, _has_manifest = worklist_removed(args.ledger)
         d["ledger"] = {"unresolved_total": left, "rows": ledger_rows,
-                       "empty": ledger_rows == 0}
+                       "empty": ledger_rows == 0,
+                       "manifest": _has_manifest,
+                       "removed_rows": _removed}
     d.pop("flagged", None)
     if isinstance(d.get("delivered"), dict):
         d["delivered"].pop("flagged", None)

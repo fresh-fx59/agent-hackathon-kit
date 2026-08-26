@@ -251,8 +251,13 @@ def main():
         got = json.loads(r.stdout)
         check("the lazy row reaches the JSON blocking count",
               got["blocking"] >= 1, got.get("blocking"))
+        # WITH `--ledger`, because that is the gate's own argv and because
+        # without it citecheck does not KNOW what logmap flagged: the empty map
+        # is not the fact «nothing was flagged». See the `flagged_known` note in
+        # citecheck.report_evidence and test_coverage_line1_review_v37.py.
         r2 = subprocess.run([sys.executable, str(TOOL), path, "--corpus", corp,
-                             "--require-quote"], capture_output=True, text=True)
+                             "--require-quote", "--ledger", wl],
+                            capture_output=True, text=True)
         check("the lazy row reaches the EXIT CODE", r2.returncode == 1, r2.returncode)
         check("the refusal names the tool that fixes it",
               "covermap.py" in r2.stdout, r2.stdout[-400:])

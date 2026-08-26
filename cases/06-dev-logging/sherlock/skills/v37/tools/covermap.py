@@ -46,6 +46,18 @@ implementation of the rule, shared with the grader. That is not a nicety:
 So: run this tool. It returns the admissible line for free; guessing one costs
 more and the gate enumerates the answers.
 
+WHAT «no cheaper answer than the correct one» DOES AND DOES NOT MEAN. The
+enumeration is only as closed as the worklist it is derived from, and the model
+writes the worklist back. MEASURED: dropping every reference that is not `:1`
+took the recorded v37 report from 59 blocking to 7 with triagecheck still at 0 —
+one `awk`, and the closed set had been re-opened from below. `logmap` therefore
+writes `worklist.manifest.json` with the ids it emitted and `citecheck --ledger`
+blocks on any that the ledger no longer contains, so a deletion is now MORE
+expensive than the correct answer, not less. That is tamper-EVIDENT, not
+tamper-proof: this process can rewrite the sidecar too. The claim that holds is
+«the cheap path is gone and the expensive one leaves a record», and that is the
+claim made here.
+
 «не смотрел» is never emitted. It does not discharge a file — it is
 unverifiable by construction — so generating it would be writing a lie.
 """
@@ -121,9 +133,18 @@ def flagged_lines(worklists):
     return out
 
 
-def line_at(path, want):
+def line_at(path, want, cc):
+    """Line `want` of the file, read through the SAME opener the grader uses.
+
+    It used to be a bare `open`, so a `.gz` was read as raw compressed bytes and
+    the "quote" was mojibake from the middle of a deflate stream — a coverage
+    row that quoted garbage and cited a line number that does not exist as text.
+    `citecheck.opener` returns `gzip.open` for `.gz`, which is what
+    `read_lines`, `looks_binary` and `coverage_admissible_lines` all read
+    through.
+    """
     try:
-        with open(path, encoding="utf-8", errors="replace") as fh:
+        with cc.opener(path)(path, "rt", encoding="utf-8", errors="replace") as fh:
             for i, text in enumerate(fh, 1):
                 if i == want:
                     return text.rstrip("\n"), None
@@ -151,7 +172,11 @@ def rows_for(corpus, flagged, cc):
             if cc.looks_binary(ap):
                 rows.append((rel, "двоичный", "формат=двоичный"))
                 continue
-            marks = flagged.get(rel) or {}
+            # THE SAME RESOLVER THE GRADER USES (`citecheck.flagged_key_for`),
+            # not `flagged.get(rel)`. The worklist may spell a path differently
+            # from the corpus walk, and a basename shared by two hosts must
+            # authorize neither — one function decides that for both tools.
+            marks = flagged.get(cc.flagged_key_for(flagged, rel)) or {}
             # WHICH LINE. Not "any flagged line" and never "line 1 because it
             # is there": `citecheck.coverage_admissible_lines` owns that rule
             # and this is the only place it is consulted, so the producer
@@ -177,7 +202,7 @@ def rows_for(corpus, flagged, cc):
             # There is no fallback outside `allowed`. A file with nothing
             # citable is reported as such, not papered over with line 1.
             for candidate in want:
-                text, why = line_at(ap, candidate)
+                text, why = line_at(ap, candidate, cc)
                 if text is None:
                     continue
                 hint = (marks.get(candidate) or ("", ""))[1]
