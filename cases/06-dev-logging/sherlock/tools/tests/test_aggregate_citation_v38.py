@@ -30,10 +30,10 @@ import tempfile
 import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-V37 = os.path.normpath(os.path.join(HERE, "..", "..", "skills", "v37", "tools"))
-CITE = os.path.join(V37, "cite.py")
-CITECHECK = os.path.join(V37, "citecheck.py")
-ROLLOVER = os.path.join(V37, "rollover.py")
+V38 = os.path.normpath(os.path.join(HERE, "..", "..", "skills", "v38", "tools"))
+CITE = os.path.join(V38, "cite.py")
+CITECHECK = os.path.join(V38, "citecheck.py")
+ROLLOVER = os.path.join(V38, "rollover.py")
 
 
 def load(name, path):

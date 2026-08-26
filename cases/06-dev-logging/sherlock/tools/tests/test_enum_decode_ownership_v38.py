@@ -37,9 +37,9 @@ import tempfile
 import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-V37 = os.path.normpath(os.path.join(HERE, "..", "..", "skills", "v37"))
+V38 = os.path.normpath(os.path.join(HERE, "..", "..", "skills", "v38"))
 CITECHECK = os.environ.get("SHERLOCK_CITECHECK",
-                           os.path.join(V37, "tools", "citecheck.py"))
+                           os.path.join(V38, "tools", "citecheck.py"))
 
 
 def load(name, path):
@@ -124,7 +124,7 @@ def rollover_for(corpus, cites=("fw.jsonl",)):
     """The «Окно записей» section the v38 gate demands, produced by the tool the
     gate tells the author to run. Merging PR #79 made every fixture in this file
     owe one; the FIXTURE is what was out of date, not the gate."""
-    argv = [sys.executable, os.path.join(V37, "tools", "rollover.py"),
+    argv = [sys.executable, os.path.join(V38, "tools", "rollover.py"),
             "--corpus", corpus, "--report", "--required-only"]
     for c in cites:
         argv += ["--cite", c]
@@ -165,7 +165,7 @@ class Base(unittest.TestCase):
         # a private, writable copy of the reference dir so table tests can
         # mangle it without touching the committed skill
         self.ref = os.path.join(self.tmp, "reference")
-        shutil.copytree(os.path.join(V37, "reference"), self.ref)
+        shutil.copytree(os.path.join(V38, "reference"), self.ref)
 
     def tearDown(self):
         shutil.rmtree(self.tmp, ignore_errors=True)
@@ -299,7 +299,7 @@ class EnumDecode(Base):
 
     def test_the_shipped_table_actually_has_data_rows(self):
         """fix #10: a growth path with zero production rows is unexercised."""
-        path = os.path.join(V37, "reference", cc.ENUM_TABLE_FILE)
+        path = os.path.join(V38, "reference", cc.ENUM_TABLE_FILE)
         rows, problems = cc.load_enum_extensions(path)
         self.assertEqual(problems, [])
         self.assertGreaterEqual(len(rows), 10)
@@ -787,12 +787,12 @@ class PerTerm(Base):
         """`table_problems` needs a private skill copy, so it is its own test."""
         tmp = tempfile.mkdtemp(prefix="fix6-tbl-")
         try:
-            shutil.copytree(V37, os.path.join(tmp, "v37"))
-            tsv = os.path.join(tmp, "v37", "reference", cc.ENUM_TABLE_FILE)
+            shutil.copytree(V38, os.path.join(tmp, "v38"))
+            tsv = os.path.join(tmp, "v38", "reference", cc.ENUM_TABLE_FILE)
             with open(tsv, "a", encoding="utf-8") as fh:
                 fh.write("Action\t9\tчто-то\t\t\n")     # no source
             p = self.run_cli(self.rep(),
-                             citecheck=os.path.join(tmp, "v37", "tools",
+                             citecheck=os.path.join(tmp, "v38", "tools",
                                                     "citecheck.py"))
             self.assertEqual(p.returncode, 1, p.stdout[-2000:])
             d = json.loads(p.stdout)
@@ -806,8 +806,8 @@ class PerTerm(Base):
         """fix #7 end to end: rewrite `logontype 5` to a lie in a private copy."""
         tmp = tempfile.mkdtemp(prefix="fix6-lock-")
         try:
-            shutil.copytree(V37, os.path.join(tmp, "v37"))
-            p = os.path.join(tmp, "v37", "tools", "citecheck.py")
+            shutil.copytree(V38, os.path.join(tmp, "v38"))
+            p = os.path.join(tmp, "v38", "tools", "citecheck.py")
             src = open(p, encoding="utf-8").read()
             old = '("logontype", 5, "служба", ["service"]),'
             self.assertEqual(src.count(old), 1)
@@ -876,8 +876,8 @@ class MutationProof(unittest.TestCase):
     def _mutate(self, which):
         tmp = tempfile.mkdtemp(prefix="fix6-mut-")
         tools = os.path.join(tmp, "tools")
-        shutil.copytree(os.path.join(V37, "tools"), tools)
-        shutil.copytree(os.path.join(V37, "reference"),
+        shutil.copytree(os.path.join(V38, "tools"), tools)
+        shutil.copytree(os.path.join(V38, "reference"),
                         os.path.join(tmp, "reference"))
         p = os.path.join(tools, "citecheck.py")
         src = open(p, encoding="utf-8").read()
@@ -892,7 +892,7 @@ class MutationProof(unittest.TestCase):
                               capture_output=True, text=True, env=env)
 
     def test_suite_is_green_against_the_real_module(self):
-        p = self._suite_against(os.path.join(V37, "tools", "citecheck.py"))
+        p = self._suite_against(os.path.join(V38, "tools", "citecheck.py"))
         self.assertEqual(p.returncode, 0, p.stderr[-4000:])
 
 

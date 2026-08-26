@@ -22,6 +22,59 @@ hooks:
 instructions are in English.** The python gates parse those Russian literals
 verbatim, so translating or re-spelling any of them fails the check.
 
+**TWO RULES THE CITATION GATE CANNOT INFER FROM A QUOTE. A citation proves a
+quote is GENUINE; it never proved it was READ CORRECTLY. `citecheck` now blocks
+on both, so a report that breaks either cannot be delivered.**
+
+1. **A NUMBER IS NOT A READING.** Any enum field you quote or mention inside a
+   `### Н-n` or `### К-n` block — `Action`, `Direction`, `Protocol`, `Profiles`,
+   `Origin`, `LogonType`, and their Russian names («действие», «направление»,
+   «протокол», «профили», «происхождение», «тип входа») — must appear in the
+   block in EXACTLY this form, once per distinct value:
+
+       Action=2 (блокировать)      Action=3 (разрешить)
+       LogonType=10 (удалённый интерактивный rdp)
+
+   The field name may be Russian on BOTH sides: «действие 2 (блокировать)» is
+   read exactly like `Action=2 (блокировать)`. The word in brackets must be the
+   one `reference/enum-tables.tsv` (plus the built-in table) gives for THAT
+   value — inflected forms and close synonyms are accepted («блокировка»,
+   «разрешено», «сетевое подключение»), but words that name a DIFFERENT value
+   of the same field are not. «действие 2/3 (разрешить)» is the v37 error and
+   blocks as `wrong_decode`: those are two different events, and `Action=2` is
+   BLOCK. Do not write a slash pair; decode each value on its own line of
+   reasoning. Keep the bracket short — a whole sentence in parentheses is an
+   aside, not a decode, and the pair still counts as undecoded.
+   Met a value the table does not have? `citecheck` names it — add a row to
+   `reference/enum-tables.tsv` WITH A SOURCE. Never delete the quote instead.
+
+2. **OWNERSHIP BEFORE INTRUDER.** Every account name that appears in any
+   `### Н-n` or `### К-n` block needs one row in a section whose heading is
+   EXACTLY «Принадлежность учётных записей» — nothing else is that section
+
+       ## Принадлежность учётных записей
+
+       | учётная запись | первое появление | path:line «цитата» | как | вывод | раньше |
+       |---|---|---|---|---|---|
+       | IPSERVER\\root | 2021-05-08T15:04:51Z | rendered/…User-Profile-Service…jsonl:1 «…ntuser.dat…» | профиль | владелец | — |
+
+   `как` ∈ `профиль | создание | удалённый вход | локальный вход | служба |
+   неизвестно`. `вывод` ∈ `владелец | посторонний | не определяется`.
+   `citecheck` re-derives the first appearance FROM THE CORPUS: a later
+   timestamp, a record that does not name the account, or an earlier record
+   anywhere in the corpus all block. `вывод: посторонний` additionally requires
+   the `раньше` column to name another account whose own row proves an EARLIER
+   first appearance — an outsider is an outsider *to somebody*.
+   The corpus really has nothing on the account? Write
+   `| имя | не определяется | — | неизвестно | не определяется | — |`.
+   That is a legitimate answer and it prints in the report. It is checked too:
+   if the account IS in the corpus, «не определяется» is a lie and blocks.
+   A WMI namespace (`ROOT\\CIMV2`), a registry or device path fragment and a
+   per-session pseudo-principal (`UMFD-2`, `DWM-1`) are not accounts and need no
+   row. If the corpus mentions the account on lines that carry no timestamp, the
+   gate refuses to certify the first appearance (`unverifiable_first`): date
+   those records or drop the «посторонний» verdict.
+
 **`<SKILL_BASE_DIR>` is an absolute path you have already been given.**
 The first line when the skill loads: "Base directory for this skill: …".
 Substitute it into every command below and do NOT guess the path: the skill
@@ -91,6 +144,13 @@ You do NOT read the corpus yourself: you run `logmap.py`, read `map.txt` and
    Only now, immediately before writing the draft, read
    `reference/report-format.md` (do not read it at the start). Write the full
    report into `work/report.md`.
+   **EVERY citation is produced by a tool, and there are TWO of them.** One line
+   → `cite.py <путь>:<строка>`. A NUMBER over many lines — «93 источника», «25355
+   отказов», «8 из них больше 1000 раз» — → `cite.py --file <путь> --aggregate
+   '<предикат>'`, which computes the number for you. Paste either output
+   verbatim. **A count you typed yourself is not evidence and citecheck will not
+   accept it**; a count you deleted because it had no line to quote is the v37
+   failure this step exists to stop (§7).
 4. **VERIFY** — check the very file you are going to deliver:
 
        python3 <SKILL_BASE_DIR>/tools/citecheck.py work/report.md --corpus <LOG_DIR> --require-quote --ledger ./work/worklist.tsv
@@ -308,13 +368,38 @@ there.
 
     python3 <SKILL_BASE_DIR>/tools/covermap.py --corpus <LOG_DIR> --worklist ./work/worklist.tsv --header
 
-One row per corpus file, quoting the `logmap`-flagged line — preferring the one triage called a defect. Every file must appear: `citecheck` blocks on any that does not, and «не смотрел» does NOT discharge a file, because nothing can check it. Paste the output as the «Покрытие» section; statuses are read off the files, never invented.
+One row per corpus file, quoting the `logmap`-flagged line — preferring the one triage called a defect. Every file must appear: `citecheck` blocks on any that does not, and «не смотрел» does NOT discharge a file, because nothing can check it. Paste the output as the «Покрытие» section; statuses are read off the files, never invented. **A COVERAGE ROW MAY NOT ANSWER A FILE WITH LINE 1** — line 1 is the oldest record and the reference `logmap` prints for almost every group, so quoting it proves the file was opened and nothing more (measured: 81 of 93 rows in the last gate-clean run, Opera, PowerShell and DPAPI among them). `citecheck` counts it `cov_inadmissible_line` and blocks. The set of lines a file may be answered with is CLOSED — the flagged lines above 1, or line 1 when it is the only flag, or any line of a file of two lines or fewer, or the single last line when `logmap` flagged nothing — so line 2 is no cheaper than line 1. `covermap.py` picks from that set for you; do not guess against it. «нечитабельно» on a file that reads AND yields a quotable line is `cov_false_unreadable` and blocks too — `covermap.py` asks that exact question before it writes «нечитабельно», so its own output never trips it. The worklist is NOT a cheaper answer either: `logmap` writes `work/worklist.manifest.json` with the ids it emitted, and `citecheck --ledger` blocks on every id that is missing from the list you hand back — close a row with a verdict, never delete it.
+
+**AND NEVER TYPE THE RECORD WINDOW BY HAND:**
+
+    python3 <SKILL_BASE_DIR>/tools/rollover.py --corpus <LOG_DIR> --report --required-only --cite <файл-улики> [--cite …]
+
+A Windows channel is a ring buffer: what you hold is a WINDOW, not a history. `EventRecordID` is monotonic per channel, so `(max − min + 1)` against the number of records says outright whether records are missing inside your window. Paste the output as the «Окно записей» section — **a TOP-LEVEL heading: `# Окно записей` at h1, or `## Окно записей` placed AFTER the «Покрытие» section, never nested inside it** (nested, its rows are read as «Покрытие» rows and the span runs on past its own table: measured on the recorded v37 report that is **12** blocking defects — 6 duplicate coverage paths + 6 no-address coverage lines — and not one of them says the word rollover; at h1 or h2-after-«Покрытие» the same report is exit 0) — with one `--cite` per corpus file your findings lean on. `citecheck` re-computes all of it from the corpus and blocks on: no section, an `итог:` line whose six counts disagree with the disk, a channel with a gap that you did not declare, a channel your findings cite that you did not declare, a wrong number, a row the corpus does not support, and every file whose window could not be read. **Where a channel shows `нет=N` with N>0, say so in prose too: inside that window «такого события нет» does NOT mean «этого не было».** An interior hole is usually a filtered export rather than a wrap — report the loss, do not diagnose eviction.
 
 **NEVER TYPE A CITATION BY HAND** — that is what re-reading the address means now:
 
     python3 <SKILL_BASE_DIR>/tools/cite.py --corpus <LOG_DIR> System.jsonl:263 --contains 3proxy
 
 It prints `путь:строка — «дословная цитата»`; paste it verbatim, then write your claim beside it. The quote comes from `citecheck`'s own builder, so what `cite.py` prints, `citecheck` accepts; `--contains` centres it on the token that matters. **A refusal means the claim is wrong, not the tool** — re-read the line or drop the claim, never paste a citation it declined. Why a tool: `reference/tools.md`.
+
+**A CLAIM ABOUT A POPULATION HAS ITS OWN CITATION** — «93 разных источника, 8 из них больше 1000 отказов» has no single line to quote, so do not delete it and do not fake a line for it. Ask for the number and paste what comes back:
+
+    python3 <SKILL_BASE_DIR>/tools/cite.py --corpus <LOG_DIR> --file Security.jsonl --aggregate 'distinct(Event.EventData.IpAddress, Event.EventData.IpAddress!=-)'
+
+Whatever it prints is the whole line, ending in a long `jq` command. **Copy that
+line; never retype it and never abbreviate the command** — an `…` in the command
+is `command-mismatch`, and this is the one form that must not be hand-typed.
+
+`citecheck` **re-runs the predicate over the corpus and compares the count exactly** — the trailing command is a rendering for a human, never executed. Use it for every census, ratio and «сколько всего» in the report: how many distinct sources, how many records of one code versus another, how many in a window. Predicates: `count(поле=значение, …)`, `distinct(поле, …)`, `distinct_over(поле, N, …)`; operators `=`, `!=`, `~=` (substring, ≥2 characters), `>=`/`<=` (lexicographic, so **ISO-8601 values only** — a bare number is refused, because lexicographic order lies about numbers).
+
+**An aggregate proves the number, and only the number.** It says nothing about
+*who* or *why*: a verified count beside an unrelated claim is a defect the gate
+cannot yet see (`reference/report-format.md`, «Что агрегат не доказывает»), so
+the aggregate you paste must be the one your sentence is actually about. And a
+predicate broad enough to match every record that merely HAS the field is
+`too-broad` — «сколько записей имеют это поле» is not a census.
+
+Measured: the run that passed all three gates named **4** attacker IPs of 93, and never stated that `0xc0000064` (нет такой учётки) fired 25355 times against `0xc000006a` (учётка есть, пароль неверный) 8098 — the difference between noise and a target list. It did not fail to cite that; nothing told it the form existed. Full grammar and every refusal: `reference/report-format.md`.
 
 Then run the report through the check — this is **one** call:
 
@@ -334,7 +419,8 @@ fixed before delivery. With several hosts, run it over
 
 `wrong-content`, `out-of-range`, `missing-file`, `binary-file`, `ambiguous`,
 "no quote", `не-ссылка`, a missing `исход:`, a missing `атрибуция:`, an
-empty/missing `## Отклонённые кандидаты` or `## Покрытие` section, a repeated
+empty/missing `## Отклонённые кандидаты`, `## Покрытие` or
+`## Окно записей` section, a repeated
 `Н-n` or `К-n`, a candidate without a quote, a coverage line without a verifiable
 address, someone else's quote, a repeated/ambiguous path or one escaping through
 `..`, and a no-address coverage line that does not follow the closed grammar or
@@ -418,7 +504,11 @@ to know what it counts as a state change and how a group is closed.
    `citecheck --ledger work/worklist-<хост>.tsv` **for every host**: N machines
    are N investigations, and "done" applies to each of them separately;
 2. `citecheck --ledger` exited with a non-zero code;
-3. at least one finding has not a single quote with verdict `ok`;
+3. at least one finding has not a single quote with verdict `ok` — a quote or
+   a verified `агрегат:` line, both count;
+   — or the report states a count, a share or a «сколько всего» that no
+   `агрегат:` line backs: a number you typed is not evidence, and deleting the
+   number instead of citing it is the v37 regression (§7);
    — and at least one finding has no `исход: успех|попытка|норма` line, or the
    findings' outcomes do not add up to the `ВЕРДИКТ` section, if you have one;
 4. `triagecheck` exited with a non-zero code — part of the list is closed
@@ -427,11 +517,18 @@ to know what it counts as a state change and how a group is closed.
 5. `statecheck --report` exited with a non-zero code — there is a state change in
    the corpus about which the report said nothing: neither as a finding nor as
    `норма`;
-6. **the report text is not yet entirely inside your final message.**
+6. `citecheck` reported `РАСШИФРОВКА ПЕРЕЧИСЛЕНИЙ (6a)` above zero — an enum
+   number is quoted in a finding without `Поле=значение (расшифровка из
+   таблицы)`, or the decode belongs to a DIFFERENT value of that field;
+7. `citecheck` reported `ПРИНАДЛЕЖНОСТЬ УЧЁТНЫХ ЗАПИСЕЙ (6b)` above zero — an
+   account is named in a finding without a checked first-appearance row, its
+   claimed first appearance does not survive the corpus, or it is called
+   «посторонний» with no earlier owner named;
+8. **the report text is not yet entirely inside your final message.**
    If you deliver an abridgement rather than the draft verbatim, it must pass
    `citecheck … --delivered <файл поставки>` with a zero return.
 
-Items 1–5 print numbers, not self-assessment. Only the last act — pasting the
+Items 1–7 print numbers, not self-assessment. Only the last act — pasting the
 text into the message — is unverifiable, which is exactly why it gets forgotten: a
 green `citecheck` feels like the finish line though it only permits delivery.
 While the report lives only in a file, zero has been done. "There is enough
@@ -465,6 +562,9 @@ MUST read `<SKILL_BASE_DIR>/reference/tools.md` §"Бюджет: почему о
   `triagecheck`, `citecheck` and `statecheck` have not each exited zero. Writing
   the report straight into chat is a failed run even if the prose is perfect.
 - **Never invent a log line.** A quote is only what you read.
+- **Never type a number either.** Every count, share and «сколько всего» in the
+  report comes from `cite.py --aggregate` and is pasted verbatim, command and
+  all. No aggregate, no number — and no deleting the claim to dodge the gate.
 - **Never invent a LINK between entities.** Two real pieces of evidence joined by
   a non-existent edge are invented evidence. If you have not seen the line where
   both entities stand together, write «связь не подтверждена корпусом».

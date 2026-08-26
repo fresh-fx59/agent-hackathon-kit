@@ -33,11 +33,11 @@ import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SKILLS = os.path.normpath(os.path.join(HERE, "..", "..", "skills"))
-V37 = os.path.join(SKILLS, "v37", "tools")
-ROLLOVER = os.path.join(V37, "rollover.py")
-CITECHECK = os.path.join(V37, "citecheck.py")
+V38 = os.path.join(SKILLS, "v38", "tools")
+ROLLOVER = os.path.join(V38, "rollover.py")
+CITECHECK = os.path.join(V38, "citecheck.py")
 
-sys.path.insert(0, V37)
+sys.path.insert(0, V38)
 import importlib.util
 
 
@@ -412,7 +412,7 @@ class GateTest(unittest.TestCase):
 
     def test_unloadable_rollover_module_fails_closed(self):
         tools = os.path.join(self.dir, "tools")
-        shutil.copytree(V37, tools)
+        shutil.copytree(V38, tools)
         with open(os.path.join(tools, "rollover.py"), "w") as fh:
             fh.write("def scan_corpus(:\n")            # syntax error on purpose
         broken = _load("_t_broken_cc", os.path.join(tools, "citecheck.py"))
@@ -469,11 +469,11 @@ class WiringTest(unittest.TestCase):
     def _mutant(self, old, new):
         base = os.path.join(self.dir, "mutant-%d" % abs(hash(new)))
         tools = os.path.join(base, "tools")
-        shutil.copytree(V37, tools)
+        shutil.copytree(V38, tools)
         # The enum gate (fix 6a) reads `tools/../reference/enum-tables.tsv` and
         # FAILS CLOSED when it is missing, so a mutant tree without it blocks for
         # the wrong reason and every mutation looks alive. Copy the whole skill.
-        shutil.copytree(os.path.join(os.path.dirname(V37), "reference"),
+        shutil.copytree(os.path.join(os.path.dirname(V38), "reference"),
                         os.path.join(base, "reference"))
         p = os.path.join(tools, "citecheck.py")
         with open(p, encoding="utf-8") as fh:

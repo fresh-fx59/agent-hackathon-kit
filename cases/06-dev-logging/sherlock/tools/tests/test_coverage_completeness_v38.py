@@ -32,7 +32,7 @@ import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SKILLS = os.path.normpath(os.path.join(HERE, "..", "..", "skills"))
-V37 = os.path.join(SKILLS, "v37", "tools", "citecheck.py")
+V38 = os.path.join(SKILLS, "v38", "tools", "citecheck.py")
 V36 = os.path.join(SKILLS, "v36", "tools", "citecheck.py")
 
 LINE = '{"Event":{"System":{"EventID":{"#text":7045}},' \
@@ -72,20 +72,20 @@ class Base(unittest.TestCase):
 
 class TestDeletingRowsMustNotHelp(Base):
     def test_full_coverage_has_no_uncovered_defect(self):
-        out = self.run_gate(V37, self.FILES).stdout
+        out = self.run_gate(V38, self.FILES).stdout
         self.assertNotIn("НЕ ПОКРЫТО", out, "a complete table must not be flagged")
 
     def test_missing_file_is_blocking(self):
         """The whole point: a corpus file with no coverage row must FAIL."""
-        out = self.run_gate(V37, ("a.jsonl",)).stdout
+        out = self.run_gate(V38, ("a.jsonl",)).stdout
         self.assertIn("НЕ ПОКРЫТО", out)
         self.assertIn("b.jsonl", out)
         self.assertIn("c.jsonl", out)
 
     def test_deleting_a_row_can_only_make_the_score_worse(self):
         """The v36 report improved 80 -> 32 by deleting rows. Never again."""
-        full = self.count(self.run_gate(V37, self.FILES).stdout)
-        cut = self.count(self.run_gate(V37, ("a.jsonl",)).stdout)
+        full = self.count(self.run_gate(V38, self.FILES).stdout)
+        cut = self.count(self.run_gate(V38, ("a.jsonl",)).stdout)
         self.assertGreater(cut, full,
                            "deleting 2 of 3 coverage rows must RAISE the "
                            "defect count, not lower it (full=%s cut=%s)"
@@ -123,7 +123,7 @@ class TestTheCheckCannotBeGamed(Base):
         path = os.path.join(self.dir, "g.md")
         with open(path, "w", encoding="utf-8") as fh:
             fh.write(self.report_with(rows))
-        out = subprocess.run([sys.executable, V37, path, "--corpus", self.corpus,
+        out = subprocess.run([sys.executable, V38, path, "--corpus", self.corpus,
                               "--require-quote"], capture_output=True, text=True).stdout
         m = re.search(r"v26: (\d+) блокирующих", out)
         return int(m.group(1)), out

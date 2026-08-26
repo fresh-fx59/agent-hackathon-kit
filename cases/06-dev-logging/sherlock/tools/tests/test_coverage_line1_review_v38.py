@@ -32,11 +32,11 @@ import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[5]
-V37 = ROOT / "cases" / "06-dev-logging" / "sherlock" / "skills" / "v37" / "tools"
-TOOL = V37 / "citecheck.py"
-COVERMAP = V37 / "covermap.py"
-LOGMAP = V37 / "logmap.py"
-ROLLOVER = V37 / "rollover.py"
+V38 = ROOT / "cases" / "06-dev-logging" / "sherlock" / "skills" / "v38" / "tools"
+TOOL = V38 / "citecheck.py"
+COVERMAP = V38 / "covermap.py"
+LOGMAP = V38 / "logmap.py"
+ROLLOVER = V38 / "rollover.py"
 
 FAILED = []
 
