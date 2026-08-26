@@ -167,6 +167,23 @@
 #     never falls back to the env values and never to the route it last saw: a
 #     call sent to the wrong provider corrupts a paid measurement silently.
 #
+#  6b. IT CAN HEAL A RUN. SHERLOCK_ROUTE_FALLBACKS names a JSON array of
+#     route objects (same shape as the route file, in priority order). When
+#     the substitution-retry cap is spent the proxy ADVANCES to the next one
+#     — atomically, generation+1, through hack/swap-upstream-route.sh — and
+#     re-issues the same request with a fresh budget, instead of ending the
+#     run. Not one wrong-model byte is relayed on any route.
+#
+#     Every advance is recorded twice: a `route_advance` row in the ledger
+#     and a line in <trace>.upstream.route-advances.jsonl, and lane-audit.py
+#     prints a MULTI-ROUTE RUN line the operator cannot miss. An invisible
+#     failover would be a lie about the measurement.
+#
+#     SHERLOCK_ROUTE_ADVANCE_MAX caps advances for the WHOLE RUN (default:
+#     the length of the list), so a flapping provider cannot walk the list
+#     once per call and quietly bill every provider we own. Unset list =
+#     today's behaviour exactly: exhaustion trips the lane.
+#
 #     SHERLOCK_UPSTREAM_ROUTE_FILE=0 opts out and restores the env-only path,
 #     byte for byte.
 
@@ -260,6 +277,34 @@ PY
       route_file=""
     fi
   fi
+
+  # EXHAUSTION MUST NOT END THE RUN. With a fallback list the proxy advances to
+  # the next provider/model/identity when the substitution cap is spent, instead
+  # of tripping the lane and throwing away every good call already made (on the
+  # v38 ledger: one call needed 13 retries against a cap of 12 and ended a
+  # 2h42m run after 280 good calls). OFF unless the launcher names a list, and
+  # the file is validated by the proxy at startup rather than mid-run.
+  #
+  # An arm deliberately measuring ONE model leaves the list unset: a report
+  # synthesised across two models is a different scientific object, so the
+  # switch is opt-in per launch and lane-audit.py prints a MULTI-ROUTE line
+  # when it was used.
+  local fallbacks_file=""
+  local advance_max=""
+  if [ -n "${SHERLOCK_ROUTE_FALLBACKS:-}" ]; then
+    if [ -z "$route_file" ]; then
+      # An advance is a WRITE to the live route file. Without one there is
+      # nowhere to advance to, and the proxy refuses to start rather than run
+      # with an inert feature — so do not hand it the list at all.
+      echo "  ⚠ upstream lane: SHERLOCK_ROUTE_FALLBACKS ignored — no route file" >&2
+    elif [ ! -f "$SHERLOCK_ROUTE_FALLBACKS" ]; then
+      echo "  ✗ upstream lane: no fallback route list at $SHERLOCK_ROUTE_FALLBACKS" >&2
+      return 1
+    else
+      fallbacks_file="$SHERLOCK_ROUTE_FALLBACKS"
+      advance_max="${SHERLOCK_ROUTE_ADVANCE_MAX:-}"
+    fi
+  fi
   local -a lane_env=(
     "UPSTREAM_LANE_ABORT=$abort_path"
     "UPSTREAM_EXPECTED_RETURNED_IDENTITY=$expected"
@@ -296,6 +341,8 @@ PY
       UPSTREAM_SUBSTITUTION_RETRY_MAX="${SHERLOCK_SUBSTITUTION_RETRY:-12}" \
       UPSTREAM_API_KEY_FILE="${SHERLOCK_API_KEY_FILE:-}" \
       UPSTREAM_ROUTE_FILE="$route_file" \
+      UPSTREAM_ROUTE_FALLBACKS="$fallbacks_file" \
+      UPSTREAM_ROUTE_ADVANCE_MAX="$advance_max" \
       UPSTREAM_FIRST_TOKEN_MS="${SHERLOCK_UPSTREAM_FIRST_TOKEN_MS:-240000}" \
       UPSTREAM_RETRY_BASE_MS="${SHERLOCK_UPSTREAM_RETRY_BASE_MS:-2000}" \
       UPSTREAM_BODY_DIR="$body_dir" "${lane_env[@]}" "${budget_env[@]}" \
@@ -309,6 +356,8 @@ PY
       UPSTREAM_SUBSTITUTION_RETRY_MAX="${SHERLOCK_SUBSTITUTION_RETRY:-12}" \
       UPSTREAM_API_KEY_FILE="${SHERLOCK_API_KEY_FILE:-}" \
       UPSTREAM_ROUTE_FILE="$route_file" \
+      UPSTREAM_ROUTE_FALLBACKS="$fallbacks_file" \
+      UPSTREAM_ROUTE_ADVANCE_MAX="$advance_max" \
       UPSTREAM_FIRST_TOKEN_MS="${SHERLOCK_UPSTREAM_FIRST_TOKEN_MS:-240000}" \
       UPSTREAM_RETRY_BASE_MS="${SHERLOCK_UPSTREAM_RETRY_BASE_MS:-2000}" \
       UPSTREAM_BODY_DIR="$body_dir" "${lane_env[@]}" \
@@ -337,6 +386,11 @@ PY
     if [ -n "$route_file" ]; then
       echo "  ↻ upstream route (hot-swappable, read per call): $route_file" >&2
       echo "      hack/swap-upstream-route.sh $route_file <base> <model> [identity]" >&2
+    fi
+    if [ -n "$fallbacks_file" ]; then
+      echo "  ↷ upstream fallbacks: $fallbacks_file (exhausting the substitution" >&2
+      echo "      cap ADVANCES the route instead of ending the run; history in" >&2
+      echo "      ${log_path%.jsonl}.route-advances.jsonl)" >&2
     fi
     if [ -n "${SHERLOCK_API_KEY_FILE:-}" ]; then
       echo "  ↻ upstream key   (hot-swappable, read per call): $SHERLOCK_API_KEY_FILE" >&2

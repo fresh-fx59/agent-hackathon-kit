@@ -870,7 +870,13 @@ if [ -n "${LANE_PROXY_PID_WAS:-}" ] || [ -n "${LANE_PROXY_PID:-}" ] || [ -f "${L
                    # to land in an artifact, or a provider that starts
                    # substituting on half its calls just triples the bill in
                    # silence.
-                   --summary-json "$TRACE/lane-substitutions.json")
+                   --summary-json "$TRACE/lane-substitutions.json"
+                   # A run that CHANGED PROVIDER mid-flight is a different
+                   # scientific object than one that did not. The history is
+                   # checked against the ledger and the span is printed where
+                   # nobody can miss it; absent file on a single-route run is
+                   # simply nothing to say.
+                   --advances "$TRACE.upstream.route-advances.jsonl")
   # Thresholds are NOT defaulted here. They live in measure/lane_guard.py, and a
   # second copy in shell is a second thing to forget when they move.
   [ -z "${SHERLOCK_CACHE_MIN_RATE:-}" ] || LANE_AUDIT_ARGS+=(--cache-min-rate "$SHERLOCK_CACHE_MIN_RATE")
