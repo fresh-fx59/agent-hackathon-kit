@@ -35,6 +35,29 @@ class FakeProvider:
                 elif mode == "malformed_json":
                     body = b"not-json"
                     self.send_response(200)
+                elif mode == "keepalive_prefix":
+                    # CloseRouter-shaped body: an SSE comment/keep-alive line
+                    # opens the stream before the first `data:` event.
+                    body = (": keep-alive\n\n" +
+                            "data: " + json.dumps({"model": "DeepSeek-V4-Flash"}) +
+                            "\ndata: [DONE]\n").encode()
+                    self.send_response(200)
+                elif mode == "comment_mid_stream":
+                    # A comment/keep-alive line arriving BETWEEN data: events
+                    # must not be counted as a parse error either.
+                    body = ("data: " + json.dumps({"model": "DeepSeek-V4-Flash"}) +
+                            "\n: keep-alive\ndata: [DONE]\n").encode()
+                    self.send_response(200)
+                elif mode == "gateway_html_in_data":
+                    # A gateway HTML page smuggled inside a data: line after an
+                    # HTTP 200 — must still be a hard MALFORMED_SSE failure.
+                    body = ("data: " + json.dumps({"model": "DeepSeek-V4-Flash"}) +
+                            "\ndata: <html>502 Bad Gateway</html>\ndata: [DONE]\n").encode()
+                    self.send_response(200)
+                elif mode == "missing_done":
+                    # A stream that never sends [DONE] — must still fail.
+                    body = ("data: " + json.dumps({"model": "DeepSeek-V4-Flash"}) + "\n").encode()
+                    self.send_response(200)
                 else:
                     model = "Wrong-Model" if mode == "wrong" else "DeepSeek-V4-Flash"
                     body = ("data: " + json.dumps({"model": model}) +
@@ -88,7 +111,8 @@ class LaneHealthReceiptTests(unittest.TestCase):
         self.assertEqual(set(row["sizes_kb"]), {100, 250, 400})
 
     def test_wrong_identity_malformed_sse_and_non200_are_not_healthy(self):
-        for mode in ("wrong", "malformed", "malformed_json", "non200"):
+        for mode in ("wrong", "malformed", "malformed_json", "non200",
+                     "gateway_html_in_data", "missing_done"):
             with self.subTest(mode=mode):
                 proc, receipt = self.run_probe(mode)
                 self.assertNotEqual(proc.returncode, 0)
@@ -97,6 +121,27 @@ class LaneHealthReceiptTests(unittest.TestCase):
                 self.assertNotEqual(row["verdict"], "HEALTHY")
                 if mode == "malformed_json":
                     self.assertEqual(row["history"][0]["error_code"], "MALFORMED_JSON")
+                if mode in ("gateway_html_in_data", "missing_done"):
+                    self.assertEqual(row["history"][0]["error_code"], "MALFORMED_SSE")
+
+    def test_leading_sse_comment_line_is_dispatched_as_event_stream(self):
+        # CloseRouter opens its stream with `: keep-alive\n\n` before the
+        # first data: line. The dispatch must still recognise it as SSE (not
+        # fall through to json.loads() on the raw text) and the identity/verdict
+        # must come out healthy, exactly like a body with no comment line.
+        proc, receipt = self.run_probe("keepalive_prefix")
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        row = json.loads(receipt.read_text())
+        self.assertEqual(row["verdict"], "HEALTHY")
+        self.assertEqual(row["history"][0]["returned_model"], "DeepSeek-V4-Flash")
+        self.assertIsNone(row["history"][0]["error_code"])
+
+    def test_comment_line_mid_stream_is_not_a_parse_error(self):
+        proc, receipt = self.run_probe("comment_mid_stream")
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        row = json.loads(receipt.read_text())
+        self.assertEqual(row["verdict"], "HEALTHY")
+        self.assertIsNone(row["history"][0]["error_code"])
 
     def test_receipt_keeps_lane_and_provider_identities_distinct(self):
         _proc, receipt = self.run_probe()
