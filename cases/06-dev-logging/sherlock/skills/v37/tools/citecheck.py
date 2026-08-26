@@ -843,7 +843,31 @@ def findings_without_evidence(report, results, aggregates=None):
     An aggregate citation that VERIFIED counts as proof here, and only when it
     verified. That is the whole point of the second form: a claim about a
     population is provable, so a finding that rests on one is not «unproven».
-    A failing aggregate proves nothing and is already blocking on its own."""
+    A failing aggregate proves nothing and is already blocking on its own.
+
+    ## OPEN QUESTION — nothing here links the evidence to the CLAIM.
+
+    This function asks only «is there something with verdict ok inside the
+    finding's line range». It does not ask whether that something is ABOUT the
+    finding. So an aggregate that verified — any aggregate — discharges any
+    finding it is pasted under, and the report reads as proven.
+
+    State it plainly rather than softly: this is a REAL hole, and the aggregate
+    form makes it CHEAPER, because a true aggregate is easier to manufacture
+    than a true line quote. It is not, however, a regression the aggregate form
+    introduced: the control was run, and an irrelevant LINE QUOTE discharges a
+    finding exactly the same way. The hole is claim-relevance, it predates this
+    form, and it is inherited whole.
+
+    It is deliberately NOT patched here. A relevance check is a different kind
+    of judgement from «does this number recompute» — every cheap version of it
+    (token overlap between the claim and the quote) is the same heuristic that
+    `quote_example` already applies to the quote text, and applying it to a
+    finding's whole prose would reject honest reports. Until there is a
+    measurement to design against, the honest state is: the gate proves the
+    NUMBER and the LINE, and the author owns the link between the evidence and
+    the sentence. `reference/report-format.md` §«Что агрегат НЕ доказывает»
+    says the same thing to the model."""
     bounds = finding_blocks(report)
     if not bounds:
         return [], 0
@@ -1677,8 +1701,17 @@ AGG_KEYWORD = "агрегат"
 AGG_LINE_RE = re.compile(
     r"^\s*[#>*\-\s]{0,8}(?:\*\*|__|`)?\s*(?:улики\s*[:：]\s*)?"
     + AGG_KEYWORD + r"\s*[:：]\s*(?P<body>.+?)\s*$", re.IGNORECASE)
+# The path is EITHER bare (no space, no `·`) OR double-quoted. Without the
+# quoted alternative `cite.py --aggregate` printed, for `My Log.jsonl`, a line
+# this very regex then graded `malformed` — and both SKILL.md and
+# report-format.md forbid hand-editing the line, so the model had no legal
+# move: an unfixable loop. Windows event-log exports with spaces in the name
+# are ordinary. A `"` in the path itself is REFUSED at both ends (see
+# `agg_quote_path`) rather than escaped: an escape grammar is one more thing
+# the producer and the grader can disagree about.
 AGG_BODY_RE = re.compile(
-    r"^(?P<path>[^\s·]+)\s*·\s*(?P<pred>[a-z_]+\([^·]*\))\s*=\s*"
+    r"^(?:\"(?P<qpath>[^\"]+)\"|(?P<path>[^\s·]+))\s*·\s*"
+    r"(?P<pred>[a-z_]+\([^·]*\))\s*=\s*"
     r"(?P<count>\d{1,12})\s*·\s*(?P<cmd>.+?)$")
 AGG_PRED_RE = re.compile(r"^(count|distinct|distinct_over)\((.*)\)$")
 AGG_FIELD_RE = re.compile(r"^(?:line|[A-Za-z_#][A-Za-z0-9_.#\-]*)$")
@@ -1686,6 +1719,26 @@ AGG_FILTER_RE = re.compile(
     r"^(?P<field>line|[A-Za-z_#][A-Za-z0-9_.#\-]*)\s*(?P<op>~=|!=|>=|<=|=)\s*"
     r"(?P<value>.+)$")
 AGG_OPS = ("~=", "!=", ">=", "<=", "=")
+# `>=` / `<=` are LEXICOGRAPHIC, and the docstring's whole defence of that is
+# «the window predicate this exists for is an ISO-8601 timestamp, where
+# lexicographic and chronological order coincide». Nothing enforced it, so
+# `count(Event.System.EventID<=5) = 33841` verified — those are 4625/4624
+# events, and "EventID <= 5" is numerically absurd. Lexicographic order is
+# honest only for a zero-padded fixed-width encoding; ISO-8601 is the one such
+# encoding in this vocabulary. So the operator is CONSTRAINED to it rather than
+# quietly reinterpreted: a numeric comparison the gate cannot do honestly is
+# refused, not approximated. Range comparisons on numbers stay unavailable —
+# say what you mean with `=` / `~=`, or state the number in prose beside a
+# `count(...)` that is exact.
+AGG_ORDERED_VALUE_RE = re.compile(
+    r"^\d{4}-\d{2}-\d{2}"
+    r"(?:[T ]\d{2}(?::\d{2}(?::\d{2}(?:\.\d{1,9})?)?)?"
+    r"(?:Z|[+-]\d{2}:?\d{2})?)?$")
+# A one-character `~=` value is not a filter, it is «records that have this
+# field», dressed as one: `count(Event.EventData.SubStatus~=0) = 33456` on the
+# real corpus. Two characters is not a cure for that class — the population
+# guard below is — but it removes the cheapest instance of it.
+AGG_MIN_CONTAINS = 2
 AGG_VERDICTS = ("ok", "malformed", "missing-file", "ambiguous", "binary-file",
                 "not-tabular", "unknown-field", "zero-match", "too-broad",
                 "count-mismatch", "command-mismatch", "unreadable")
@@ -1754,9 +1807,20 @@ def agg_parse_predicate(text):
     fields = ([field] if field else []) + [f for f, _o, _v in filters]
     if any(f == "line" for f in fields) and any(f != "line" for f in fields):
         raise AggError("предикат смешивает line и поля JSON — так нельзя")
-    for f, op, _v in filters:
+    for f, op, v in filters:
         if f == "line" and op in (">=", "<="):
             raise AggError("для псевдополя line допустимы только =, != и ~=")
+        if op == "~=" and len(v) < AGG_MIN_CONTAINS:
+            raise AggError(
+                "значение для ~= короче %d символов: «%s» — такой фильтр "
+                "совпадает почти со всем и означает «у записи есть это поле», "
+                "а не «поле равно чему-то»" % (AGG_MIN_CONTAINS, v))
+        if op in (">=", "<=") and not AGG_ORDERED_VALUE_RE.match(v):
+            raise AggError(
+                "сравнение %s лексикографическое и допустимо только для "
+                "значения в форме ISO-8601 (2021-06-01 или "
+                "2021-06-01T18:36:04.949933Z); «%s» не такое — для чисел "
+                "лексикографический порядок врёт" % (op, v))
     return {"kind": kind, "field": field, "threshold": threshold,
             "filters": filters, "text": text,
             "mode": "line" if "line" in fields else "json"}
@@ -1769,7 +1833,10 @@ def agg_parse_line(body):
         raise AggError("строка не разобрана; формат: "
                        "агрегат: <путь> · <предикат> = <число> · <команда>")
     pred = agg_parse_predicate(m.group("pred"))
-    return {"path": m.group("path"), "predicate": pred,
+    path = m.group("qpath") or m.group("path")
+    if '"' in path:
+        raise AggError("в пути не может быть символа \" — переименуй файл")
+    return {"path": path, "predicate": pred,
             "claimed": int(m.group("count")),
             "command": _agg_strip_wrap(m.group("cmd"))}
 
@@ -1788,15 +1855,47 @@ def _jq_path(field):
                           else p for p in field.split("."))
 
 
+def agg_quote_path(path):
+    """The path as it appears IN the citation line. Bare when it can be, double
+    quoted when a space or the `·` separator would otherwise break the grammar.
+    `agg_parse_line` reads both, so producer and grader round-trip."""
+    if '"' in path:
+        raise AggError("в пути не может быть символа \" — переименуй файл")
+    if path == "" or any(c.isspace() for c in path) or "\u00b7" in path:
+        return '"%s"' % path
+    return path
+
+
 def _jq_cond(field, op, value):
-    lhs = "(%s|tostring)" % _jq_path(field)
+    """One filter, as jq — and it must decide EXACTLY what `_agg_cmp` decides.
+
+    It did not. `_agg_str` returns None for a field that is absent or JSON
+    null, and `agg_evaluate` then EXCLUDES the record — absence is not
+    evidence. The rendered jq said only `(.f|tostring) != "v"`, and in jq a
+    missing path is `null`, whose `tostring` is the string "null", which
+    happily satisfies `!=` and `contains`. Measured on the real corpus:
+    `count(Event.EventData.IpAddress!=-)` — the gate says 33455, the command it
+    printed says 34728. The entire justification for shipping a command is that
+    a human can reproduce the number; for `!=` and `~=` they could not.
+    `distinct(...)` only looked right because the trailing `// empty` masked
+    the same bug.
+
+    So every condition is now guarded by presence: `!= null` first, and the
+    whole thing wrapped in `try … catch false` so a path through a non-object
+    (which `_agg_get` reports as absent) is excluded rather than an error.
+    `false` survives the guard, because `_agg_str(False)` is "false".
+    """
+    p = _jq_path(field)
+    lhs = "(%s|tostring)" % p
     if op == "=":
-        return "%s == %s" % (lhs, _jq_s(value))
-    if op == "!=":
-        return "%s != %s" % (lhs, _jq_s(value))
-    if op == "~=":
-        return "(%s|contains(%s))" % (lhs, _jq_s(value))
-    return "%s %s %s" % (lhs, op, _jq_s(value))
+        cmp_ = "%s == %s" % (lhs, _jq_s(value))
+    elif op == "!=":
+        cmp_ = "%s != %s" % (lhs, _jq_s(value))
+    elif op == "~=":
+        cmp_ = "(%s|contains(%s))" % (lhs, _jq_s(value))
+    else:
+        cmp_ = "%s %s %s" % (lhs, op, _jq_s(value))
+    return "(try (%s != null and %s) catch false)" % (p, cmp_)
 
 
 def agg_render_command(path, pred):
@@ -1815,7 +1914,11 @@ def agg_render_command(path, pred):
     sel = "select(%s) | " % conds if conds else ""
     if pred["kind"] == "count":
         return "jq -c %s -- %s | wc -l" % (_sh_q("select(%s)" % conds), _sh_q(path))
-    val = "%s%s // empty" % (sel, _jq_path(pred["field"]))
+    # `X // empty` also drops `false` and, for a missing path, printed nothing
+    # only by luck. `agg_evaluate` skips a value that is absent, null or the
+    # empty string and keeps everything else, including `false`. Say that.
+    val = ("%s(try (%s) catch null) | select(. != null) | tostring "
+           "| select(. != \"\")" % (sel, _jq_path(pred["field"])))
     if pred["kind"] == "distinct":
         return "jq -r %s -- %s | sort -u | wc -l" % (_sh_q(val), _sh_q(path))
     return ("jq -r %s -- %s | sort | uniq -c | awk %s | wc -l"
@@ -1825,7 +1928,8 @@ def agg_render_command(path, pred):
 
 def agg_render_citation(path, pred, count):
     return "агрегат: %s · %s = %d · `%s`" % (
-        path, pred["text"], count, agg_render_command(path, pred))
+        agg_quote_path(path), pred["text"], count,
+        agg_render_command(path, pred))
 
 
 # ---- evaluation ----------------------------------------------------------
@@ -1878,6 +1982,7 @@ def agg_evaluate(abspath, pred):
     parsed = 0
     unparsed = 0
     matched = 0
+    present = 0        # records where EVERY filter field is there to test
     values = {}
     try:
         op = opener(abspath)
@@ -1890,6 +1995,7 @@ def agg_evaluate(abspath, pred):
                 if pred["mode"] == "line":
                     text = raw.rstrip("\n")
                     parsed += 1
+                    present += 1
                     seen_field["line"] = True
                     if all(_agg_cmp(text, o, v) for _f, o, v in pred["filters"]):
                         matched += 1
@@ -1907,14 +2013,18 @@ def agg_evaluate(abspath, pred):
                     continue
                 parsed += 1
                 ok = True
+                all_there = True
                 for f, o, v in pred["filters"]:
                     sv = _agg_str(_agg_get(rec, f))
                     if sv is None:
                         ok = False
+                        all_there = False
                         continue
                     seen_field[f] = True
                     if not _agg_cmp(sv, o, v):
                         ok = False
+                if all_there:
+                    present += 1
                 if not ok:
                     continue
                 if pred["field"]:
@@ -1944,7 +2054,18 @@ def agg_evaluate(abspath, pred):
 
     if pred["kind"] == "count":
         actual = matched
-        population = parsed
+        # NOT `parsed`. `too-broad` fired only on «matched every record in the
+        # file», so a predicate that matched every record that merely HAS the
+        # field walked through: on the real corpus
+        # `count(Event.EventData.IpAddress!=zzzz) = 33643` and
+        # `count(Event.EventData.SubStatus~=0) = 33456` both graded ok. Each is
+        # «how many records have this field» wearing a filter, and each reads
+        # in a report as a substantive census — the cheapest path to a big
+        # true-looking number. The honest population for a count is the set of
+        # records the filter could have discriminated between, so that is what
+        # it is compared against. This is strictly tighter than the old rule
+        # (present <= parsed), never looser.
+        population = present
     elif pred["kind"] == "distinct":
         actual = len(values)
         population = parsed

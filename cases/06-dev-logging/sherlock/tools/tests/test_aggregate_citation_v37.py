@@ -378,5 +378,525 @@ class TestDeterminism(Corpus):
                          cc.agg_render_command("a.jsonl", p2))
 
 
+# ==========================================================================
+# fix-4: the parts of this form that had NO mutation-resistant test.
+#
+# A review applied 24 single-line mutants to citecheck.py and ran the 30 tests
+# above. TEN survived. The three that mattered most were the whole blocking
+# ACCOUNTING — delete all three call sites that add `aggregates.blocking` into
+# the stop number and the suite still passed while a report with a false
+# aggregate exited 0:
+#
+#   none  with-ledger rc=1 | none no-ledger rc=1
+#   M19   with-ledger rc=1 | M19  no-ledger rc=0   <- one line, gate fails open
+#   ALL3  with-ledger rc=0 | ALL3 no-ledger rc=0   <- and 30/30 still OK
+#
+# `test_blocking_reaches_the_exit_code` above missed it because its fixture
+# report is blocking for OTHER reasons — a bad line citation, a missing quote —
+# so `assertGreaterEqual(d["blocking"], 1)` passed on unrelated defects, and it
+# exercised only `--json`, never the plain render, never `--ledger`.
+#
+# So the fixture here is a report that citecheck grades COMPLETELY GREEN — rc
+# 0, blocking 0, every citation ok, coverage complete, outcomes consistent —
+# and the only thing the bad variant adds is one aggregate whose count is
+# wrong. Then rc and the printed `blocking` can only be about the aggregate.
+# ==========================================================================
+
+
+def _cite_line(root, path, lineno):
+    p = subprocess.run([sys.executable, CITE, "--corpus", root,
+                        "%s:%d" % (path, lineno)],
+                       capture_output=True, text=True)
+    assert p.returncode == 0, p.stderr
+    return p.stdout.strip()
+
+
+def green_report(root, extra=""):
+    """A report on the mini corpus that citecheck grades with ZERO defects."""
+    return """# Находки
+
+### Н-1 · Перебор паролей с внешнего адреса
+улики: %s
+%sатрибуция: не установлена
+исход: попытка
+
+# Отклонённые кандидаты
+
+### К-1 · Вход по SSH как кандидат на компрометацию
+улики: %s
+исход: норма
+
+# Покрытие
+
+| файл | статус | наблюдение |
+| --- | --- | --- |
+| Security.jsonl | наблюдение | %s |
+| spray.jsonl | наблюдение | %s |
+| notes.log | наблюдение | %s |
+| blob.bin | двоичный | формат=двоичный |
+
+# Разбор рабочего списка
+
+# Чего я не знаю
+
+# ВЕРДИКТ
+attacked-not-proven
+""" % (_cite_line(root, "Security.jsonl", 1), extra,
+       _cite_line(root, "notes.log", 2),
+       _cite_line(root, "Security.jsonl", 2),
+       _cite_line(root, "spray.jsonl", 1),
+       _cite_line(root, "notes.log", 3))
+
+
+class TestBlockingAccounting(unittest.TestCase):
+    """Three call sites carry `aggregates.blocking` into the stop number:
+    `_blocking_total` (the `--json` field), `ledger()`'s `total` (the `--ledger`
+    exit), and `blocking_defects` in `main()` (every exit). One test per site,
+    each on a report whose ONLY defect is the aggregate."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = os.path.join(self.tmp.name, "corpus")
+        os.makedirs(self.root)
+        build_corpus(self.root)
+        self.out = os.path.join(self.tmp.name, "out")
+        os.makedirs(self.out)
+        # the aggregate is TRUE (4 distinct IpAddress values) in the control and
+        # off by 95 in the variant; nothing else differs between the two.
+        rc, agg, err = cite_agg(self.root, "Security.jsonl",
+                                "distinct(Event.EventData.IpAddress)")
+        assert rc == 0, err
+        self.good_agg = agg
+        self.bad_agg = agg.replace("= 4 ", "= 99 ")
+        assert self.bad_agg != agg
+        self.ledger = os.path.join(self.out, "worklist.tsv")
+        with open(self.ledger, "w", encoding="utf-8") as fh:
+            fh.write("# id\tвердикт\tось\tссылка\n")
+            fh.write("W-1\tN 1\tчастота\tSecurity.jsonl:2\n")
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def write(self, name, agg_line):
+        extra = ("улики: %s\n" % agg_line) if agg_line else ""
+        p = os.path.join(self.out, name)
+        with open(p, "w", encoding="utf-8") as fh:
+            fh.write(green_report(self.root, extra))
+        return p
+
+    def run_gate(self, path, *extra):
+        return subprocess.run(
+            [sys.executable, CITECHECK, path, "--corpus", self.root,
+             "--require-quote"] + list(extra), capture_output=True, text=True)
+
+    # ---- the control: without the aggregate this report is spotless --------
+    def test_control_report_is_green_in_all_three_branches(self):
+        """If the control were blocking for any other reason, the three tests
+        below would pass on an unrelated defect — which is exactly how the old
+        test missed all three mutants."""
+        p = self.write("control.md", None)
+        for extra in ([], ["--json"], ["--ledger", self.ledger]):
+            r = self.run_gate(p, *extra)
+            self.assertEqual(r.returncode, 0, (extra, r.stdout[-3000:]))
+        r = self.run_gate(p, "--json")
+        self.assertEqual(json.loads(r.stdout)["blocking"], 0)
+        # and a TRUE aggregate does not make it blocking either
+        p2 = self.write("control-agg.md", self.good_agg)
+        r = self.run_gate(p2, "--json")
+        self.assertEqual(r.returncode, 0, r.stdout[-3000:])
+        d = json.loads(r.stdout)
+        self.assertEqual(d["aggregates"]["blocking"], 0)
+        self.assertEqual(d["blocking"], 0)
+
+    # ---- M17: `_blocking_total` drops the aggregate term -------------------
+    def test_false_aggregate_json_branch(self):
+        p = self.write("bad.md", self.bad_agg)
+        r = self.run_gate(p, "--json")
+        d = json.loads(r.stdout)
+        self.assertEqual(d["aggregates"]["blocking"], 1, r.stdout[-2000:])
+        self.assertEqual(d["blocking"], 1,
+                         "the ONLY defect is the aggregate, so the stop number "
+                         "must be exactly 1 — `_blocking_total` has to add it")
+        self.assertEqual(r.returncode, 1, r.stdout[-3000:])
+
+    # ---- M19: `blocking_defects` in main() drops the aggregate -------------
+    def test_false_aggregate_plain_branch(self):
+        p = self.write("bad2.md", self.bad_agg)
+        r = self.run_gate(p)
+        self.assertIn("count-mismatch", r.stdout)
+        self.assertEqual(r.returncode, 1,
+                         "plain render: `blocking_defects` must see the "
+                         "aggregate — this branch has no ledger to hide behind")
+
+    # ---- M18: `ledger()`'s total drops the aggregate -----------------------
+    def test_false_aggregate_ledger_branch(self):
+        p = self.write("bad3.md", self.bad_agg)
+        r = self.run_gate(p, "--ledger", self.ledger)
+        self.assertIn("count-mismatch", r.stdout)
+        self.assertIn("ИТОГ: НЕ ЗАКОНЧЕНО — осталось 1", r.stdout)
+        self.assertEqual(r.returncode, 1, r.stdout[-3000:])
+
+    def test_false_aggregate_ledger_and_json_together(self):
+        """The combination the reviewer used to show all three sites at once."""
+        p = self.write("bad4.md", self.bad_agg)
+        r = self.run_gate(p, "--ledger", self.ledger, "--json")
+        self.assertEqual(r.returncode, 1, r.stdout[-3000:])
+        self.assertEqual(json.loads(r.stdout)["blocking"], 1)
+
+
+class TestRenderedCommandAgreesWithTheGate(Corpus):
+    """The rendered `jq` must return the number the gate computed. It did not.
+
+    `_agg_str` returns None for a field that is absent or JSON null and the
+    record is then EXCLUDED. The rendered jq said `(.f|tostring) != "v"`, and
+    in jq a missing path is `null` whose `tostring` is the string "null" — so
+    `!=` and `contains` both SUCCEEDED on a record that has no such field. On
+    the real corpus `count(Event.EventData.IpAddress!=-)`: gate 33455, pasted
+    command 34728. The only reason to ship a command is that a human can
+    reproduce the number.
+    """
+
+    def setUp(self):
+        super().setUp()
+        if subprocess.run(["sh", "-c", "command -v jq"],
+                          capture_output=True).returncode != 0:
+            self.skipTest("jq not installed")
+        # records where the field is ABSENT, and one where it is JSON null —
+        # the two shapes the old rendering counted and the evaluator did not.
+        with open(os.path.join(self.root, "sparse.jsonl"), "a",
+                  encoding="utf-8") as fh:
+            for _ in range(3):
+                fh.write(json.dumps({"Event": {"System": {"EventID": 4625},
+                                               "EventData": {}}}) + "\n")
+            fh.write(json.dumps({"Event": {"System": {"EventID": 4625},
+                                           "EventData": {"IpAddress": None}}})
+                     + "\n")
+            fh.write(json.dumps({"Event": {"System": {"EventID": 4625},
+                                           "EventData": {"IpAddress": "-"}}})
+                     + "\n")
+            for ip in ("8.8.8.8", "9.9.9.9", "8.8.8.8"):
+                fh.write(json.dumps({"Event": {"System": {"EventID": 4625},
+                                               "EventData": {"IpAddress": ip}}})
+                         + "\n")
+
+    def paste(self, out):
+        """Run the command the citation ships, from the corpus root."""
+        cmd = out.split(" · `", 1)[1].rstrip("`")
+        r = subprocess.run(["sh", "-c", cmd], cwd=self.root,
+                           capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return int(r.stdout.strip())
+
+    def check(self, path, pred):
+        rc, out, err = cite_agg(self.root, path, pred)
+        self.assertEqual(rc, 0, err)
+        claimed = int(out.split(" = ")[1].split(" ")[0])
+        self.assertEqual(self.paste(out), claimed,
+                         "gate and pasted command disagree: %s" % out)
+        self.assertEqual(grade(self.root, out)["verdict"], "ok", out)
+
+    def test_not_equal_over_a_sparse_field(self):
+        self.check("sparse.jsonl", "count(Event.EventData.IpAddress!=-)")
+
+    def test_substring_over_a_sparse_field(self):
+        self.check("sparse.jsonl", "count(Event.EventData.IpAddress~=8.8)")
+
+    def test_equality_over_a_sparse_field(self):
+        self.check("sparse.jsonl", "count(Event.EventData.IpAddress=8.8.8.8)")
+
+    def test_distinct_over_a_sparse_field(self):
+        self.check("sparse.jsonl", "distinct(Event.EventData.IpAddress)")
+
+    def test_distinct_over_threshold_over_a_sparse_field(self):
+        self.check("sparse.jsonl",
+                   "distinct_over(Event.EventData.IpAddress, 1)")
+
+    def test_ordered_comparisons(self):
+        self.check("Security.jsonl",
+                   "count(Event.System.TimeCreated.#attributes.SystemTime"
+                   ">=2021-06-01, Event.EventData.SubStatus=0xc000006a)")
+        self.check("Security.jsonl",
+                   "count(Event.System.TimeCreated.#attributes.SystemTime"
+                   "<=2021-07-01, Event.EventData.SubStatus=0xc000006a)")
+
+    def test_the_flagship_shapes(self):
+        self.check("Security.jsonl",
+                   "distinct(Event.EventData.IpAddress, "
+                   "Event.EventData.IpAddress!=-)")
+        self.check("Security.jsonl", "count(line~=nothing-here)"
+                   if False else
+                   "count(Event.EventData.SubStatus~=0xc000006a)")
+
+
+class TestPathsWithSpaces(unittest.TestCase):
+    """«producer and grader cannot drift» was false for any path with a space.
+
+    `AGG_BODY_RE` had `path` as `[^\s·]+` and `cite.py --aggregate` printed the
+    path unescaped, so `cite.py` PRINTED a line that `citecheck` then graded
+    `malformed` — and SKILL.md forbids hand-editing it («отказ — это не повод
+    переписать строку руками»). An unfixable loop. Windows event-log exports
+    with a space in the name are ordinary."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = self.tmp.name
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def put(self, name):
+        with open(os.path.join(self.root, name), "w", encoding="utf-8") as fh:
+            for eid in (4625, 4625, 4624):
+                fh.write(json.dumps({"Event": {"System": {"EventID": eid}}})
+                         + "\n")
+        return name
+
+    def round_trip(self, name):
+        rc, out, err = cite_agg(self.root, name, "count(Event.System.EventID=4625)")
+        self.assertEqual(rc, 0, err)
+        self.assertIn("= 2 ", out)
+        item = grade(self.root, out)
+        self.assertEqual(item["verdict"], "ok", out)
+        self.assertEqual(item["path"], name)
+        return out
+
+    def test_space_in_the_filename(self):
+        out = self.round_trip(self.put("My Log.jsonl"))
+        self.assertIn('"My Log.jsonl"', out)
+
+    def test_interpunct_in_the_filename(self):
+        out = self.round_trip(self.put("Odd·Name.jsonl"))
+        self.assertIn('"Odd·Name.jsonl"', out)
+
+    def test_plain_name_stays_unquoted(self):
+        out = self.round_trip(self.put("Plain.jsonl"))
+        self.assertIn("агрегат: Plain.jsonl · ", out)
+
+    def test_a_quote_in_the_path_is_refused_not_mangled(self):
+        pred = cc.agg_parse_predicate("count(Event.System.EventID=4625)")
+        with self.assertRaises(cc.AggError):
+            cc.agg_render_citation('we"ird.jsonl', pred, 2)
+
+
+class TestPopulationGaming(Corpus):
+    """`too-broad` fired only on `actual == population`, so a predicate that
+    matched every record which merely HAS the field walked through. On the real
+    corpus `count(Event.EventData.IpAddress!=zzzz) = 33643` and
+    `count(Event.EventData.SubStatus~=0) = 33456` both graded ok — «how many
+    records have this field» dressed as a census."""
+
+    def setUp(self):
+        super().setUp()
+        with open(os.path.join(self.root, "mixed.jsonl"), "w",
+                  encoding="utf-8") as fh:
+            for ip in ("1.1.1.1", "2.2.2.2", "3.3.3.3"):
+                fh.write(json.dumps({"Event": {"EventData": {"IpAddress": ip},
+                                               "System": {"EventID": 4625}}})
+                         + "\n")
+            for _ in range(5):      # no IpAddress at all
+                fh.write(json.dumps({"Event": {"EventData": {},
+                                               "System": {"EventID": 4624}}})
+                         + "\n")
+
+    def test_matches_every_record_that_has_the_field(self):
+        rc, out, err = cite_agg(self.root, "mixed.jsonl",
+                                "count(Event.EventData.IpAddress!=zzzz)")
+        self.assertEqual(rc, 1)
+        self.assertIn("too-broad", err)
+        item = grade(self.root, "агрегат: mixed.jsonl · "
+                     "count(Event.EventData.IpAddress!=zzzz) = 3 · `x`")
+        self.assertEqual(item["verdict"], "too-broad")
+        self.assertIn("3 из 3", item["detail"])
+
+    def test_single_character_substring_is_refused_at_the_parser(self):
+        with self.assertRaises(cc.AggError):
+            cc.agg_parse_predicate("count(Event.EventData.SubStatus~=0)")
+        rc, _out, err = cite_agg(self.root, "Security.jsonl",
+                                 "count(Event.EventData.SubStatus~=0)")
+        self.assertEqual(rc, 1)
+        self.assertIn("~=", err)
+
+    def test_a_real_filter_over_a_sparse_field_still_passes(self):
+        """The guard must kill the vacuous case only. Two of three records with
+        the field, not three of three."""
+        rc, out, err = cite_agg(self.root, "mixed.jsonl",
+                                "count(Event.EventData.IpAddress!=1.1.1.1)")
+        self.assertEqual(rc, 0, err)
+        self.assertIn("= 2 ", out)
+        self.assertEqual(grade(self.root, out)["verdict"], "ok")
+
+
+class TestOrderedComparisonsAreISO8601Only(unittest.TestCase):
+    """`>=`/`<=` are lexicographic and the docstring's whole defence of that is
+    «the window predicate this exists for is an ISO-8601 timestamp». Nothing
+    enforced it, so `count(Event.System.EventID<=5) = 33841` verified on the
+    real corpus — 4625/4624 events, a numerically absurd claim that the gate
+    and the pasted command AGREED on."""
+
+    def test_a_bare_number_is_refused(self):
+        for pred in ("count(Event.System.EventID<=5)",
+                     "count(Event.System.EventID>=1000)",
+                     "count(Event.EventData.LogonType<=9)"):
+            with self.assertRaises(cc.AggError, msg=pred):
+                cc.agg_parse_predicate(pred)
+
+    def test_free_text_is_refused(self):
+        with self.assertRaises(cc.AggError):
+            cc.agg_parse_predicate("count(Event.EventData.TargetUserName>=root)")
+
+    def test_iso_8601_shapes_are_accepted(self):
+        for v in ("2021-06-01", "2021-06-01T18", "2021-06-01T18:36",
+                  "2021-06-01T18:36:04", "2021-06-01T18:36:04.949933Z",
+                  "2021-06-01 18:36:04", "2021-06-01T18:36:04+03:00"):
+            p = cc.agg_parse_predicate(
+                "count(Event.System.TimeCreated.#attributes.SystemTime>=%s)" % v)
+            self.assertEqual(p["filters"][0][2], v)
+
+    def test_line_pseudofield_still_rejects_ordering(self):
+        with self.assertRaises(cc.AggError):
+            cc.agg_parse_predicate("count(line>=2021-06-01)")
+
+
+class TestMutantsThatSurvived(Corpus):
+    """One test per surviving mutant from the review's 24-mutant set, each
+    written so that the mutation — and nothing else — makes it fail."""
+
+    def one(self, line):
+        return grade(self.root, line)
+
+    def cited(self, path, pred_text, count):
+        """A citation with the CORRECT rendered command, so the verdict under
+        test is not masked by `command-mismatch`."""
+        pred = cc.agg_parse_predicate(pred_text)
+        return grade(self.root, cc.agg_render_citation(path, pred, count))
+
+    def test_M3_oserror_must_be_unreadable_not_ok(self):
+        """M3: the OSError arm returning `ok`. A file the gate cannot read is
+        not a file the gate has verified."""
+        real = cc.opener
+        real_binary = cc.looks_binary
+
+        def boom(_path):
+            raise OSError(13, "Permission denied")
+        cc.opener = boom
+        cc.looks_binary = lambda _p: False
+        try:
+            item = self.one("агрегат: Security.jsonl · "
+                            "distinct(Event.EventData.IpAddress) = 4 · `x`")
+        finally:
+            cc.opener = real
+            cc.looks_binary = real_binary
+        self.assertEqual(item["verdict"], "unreadable")
+        self.assertIn("Permission denied", item["detail"])
+
+    def test_M9_not_equal_is_not_equality(self):
+        """M9: `!=` inverted to `==` inside `_agg_cmp`."""
+        self.assertTrue(cc._agg_cmp("a", "!=", "b"))
+        self.assertFalse(cc._agg_cmp("a", "!=", "a"))
+        # 16 records, 1 of them "-": != selects the other 15
+        item = self.cited("Security.jsonl",
+                          "count(Event.EventData.IpAddress!=-)", 15)
+        self.assertEqual(item["verdict"], "ok", item["detail"])
+        self.assertEqual(item["actual"], 15,
+                         "`!=` must select everything that is NOT the value")
+        item = self.cited("Security.jsonl",
+                          "count(Event.EventData.IpAddress!=-)", 1)
+        self.assertEqual(item["verdict"], "count-mismatch")
+
+    def test_M11_distinct_over_is_strictly_greater(self):
+        """M11: `>` relaxed to `>=` — the boundary was untested. spray.jsonl has
+        three values, each exactly 3 times: a threshold of 3 selects NONE."""
+        item = self.cited("spray.jsonl",
+                          "distinct_over(Event.EventData.IpAddress, 3)", 3)
+        self.assertEqual(item["verdict"], "zero-match",
+                         "«more than 3» must exclude a value seen exactly 3")
+        item = self.cited("spray.jsonl",
+                          "distinct_over(Event.EventData.IpAddress, 2)", 3)
+        self.assertEqual(item["verdict"], "too-broad")
+
+    def test_M13_not_tabular_still_fires(self):
+        """M13: the `not-tabular` arm removed. A JSON field on a text file must
+        not silently become `unknown-field` or a zero."""
+        item = self.cited("notes.log",
+                          "count(Event.EventData.IpAddress=1.1.1.1)", 1)
+        self.assertEqual(item["verdict"], "not-tabular")
+        self.assertIn("JSONL", item["detail"])
+
+    def test_M13_mostly_unparsed_is_also_not_tabular(self):
+        """The second arm: a file with a couple of JSON lines in a sea of prose
+        is not a JSONL corpus either."""
+        p = os.path.join(self.root, "mostly-prose.log")
+        with open(p, "w", encoding="utf-8") as fh:
+            fh.write(json.dumps({"Event": {"EventData": {"IpAddress": "1.1.1.1"}}})
+                     + "\n")
+            fh.write("this is prose\n" * 5)
+        item = self.cited("mostly-prose.log",
+                          "count(Event.EventData.IpAddress=1.1.1.1)", 1)
+        self.assertEqual(item["verdict"], "not-tabular")
+
+    def test_M14_binary_file_still_fires(self):
+        """M14: the `looks_binary` check removed. blob.bin must never be
+        counted — and must be named `binary-file`, not misread as text."""
+        item = self.cited("blob.bin", "count(line~=binary)", 1)
+        self.assertEqual(item["verdict"], "binary-file")
+        self.assertIn("двоичный", item["detail"])
+
+    def test_M16_ambiguous_still_fires(self):
+        """M16: the `ambiguous` arm removed, so a basename meaning two files
+        would silently be graded against whichever one sorted first."""
+        for d in ("hostA", "hostB"):
+            os.makedirs(os.path.join(self.root, d), exist_ok=True)
+            with open(os.path.join(self.root, d, "sys.log"), "w",
+                      encoding="utf-8") as fh:
+                fh.write("boot ok\n")
+        item = self.cited("sys.log", "count(line~=boot ok)", 1)
+        self.assertEqual(item["verdict"], "ambiguous")
+        self.assertEqual(item["actual"], None,
+                         "an ambiguous path must never be evaluated")
+        self.assertIn("2", item["detail"])
+
+    def test_M2_ordered_comparison_includes_the_boundary(self):
+        """M2: `>=` weakened to `>`. Every record in Security.jsonl carries the
+        same SystemTime, so a bound EQUAL to it must select all 16 — under `>`
+        it selects none, and a window predicate that silently drops the instant
+        it was asked about is how an incident window loses its first event."""
+        ts = "2021-06-01T18:36:04.949933Z"
+        self.assertTrue(cc._agg_cmp(ts, ">=", ts))
+        self.assertTrue(cc._agg_cmp(ts, "<=", ts))
+        item = self.cited(
+            "Security.jsonl",
+            "count(Event.System.TimeCreated.#attributes.SystemTime>=%s, "
+            "Event.EventData.SubStatus=0xc000006a)" % ts, 5)
+        self.assertEqual(item["verdict"], "ok", item["detail"])
+        item = self.cited(
+            "Security.jsonl",
+            "count(Event.System.TimeCreated.#attributes.SystemTime<=%s, "
+            "Event.EventData.SubStatus=0xc000006a)" % ts, 5)
+        self.assertEqual(item["verdict"], "ok", item["detail"])
+
+    def test_M13_a_file_with_no_records_at_all_is_not_tabular(self):
+        """M13: the `parsed == 0` arm. Its sibling (`unparsed > parsed`) covers
+        a file full of prose, so only a file with NEITHER records NOR unparsed
+        content — blank lines — separates the two arms. Without this arm such a
+        file falls through to `unknown-field`, which reads as «you typoed the
+        field», not «there is nothing here to count»."""
+        with open(os.path.join(self.root, "blank.jsonl"), "w",
+                  encoding="utf-8") as fh:
+            fh.write("\n\n\n")
+        item = self.cited("blank.jsonl",
+                          "count(Event.EventData.IpAddress=1.1.1.1)", 1)
+        self.assertEqual(item["verdict"], "not-tabular", item["detail"])
+        self.assertIn("ни одной JSON-записи", item["detail"])
+
+    def test_M24_substring_is_not_equality(self):
+        """M24: `~=` collapsed to `==`."""
+        self.assertTrue(cc._agg_cmp("0xc0000064", "~=", "c00000"))
+        self.assertFalse(cc._agg_cmp("0xc0000064", "~=", "zzzz"))
+        item = self.cited("Security.jsonl",
+                          "count(Event.EventData.SubStatus~=c000006a)", 5)
+        self.assertEqual(item["verdict"], "ok",
+                         "`~=` must match a substring, not the whole value")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
