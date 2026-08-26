@@ -42,7 +42,7 @@ BASE_URL="${SHERLOCK_BASE_URL:-https://linkapi.ai/v1}"
 # of the v38 launch, zero billed usage. `-0731` is a value the provider RETURNS,
 # never one you can SEND. The only defence against provider substitution is the
 # returned-side family check in measure/lane_guard.py — see measure/upstream-lane.sh job 1.
-MODEL="${SHERLOCK_MODEL:-[SP]deepseek-v4-flash}"
+MODEL="${SHERLOCK_MODEL:-[次]deepseek-v4-flash}"
 TIMEOUT="${SHERLOCK_TIMEOUT:-900}"
 : "${SHERLOCK_API_KEY:?set SHERLOCK_API_KEY via with-secret.sh eval_linkapi_key --env SHERLOCK_API_KEY -- …}"
 

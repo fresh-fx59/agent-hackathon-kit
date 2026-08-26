@@ -56,7 +56,7 @@ run_canary() {                     # $1 = yolo | noyolo  -> echoes yes/no
   ( cd "$W" && QWEN_HOME="$W/home" OPENAI_API_KEY="$SHERLOCK_API_KEY" \
     OPENAI_BASE_URL="${SHERLOCK_BASE_URL:-https://linkapi.ai/v1}" \
     timeout "${SHERLOCK_TIMEOUT:-300}" "$QWEN" --auth-type openai \
-      --model "${SHERLOCK_MODEL:-[SP]deepseek-v4-flash}" ${extra[@]+"${extra[@]}"} \
+      --model "${SHERLOCK_MODEL:-[次]deepseek-v4-flash}" ${extra[@]+"${extra[@]}"} \
       -p "Посмотри лог $W/test.log — что случилось?" --output-format json </dev/null \
   ) > "$W/out-$1.json" 2>"$W/err-$1.txt"
   python3 "$W/check.py" "$W/out-$1.json"
