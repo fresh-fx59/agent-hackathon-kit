@@ -135,6 +135,41 @@
 #     UNSET = TODAY'S BEHAVIOUR, byte for byte: the client's header is
 #     forwarded verbatim. Every other lane is unaffected.
 
+#  6. IT OWNS THE UPSTREAM ROUTE — provider, model and expected identity — and
+#     that route is hot-swappable on a LIVE run.
+#
+#     UPSTREAM_BASE / UPSTREAM_MODEL / UPSTREAM_EXPECTED_RETURNED_IDENTITY were
+#     read ONCE at proxy import, so changing provider or model meant restarting
+#     the proxy, which means restarting the run — 2h42m and ~14 CNY, measured
+#     three times. All three paid v38 runs failed on the PROVIDER, not the
+#     harness, and the fix (CloseRouter at 1/27th the cost) is a different base
+#     URL plus a different model id. That is exactly the change a restart made
+#     unaffordable.
+#
+#     This lane therefore writes the route it is starting with into
+#
+#       <trace>.upstream.route.json
+#
+#     and exports UPSTREAM_ROUTE_FILE, which the proxy re-reads on EVERY relayed
+#     call. Both paths are printed at start-up so a live operator can find them
+#     without reading this source. The supported swap command is
+#
+#       hack/swap-upstream-route.sh <route-file> <base> <model> [identity]
+#
+#     THE THREE FIELDS MOVE TOGETHER, ALWAYS. `model_family` keeps the vendor
+#     prefix, so a CloseRouter base left with a linkapi expected identity trips
+#     the lane guard on the very first call — which is why the route is one file
+#     and not three independently swappable variables.
+#
+#     FAILS CLOSED. A route file that is missing, empty, truncated, wrong-schema,
+#     field-missing, oversized, non-regular, or carrying a credential makes the
+#     proxy REFUSE the request (503, diagnosis with no credential in it). It
+#     never falls back to the env values and never to the route it last saw: a
+#     call sent to the wrong provider corrupts a paid measurement silently.
+#
+#     SHERLOCK_UPSTREAM_ROUTE_FILE=0 opts out and restores the env-only path,
+#     byte for byte.
+
 # shellcheck disable=SC2034   # these are the helper's return values
 upstream_lane_start() {
   local up_base="${1:?upstream_lane_start <upstream_base> <log> <tag> <model>}"
@@ -152,6 +187,7 @@ upstream_lane_start() {
   LANE_CLIENT_MODEL="$model"
   LANE_PROXY_PID=""
   LANE_ABORT_PATH=""
+  LANE_ROUTE_FILE=""
 
   if [ "${SHERLOCK_UPSTREAM_LOG:-1}" != "1" ]; then
     [ "$strict" != 1 ] || {
@@ -191,6 +227,39 @@ s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1]); s.clos
   # trace name can never be read as this run's verdict.
   local abort_path="${log_path%.jsonl}.abort.json"
   rm -f "$abort_path" 2>/dev/null || true
+
+  # THE HOT-SWAPPABLE ROUTE. Written before the proxy starts, from this lane's
+  # own base/model/identity, so the file the operator swaps is the file the run
+  # actually began on — never a guess reconstructed afterwards. Generation 0 is
+  # "the route the lane started with"; every swap increments it.
+  local route_file=""
+  if [ "${SHERLOCK_UPSTREAM_ROUTE_FILE:-1}" != "0" ]; then
+    route_file="${log_path%.jsonl}.route.json"
+    if ! ROUTE_BASE="$up_base" ROUTE_MODEL="$model" ROUTE_EXPECTED="$expected"          ROUTE_KEY_FILE="${SHERLOCK_API_KEY_FILE:-}"          python3 - "$route_file" <<'PY'
+import json, os, sys
+row = {"schema": 1, "base": os.environ["ROUTE_BASE"].rstrip("/"),
+       "model": os.environ["ROUTE_MODEL"],
+       "expected_returned_identity": os.environ["ROUTE_EXPECTED"],
+       "generation": 0}
+if os.environ.get("ROUTE_KEY_FILE"):
+    row["key_file"] = os.environ["ROUTE_KEY_FILE"]
+tmp = sys.argv[1] + ".tmp.%d" % os.getpid()
+with open(tmp, "w", encoding="utf-8") as target:
+    json.dump(row, target, ensure_ascii=False, sort_keys=True)
+    target.write("\n")
+    target.flush()
+    os.fsync(target.fileno())
+os.chmod(tmp, 0o600)
+os.replace(tmp, sys.argv[1])
+PY
+    then
+      # A route file we could not write is not a route file we may pretend to
+      # have: fall back to the env-only path rather than pointing the proxy at
+      # something unreadable, which would refuse every call.
+      echo "  ⚠ upstream lane: could not write $route_file — route hot swap OFF" >&2
+      route_file=""
+    fi
+  fi
   local -a lane_env=(
     "UPSTREAM_LANE_ABORT=$abort_path"
     "UPSTREAM_EXPECTED_RETURNED_IDENTITY=$expected"
@@ -226,6 +295,7 @@ s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1]); s.clos
       UPSTREAM_RETRY_MAX="${SHERLOCK_UPSTREAM_RETRY:-6}" \
       UPSTREAM_SUBSTITUTION_RETRY_MAX="${SHERLOCK_SUBSTITUTION_RETRY:-12}" \
       UPSTREAM_API_KEY_FILE="${SHERLOCK_API_KEY_FILE:-}" \
+      UPSTREAM_ROUTE_FILE="$route_file" \
       UPSTREAM_FIRST_TOKEN_MS="${SHERLOCK_UPSTREAM_FIRST_TOKEN_MS:-240000}" \
       UPSTREAM_RETRY_BASE_MS="${SHERLOCK_UPSTREAM_RETRY_BASE_MS:-2000}" \
       UPSTREAM_BODY_DIR="$body_dir" "${lane_env[@]}" "${budget_env[@]}" \
@@ -238,6 +308,7 @@ s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1]); s.clos
       UPSTREAM_RETRY_MAX="${SHERLOCK_UPSTREAM_RETRY:-6}" \
       UPSTREAM_SUBSTITUTION_RETRY_MAX="${SHERLOCK_SUBSTITUTION_RETRY:-12}" \
       UPSTREAM_API_KEY_FILE="${SHERLOCK_API_KEY_FILE:-}" \
+      UPSTREAM_ROUTE_FILE="$route_file" \
       UPSTREAM_FIRST_TOKEN_MS="${SHERLOCK_UPSTREAM_FIRST_TOKEN_MS:-240000}" \
       UPSTREAM_RETRY_BASE_MS="${SHERLOCK_UPSTREAM_RETRY_BASE_MS:-2000}" \
       UPSTREAM_BODY_DIR="$body_dir" "${lane_env[@]}" \
@@ -260,6 +331,17 @@ sys.exit(1)
 PY
   then
     LANE_BASE_URL="http://127.0.0.1:$port/v1"
+    LANE_ROUTE_FILE="$route_file"
+    # PRINT BOTH PATHS. A live operator needs to know where to write, and the
+    # answer must not require reading this file.
+    if [ -n "$route_file" ]; then
+      echo "  ↻ upstream route (hot-swappable, read per call): $route_file" >&2
+      echo "      hack/swap-upstream-route.sh $route_file <base> <model> [identity]" >&2
+    fi
+    if [ -n "${SHERLOCK_API_KEY_FILE:-}" ]; then
+      echo "  ↻ upstream key   (hot-swappable, read per call): $SHERLOCK_API_KEY_FILE" >&2
+      echo "      hack/swap-upstream-key.sh <secret-name> $SHERLOCK_API_KEY_FILE" >&2
+    fi
     # Strip a leading bracketed routing tag — `[SP]`, `[FREE]`, whatever the
     # provider prefixes next. Generic on purpose: the bug is "the client is shown
     # a routing tag it parses as part of the model name", not this one tag. An id
@@ -271,6 +353,7 @@ PY
     wait "$LANE_PROXY_PID" 2>/dev/null || true
     LANE_PROXY_PID=""
     LANE_ABORT_PATH=""
+    LANE_ROUTE_FILE=""
     [ "$strict" != 1 ] || return 1
   fi
   return 0
