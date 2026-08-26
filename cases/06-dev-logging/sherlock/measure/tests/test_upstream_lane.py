@@ -17,6 +17,7 @@ a real request through whatever it handed back, to a real stub provider.
 """
 import json
 import os
+import re
 import subprocess
 import tempfile
 import threading
@@ -165,18 +166,36 @@ class TheLanePutsTheProxyInThePath(unittest.TestCase):
 
         A paid run sets SHERLOCK_UPSTREAM_RETRY=0 — provider ERROR retries off,
         deliberately. If the substitution retry rode on that switch it would be
-        off exactly where it is needed, and one 2 %-probability wrong-model
-        answer would kill a 180-call run. So the lane defaults it to 2, and
-        this stub — which answers as a different family every single time —
-        proves it: one client call, three upstream calls, then fail closed.
+        off exactly where it is needed, and one wrong-model answer would kill
+        the run. So the lane defaults it ON, and this stub — which answers as a
+        different family every single time — proves it: one client call, cap+1
+        upstream calls, then fail closed.
+
+        The expected count is DERIVED from the lane's own default, never
+        hardcoded. It was hardcoded to 3, and when the default moved 2 -> 12 in
+        `fefcc8e` this test broke and the breakage shipped, because the commit
+        was merged on the retry arithmetic alone without running this suite.
+        A test that pins a constant it does not read is a test that dies the
+        first time the constant is tuned.
         """
+        cap = self.lane_default_substitution_retry()
         _out, seen, rows, _p = self.drive("qwen3-coder-plus",
                                           {"SHERLOCK_UPSTREAM_RETRY": "0"})
-        self.assertEqual(len(seen), 3, "the lane did not re-ask: %r" % (seen,))
+        self.assertGreaterEqual(cap, 1, "the lane must ship the retry ON")
+        self.assertEqual(len(seen), cap + 1,
+                         "the lane did not re-ask cap+1 times: %r" % (len(seen),))
         self.assertEqual([r.get("discarded_substitution") for r in rows],
-                         [True, True, True])
+                         [True] * (cap + 1))
         self.assertEqual([r.get("substitution_retry_exhausted") for r in rows],
-                         [False, False, True])
+                         [False] * cap + [True])
+
+    def lane_default_substitution_retry(self):
+        """Read the cap out of upstream-lane.sh so the two cannot drift."""
+        lane = LANE
+        with open(lane, encoding="utf-8") as fh:
+            m = re.search(r'SHERLOCK_SUBSTITUTION_RETRY:-(\d+)', fh.read())
+        self.assertIsNotNone(m, "upstream-lane.sh no longer defaults the cap")
+        return int(m.group(1))
 
     def test_when_the_proxy_cannot_start_the_caller_keeps_the_alias(self):
         """No proxy means nothing can restore the prefix — a stripped id would 404."""
