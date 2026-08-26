@@ -19,6 +19,17 @@ ARM="${1:-unknown}"
 CORPUS="${SHERLOCK_CORPUS:-}"
 BASE_URL="${SHERLOCK_BASE_URL:-https://linkapi.ai/v1}"
 MODEL="${SHERLOCK_MODEL:-[SP]deepseek-v4-flash-0731}"
+# THE IDENTITY THE LANE GUARD CHECKS AGAINST, and why it defaults to $MODEL.
+# It used to default to EMPTY, and an empty expected id turned the family check
+# OFF. `SHERLOCK_EXPECTED_RETURNED_IDENTITY` is only *required* under
+# SHERLOCK_REQUIRE_ATTRIBUTION, which defaults to 0, and the paid launcher that
+# produced the v37 incident (sherlock-paid-v37-full-r1.sh) runs under `env -i`
+# and sets neither. So on the exact run that got substituted, the only live
+# guard was the cache one. The run always knows which id it asked for; that is
+# the id it must be answered as. The v37 ledger's first substituted row is row 2
+# of 180 - with this on, that incident costs one call instead of the whole run.
+EXPECTED_RETURNED_IDENTITY="${SHERLOCK_EXPECTED_RETURNED_IDENTITY:-$MODEL}"
+export SHERLOCK_EXPECTED_RETURNED_IDENTITY="$EXPECTED_RETURNED_IDENTITY"
 if [ -n "${SHERLOCK_TIMEOUT+x}" ]; then
   TIMEOUT="$SHERLOCK_TIMEOUT"
 elif [ "$ARM" = "v30" ] || [ "$ARM" = "v31" ] || [ "$ARM" = "v32" ] || [ "$ARM" = "v33" ] || [ "$ARM" = "v34" ] || [ "$ARM" = "v35" ] || [ "$ARM" = "v36" ] || [ "$ARM" = "v37" ]; then
@@ -135,6 +146,14 @@ save_trace() {
   [ -n "$W" ] || return 0
   mkdir -p "$TRACE"
   if [ -n "${LANE_PROXY_PID:-}" ]; then
+    # LANE_PROXY_PID_WAS outlives the kill. The RC-5 audit below is gated on
+    # "was there a lane on this run?", and it used to read LANE_PROXY_PID -
+    # which THIS function had already unset, so on every healthy run the first
+    # clause was false, the audit never ran, and LEDGER_MISSING / LEDGER_EMPTY /
+    # LEDGER_MALFORMED / RETURNED_MODEL_UNKNOWN / the post-hoc cache check were
+    # dead code. The only time it fired was when the live guard had already
+    # written a marker, i.e. it could only re-read a verdict someone else made.
+    LANE_PROXY_PID_WAS="$LANE_PROXY_PID"
     kill "$LANE_PROXY_PID" 2>/dev/null || true
     wait "$LANE_PROXY_PID" 2>/dev/null || true
     unset LANE_PROXY_PID
@@ -833,12 +852,14 @@ LANE_DETAIL=""
 # quotes baked into it. Expanded at the call site with the ${a[@]+"${a[@]}"}
 # guard, because bash 3.2 reads an empty array as unbound under `set -u`.
 LANE_REASON_ARG=()
-if [ -n "${LANE_PROXY_PID:-}" ] || [ -f "${LANE_ABORT_PATH:-}" ]; then
+if [ -n "${LANE_PROXY_PID_WAS:-}" ] || [ -n "${LANE_PROXY_PID:-}" ] || [ -f "${LANE_ABORT_PATH:-}" ]; then
   LANE_AUDIT_ARGS=(--ledger "$TRACE.upstream.jsonl"
                    --abort "${LANE_ABORT_PATH:-}"
-                   --expected "${SHERLOCK_EXPECTED_RETURNED_IDENTITY:-}"
-                   --cache-min-rate "${SHERLOCK_CACHE_MIN_RATE:-0.50}"
-                   --cache-min-calls "${SHERLOCK_CACHE_MIN_CALLS:-20}")
+                   --expected "$EXPECTED_RETURNED_IDENTITY")
+  # Thresholds are NOT defaulted here. They live in measure/lane_guard.py, and a
+  # second copy in shell is a second thing to forget when they move.
+  [ -z "${SHERLOCK_CACHE_MIN_RATE:-}" ] || LANE_AUDIT_ARGS+=(--cache-min-rate "$SHERLOCK_CACHE_MIN_RATE")
+  [ -z "${SHERLOCK_CACHE_MIN_CALLS:-}" ] || LANE_AUDIT_ARGS+=(--cache-min-calls "$SHERLOCK_CACHE_MIN_CALLS")
   if [ "${SHERLOCK_CACHE_GUARD:-1}" = "0" ]; then
     LANE_AUDIT_ARGS+=(--no-cache-guard)
   fi

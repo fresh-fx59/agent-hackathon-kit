@@ -52,9 +52,13 @@
 #     actually happened on v37, and the harness noticed nothing for days. The
 #     proxy now aborts the lane the moment a returned model is from a different
 #     FAMILY than the requested one, and the moment the cumulative prompt-cache
-#     hit rate falls below SHERLOCK_CACHE_MIN_RATE (default 0.50) after
-#     SHERLOCK_CACHE_MIN_CALLS (default 20) billed calls — 68-88 % on every
-#     healthy run, 28.0 % on the broken one. Set SHERLOCK_CACHE_GUARD=0 for a
+#     hit rate falls below SHERLOCK_CACHE_MIN_RATE (default 0.35) after
+#     SHERLOCK_CACHE_MIN_CALLS (default 30) billed calls. Those two numbers are
+#     derived, and re-derived, in measure/lane_guard.py — they are set against
+#     the CUMULATIVE rate at the call count, not a run's final rate, which is
+#     the difference between ~20 points of margin and ~5. The expected identity
+#     defaults to the id the lane requested, because an empty one used to turn
+#     the whole family check off. Set SHERLOCK_CACHE_GUARD=0 for a
 #     genuinely cold first run against a new provider, and for nothing else.
 #     LANE_ABORT_PATH is handed back so the runner can turn the abort into an
 #     exit code; measure/lane-audit.py re-checks the finished ledger, because a
@@ -74,6 +78,10 @@ upstream_lane_start() {
   local log_path="${2:?}" run_tag="${3:?}" model="${4:?}"
   local inflight_path="${5:-}" attempt_path="${6:-}"
   local here proxy port strict="${SHERLOCK_REQUIRE_ATTRIBUTION:-0}" budget_state=""
+  # The identity the guard checks against defaults to the id this lane actually
+  # requested. It used to default to empty, and empty disabled the check - see
+  # the note in run-bench.sh. Every caller of this helper already knows $model.
+  local expected="${SHERLOCK_EXPECTED_RETURNED_IDENTITY:-$model}"
   local -a budget_env=()
 
   # Defaults are the safe ones, so every early return below is already correct.
@@ -122,14 +130,15 @@ s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1]); s.clos
   rm -f "$abort_path" 2>/dev/null || true
   local -a lane_env=(
     "UPSTREAM_LANE_ABORT=$abort_path"
-    "UPSTREAM_EXPECTED_RETURNED_IDENTITY=${SHERLOCK_EXPECTED_RETURNED_IDENTITY:-}"
+    "UPSTREAM_EXPECTED_RETURNED_IDENTITY=$expected"
     "UPSTREAM_CACHE_GUARD=${SHERLOCK_CACHE_GUARD:-1}"
-    "UPSTREAM_CACHE_MIN_RATE=${SHERLOCK_CACHE_MIN_RATE:-0.50}"
-    "UPSTREAM_CACHE_MIN_CALLS=${SHERLOCK_CACHE_MIN_CALLS:-20}"
+    # Empty means "use lane_guard.py's default". Do not restate the numbers here.
+    "UPSTREAM_CACHE_MIN_RATE=${SHERLOCK_CACHE_MIN_RATE:-}"
+    "UPSTREAM_CACHE_MIN_CALLS=${SHERLOCK_CACHE_MIN_CALLS:-}"
   )
 
   if [ "$strict" = 1 ]; then
-    if [ -z "$inflight_path" ] || [ -z "${SHERLOCK_EXPECTED_RETURNED_IDENTITY:-}" ] || \
+    if [ -z "$inflight_path" ] || [ -z "$expected" ] || \
        [ -z "${SHERLOCK_BUDGET_MAX_UPSTREAM_ATTEMPTS:-}" ] || \
        [ -z "${SHERLOCK_BUDGET_MAX_REQUEST_BYTES:-}" ] || \
        [ -z "${SHERLOCK_BUDGET_MAX_WALL_SECONDS:-}" ] || \
@@ -140,7 +149,7 @@ s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1]); s.clos
     budget_state="$(dirname "$inflight_path")/upstream-budget-state.json"
     budget_env=(
       "UPSTREAM_BUDGET_STATE=$budget_state"
-      "UPSTREAM_EXPECTED_RETURNED_IDENTITY=$SHERLOCK_EXPECTED_RETURNED_IDENTITY"
+      "UPSTREAM_EXPECTED_RETURNED_IDENTITY=$expected"
       "UPSTREAM_MAX_UPSTREAM_ATTEMPTS=$SHERLOCK_BUDGET_MAX_UPSTREAM_ATTEMPTS"
       "UPSTREAM_MAX_REQUEST_BYTES=$SHERLOCK_BUDGET_MAX_REQUEST_BYTES"
       "UPSTREAM_MAX_WALL_SECONDS=$SHERLOCK_BUDGET_MAX_WALL_SECONDS"

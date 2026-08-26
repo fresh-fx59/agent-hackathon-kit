@@ -422,6 +422,7 @@ UPSTREAM_CACHE_MIN_CALLS = int(
 
 _LANE_LOCK = threading.Lock()
 _LANE_ABORT = None          # first breach, {"reason": ..., "detail": ...}
+_LANE_MARKER_WRITTEN = threading.Event()   # set once abort.json exists on disk
 _LANE_CACHE = {"calls": 0, "prompt_tokens": 0, "cached_tokens": 0}
 
 
@@ -452,6 +453,25 @@ def _write_lane_abort(row):
 
 
 def _lane_trip(reason, detail):
+    """Trip the lane, and do not let a refusal go out before the marker exists.
+
+    THE RACE THIS CLOSES. The marker write is mkstemp -> write -> fsync ->
+    os.replace. `save_trace` in run-bench.sh kills the proxy the moment the CLI
+    exits, and the CLI exits as soon as it sees the refusal. Measured on this
+    box, 11 of 12 trials: the refusal was served, the proxy was terminated
+    inside the fsync, and an orphan `.upstream-lane-abort.XXXXXXXX` was left
+    holding the complete correct row while `abort.json` never appeared. No
+    marker, no `LANE ABORT` on stderr - and combined with the dead RC-5 audit
+    the run then reported no lane verdict at all.
+
+    The fix is a barrier, not a reordering. `_LANE_ABORT` is still published
+    first, so the very next request is refused rather than relayed (the whole
+    value of the guard is the call that does NOT happen). `_lane_refusal` then
+    BLOCKS on `_LANE_MARKER_WRITTEN` before it answers, so no client can learn
+    the lane is dead until the diagnosis is durable. The fsync stays: on a
+    direct paid launcher this marker is the only artifact that carries the
+    reason, so it has to survive a crash as well as a kill.
+    """
     global _LANE_ABORT
     with _LANE_LOCK:
         if _LANE_ABORT is not None:
@@ -466,6 +486,7 @@ def _lane_trip(reason, detail):
     _write_lane_abort(row)
     sys.stderr.write("upstream-log-proxy: LANE ABORT %s — %s\n" % (reason, detail))
     sys.stderr.flush()
+    _LANE_MARKER_WRITTEN.set()
 
     def mark(state):
         # Never downgrade an existing breach; the paid-budget reasons and this
@@ -970,10 +991,30 @@ class Proxy(BaseHTTPRequestHandler):
                 pass
 
     def _lane_refusal(self):
+        """403, not 503 - a lane breach is a verdict, not a transport hiccup.
+
+        qwen-code's `defaultShouldRetry` retries every 5xx, `hasRetryAfterStatus`
+        treats 503 as a Retry-After status, and
+        `FALLBACK_ELIGIBLE_STATUS_CODES = {429, 503, 529}` classes it as
+        fallback-eligible (chunks/chunk-YDJRMQU4.js:41,49 and
+        chunks/chunk-7IV52LTO.js:187 of @qwen-code/qwen-code). A 503 refusal
+        therefore burned the client's 7-attempt retry budget and then presented
+        the run's own verdict as "the provider is down" - the opposite of the
+        diagnosis. 403 is in none of those sets: not >= 500, not a rate-limit
+        code, not fallback-eligible. One refusal, one honest error.
+
+        The PAID-BUDGET refusal below deliberately keeps its 503: that path is
+        wired into MAX_CONSECUTIVE_PROVIDER_FAILURES accounting and the
+        controller's polling, and moving it is not this branch's business.
+        """
+        # Never tell the client the lane is dead before the marker that says
+        # WHY is on disk - see _lane_trip. Bounded, because a stuck disk must
+        # not turn a refusal into a hang.
+        _LANE_MARKER_WRITTEN.wait(timeout=30)
         breach = _LANE_ABORT or {}
         payload = json.dumps({"error": {"message": "proxy: lane aborted (%s)"
                                         % breach.get("reason", "UNKNOWN")}}).encode()
-        self.send_response(503)
+        self.send_response(403)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(payload)))
         self.end_headers()
