@@ -22,6 +22,59 @@ hooks:
 instructions are in English.** The python gates parse those Russian literals
 verbatim, so translating or re-spelling any of them fails the check.
 
+**TWO RULES THE CITATION GATE CANNOT INFER FROM A QUOTE. A citation proves a
+quote is GENUINE; it never proved it was READ CORRECTLY. `citecheck` now blocks
+on both, so a report that breaks either cannot be delivered.**
+
+1. **A NUMBER IS NOT A READING.** Any enum field you quote or mention inside a
+   `### Н-n` or `### К-n` block — `Action`, `Direction`, `Protocol`, `Profiles`,
+   `Origin`, `LogonType`, and their Russian names («действие», «направление»,
+   «протокол», «профили», «происхождение», «тип входа») — must appear in the
+   block in EXACTLY this form, once per distinct value:
+
+       Action=2 (блокировать)      Action=3 (разрешить)
+       LogonType=10 (удалённый интерактивный rdp)
+
+   The field name may be Russian on BOTH sides: «действие 2 (блокировать)» is
+   read exactly like `Action=2 (блокировать)`. The word in brackets must be the
+   one `reference/enum-tables.tsv` (plus the built-in table) gives for THAT
+   value — inflected forms and close synonyms are accepted («блокировка»,
+   «разрешено», «сетевое подключение»), but words that name a DIFFERENT value
+   of the same field are not. «действие 2/3 (разрешить)» is the v37 error and
+   blocks as `wrong_decode`: those are two different events, and `Action=2` is
+   BLOCK. Do not write a slash pair; decode each value on its own line of
+   reasoning. Keep the bracket short — a whole sentence in parentheses is an
+   aside, not a decode, and the pair still counts as undecoded.
+   Met a value the table does not have? `citecheck` names it — add a row to
+   `reference/enum-tables.tsv` WITH A SOURCE. Never delete the quote instead.
+
+2. **OWNERSHIP BEFORE INTRUDER.** Every account name that appears in any
+   `### Н-n` or `### К-n` block needs one row in a section whose heading is
+   EXACTLY «Принадлежность учётных записей» — nothing else is that section
+
+       ## Принадлежность учётных записей
+
+       | учётная запись | первое появление | path:line «цитата» | как | вывод | раньше |
+       |---|---|---|---|---|---|
+       | IPSERVER\\root | 2021-05-08T15:04:51Z | rendered/…User-Profile-Service…jsonl:1 «…ntuser.dat…» | профиль | владелец | — |
+
+   `как` ∈ `профиль | создание | удалённый вход | локальный вход | служба |
+   неизвестно`. `вывод` ∈ `владелец | посторонний | не определяется`.
+   `citecheck` re-derives the first appearance FROM THE CORPUS: a later
+   timestamp, a record that does not name the account, or an earlier record
+   anywhere in the corpus all block. `вывод: посторонний` additionally requires
+   the `раньше` column to name another account whose own row proves an EARLIER
+   first appearance — an outsider is an outsider *to somebody*.
+   The corpus really has nothing on the account? Write
+   `| имя | не определяется | — | неизвестно | не определяется | — |`.
+   That is a legitimate answer and it prints in the report. It is checked too:
+   if the account IS in the corpus, «не определяется» is a lie and blocks.
+   A WMI namespace (`ROOT\\CIMV2`), a registry or device path fragment and a
+   per-session pseudo-principal (`UMFD-2`, `DWM-1`) are not accounts and need no
+   row. If the corpus mentions the account on lines that carry no timestamp, the
+   gate refuses to certify the first appearance (`unverifiable_first`): date
+   those records or drop the «посторонний» verdict.
+
 **`<SKILL_BASE_DIR>` is an absolute path you have already been given.**
 The first line when the skill loads: "Base directory for this skill: …".
 Substitute it into every command below and do NOT guess the path: the skill
@@ -464,11 +517,18 @@ to know what it counts as a state change and how a group is closed.
 5. `statecheck --report` exited with a non-zero code — there is a state change in
    the corpus about which the report said nothing: neither as a finding nor as
    `норма`;
-6. **the report text is not yet entirely inside your final message.**
+6. `citecheck` reported `РАСШИФРОВКА ПЕРЕЧИСЛЕНИЙ (6a)` above zero — an enum
+   number is quoted in a finding without `Поле=значение (расшифровка из
+   таблицы)`, or the decode belongs to a DIFFERENT value of that field;
+7. `citecheck` reported `ПРИНАДЛЕЖНОСТЬ УЧЁТНЫХ ЗАПИСЕЙ (6b)` above zero — an
+   account is named in a finding without a checked first-appearance row, its
+   claimed first appearance does not survive the corpus, or it is called
+   «посторонний» with no earlier owner named;
+8. **the report text is not yet entirely inside your final message.**
    If you deliver an abridgement rather than the draft verbatim, it must pass
    `citecheck … --delivered <файл поставки>` with a zero return.
 
-Items 1–5 print numbers, not self-assessment. Only the last act — pasting the
+Items 1–7 print numbers, not self-assessment. Only the last act — pasting the
 text into the message — is unverifiable, which is exactly why it gets forgotten: a
 green `citecheck` feels like the finish line though it only permits delivery.
 While the report lives only in a file, zero has been done. "There is enough
