@@ -27,14 +27,14 @@ import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[5]
-V38 = ROOT / "cases" / "06-dev-logging" / "sherlock" / "skills" / "v38" / "tools"
-TOOL = V38 / "citecheck.py"
-COVERMAP = V38 / "covermap.py"
-ROLLOVER = V38 / "rollover.py"
+V39 = ROOT / "cases" / "06-dev-logging" / "sherlock" / "skills" / "v39" / "tools"
+TOOL = V39 / "citecheck.py"
+COVERMAP = V39 / "covermap.py"
+ROLLOVER = V39 / "rollover.py"
 
 FAILED = []
 
-# v38 (PR #79) makes a report that cites corpus files owe an «Окно записей»
+# v39 (PR #79) makes a report that cites corpus files owe an «Окно записей»
 # section. Without it `report_evidence()` counts a blocking defect and these
 # tests would measure the rollover term instead of the coverage-line one.
 # Built by the REAL producer, never hand-written.

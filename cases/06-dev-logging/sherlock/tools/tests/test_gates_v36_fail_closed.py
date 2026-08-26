@@ -391,6 +391,66 @@ def v37_frozen_checks():
           tree == V37_TREE_4625105, tree)
 
 
+# skills/v38 is FROZEN as of 0a0e3f4 (PR #82) plus the fixes merged on top through
+# 48afeab — the exact tree that produced the recorded paid run 20260826T132832Z-v38.
+# skills/v39 is a byte-identical copy that carries all future edits. Content-pinned,
+# not git-status-pinned, so an edit is caught in the working tree, before it can be
+# committed.
+V38_TREE_48afeab = "7e1b063bab5f04e99331f5e3b973d4c74a5ef1c6"
+V38_FROZEN = {
+    "SKILL.md":                        "99315e21c9e828f4f206799af9515f7f",
+    "reference/bulk-closure.md":       "22fd216deacb4d5d279162f409ef0614",
+    "reference/code-and-spec.md":      "3dbfc0ca8f3386b318e868b23d52f1cf",
+    "reference/enum-tables.tsv":       "36016a59e25f1964416da3e6fad5131b",
+    "reference/report-format.md":      "8179fb57b2a9aca1b8c416ee91b09bb9",
+    "reference/tools.md":              "eb8a2997d621addafd0251a9672984d7",
+    "tools/brief.py":                  "12602a59addf285bf08ed6d35a251854",
+    "tools/checkpoint.py":             "ca8d11ccaebebdb3535a668d8dbc374a",
+    "tools/cite.py":                   "c0c294122a9c51e95b292824af7d4cd4",
+    "tools/citecheck.py":              "3182d05f92d20b6792d7c4fc14a0d085",
+    "tools/covermap.py":               "a6a6852e59ff95ed552e89f0a96be128",
+    "tools/logjoin.py":                "dd4465b4736215f1f78bd641cd40a264",
+    "tools/logmap.py":                 "92de4442b0eaaa7076185378340d1a29",
+    "tools/rollover.py":               "cf6d9b4ff9f2c751f76a11e4da604c64",
+    "tools/stage-corpus.py":           "761eff5c844a11fbd290ff3ec9f0a0de",
+    "tools/statecheck.py":             "960204ec4d953580b9689e675758e0e0",
+    "tools/stopcheck.py":              "bb2ce339a189eab32a2da69fd20dcf1c",
+    "tools/triagecheck.py":            "bb9f4307242c8482756b385b0c19a20e",
+}
+
+
+def v38_frozen_checks():
+    """v38 carries a paid result. A byte moving here makes that result
+    unreproducible, so this fails on content, on a new file, and on a
+    deletion."""
+    root = os.path.join(SKILLS, "v38")
+    seen = set()
+    drift = []
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [d for d in dirnames if d != "__pycache__"]
+        for name in filenames:
+            ap = os.path.join(dirpath, name)
+            rel = os.path.relpath(ap, root).replace(os.sep, "/")
+            seen.add(rel)
+            want = V38_FROZEN.get(rel)
+            if want is None:
+                drift.append("%s: NEW file in a frozen arm" % rel)
+                continue
+            got = hashlib.md5(open(ap, "rb").read()).hexdigest()
+            if got != want:
+                drift.append("%s: %s != %s" % (rel, got[:12], want[:12]))
+    for rel in sorted(set(V38_FROZEN) - seen):
+        drift.append("%s: MISSING from a frozen arm" % rel)
+    check("skills/v38 is byte-identical to the recorded paid run (48afeab)",
+          not drift, "; ".join(drift))
+
+    tree = subprocess.check_output(
+        ["git", "-C", KIT, "rev-parse",
+         "HEAD:cases/06-dev-logging/sherlock/skills/v38"]).decode().strip()
+    check("skills/v38 committed tree still is 48afeab's tree",
+          tree == V38_TREE_48afeab, tree)
+
+
 def version_and_freeze_checks():
     v36 = os.path.join(SKILLS, "v36")
     for rel, marker in MARKERS:
@@ -409,12 +469,12 @@ def version_and_freeze_checks():
     print("  v36 SKILL.md: %d lines / %d bytes"
           % (len(lines), len(skill.encode("utf-8"))))
 
-    # v1..v36 must be byte-for-byte what HEAD's merge-base already had.
-    # (v37 is pinned separately, by content, in v37_frozen_checks.)
+    # v1..v37 must be byte-for-byte what HEAD's merge-base already had.
+    # (v38 is pinned separately, by content, in v38_frozen_checks.)
     base = subprocess.check_output(
         ["git", "-C", KIT, "merge-base", "HEAD", "origin/main"]
     ).decode().strip()
-    names = ["v%d" % n for n in range(1, 37)] + ["v4.1"]
+    names = ["v%d" % n for n in range(1, 38)] + ["v4.1"]
     drift = []
     for name in names:
         rel = "cases/06-dev-logging/sherlock/skills/%s" % name
@@ -429,7 +489,7 @@ def version_and_freeze_checks():
             ["git", "-C", KIT, "rev-parse", "HEAD:%s" % rel]).decode().strip()
         if want != got:
             drift.append("%s: %s != %s" % (name, want[:12], got[:12]))
-    check("skills/v1..v36 tree hashes are unchanged from the merge-base",
+    check("skills/v1..v37 tree hashes are unchanged from the merge-base",
           not drift, "; ".join(drift))
 
 
@@ -494,6 +554,7 @@ def main():
     statecheck_checks(tmp)
     version_and_freeze_checks()
     v37_frozen_checks()
+    v38_frozen_checks()
     real_data_checks()
     if FAILED:
         print("✗ v36 gates: %d проверок упало" % len(FAILED))
