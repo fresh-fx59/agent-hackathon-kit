@@ -91,6 +91,13 @@ You do NOT read the corpus yourself: you run `logmap.py`, read `map.txt` and
    Only now, immediately before writing the draft, read
    `reference/report-format.md` (do not read it at the start). Write the full
    report into `work/report.md`.
+   **EVERY citation is produced by a tool, and there are TWO of them.** One line
+   → `cite.py <путь>:<строка>`. A NUMBER over many lines — «93 источника», «25355
+   отказов», «8 из них больше 1000 раз» — → `cite.py --file <путь> --aggregate
+   '<предикат>'`, which computes the number for you. Paste either output
+   verbatim. **A count you typed yourself is not evidence and citecheck will not
+   accept it**; a count you deleted because it had no line to quote is the v37
+   failure this step exists to stop (§7).
 4. **VERIFY** — check the very file you are going to deliver:
 
        python3 <SKILL_BASE_DIR>/tools/citecheck.py work/report.md --corpus <LOG_DIR> --require-quote --ledger ./work/worklist.tsv
@@ -316,6 +323,25 @@ One row per corpus file, quoting the `logmap`-flagged line — preferring the on
 
 It prints `путь:строка — «дословная цитата»`; paste it verbatim, then write your claim beside it. The quote comes from `citecheck`'s own builder, so what `cite.py` prints, `citecheck` accepts; `--contains` centres it on the token that matters. **A refusal means the claim is wrong, not the tool** — re-read the line or drop the claim, never paste a citation it declined. Why a tool: `reference/tools.md`.
 
+**A CLAIM ABOUT A POPULATION HAS ITS OWN CITATION** — «93 разных источника, 8 из них больше 1000 отказов» has no single line to quote, so do not delete it and do not fake a line for it. Ask for the number and paste what comes back:
+
+    python3 <SKILL_BASE_DIR>/tools/cite.py --corpus <LOG_DIR> --file Security.jsonl --aggregate 'distinct(Event.EventData.IpAddress, Event.EventData.IpAddress!=-)'
+
+Whatever it prints is the whole line, ending in a long `jq` command. **Copy that
+line; never retype it and never abbreviate the command** — an `…` in the command
+is `command-mismatch`, and this is the one form that must not be hand-typed.
+
+`citecheck` **re-runs the predicate over the corpus and compares the count exactly** — the trailing command is a rendering for a human, never executed. Use it for every census, ratio and «сколько всего» in the report: how many distinct sources, how many records of one code versus another, how many in a window. Predicates: `count(поле=значение, …)`, `distinct(поле, …)`, `distinct_over(поле, N, …)`; operators `=`, `!=`, `~=` (substring, ≥2 characters), `>=`/`<=` (lexicographic, so **ISO-8601 values only** — a bare number is refused, because lexicographic order lies about numbers).
+
+**An aggregate proves the number, and only the number.** It says nothing about
+*who* or *why*: a verified count beside an unrelated claim is a defect the gate
+cannot yet see (`reference/report-format.md`, «Что агрегат не доказывает»), so
+the aggregate you paste must be the one your sentence is actually about. And a
+predicate broad enough to match every record that merely HAS the field is
+`too-broad` — «сколько записей имеют это поле» is not a census.
+
+Measured: the run that passed all three gates named **4** attacker IPs of 93, and never stated that `0xc0000064` (нет такой учётки) fired 25355 times against `0xc000006a` (учётка есть, пароль неверный) 8098 — the difference between noise and a target list. It did not fail to cite that; nothing told it the form existed. Full grammar and every refusal: `reference/report-format.md`.
+
 Then run the report through the check — this is **one** call:
 
     python3 <SKILL_BASE_DIR>/tools/citecheck.py work/report.md --corpus <LOG_DIR> --require-quote --ledger ./work/worklist.tsv
@@ -418,7 +444,11 @@ to know what it counts as a state change and how a group is closed.
    `citecheck --ledger work/worklist-<хост>.tsv` **for every host**: N machines
    are N investigations, and "done" applies to each of them separately;
 2. `citecheck --ledger` exited with a non-zero code;
-3. at least one finding has not a single quote with verdict `ok`;
+3. at least one finding has not a single quote with verdict `ok` — a quote or
+   a verified `агрегат:` line, both count;
+   — or the report states a count, a share or a «сколько всего» that no
+   `агрегат:` line backs: a number you typed is not evidence, and deleting the
+   number instead of citing it is the v37 regression (§7);
    — and at least one finding has no `исход: успех|попытка|норма` line, or the
    findings' outcomes do not add up to the `ВЕРДИКТ` section, if you have one;
 4. `triagecheck` exited with a non-zero code — part of the list is closed
@@ -465,6 +495,9 @@ MUST read `<SKILL_BASE_DIR>/reference/tools.md` §"Бюджет: почему о
   `triagecheck`, `citecheck` and `statecheck` have not each exited zero. Writing
   the report straight into chat is a failed run even if the prose is perfect.
 - **Never invent a log line.** A quote is only what you read.
+- **Never type a number either.** Every count, share and «сколько всего» in the
+  report comes from `cite.py --aggregate` and is pasted verbatim, command and
+  all. No aggregate, no number — and no deleting the claim to dodge the gate.
 - **Never invent a LINK between entities.** Two real pieces of evidence joined by
   a non-existent edge are invented evidence. If you have not seen the line where
   both entities stand together, write «связь не подтверждена корпусом».

@@ -28,6 +28,22 @@ Verdicts, one per citation:
     ambiguous      the path resolves to MORE THAN ONE file  <- fails closed
     unverifiable   nothing comparable (e.g. a Russian claim about an English line)
 
+    ok             an aggregate citation whose count the gate RECOMPUTED and matched
+
+TWO citation forms, not one. A line quote proves that ONE line exists and says
+what the claim says; it can never prove a claim about a POPULATION («93 distinct
+source IPs, 8 of them over 1000 failures»), because there is no single line to
+quote. Measured: under a quote-only gate the model DELETED such claims rather
+than fail — v36 failed its gates and named 12 attacker IPs, v37 passed all three
+and named 4, out of 93 real ones. So there is a second first-class form,
+
+    агрегат: <путь> · <предикат> = <число> · <команда>
+
+graded by `aggregates_check`: the gate re-evaluates the predicate against the
+corpus itself and compares the count exactly. The command is a RENDERING of the
+predicate, compared for equality and never executed. See the block above
+`_blocking_total` for the closed predicate vocabulary and every failure mode.
+
 `unverifiable` is deliberately NOT a failure by default. Calling a true
 cross-language claim a fabrication would teach the model to delete good evidence,
 which is the one outcome worse than a decorative citation. `--require-quote`
@@ -604,9 +620,14 @@ def check(report, root, min_overlap=0.34, min_tokens=3, require_quote=False):
     summary["не-ссылка"] = len(nonrefs)
     summary["verified_pct"] = (round(100.0 * summary["ok"] / len(results), 1)
                                if results else None)
+    # Aggregate citations are graded by the same call, against the same index,
+    # so a report can never be checked for one form and not the other.
+    aggregates = aggregates_check(report, root, by_rel, by_base)
+    summary["агрегатов"] = aggregates["total"]
+    summary["агрегат-плохих"] = aggregates["blocking"]
     return {"corpus": os.path.abspath(root), "citations": results,
             "non_references": nonrefs, "require_quote": require_quote,
-            "summary": summary}
+            "aggregates": aggregates, "summary": summary}
 
 
 
@@ -816,15 +837,48 @@ def finding_blocks(report, structural=None):
     return out
 
 
-def findings_without_evidence(report, results):
-    """A finding block with no citation whose verdict is `ok` is unproven."""
+def findings_without_evidence(report, results, aggregates=None):
+    """A finding block with no citation whose verdict is `ok` is unproven.
+
+    An aggregate citation that VERIFIED counts as proof here, and only when it
+    verified. That is the whole point of the second form: a claim about a
+    population is provable, so a finding that rests on one is not «unproven».
+    A failing aggregate proves nothing and is already blocking on its own.
+
+    ## OPEN QUESTION — nothing here links the evidence to the CLAIM.
+
+    This function asks only «is there something with verdict ok inside the
+    finding's line range». It does not ask whether that something is ABOUT the
+    finding. So an aggregate that verified — any aggregate — discharges any
+    finding it is pasted under, and the report reads as proven.
+
+    State it plainly rather than softly: this is a REAL hole, and the aggregate
+    form makes it CHEAPER, because a true aggregate is easier to manufacture
+    than a true line quote. It is not, however, a regression the aggregate form
+    introduced: the control was run, and an irrelevant LINE QUOTE discharges a
+    finding exactly the same way. The hole is claim-relevance, it predates this
+    form, and it is inherited whole.
+
+    It is deliberately NOT patched here. A relevance check is a different kind
+    of judgement from «does this number recompute» — every cheap version of it
+    (token overlap between the claim and the quote) is the same heuristic that
+    `quote_example` already applies to the quote text, and applying it to a
+    finding's whole prose would reject honest reports. Until there is a
+    measurement to design against, the honest state is: the gate proves the
+    NUMBER and the LINE, and the author owns the link between the evidence and
+    the sentence. `reference/report-format.md` §«Что агрегат НЕ доказывает»
+    says the same thing to the model."""
     bounds = finding_blocks(report)
     if not bounds:
         return [], 0
+    agg_ok = [a["report_line"] for a in ((aggregates or {}).get("items") or [])
+              if a["verdict"] == "ok"]
     bad = []
     for num, lo, hi in bounds:
         ok = any(r["verdict"] == "ok" and lo <= r["report_line"] <= hi
                  for r in results)
+        if not ok:
+            ok = any(lo <= n <= hi for n in agg_ok)
         if not ok:
             bad.append(num)
     return bad, len(bounds)
@@ -1561,6 +1615,583 @@ def render_report_evidence(e):
     return "\n".join(out)
 
 
+# --------------------------------------------------------------------------
+# AGGREGATE CITATIONS — evidence for a POPULATION, not for one line
+# --------------------------------------------------------------------------
+# WHY THIS EXISTS, measured. The line-quote citation proves that ONE line
+# exists and says what the claim says. It cannot prove a statement about a
+# population: «93 different source IPs authenticate against this host, and 8 of
+# them fail more than 1000 times each» has no single line to quote, so under a
+# quote-only gate the only legal move is to DELETE the claim. Measured on the
+# winevtx corpus: v36 failed its gates and named 12 attacker IPs; v37 passed all
+# three gates and named 4, out of 93 real distinct sources in Security.jsonl.
+# Passing the gate made the report worse. EVIDENCE: fix-3.
+#
+# The shape: file + predicate + count + a reproducing command, and the gate
+# RE-EXECUTES THE PREDICATE against the corpus and compares the count. That is
+# what makes it evidence rather than an assertion.
+#
+# THE COMMAND IS NEVER EXECUTED BY THE GATE. It is *rendered* from the parsed
+# predicate by `agg_render_command()` and compared for byte equality with what
+# the report wrote. Two properties fall out of that, both load-bearing:
+#   * no injection surface — a report cannot make the gate run anything;
+#   * no producer/grader drift — a hand-edited command that no longer describes
+#     the predicate the gate evaluated is a FAILURE, not a cosmetic difference.
+# The predicate vocabulary is closed and implemented here, in Python; the
+# rendered `jq`/`grep` pipeline exists so a human can reproduce the number by
+# hand, and it is the only thing in the line a human is meant to paste.
+#
+# Grammar, ONE line, produced by `cite.py --aggregate` and never typed by hand:
+#
+#   агрегат: <path> · <predicate> = <count> · <command>
+#
+# `<path>` is from the corpus root, same rule as a line citation. There is no
+# `:line`, which is exactly how this form is told apart from a line quote —
+# CITE_RE requires `:\d+` and never matches an aggregate line.
+#
+# Predicates (closed vocabulary, three forms):
+#
+#   count(F op V[, F op V]*)          records matching EVERY filter
+#   distinct(FIELD[, F op V]*)        distinct non-empty values of FIELD
+#   distinct_over(FIELD, N[, F op V]*)  distinct values of FIELD occurring
+#                                       strictly more than N times
+#
+# Operators: `=` exact string equality, `!=` inequality (a record whose field is
+# absent never satisfies it — absence is not evidence), `~=` literal substring
+# (NOT a regex —
+# a regex in a report is unbounded work and a ReDoS surface), `>=` / `<=`
+# LEXICOGRAPHIC string comparison. Lexicographic is not a compromise: the
+# window predicate this exists for is an ISO-8601 timestamp, where lexicographic
+# and chronological order coincide, and one comparison rule means the rendered
+# `jq` says exactly what the gate did.
+#
+# FIELD is a dotted path into the JSON record (`Event.EventData.IpAddress`), or
+# the pseudo-field `line` — the raw text of the line — for corpora that are not
+# JSONL. A predicate may not mix the two.
+#
+# TOLERANCE IS ZERO. The count must match EXACTLY. The corpus is immutable, the
+# evaluation is pure and deterministic, there is no sampling and no float, and
+# the producer tool prints the number the gate computes — so exactness costs an
+# honest report nothing, while any band is a place to park a number that is
+# wrong. Silent tolerance is how gates go soft.
+#
+# FAIL CLOSED, every one of these:
+#   malformed        the line or the predicate does not parse
+#   missing-file     nothing in the corpus resolves to that path
+#   ambiguous        the path means more than one file
+#   binary-file      the path leads into a binary file
+#   not-tabular      a JSON field was used on a file that is not JSON records
+#   unknown-field    the field appears in NO record — a typo reads as zero
+#   zero-match       the predicate matched nothing; zero is not a population
+#   too-broad        the predicate matched EVERY record — «all records» proves
+#                    nothing, and it is the cheapest fake number in the file
+#   count-mismatch   the recomputed count differs from the claimed one
+#   command-mismatch the pasted command is not the rendering of the predicate
+#   unreadable       the file could not be read / the evaluation raised
+# Anything that is not `ok` is blocking. There is no "probably fine".
+
+MAX_AGG_LINES = 5000000
+MAX_AGG_FILTERS = 6
+
+AGG_KEYWORD = "агрегат"
+# The `улики:` prefix is accepted because that is where the report grammar puts
+# evidence: `улики: агрегат: …` must be one aggregate citation, not prose that
+# the gate silently ignores. A form the gate cannot see is a form that does not
+# exist — that is the failure this whole fix is about.
+AGG_LINE_RE = re.compile(
+    r"^\s*[#>*\-\s]{0,8}(?:\*\*|__|`)?\s*(?:улики\s*[:：]\s*)?"
+    + AGG_KEYWORD + r"\s*[:：]\s*(?P<body>.+?)\s*$", re.IGNORECASE)
+# The path is EITHER bare (no space, no `·`) OR double-quoted. Without the
+# quoted alternative `cite.py --aggregate` printed, for `My Log.jsonl`, a line
+# this very regex then graded `malformed` — and both SKILL.md and
+# report-format.md forbid hand-editing the line, so the model had no legal
+# move: an unfixable loop. Windows event-log exports with spaces in the name
+# are ordinary. A `"` in the path itself is REFUSED at both ends (see
+# `agg_quote_path`) rather than escaped: an escape grammar is one more thing
+# the producer and the grader can disagree about.
+AGG_BODY_RE = re.compile(
+    r"^(?:\"(?P<qpath>[^\"]+)\"|(?P<path>[^\s·]+))\s*·\s*"
+    r"(?P<pred>[a-z_]+\([^·]*\))\s*=\s*"
+    r"(?P<count>\d{1,12})\s*·\s*(?P<cmd>.+?)$")
+AGG_PRED_RE = re.compile(r"^(count|distinct|distinct_over)\((.*)\)$")
+AGG_FIELD_RE = re.compile(r"^(?:line|[A-Za-z_#][A-Za-z0-9_.#\-]*)$")
+AGG_FILTER_RE = re.compile(
+    r"^(?P<field>line|[A-Za-z_#][A-Za-z0-9_.#\-]*)\s*(?P<op>~=|!=|>=|<=|=)\s*"
+    r"(?P<value>.+)$")
+AGG_OPS = ("~=", "!=", ">=", "<=", "=")
+# `>=` / `<=` are LEXICOGRAPHIC, and the docstring's whole defence of that is
+# «the window predicate this exists for is an ISO-8601 timestamp, where
+# lexicographic and chronological order coincide». Nothing enforced it, so
+# `count(Event.System.EventID<=5) = 33841` verified — those are 4625/4624
+# events, and "EventID <= 5" is numerically absurd. Lexicographic order is
+# honest only for a zero-padded fixed-width encoding; ISO-8601 is the one such
+# encoding in this vocabulary. So the operator is CONSTRAINED to it rather than
+# quietly reinterpreted: a numeric comparison the gate cannot do honestly is
+# refused, not approximated. Range comparisons on numbers stay unavailable —
+# say what you mean with `=` / `~=`, or state the number in prose beside a
+# `count(...)` that is exact.
+AGG_ORDERED_VALUE_RE = re.compile(
+    r"^\d{4}-\d{2}-\d{2}"
+    r"(?:[T ]\d{2}(?::\d{2}(?::\d{2}(?:\.\d{1,9})?)?)?"
+    r"(?:Z|[+-]\d{2}:?\d{2})?)?$")
+# A one-character `~=` value is not a filter, it is «records that have this
+# field», dressed as one: `count(Event.EventData.SubStatus~=0) = 33456` on the
+# real corpus. Two characters is not a cure for that class — the population
+# guard below is — but it removes the cheapest instance of it.
+AGG_MIN_CONTAINS = 2
+AGG_VERDICTS = ("ok", "malformed", "missing-file", "ambiguous", "binary-file",
+                "not-tabular", "unknown-field", "zero-match", "too-broad",
+                "count-mismatch", "command-mismatch", "unreadable")
+
+_MISSING = object()
+
+
+class AggError(Exception):
+    """Malformed aggregate citation. Carries the reason the report will print."""
+
+
+def _agg_strip_wrap(s):
+    s = s.strip()
+    for a, b in (("`", "`"), ("«", "»"), ('"', '"'), ("**", "**")):
+        while len(s) > len(a) + len(b) and s.startswith(a) and s.endswith(b):
+            s = s[len(a):len(s) - len(b)].strip()
+    return s
+
+
+def _agg_split_args(inner):
+    """Split predicate arguments on commas. No nesting: a value containing a
+    comma or a parenthesis is a parse error, not a guess."""
+    if "(" in inner or ")" in inner:
+        raise AggError("в аргументах предиката не может быть скобок")
+    return [a.strip() for a in inner.split(",")] if inner.strip() else []
+
+
+def agg_parse_predicate(text):
+    """`count(a=b, c=d)` -> a dict. Raises AggError. The ONE parser."""
+    text = text.strip()
+    m = AGG_PRED_RE.match(text)
+    if not m:
+        raise AggError("предикат должен быть count(...), distinct(...) "
+                       "или distinct_over(...)")
+    kind, inner = m.group(1), m.group(2)
+    args = _agg_split_args(inner)
+    field, threshold = None, None
+    if kind in ("distinct", "distinct_over"):
+        if not args:
+            raise AggError("%s(...) требует поле первым аргументом" % kind)
+        field = args.pop(0)
+        if not AGG_FIELD_RE.match(field):
+            raise AggError("не поле: %s" % field)
+        if field == "line":
+            raise AggError("distinct по псевдополю line не поддерживается")
+    if kind == "distinct_over":
+        if not args:
+            raise AggError("distinct_over(поле, N) требует порог N")
+        raw = args.pop(0)
+        if not raw.isdigit():
+            raise AggError("порог distinct_over должен быть целым: %s" % raw)
+        threshold = int(raw)
+        if threshold < 1:
+            raise AggError("порог distinct_over должен быть >= 1")
+    filters = []
+    for a in args:
+        fm = AGG_FILTER_RE.match(a)
+        if not fm:
+            raise AggError("фильтр не разобран (нужно поле=значение): %s" % a)
+        filters.append((fm.group("field"), fm.group("op"),
+                        fm.group("value").strip()))
+    if kind == "count" and not filters:
+        raise AggError("count() без фильтров считает весь файл — это не улика")
+    if len(filters) > MAX_AGG_FILTERS:
+        raise AggError("слишком много фильтров (максимум %d)" % MAX_AGG_FILTERS)
+    fields = ([field] if field else []) + [f for f, _o, _v in filters]
+    if any(f == "line" for f in fields) and any(f != "line" for f in fields):
+        raise AggError("предикат смешивает line и поля JSON — так нельзя")
+    for f, op, v in filters:
+        if f == "line" and op in (">=", "<="):
+            raise AggError("для псевдополя line допустимы только =, != и ~=")
+        if op == "~=" and len(v) < AGG_MIN_CONTAINS:
+            raise AggError(
+                "значение для ~= короче %d символов: «%s» — такой фильтр "
+                "совпадает почти со всем и означает «у записи есть это поле», "
+                "а не «поле равно чему-то»" % (AGG_MIN_CONTAINS, v))
+        if op in (">=", "<=") and not AGG_ORDERED_VALUE_RE.match(v):
+            raise AggError(
+                "сравнение %s лексикографическое и допустимо только для "
+                "значения в форме ISO-8601 (2021-06-01 или "
+                "2021-06-01T18:36:04.949933Z); «%s» не такое — для чисел "
+                "лексикографический порядок врёт" % (op, v))
+    return {"kind": kind, "field": field, "threshold": threshold,
+            "filters": filters, "text": text,
+            "mode": "line" if "line" in fields else "json"}
+
+
+def agg_parse_line(body):
+    """The whole `агрегат:` body -> a parsed citation dict. Raises AggError."""
+    m = AGG_BODY_RE.match(body.strip())
+    if not m:
+        raise AggError("строка не разобрана; формат: "
+                       "агрегат: <путь> · <предикат> = <число> · <команда>")
+    pred = agg_parse_predicate(m.group("pred"))
+    path = m.group("qpath") or m.group("path")
+    if '"' in path:
+        raise AggError("в пути не может быть символа \" — переименуй файл")
+    return {"path": path, "predicate": pred,
+            "claimed": int(m.group("count")),
+            "command": _agg_strip_wrap(m.group("cmd"))}
+
+
+# ---- rendering the reproducing command (never executed, only compared) -----
+def _sh_q(s):
+    return "'" + s.replace("'", "'\\''") + "'"
+
+
+def _jq_s(s):
+    return json.dumps(s, ensure_ascii=False)
+
+
+def _jq_path(field):
+    return "." + ".".join(('"%s"' % p) if not re.match(r"^[A-Za-z_][A-Za-z0-9_]*$", p)
+                          else p for p in field.split("."))
+
+
+def agg_quote_path(path):
+    """The path as it appears IN the citation line. Bare when it can be, double
+    quoted when a space or the `·` separator would otherwise break the grammar.
+    `agg_parse_line` reads both, so producer and grader round-trip."""
+    if '"' in path:
+        raise AggError("в пути не может быть символа \" — переименуй файл")
+    if path == "" or any(c.isspace() for c in path) or "\u00b7" in path:
+        return '"%s"' % path
+    return path
+
+
+def _jq_cond(field, op, value):
+    """One filter, as jq — and it must decide EXACTLY what `_agg_cmp` decides.
+
+    It did not. `_agg_str` returns None for a field that is absent or JSON
+    null, and `agg_evaluate` then EXCLUDES the record — absence is not
+    evidence. The rendered jq said only `(.f|tostring) != "v"`, and in jq a
+    missing path is `null`, whose `tostring` is the string "null", which
+    happily satisfies `!=` and `contains`. Measured on the real corpus:
+    `count(Event.EventData.IpAddress!=-)` — the gate says 33455, the command it
+    printed says 34728. The entire justification for shipping a command is that
+    a human can reproduce the number; for `!=` and `~=` they could not.
+    `distinct(...)` only looked right because the trailing `// empty` masked
+    the same bug.
+
+    So every condition is now guarded by presence: `!= null` first, and the
+    whole thing wrapped in `try … catch false` so a path through a non-object
+    (which `_agg_get` reports as absent) is excluded rather than an error.
+    `false` survives the guard, because `_agg_str(False)` is "false".
+    """
+    p = _jq_path(field)
+    lhs = "(%s|tostring)" % p
+    if op == "=":
+        cmp_ = "%s == %s" % (lhs, _jq_s(value))
+    elif op == "!=":
+        cmp_ = "%s != %s" % (lhs, _jq_s(value))
+    elif op == "~=":
+        cmp_ = "(%s|contains(%s))" % (lhs, _jq_s(value))
+    else:
+        cmp_ = "%s %s %s" % (lhs, op, _jq_s(value))
+    return "(try (%s != null and %s) catch false)" % (p, cmp_)
+
+
+def agg_render_command(path, pred):
+    """The pasteable rendering of a predicate. Deterministic; the gate compares
+    the report's command to this string and NEVER runs either one."""
+    if pred["mode"] == "line":
+        f, op, v = pred["filters"][0]
+        if len(pred["filters"]) != 1:
+            raise AggError("для псевдополя line поддерживается ровно один фильтр")
+        if op == "=":
+            return "grep -c -x -F -- %s %s" % (_sh_q(v), _sh_q(path))
+        if op == "!=":
+            return "grep -c -v -x -F -- %s %s" % (_sh_q(v), _sh_q(path))
+        return "grep -c -F -- %s %s" % (_sh_q(v), _sh_q(path))
+    conds = " and ".join(_jq_cond(f, o, v) for f, o, v in pred["filters"])
+    sel = "select(%s) | " % conds if conds else ""
+    if pred["kind"] == "count":
+        return "jq -c %s -- %s | wc -l" % (_sh_q("select(%s)" % conds), _sh_q(path))
+    # `X // empty` also drops `false` and, for a missing path, printed nothing
+    # only by luck. `agg_evaluate` skips a value that is absent, null or the
+    # empty string and keeps everything else, including `false`. Say that.
+    val = ("%s(try (%s) catch null) | select(. != null) | tostring "
+           "| select(. != \"\")" % (sel, _jq_path(pred["field"])))
+    if pred["kind"] == "distinct":
+        return "jq -r %s -- %s | sort -u | wc -l" % (_sh_q(val), _sh_q(path))
+    return ("jq -r %s -- %s | sort | uniq -c | awk %s | wc -l"
+            % (_sh_q(val), _sh_q(path),
+               _sh_q("$1 > %d" % pred["threshold"])))
+
+
+def agg_render_citation(path, pred, count):
+    return "агрегат: %s · %s = %d · `%s`" % (
+        agg_quote_path(path), pred["text"], count,
+        agg_render_command(path, pred))
+
+
+# ---- evaluation ----------------------------------------------------------
+def _agg_get(rec, field):
+    cur = rec
+    for part in field.split("."):
+        if isinstance(cur, dict) and part in cur:
+            cur = cur[part]
+        else:
+            return _MISSING
+    return cur
+
+
+def _agg_str(v):
+    if v is None or v is _MISSING:
+        return None
+    if v is True:
+        return "true"
+    if v is False:
+        return "false"
+    if isinstance(v, float) and v.is_integer():
+        return str(int(v))
+    if isinstance(v, (dict, list)):
+        return json.dumps(v, ensure_ascii=False, sort_keys=True,
+                          separators=(",", ":"))
+    return str(v)
+
+
+def _agg_cmp(sv, op, value):
+    if op == "=":
+        return sv == value
+    if op == "!=":
+        return sv != value
+    if op == "~=":
+        return value in sv
+    if op == ">=":
+        return sv >= value
+    return sv <= value
+
+
+def agg_evaluate(abspath, pred):
+    """-> (verdict, actual_or_None, detail). Pure, deterministic, no shell.
+
+    Fails closed: any unexpected condition becomes a named non-`ok` verdict.
+    """
+    fields = ([pred["field"]] if pred["field"] else []) \
+        + [f for f, _o, _v in pred["filters"]]
+    seen_field = dict((f, False) for f in fields)
+    total = 0
+    parsed = 0
+    unparsed = 0
+    matched = 0
+    present = 0        # records where EVERY filter field is there to test
+    values = {}
+    try:
+        op = opener(abspath)
+        with op(abspath, "rt", encoding="utf-8", errors="replace") as fh:
+            for raw in fh:
+                total += 1
+                if total > MAX_AGG_LINES:
+                    return ("unreadable", None,
+                            "файл длиннее %d строк" % MAX_AGG_LINES)
+                if pred["mode"] == "line":
+                    text = raw.rstrip("\n")
+                    parsed += 1
+                    present += 1
+                    seen_field["line"] = True
+                    if all(_agg_cmp(text, o, v) for _f, o, v in pred["filters"]):
+                        matched += 1
+                    continue
+                line = raw.strip()
+                if not line:
+                    continue
+                try:
+                    rec = json.loads(line)
+                except ValueError:
+                    unparsed += 1
+                    continue
+                if not isinstance(rec, dict):
+                    unparsed += 1
+                    continue
+                parsed += 1
+                ok = True
+                all_there = True
+                for f, o, v in pred["filters"]:
+                    sv = _agg_str(_agg_get(rec, f))
+                    if sv is None:
+                        ok = False
+                        all_there = False
+                        continue
+                    seen_field[f] = True
+                    if not _agg_cmp(sv, o, v):
+                        ok = False
+                if all_there:
+                    present += 1
+                if not ok:
+                    continue
+                if pred["field"]:
+                    sv = _agg_str(_agg_get(rec, pred["field"]))
+                    if sv is None or sv == "":
+                        continue
+                    seen_field[pred["field"]] = True
+                    values[sv] = values.get(sv, 0) + 1
+                matched += 1
+    except OSError as e:
+        return "unreadable", None, "не читается: %s" % e
+    except Exception as e:                                # fail closed
+        return "unreadable", None, "ошибка разбора: %s" % e
+
+    if pred["mode"] == "json" and parsed == 0:
+        return ("not-tabular", None,
+                "в файле нет ни одной JSON-записи (%d строк не разобрано); "
+                "агрегат по полям JSON требует JSONL" % unparsed)
+    if pred["mode"] == "json" and unparsed > parsed:
+        return ("not-tabular", None,
+                "разобрано %d записей, не разобрано %d — это не JSONL"
+                % (parsed, unparsed))
+    for f, was in seen_field.items():
+        if not was:
+            return ("unknown-field", None,
+                    "поля «%s» нет ни в одной записи файла" % f)
+
+    if pred["kind"] == "count":
+        actual = matched
+        # NOT `parsed`. `too-broad` fired only on «matched every record in the
+        # file», so a predicate that matched every record that merely HAS the
+        # field walked through: on the real corpus
+        # `count(Event.EventData.IpAddress!=zzzz) = 33643` and
+        # `count(Event.EventData.SubStatus~=0) = 33456` both graded ok. Each is
+        # «how many records have this field» wearing a filter, and each reads
+        # in a report as a substantive census — the cheapest path to a big
+        # true-looking number. The honest population for a count is the set of
+        # records the filter could have discriminated between, so that is what
+        # it is compared against. This is strictly tighter than the old rule
+        # (present <= parsed), never looser.
+        population = present
+    elif pred["kind"] == "distinct":
+        actual = len(values)
+        population = parsed
+    else:
+        actual = sum(1 for v in values.values() if v > pred["threshold"])
+        population = len(values)
+
+    if actual == 0:
+        return "zero-match", 0, "предикат не совпал ни с чем"
+    if population and actual == population:
+        return ("too-broad", actual,
+                "предикат совпал со ВСЕЙ популяцией (%d из %d) — "
+                "утверждение «все записи» ничего не доказывает"
+                % (actual, population))
+    return "ok", actual, ""
+
+
+def agg_extract(report, structural=None):
+    """-> [{lineno, body, ...}] every `агрегат:` line outside code fences."""
+    lines = report.splitlines()
+    structural = structural if structural is not None else structural_mask(lines)
+    out = []
+    for i, line in enumerate(lines, 1):
+        if not structural[i - 1]:
+            continue
+        m = AGG_LINE_RE.match(line)
+        if m:
+            out.append({"report_line": i, "body": m.group("body")})
+    return out
+
+
+def aggregates_check(report, root, by_rel=None, by_base=None):
+    """Grade every aggregate citation in the report. Never runs a command."""
+    if by_rel is None:
+        by_rel, by_base = index_corpus(root)
+    items = []
+    for raw in agg_extract(report):
+        item = {"report_line": raw["report_line"], "raw": raw["body"],
+                "path": None, "predicate": None, "claimed": None,
+                "actual": None, "verdict": "malformed", "detail": "",
+                "suggest": None}
+        try:
+            parsed = agg_parse_line(raw["body"])
+        except AggError as e:
+            item["detail"] = str(e)
+            items.append(item)
+            continue
+        except Exception as e:                            # fail closed
+            item["detail"] = "разбор упал: %s" % e
+            items.append(item)
+            continue
+        pred = parsed["predicate"]
+        item.update({"path": parsed["path"], "predicate": pred["text"],
+                     "claimed": parsed["claimed"],
+                     "command": parsed["command"]})
+        cand, how = resolve(parsed["path"], by_rel, by_base)
+        if not cand:
+            item.update(verdict="missing-file",
+                        detail="в корпусе такого файла нет")
+            items.append(item)
+            continue
+        if how.endswith("ambiguous"):
+            item.update(verdict="ambiguous", candidate_paths=cand,
+                        detail="путь означает %d разных файла" % len(cand))
+            items.append(item)
+            continue
+        rel = cand[0]
+        item["resolved"] = rel
+        if looks_binary(by_rel[rel]):
+            item.update(verdict="binary-file",
+                        detail="двоичный файл — отрендерь в текст")
+            items.append(item)
+            continue
+        try:
+            expect_cmd = agg_render_command(rel, pred)
+        except AggError as e:
+            item.update(verdict="malformed", detail=str(e))
+            items.append(item)
+            continue
+        verdict, actual, detail = agg_evaluate(by_rel[rel], pred)
+        item.update(verdict=verdict, actual=actual, detail=detail)
+        if verdict != "ok":
+            items.append(item)
+            continue
+        if actual != parsed["claimed"]:
+            item.update(verdict="count-mismatch",
+                        detail="в отчёте %d, пересчёт даёт %d"
+                               % (parsed["claimed"], actual),
+                        suggest=agg_render_citation(rel, pred, actual))
+            items.append(item)
+            continue
+        if parsed["command"] != expect_cmd:
+            item.update(verdict="command-mismatch",
+                        detail="команда не является рендером предиката",
+                        expected_command=expect_cmd,
+                        suggest=agg_render_citation(rel, pred, actual))
+            items.append(item)
+            continue
+        items.append(item)
+    blocking = sum(1 for i in items if i["verdict"] != "ok")
+    return {"items": items, "total": len(items),
+            "ok": len(items) - blocking, "blocking": blocking}
+
+
+def render_aggregates(a):
+    if not a or not a["total"]:
+        return ""
+    out = ["АГРЕГАТЫ: %d ссылок на популяцию, блокирующих %d"
+           % (a["total"], a["blocking"])]
+    for i in a["items"]:
+        mark = "✓" if i["verdict"] == "ok" else "✗"
+        out.append("%s %-16s строка %d: %s"
+                   % (mark, i["verdict"], i["report_line"], i["raw"][:120]))
+        if i["detail"]:
+            out.append("    %s" % i["detail"])
+        if i.get("expected_command"):
+            out.append("    команда должна быть: %s" % i["expected_command"])
+        if i.get("suggest"):
+            out.append("    например: %s" % i["suggest"])
+        if i["verdict"] == "malformed":
+            out.append("    не пиши агрегат руками — "
+                       "cite.py --corpus <корпус> --file <путь> "
+                       "--aggregate '<предикат>'")
+    return "\n".join(out)
+
+
 def _blocking_total(d, report, ledger_path=None, report_path=None):
     """The stop number, taken from `ledger()` itself when there is a ledger.
 
@@ -1582,27 +2213,32 @@ def _blocking_total(d, report, ledger_path=None, report_path=None):
     bad = sum(summary.get(k, 0) for k in BAD)
     o = d.get("outcomes") or {}
     ev = d.get("report_evidence") or report_evidence(report, d)
+    agg = d.get("aggregates") or {"blocking": 0}
     return (bad + (summary.get("не-ссылка") or 0)
-            + (o.get("blocking") or 0) + (ev.get("blocking") or 0))
+            + (o.get("blocking") or 0) + (ev.get("blocking") or 0)
+            + (agg.get("blocking") or 0))
 
 
 def ledger(d, report, path, report_path=None):
     rows, closed = read_ledger(path)
     open_rows = [r for r in rows
                  if r["state"] == "open" and not (set(r["ids"]) & closed)]
-    unproven, n_find = findings_without_evidence(report, d["citations"])
+    agg = d.get("aggregates") or {"items": [], "total": 0, "blocking": 0}
+    unproven, n_find = findings_without_evidence(report, d["citations"], agg)
     o = d.get("outcomes") or outcomes_of(report)
     s = d["summary"]
     bad = sum(s[k] for k in BAD)
     nonref = s["не-ссылка"]
-    out = ["", "ЛЕДЖЕР — условие остановки (все пять чисел обязаны быть 0)",
+    out = ["", "ЛЕДЖЕР — условие остановки (все шесть чисел обязаны быть 0)",
            "  неразобранных строк: %d из %d" % (len(open_rows), len(rows)),
            "  находок без подтверждённой цитаты: %d из %d" % (len(unproven), n_find),
            "  находок без строки «исход»: %d из %d"
            % (len(o["missing"]) + len(o["invalid"]), n_find),
            "  плохих цитат (wrong-content/out-of-range/missing-file/без цитаты): %d"
            % bad,
-           "  ссылок, которые я не проверял (не разрешились в корпусе): %d" % nonref]
+           "  ссылок, которые я не проверял (не разрешились в корпусе): %d" % nonref,
+           "  агрегатов, не сошедшихся с корпусом: %d из %d"
+           % (agg["blocking"], agg["total"])]
     if open_rows:
         out.append("")
         out.append("  первые незакрытые строки:")
@@ -1622,8 +2258,12 @@ def ledger(d, report, path, report_path=None):
     if ev_block:
         out.append("")
         out.append(ev_block)
+    agg_block = render_aggregates(agg)
+    if agg_block:
+        out.append("")
+        out.append(agg_block)
     total = (len(open_rows) + len(unproven) + bad + nonref + o["blocking"]
-             + ev.get("blocking", 0))
+             + ev.get("blocking", 0) + agg["blocking"])
     out.append("")
     if total:
         out.append("ИТОГ: НЕ ЗАКОНЧЕНО — осталось %d" % total)
@@ -1723,7 +2363,8 @@ def not_in_checked(checked, delivered):
 def delivery_failed(dd):
     return bool(any(dd["summary"][k] for k in BAD) or dd["not_in_checked"]
                 or (dd.get("outcomes") or {}).get("blocking")
-                or (dd.get("report_evidence") or {}).get("blocking"))
+                or (dd.get("report_evidence") or {}).get("blocking")
+                or (dd.get("aggregates") or {}).get("blocking"))
 
 
 def render_delivery(dd):
@@ -1826,6 +2467,10 @@ def render(d):
     if ev:
         out.append("")
         out.append(ev)
+    agg = render_aggregates(d.get("aggregates"))
+    if agg:
+        out.append("")
+        out.append(agg)
     return "\n".join(out)
 
 
@@ -1909,7 +2554,8 @@ def main():
     # whether a paid run is deliverable must not rest on an accident.
     blocking_defects = bool(any(d["summary"][k] for k in BAD)
                             or d["outcomes"]["blocking"]
-                            or d.get("report_evidence", {}).get("blocking"))
+                            or d.get("report_evidence", {}).get("blocking")
+                            or (d.get("aggregates") or {}).get("blocking"))
     if args.ledger:
         if not args.json:
             print(body)
