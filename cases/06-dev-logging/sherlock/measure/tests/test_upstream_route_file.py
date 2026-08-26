@@ -227,8 +227,24 @@ class Base(unittest.TestCase):
             time.sleep(0.02)
         return []
 
-    def calls_only(self):
-        return [r for r in self.rows(0) if not r.get("event")]
+    def calls_only(self, want=1):
+        """The CALL rows, once at least `want` of them have landed.
+
+        `rows(0)` returns on the FIRST read — `len(out) >= 0` is always true —
+        so this used to wait for nothing at all, while the proxy writes a call's
+        ledger row AFTER the client's bytes go out. Measured on this box: about
+        one run in ten failed here with 1 of 2 rows read. The wait has to be on
+        the CALL rows specifically, because `rows` counts `event` rows too and a
+        run with a route advance would satisfy a call-row count it never
+        actually reached.
+        """
+        calls = []
+        for _ in range(300):
+            calls = [r for r in self.rows(0) if not r.get("event")]
+            if len(calls) >= want:
+                return calls
+            time.sleep(0.02)
+        return calls
 
 
 # ============================================================== 1. the swap
@@ -258,7 +274,7 @@ class SwapTest(Base):
         self.assertIsNone(self.proc.poll(), "proxy died — that is a restart")
         self.assertEqual(pid, self.proc.pid)
 
-        rows = self.calls_only()
+        rows = self.calls_only(2)
         self.assertEqual([r["route_base"] for r in rows], [a.base, b.base])
         self.assertEqual([r["sent_model"] for r in rows], [MODEL_A, MODEL_B])
         self.assertEqual([r["route_expected_identity"] for r in rows],
@@ -371,7 +387,7 @@ class InFlightTest(Base):
         self.assertEqual(answered["stub"], "A")
         self.assertEqual(answered["model"], MODEL_A)
         self.assertEqual(b.seen, [], "the in-flight call moved provider")
-        row = self.calls_only()[0]
+        row = self.calls_only(1)[0]
         self.assertEqual((row["route_base"], row["sent_model"],
                           row["route_expected_identity"], row["route_generation"]),
                          (a.base, MODEL_A, MODEL_A, 1))
@@ -414,7 +430,7 @@ class InFlightTest(Base):
 
         self.assertEqual(set(codes), {200},
                          "a swap produced a refusal: %r" % sorted(set(codes)))
-        rows = self.calls_only()
+        rows = self.calls_only(100)
         self.assertEqual(len(rows), 100)
         for index, row in enumerate(rows, 1):
             got = (row["route_base"], row["sent_model"],
@@ -698,7 +714,7 @@ class EnvOnlyTest(Base):
         self.assertEqual(code, 200, body)
         self.assertEqual(json.loads(body)["model"], MODEL_A)
         self.assertEqual(a.seen[0]["model"], MODEL_A)
-        row = self.calls_only()[0]
+        row = self.calls_only(1)[0]
         self.assertEqual(row["sent_model"], MODEL_A)
         # NO ROUTE FIELD AT ALL. A run that does not use the feature keeps the
         # exact ledger shape every previous run wrote, so no existing reader
