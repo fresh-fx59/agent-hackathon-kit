@@ -690,8 +690,15 @@ exit 0
                 self.assertEqual(json.load(fh)["model"], "[SP]deepseek-v4-flash")
 
     def test_a_model_with_no_prefix_is_passed_through_untouched(self):
+        # SHERLOCK_SUBSTITUTION_RETRY=0 because this stub answers as
+        # `DeepSeek-V4-Flash` no matter what it was asked for, so a
+        # `qwen3-coder-plus` lane sees a wrong-family answer on every call and
+        # the lane default re-issues it twice before failing closed. That is the
+        # intended behaviour (measure/tests/test_substitution_retry.py); this
+        # test is about the ID pass-through, so it keeps the call count at one.
         with tempfile.TemporaryDirectory() as d:
-            argv, seen, _rd = self.go(d, {"SHERLOCK_MODEL": "qwen3-coder-plus"})
+            argv, seen, _rd = self.go(d, {"SHERLOCK_MODEL": "qwen3-coder-plus",
+                                          "SHERLOCK_SUBSTITUTION_RETRY": "0"})
             self.assertEqual(self.cli_model(argv), "qwen3-coder-plus")
             self.assertEqual([r.get("model") for r in seen], ["qwen3-coder-plus"])
 
