@@ -88,6 +88,7 @@ citation is ok or unverifiable, 1 when any is wrong-content / out-of-range /
 missing-file / ambiguous, 2 on usage error.
 """
 import argparse
+import importlib.util
 import gzip
 import io
 import json
@@ -1457,6 +1458,316 @@ def resolve_coverage_path(path, by_rel, by_base):
     return normalized, candidates, None
 
 
+# --------------------------------------------------------------------------
+# v38: окно записей — did records go missing INSIDE the window we reason about?
+#
+# WHY A GATE AND NOT JUST A TOOL. covermap.py pairs with the coverage rules in
+# this file for one reason the v37 run proved: the arm omits whatever the gate
+# does not demand. `rollover.py` can compute the window for every channel in
+# 3.6 s, and on the v37 report that number appears nowhere, because nothing
+# asked for it. A number nobody is required to state is a number that will not
+# be stated. So the producer is rollover.py and the grader is here — and the
+# grader RE-DERIVES the truth from the corpus rather than believing the report.
+#
+# WHAT THE REPORT OWES (see rollover.required_keys for the full argument):
+#   1. one «итог:» line whose six counts equal the gate's own scan;
+#   2. one row per channel WITH A GAP;
+#   3. one row per channel of a file that a FINDING cites — the anchor case:
+#      the false «402 000 evicted from Security.jsonl» claim was about exactly
+#      the channel the findings rested on.
+# NOT one row per corpus file. The coverage table already costs 143 rows for
+# 143 files and the project has an open question about whether that survives a
+# 10 000-file corpus; a second full-corpus table doubles a cost already in
+# doubt. This set is bounded by findings + gaps, not by corpus size.
+#
+# EVERY COUNTER BELOW FEEDS THE ONE `blocking` SUM AT THE END OF
+# report_evidence(). There is no second ledger: defect #4 two rounds ago was a
+# private counter that printed 160 where the gate printed 161.
+# MATCHED AGAINST SECTION TITLES. Keep it NARROW. The `rollover|ротаци`
+# aliases that used to live here were a false positive with teeth: in a
+# log-analysis case «Ротация журналов» is an ordinary finding title, and any
+# section whose heading matched became a rollover span, so every `|`-line in
+# it was parsed as a rollover row and counted as `malformed`. The only escape
+# the arm had was renaming its finding. One spelling, the one the tool emits.
+ROLLOVER_SECTION_RE = re.compile(r"окно\s+запис", re.IGNORECASE)
+ROLLOVER_SUMMARY_RE = re.compile(r"^\s*(?:[-*+>]\s*)?(?:\*\*|__)?\s*итог\s*:",
+                                 re.IGNORECASE)
+_RO_NUM = r"[\d   ]+"
+ROLLOVER_KEYS = ("файлов", "каналов", "сплошных", "с-пропусками",
+                 "неприменимо", "ошибок")
+ROLLOVER_FIELDS = {"files": "файлов", "channels": "каналов",
+                   "contiguous": "сплошных", "gapped": "с-пропусками",
+                   "na": "неприменимо", "errors": "ошибок"}
+ROLLOVER_WINDOW_RE = re.compile(
+    r"окно\s*[:=]?\s*(" + _RO_NUM + r")\s*[-‐-―~.]{1,2}\s*(" + _RO_NUM + r")")
+ROLLOVER_RECORDS_RE = re.compile(r"запис(?:ей|и|ь)\s*[:=]\s*(" + _RO_NUM + r")")
+ROLLOVER_MISSING_RE = re.compile(r"нет\s*[:=]\s*(" + _RO_NUM + r")")
+
+
+def _ro_int(text):
+    """«34 916», «34 916» and «34916» are the same number; anything else is None."""
+    s = re.sub(r"[  \s]", "", text or "")
+    return int(s) if s.isdigit() else None
+
+
+def load_rollover():
+    """One definition of the scan, shared by the producer and this grader.
+
+    Missing or broken module = a blocking defect, never a skip: `scan_failed`.
+    """
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "rollover.py")
+    spec = importlib.util.spec_from_file_location("_sherlock_rollover", path)
+    if spec is None or spec.loader is None:
+        raise ImportError("rollover.py не загружается: %s" % path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def rollover_summary_line(lines, spans, structural):
+    """-> (parsed dict or None, list of report_lines carrying «итог:»)."""
+    hits = []
+    for i in range(1, len(lines) + 1):
+        if not structural[i - 1] or not _in_spans(i, spans):
+            continue
+        if ROLLOVER_SUMMARY_RE.match(lines[i - 1]):
+            hits.append(i)
+    if not hits:
+        return None, []
+    text = lines[hits[0] - 1]
+    got = {}
+    for key in ROLLOVER_KEYS:
+        m = re.search(re.escape(key) + r"\s*[:=]\s*(" + _RO_NUM + r")", text)
+        got[key] = _ro_int(m.group(1)) if m else None
+    return got, hits
+
+
+def rollover_rows(lines, spans, structural):
+    """Parse the «окно записей» table. Unparseable rows are defects, not noise."""
+    rows, malformed = [], []
+    for lo, hi in spans:
+        for i in range(lo, min(hi, len(lines) + 1)):
+            if not structural[i - 1]:
+                continue
+            raw = lines[i - 1]
+            if not raw.lstrip().startswith("|") or TABLE_SEP_RE.match(raw):
+                continue
+            cells = split_cells(raw)
+            if cells and cells[0].strip().lower() in ("путь", "path", "файл", "file"):
+                continue
+            if len(cells) < 3:
+                malformed.append(i)
+                continue
+            tail = " | ".join(cells[2:])
+            w = ROLLOVER_WINDOW_RE.search(tail)
+            n = ROLLOVER_RECORDS_RE.search(tail)
+            g = ROLLOVER_MISSING_RE.search(tail)
+            if not (w and n and g):
+                malformed.append(i)
+                continue
+            lo_id, hi_id = _ro_int(w.group(1)), _ro_int(w.group(2))
+            recs, miss = _ro_int(n.group(1)), _ro_int(g.group(1))
+            if None in (lo_id, hi_id, recs, miss):
+                malformed.append(i)
+                continue
+            rows.append({"report_line": i, "path": cells[0], "channel": cells[1],
+                         "lo": lo_id, "hi": hi_id, "records": recs,
+                         "missing": miss})
+    return rows, malformed
+
+
+ROLLOVER_ROW_SHAPE_RE = re.compile(
+    r"окно\s*[:=].*запис(?:ей|и|ь)\s*[:=].*нет\s*[:=]", re.IGNORECASE)
+
+
+def misplaced_rollover_rows(lines, structural):
+    """Report lines that LOOK like «окно записей» rows but sit outside the section.
+
+    Without this the diagnosis for a nested table is «дубликаты покрытия» and
+    «строки покрытия без адреса» — twelve messages, none of which says the word
+    rollover, for what is really one placement mistake.
+    """
+    hits = []
+    for i, raw in enumerate(lines, 1):
+        if not structural[i - 1]:
+            continue
+        if not raw.lstrip().startswith("|"):
+            continue
+        if ROLLOVER_ROW_SHAPE_RE.search(raw):
+            hits.append(i)
+    return hits
+
+
+def rollover_evidence(report, corpus, cited_paths, structural=None, sections=None):
+    """The whole «окно записей» verdict, as counters. Fails closed everywhere."""
+    lines = report.splitlines()
+    structural = structural if structural is not None else structural_mask(lines)
+    sections = sections if sections is not None else _sections(report, structural)
+    spans = _spans_for(sections, ROLLOVER_SECTION_RE)
+    out = {"missing_section": False, "summary_missing": False,
+           "summary_duplicate": False, "summary_mismatch": None,
+           "undeclared": [], "wrong": [], "spurious": [], "duplicate_rows": [],
+           "malformed": [], "scan_errors": [], "scan_failed": None,
+           "misplaced_rows": [], "nested_section": False,
+           "scan": None, "required": 0, "blocking": 0}
+
+    try:
+        ro = load_rollover()
+        if not (corpus and os.path.isdir(corpus)):
+            raise OSError("нет каталога корпуса: %r" % corpus)
+        scan = ro.scan_corpus(corpus)
+    except Exception as exc:
+        # An exception in the check is NOT a clean run. This repo has shipped a
+        # guard that failed open on a malformed gates.json; not twice.
+        out["scan_failed"] = "%s: %s" % (type(exc).__name__, exc)
+        out["blocking"] = 1
+        return out
+
+    out["scan"] = {k: scan[k] for k in
+                   ("files", "channels", "contiguous", "gapped", "na",
+                    "errors", "lost")}
+    out["scan_errors"] = [{"path": e["path"], "detail": e["detail"]}
+                          for e in scan["entries"] if e["status"] == ro.ERR]
+
+    want = ro.required_keys(scan, cited_paths)
+    out["required"] = len(want)
+
+    if not spans:
+        out["missing_section"] = True
+        out["blocking"] = 1 + len(out["scan_errors"]) + len(want)
+        out["undeclared"] = ["%s | %s" % k for k in sorted(want)]
+        # Nesting the table under another heading («# Покрытие» is the one that
+        # happens) is NOT a small mistake: the section stops existing, the rows
+        # are then read as COVERAGE rows, and every message names coverage while
+        # the real cause is placement. Say the real cause here.
+        out["misplaced_rows"] = misplaced_rollover_rows(lines, structural)
+        return out
+
+    # A section NESTED inside «Покрытие» (a deeper heading level) does not end
+    # where its author thinks: the span runs on to the next heading of the same
+    # level, so the coverage rows below it are read as rollover rows and every
+    # message names the wrong table. Name the real cause: placement.
+    cov = _spans_for(sections, COVERAGE_SECTION_RE)
+    out["nested_section"] = any(a < d and c < b
+                                for a, b in spans for c, d in cov)
+
+    summary, hits = rollover_summary_line(lines, spans, structural)
+    if summary is None:
+        out["summary_missing"] = True
+    else:
+        if len(hits) > 1:
+            out["summary_duplicate"] = True
+        bad = {}
+        for field, key in ROLLOVER_FIELDS.items():
+            if summary.get(key) != scan[field]:
+                bad[key] = {"заявлено": summary.get(key), "на диске": scan[field]}
+        if bad:
+            out["summary_mismatch"] = bad
+
+    rows, malformed = rollover_rows(lines, spans, structural)
+    out["malformed"] = malformed
+    seen = {}
+    for r in rows:
+        # The row was written by `row_for`, so its cells are ALREADY escaped.
+        key = ro.key_of_cells(r["path"], r["channel"])
+        seen.setdefault(key, []).append(r)
+    out["duplicate_rows"] = sorted("%s | %s" % k for k, v in seen.items()
+                                   if len(v) > 1)
+
+    for key, e in sorted(want.items()):
+        got = (seen.get(key) or [None])[0]
+        if got is None:
+            out["undeclared"].append("%s | %s" % key)
+            continue
+        if (got["lo"], got["hi"], got["records"], got["missing"]) != (
+                e["lo"], e["hi"], e["records"], e["missing"]):
+            out["wrong"].append(
+                {"line": got["report_line"], "row": "%s | %s" % key,
+                 "заявлено": "окно=%d–%d записей=%d нет=%d"
+                             % (got["lo"], got["hi"], got["records"], got["missing"]),
+                 "на диске": "окно=%d–%d записей=%d нет=%d"
+                             % (e["lo"], e["hi"], e["records"], e["missing"])})
+    # Declaring every channel «gapped» to be safe is not a cheap way out: a row
+    # the corpus does not support costs exactly as much as a missing one.
+    for key in sorted(seen):
+        if key not in want:
+            out["spurious"].append({"line": seen[key][0]["report_line"],
+                                    "row": "%s | %s" % key})
+
+    out["blocking"] = (int(out["summary_missing"]) + int(out["summary_duplicate"])
+                       + (1 if out["summary_mismatch"] else 0)
+                       + len(out["undeclared"]) + len(out["wrong"])
+                       + len(out["spurious"]) + len(out["duplicate_rows"])
+                       + len(out["malformed"]) + len(out["scan_errors"]))
+    return out
+
+
+def render_rollover(r):
+    if not r:
+        return ""
+    out = ["ОКНО ЗАПИСЕЙ v38: %d блокирующих дефектов" % r.get("blocking", 0)]
+    if r.get("scan_failed"):
+        out.append("  ПРОВЕРКА НЕ ОТРАБОТАЛА: %s — это НЕ «чисто»." % r["scan_failed"])
+        return "\n".join(out)
+    s = r.get("scan") or {}
+    # NOT «потеряно записей». «Lost» is the diagnosis, and «~402 000 записей
+    # вытеснено» is the exact false claim this whole check exists to prevent;
+    # printing it in the gate's own output re-introduces it. State the FACT:
+    # ids absent inside the window. The cause — filtered export or a real wrap —
+    # is the report's job, not this line's.
+    out.append("  на диске: файлов %d, каналов %d, сплошных %d, с пропусками %d, "
+               "неприменимо %d, ошибок %d, id нет внутри окон %d"
+               % (s.get("files", 0), s.get("channels", 0), s.get("contiguous", 0),
+                  s.get("gapped", 0), s.get("na", 0), s.get("errors", 0),
+                  s.get("lost", 0)))
+    if r.get("missing_section"):
+        out.append("  НЕТ РАЗДЕЛА «Окно записей». Добавь его: "
+                   "python3 rollover.py --corpus <корпус> --report --required-only "
+                   "--cite <файл-улики> >> report.md")
+    if r.get("nested_section"):
+        out.append("  РАЗДЕЛ ВЛОЖЕН в «Покрытие»: его строки читаются ещё и как "
+                   "строки ПОКРЫТИЯ (повторные пути, без адреса), а вложенный "
+                   "заголовок не кончается там, где ты думаешь. «Окно записей» "
+                   "обязан быть заголовком ВЕРХНЕГО уровня — «# Окно записей», "
+                   "или «## Окно записей» ПОСЛЕ всего раздела «Покрытие», "
+                   "НЕ внутри него.")
+    if r.get("misplaced_rows"):
+        out.append("  НО строки нужной формы в отчёте ЕСТЬ — строки %s. Раздел "
+                   "вложен в чужой: «# Окно записей» обязан быть заголовком "
+                   "ВЕРХНЕГО уровня (h1 «# », или h2 «## » сразу ПОСЛЕ раздела "
+                   "«Покрытие»), НЕ внутри него."
+                   % ", ".join(str(i) for i in r["misplaced_rows"][:10]))
+    if r.get("summary_missing"):
+        out.append("  нет строки «итог:» — раздел есть, чисел нет")
+    if r.get("summary_duplicate"):
+        out.append("  строк «итог:» больше одной — какая из них твоя?")
+    if r.get("summary_mismatch"):
+        out.append("  итог не сходится с диском: %s"
+                   % json.dumps(r["summary_mismatch"], ensure_ascii=False))
+    for k in ("undeclared", "duplicate_rows"):
+        if r.get(k):
+            out.append("  %s: %s" % ({"undeclared": "не объявлены окна",
+                                      "duplicate_rows": "повторные строки"}[k],
+                                     ", ".join(r[k][:10])))
+    if r.get("wrong"):
+        out.append("  окна заявлены неверно:")
+        for w in r["wrong"][:10]:
+            out.append("    строка %d %s — заявлено %s, на диске %s"
+                       % (w["line"], w["row"], w["заявлено"], w["на диске"]))
+    if r.get("spurious"):
+        out.append("  лишние строки (корпус их не подтверждает): %s"
+                   % ", ".join("строка %d %s" % (x["line"], x["row"])
+                               for x in r["spurious"][:10]))
+    if r.get("malformed"):
+        out.append("  строки не по схеме | путь | канал | окно=a–b | записей=n | нет=m |: %s"
+                   % ", ".join(str(i) for i in r["malformed"][:10]))
+    if r.get("scan_errors"):
+        out.append("  файлы, окно которых прочитать НЕ УДАЛОСЬ (каждый блокирует):")
+        for e in r["scan_errors"][:10]:
+            out.append("    %s — %s" % (e["path"], e["detail"]))
+    return "\n".join(out)
+
+
 def report_evidence(report, checked=None):
     """Machine-readable v26 evidence grammar for findings, rejections and coverage."""
     citations = (checked or {}).get("citations") or []
@@ -1666,6 +1977,17 @@ def report_evidence(report, checked=None):
         cov_uncovered = sorted(set(by_rel) - set(path_rows))
         cov_unexamined = sorted(set(path_rows) - examined)
 
+    # v38 rollover. `cited` = every corpus file a FINDING leans on; those
+    # channels owe a window even when they are contiguous, because "no such
+    # event in the log" is only sound inside a window with no holes.
+    cited_by_findings = set()
+    for _num, flo, fhi in finding_blocks_here:
+        for c in _line_citations(citations, flo, fhi):
+            if c.get("resolved"):
+                cited_by_findings.add(c["resolved"])
+    rollover = rollover_evidence(report, corpus, sorted(cited_by_findings),
+                                 structural, sections)
+
     blocking = (len(attr_missing) + len(attr_invalid) + len(finding_dupes)
                 + (1 if rejected_missing_section else 0)
                 + (1 if rejected_empty_section else 0)
@@ -1683,7 +2005,8 @@ def report_evidence(report, checked=None):
                 + len(cov_false_empty) + len(cov_false_binary)
                 + len(cov_duplicate_paths)
                 + len(cov_uncovered) + len(cov_unexamined)
-                + (1 if index_truncated else 0))
+                + (1 if index_truncated else 0)
+                + rollover["blocking"])
     return {
         "grammar": {
             "finding_attribution": "атрибуция: установлена|не установлена",
@@ -1740,6 +2063,7 @@ def report_evidence(report, checked=None):
                      "invalid_no_address_detail": [r["report_line"] for r in cov_smuggled],
                      "content_claim_in_no_address": [r["report_line"] for r in cov_smuggled],
                      "malformed": [r["report_line"] for r in cov_malformed]},
+        "rollover": rollover,
         "blocking": blocking,
     }
 
@@ -1870,6 +2194,9 @@ def render_report_evidence(e):
                    % ", ".join(str(x) for x in bad_no_addr))
     if e["blocking"]:
         out.append("  исправь грамматику: наблюдение = path:line + дословная цитата; без адреса — только закрытая деталь доступа вида байт=0, формат=двоичный, ошибка=код или причина=лимит.")
+    ro = render_rollover(e.get("rollover"))
+    if ro:
+        out.append("  " + ro.replace("\n", "\n  "))
     return "\n".join(out)
 
 

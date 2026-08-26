@@ -30,8 +30,37 @@ ROOT = Path(__file__).resolve().parents[5]
 V37 = ROOT / "cases" / "06-dev-logging" / "sherlock" / "skills" / "v37" / "tools"
 TOOL = V37 / "citecheck.py"
 COVERMAP = V37 / "covermap.py"
+ROLLOVER = V37 / "rollover.py"
 
 FAILED = []
+
+# v38 (PR #79) makes a report that cites corpus files owe an «Окно записей»
+# section. Without it `report_evidence()` counts a blocking defect and these
+# tests would measure the rollover term instead of the coverage-line one.
+# Built by the REAL producer, never hand-written.
+CORP = None
+_ROLL = {}
+
+
+def use_corpus(corp, *cites):
+    global CORP
+    CORP = (corp, tuple(cites))
+    return corp
+
+
+def rollover_section():
+    if CORP is None:
+        return ""
+    if CORP not in _ROLL:
+        corp, cites = CORP
+        argv = [sys.executable, str(ROLLOVER), "--corpus", corp,
+                "--report", "--required-only"]
+        for c in cites:
+            argv += ["--cite", c]
+        p = subprocess.run(argv, capture_output=True, text=True)
+        assert p.returncode == 0, p.stderr
+        _ROLL[CORP] = p.stdout.strip()
+    return _ROLL[CORP]
 
 
 def check(name, cond, detail=""):
@@ -108,7 +137,8 @@ def report(rows):
         "| path | status | detail |",
         "| --- | --- | --- |",
     ]
-    return "\n".join(body + rows) + "\n"
+    tail = rollover_section()
+    return "\n".join(body + rows) + "\n" + (("\n" + tail + "\n") if tail else "")
 
 
 def default_rows(override=None):
@@ -138,6 +168,7 @@ def main():
     with tempfile.TemporaryDirectory() as td:
         corp = os.path.join(td, "corpus")
         wl = build(td)
+        use_corpus(corp, "host/big.log")
         flagged = CITE.flagged_lines(wl)
 
         # ---- the rule itself -------------------------------------------

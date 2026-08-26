@@ -317,6 +317,12 @@ there.
 
 One row per corpus file, quoting the `logmap`-flagged line — preferring the one triage called a defect. Every file must appear: `citecheck` blocks on any that does not, and «не смотрел» does NOT discharge a file, because nothing can check it. Paste the output as the «Покрытие» section; statuses are read off the files, never invented. **A COVERAGE ROW MAY NOT ANSWER A FILE WITH LINE 1** — line 1 is the oldest record and the reference `logmap` prints for almost every group, so quoting it proves the file was opened and nothing more (measured: 81 of 93 rows in the last gate-clean run, Opera, PowerShell and DPAPI among them). `citecheck` counts it `cov_inadmissible_line` and blocks. The set of lines a file may be answered with is CLOSED — the flagged lines above 1, or line 1 when it is the only flag, or any line of a file of two lines or fewer, or the single last line when `logmap` flagged nothing — so line 2 is no cheaper than line 1. `covermap.py` picks from that set for you; do not guess against it. «нечитабельно» on a file that reads AND yields a quotable line is `cov_false_unreadable` and blocks too — `covermap.py` asks that exact question before it writes «нечитабельно», so its own output never trips it. The worklist is NOT a cheaper answer either: `logmap` writes `work/worklist.manifest.json` with the ids it emitted, and `citecheck --ledger` blocks on every id that is missing from the list you hand back — close a row with a verdict, never delete it.
 
+**AND NEVER TYPE THE RECORD WINDOW BY HAND:**
+
+    python3 <SKILL_BASE_DIR>/tools/rollover.py --corpus <LOG_DIR> --report --required-only --cite <файл-улики> [--cite …]
+
+A Windows channel is a ring buffer: what you hold is a WINDOW, not a history. `EventRecordID` is monotonic per channel, so `(max − min + 1)` against the number of records says outright whether records are missing inside your window. Paste the output as the «Окно записей» section — **a TOP-LEVEL heading: `# Окно записей` at h1, or `## Окно записей` placed AFTER the «Покрытие» section, never nested inside it** (nested, its rows are read as «Покрытие» rows and the span runs on past its own table: measured on the recorded v37 report that is **12** blocking defects — 6 duplicate coverage paths + 6 no-address coverage lines — and not one of them says the word rollover; at h1 or h2-after-«Покрытие» the same report is exit 0) — with one `--cite` per corpus file your findings lean on. `citecheck` re-computes all of it from the corpus and blocks on: no section, an `итог:` line whose six counts disagree with the disk, a channel with a gap that you did not declare, a channel your findings cite that you did not declare, a wrong number, a row the corpus does not support, and every file whose window could not be read. **Where a channel shows `нет=N` with N>0, say so in prose too: inside that window «такого события нет» does NOT mean «этого не было».** An interior hole is usually a filtered export rather than a wrap — report the loss, do not diagnose eviction.
+
 **NEVER TYPE A CITATION BY HAND** — that is what re-reading the address means now:
 
     python3 <SKILL_BASE_DIR>/tools/cite.py --corpus <LOG_DIR> System.jsonl:263 --contains 3proxy
@@ -360,7 +366,8 @@ fixed before delivery. With several hosts, run it over
 
 `wrong-content`, `out-of-range`, `missing-file`, `binary-file`, `ambiguous`,
 "no quote", `не-ссылка`, a missing `исход:`, a missing `атрибуция:`, an
-empty/missing `## Отклонённые кандидаты` or `## Покрытие` section, a repeated
+empty/missing `## Отклонённые кандидаты`, `## Покрытие` or
+`## Окно записей` section, a repeated
 `Н-n` or `К-n`, a candidate without a quote, a coverage line without a verifiable
 address, someone else's quote, a repeated/ambiguous path or one escaping through
 `..`, and a no-address coverage line that does not follow the closed grammar or

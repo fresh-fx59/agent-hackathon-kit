@@ -36,8 +36,23 @@ V37 = ROOT / "cases" / "06-dev-logging" / "sherlock" / "skills" / "v37" / "tools
 TOOL = V37 / "citecheck.py"
 COVERMAP = V37 / "covermap.py"
 LOGMAP = V37 / "logmap.py"
+ROLLOVER = V37 / "rollover.py"
 
 FAILED = []
+
+# v38 (PR #79): a report citing corpus files owes an «Окно записей» section.
+# Built by the REAL producer so these tests keep measuring the coverage rule.
+CORP = None
+
+
+def rollover_section():
+    if CORP is None:
+        return ""
+    p = subprocess.run([sys.executable, str(ROLLOVER), "--corpus", CORP,
+                        "--report", "--required-only", "--cite", ANCHOR_REL],
+                       capture_output=True, text=True)
+    assert p.returncode == 0, p.stderr
+    return p.stdout.strip()
 
 
 def check(name, cond, detail=""):
@@ -74,6 +89,8 @@ def make_anchor(corp):
     itself one blocking defect — and a fixture that blocks for a second reason
     cannot ISOLATE the term under test. That non-isolation is review finding #4.
     """
+    global CORP
+    CORP = corp
     d = os.path.join(corp, "host")
     os.makedirs(d, exist_ok=True)
     with open(os.path.join(d, ANCHOR), "w", encoding="utf-8") as fh:
@@ -103,7 +120,9 @@ def report(rows):
     # covermap's own table, which already has one — two rows for one path is
     # `cov_duplicate_paths` and would block for a reason that is not under test.
     anchor = [] if any(ANCHOR_REL in r for r in rows) else [obs(ANCHOR_REL, 12, ANCHOR)]
-    return "\n".join(body + anchor + rows) + "\n"
+    tail = rollover_section()
+    return ("\n".join(body + anchor + rows) + "\n"
+            + (("\n" + tail + "\n") if tail else ""))
 
 
 def obs(rel, n, name=None):
