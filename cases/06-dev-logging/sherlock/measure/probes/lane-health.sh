@@ -162,20 +162,47 @@ for kb in sizes:
             # So dispatch on what CAME BACK, not on what the shape was called —
             # a name can drift from behaviour, a body cannot.
             name, text = None, raw.decode("utf-8", "replace")
-            if text.lstrip().startswith("data:"):
+            # An event stream is any body where SOME line opens with `data:` —
+            # not only the first. CloseRouter opens with an SSE comment line
+            # (`: keep-alive`), which is legal SSE (RFC-style `:` comment /
+            # keep-alive), before the first `data:` event. Checking only the
+            # first line made a healthy CloseRouter stream fall into the
+            # non-stream branch, where json.loads() threw on the raw SSE text
+            # and the call was recorded MALFORMED_JSON on a 200 OK response.
+            is_event_stream = any(ln.startswith("data:") for ln in text.splitlines())
+            if is_event_stream:
                 saw_done, parse_errors, embedded_status = False, 0, None
                 for ln in text.splitlines():
-                    if not ln.startswith("data: "):
+                    s = ln.rstrip("\r")
+                    if not s:
                         continue
-                    payload = ln[6:]
-                    if payload == "[DONE]":
+                    if s.startswith(":"):
+                        # SSE comment / keep-alive line — legal SSE, not data,
+                        # never a parse error.
+                        continue
+                    if not s.startswith("data:"):
+                        # event: / id: / retry: field lines — not data either.
+                        continue
+                    # NOTE: named event_payload, not `payload` — `payload` is
+                    # the outer request BYTES sent to urllib.request.Request
+                    # and read again below (request_bytes, total_bytes). This
+                    # loop used to reassign `payload` to the last SSE line's
+                    # string, which corrupted the request body on the NEXT
+                    # attempt/size once this branch actually ran ("POST data
+                    # should be bytes... It cannot be of type str").
+                    event_payload = s[len("data:"):].lstrip()
+                    if event_payload == "[DONE]":
                         saw_done = True
                         continue
                     try:
-                        event = json.loads(payload)
+                        event = json.loads(event_payload)
                     except ValueError:
+                        # A malformed JSON payload ON a data: line is still a
+                        # real parse error — e.g. a gateway HTML page smuggled
+                        # inside a `data:` line after an HTTP 200. Keep this a
+                        # hard failure.
                         parse_errors += 1
-                        hit = __import__("re").search(r"HTTP/\d(?:\.\d)?\s+(\d{3})", payload)
+                        hit = __import__("re").search(r"HTTP/\d(?:\.\d)?\s+(\d{3})", event_payload)
                         embedded_status = hit.group(1) if hit else None
                         continue
                     if event.get("model") and not name:
