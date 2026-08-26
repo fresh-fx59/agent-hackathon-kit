@@ -82,6 +82,27 @@ def write_ledger(path, rows):
             fh.write(json.dumps(one) + "\n")
 
 
+# THE V37 SHAPE, which is the only shape the cache floor may judge. A billed 2xx
+# row that names NO model is what the floor is a proxy signal FOR; a row that
+# names the expected identity is DIRECTLY measured and the floor may not overrule
+# it (fix 7 — see lane_guard.CACHE_JUDGEMENT_TERMS and
+# tests/test_cache_identity_evidence.py for the measured v39 CloseRouter run that
+# a confirmed-lane collapse verdict killed). These cases used to reach
+# PROMPT_CACHE_COLLAPSE on identity-CONFIRMED rows, which is exactly the
+# false positive that cost a paid run, so they now use unnamed rows plus one
+# named row (so the ledger is not RETURNED_MODEL_UNKNOWN instead).
+def cold(cached=280, **over):
+    over.setdefault("returned_model", None)
+    return row(usage={"prompt_tokens": 1000,
+                      "prompt_tokens_details": {"cached_tokens": cached}}, **over)
+
+
+def cold_ledger(path, count, cached=280):
+    write_ledger(path, [row(usage={"prompt_tokens": 1000,
+                                   "prompt_tokens_details": {"cached_tokens": 900}})]
+                 + [cold(cached) for _ in range(count)])
+
+
 # ---------------------------------------------------------------- family rule
 class FamilyRule(unittest.TestCase):
 
@@ -359,9 +380,7 @@ class LedgerAudit(unittest.TestCase):
         self.assertEqual(self.audit()[0], "RETURNED_MODEL_UNKNOWN")
 
     def test_cache_collapse_after_the_call_floor_is_a_breach(self):
-        cold = row(usage={"prompt_tokens": 1000,
-                          "prompt_tokens_details": {"cached_tokens": 280}})
-        write_ledger(self.ledger, [cold for _ in range(DEFAULT_CACHE_MIN_CALLS)])
+        cold_ledger(self.ledger, DEFAULT_CACHE_MIN_CALLS)
         reason, detail = self.audit()
         self.assertEqual(reason, "PROMPT_CACHE_COLLAPSE")
         self.assertIn("28.0%", detail)
@@ -373,9 +392,7 @@ class LedgerAudit(unittest.TestCase):
         self.assertIsNone(self.audit())
 
     def test_one_call_short_of_the_floor_is_not_yet_a_breach(self):
-        cold = row(usage={"prompt_tokens": 1000,
-                          "prompt_tokens_details": {"cached_tokens": 280}})
-        write_ledger(self.ledger, [cold for _ in range(DEFAULT_CACHE_MIN_CALLS - 1)])
+        cold_ledger(self.ledger, DEFAULT_CACHE_MIN_CALLS - 1)
         self.assertIsNone(self.audit())
 
     def test_an_empty_expected_identity_is_a_breach_not_a_disabled_check(self):
@@ -407,9 +424,12 @@ class LedgerAudit(unittest.TestCase):
         # it used to be a clean run with `calls == 0`.
         for value in (1000, 1000.0):
             write_ledger(self.ledger,
-                         [row(usage={"prompt_tokens": value,
-                                     "prompt_tokens_details": {"cached_tokens": 0}})
-                          for _ in range(50)])
+                         [row(usage={"prompt_tokens": 1000,
+                                     "prompt_tokens_details": {"cached_tokens": 900}})]
+                         + [row(returned_model=None,
+                                usage={"prompt_tokens": value,
+                                       "prompt_tokens_details": {"cached_tokens": 0}})
+                            for _ in range(50)])
             self.assertEqual(self.audit()[0], "PROMPT_CACHE_COLLAPSE", value)
         write_ledger(self.ledger,
                      [row(usage={"prompt_tokens": "many"}) for _ in range(50)])
@@ -418,17 +438,16 @@ class LedgerAudit(unittest.TestCase):
         self.assertIn("row 1", detail)
 
     def test_the_disable_switch_works(self):
-        cold = row(usage={"prompt_tokens": 1000,
-                          "prompt_tokens_details": {"cached_tokens": 280}})
-        write_ledger(self.ledger, [cold for _ in range(50)])
+        cold_ledger(self.ledger, 50)
         self.assertEqual(self.audit()[0], "PROMPT_CACHE_COLLAPSE")
         self.assertIsNone(self.audit(cache_guard=False))
 
     def test_thresholds_are_configurable(self):
-        rows = [row(usage={"prompt_tokens": 1000,
+        rows = [row(returned_model=None,
+                    usage={"prompt_tokens": 1000,
                            "prompt_tokens_details": {"cached_tokens": 600}})
                 for _ in range(35)]
-        write_ledger(self.ledger, rows)
+        write_ledger(self.ledger, [row()] + rows)
         self.assertIsNone(self.audit())
         self.assertEqual(self.audit(min_rate=0.9)[0], "PROMPT_CACHE_COLLAPSE")
         self.assertIsNone(self.audit(min_rate=0.9, min_calls=36))
@@ -500,9 +519,7 @@ class AuditCli(unittest.TestCase):
         self.assertEqual((done.returncode, done.stdout.strip()), (1, "LEDGER_MISSING"))
 
     def test_disable_switch_on_the_cli(self):
-        cold = row(usage={"prompt_tokens": 1000,
-                          "prompt_tokens_details": {"cached_tokens": 280}})
-        write_ledger(self.ledger, [cold for _ in range(35)])
+        cold_ledger(self.ledger, 35)
         self.assertEqual(self.run_audit().stdout.strip(), "PROMPT_CACHE_COLLAPSE")
         self.assertEqual(self.run_audit("--no-cache-guard").returncode, 0)
 
@@ -641,8 +658,13 @@ class LiveGuard(unittest.TestCase):
 
     def test_a_cache_collapse_aborts_after_the_configured_call_count(self):
         self.srv.cached_tokens = 280                 # 28.0 %, the v37 rate
+        # …and the v37 ATTRIBUTION too: rows that name no model at all. An
+        # identity-confirmed lane is directly measured and the cache floor may
+        # not overrule it (fix 7); the first call names the model so the ledger
+        # is not RETURNED_MODEL_UNKNOWN instead.
+        self.srv.models = ["deepseek-v4-flash-0731", None]
         self.start(UPSTREAM_CACHE_MIN_CALLS="5")
-        for index in range(5):
+        for index in range(6):
             self.assertEqual(self.call()[0], 200, index)
         marker = self.marker()
         self.assertEqual(marker["reason"], "PROMPT_CACHE_COLLAPSE")
@@ -658,6 +680,7 @@ class LiveGuard(unittest.TestCase):
 
     def test_the_disable_switch_works_live(self):
         self.srv.cached_tokens = 280
+        self.srv.models = ["deepseek-v4-flash-0731", None]
         self.start(UPSTREAM_CACHE_MIN_CALLS="5", UPSTREAM_CACHE_GUARD="0")
         for _ in range(12):
             self.assertEqual(self.call()[0], 200)

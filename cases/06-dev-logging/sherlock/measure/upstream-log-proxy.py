@@ -51,9 +51,11 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlsplit
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from lane_guard import (DEFAULT_CACHE_MIN_CALLS, DEFAULT_CACHE_MIN_RATE,
-                        cache_breach, cache_tokens, deterministic_refusal,
-                        model_family, same_family)
+from lane_guard import (CACHE_JUDGEMENT_TERMS, DEFAULT_CACHE_MIN_CALLS,
+                        DEFAULT_CACHE_MIN_RATE, cache_cost_fact,
+                        cache_judgement, cache_terms, cache_tokens,
+                        deterministic_refusal, model_family, note_cache_call,
+                        same_family)
 
 UPSTREAM_BASE = os.environ.get("UPSTREAM_BASE", "https://linkapi.ai/v1").rstrip("/")
 UPSTREAM_LOG = os.environ.get("UPSTREAM_LOG", "upstream.jsonl")
@@ -1253,7 +1255,15 @@ UPSTREAM_CACHE_MIN_CALLS = int(
 _LANE_LOCK = threading.Lock()
 _LANE_ABORT = None          # first breach, {"reason": ..., "detail": ...}
 _LANE_MARKER_WRITTEN = threading.Event()   # set once abort.json exists on disk
+# `calls`/`prompt_tokens`/`cached_tokens` stay the lane TOTALS — the abort
+# marker's `cache_observed` is the cross-check against the ledger's own sums and
+# nothing may change what those three mean. The six CACHE_JUDGEMENT_TERMS live
+# in the same dict beside them: the cache floor is a PROXY SIGNAL for a
+# substitution, so it may judge only the billed calls whose identity was not
+# directly confirmed. See lane_guard.CACHE_JUDGEMENT_TERMS for the measured
+# CloseRouter evidence that made this the rule.
 _LANE_CACHE = {"calls": 0, "prompt_tokens": 0, "cached_tokens": 0}
+_LANE_CACHE.update(cache_terms())
 # THE WASTED CALL IS REAL MONEY. A provider that starts substituting on half of
 # its calls has to show up loudly rather than silently triple the bill, so every
 # discard is counted here AND flagged in its own ledger row
@@ -1402,17 +1412,35 @@ def _lane_observe(status, returned, usage, expected):
     billed, hit = cache_tokens(usage)
     if not billed:
         return
+    # THE DIRECT SIGNAL, ON THIS CALL. `_is_substitution` already returned above
+    # for a wrong family, so reaching here with a named model of the expected
+    # family means the identity of this billed call is directly confirmed and
+    # the cache floor — a proxy for exactly that measurement — may not judge it.
+    # A 2xx naming NO model, or a lane with no declared identity, is
+    # unconfirmed, which is the v37 shape the floor was calibrated on.
+    confirmed = bool(expected and isinstance(returned, str) and returned.strip()
+                     and same_family(expected, returned))
     with _LANE_LOCK:
         _LANE_CACHE["calls"] += 1
         _LANE_CACHE["prompt_tokens"] += billed
         _LANE_CACHE["cached_tokens"] += hit
+        note_cache_call(_LANE_CACHE, billed, hit, confirmed)
+        terms = {key: _LANE_CACHE[key] for key in CACHE_JUDGEMENT_TERMS}
         calls = _LANE_CACHE["calls"]
-        prompt_tokens = _LANE_CACHE["prompt_tokens"]
-        cached_tokens = _LANE_CACHE["cached_tokens"]
-    detail = cache_breach(calls, prompt_tokens, cached_tokens,
-                          UPSTREAM_CACHE_MIN_RATE, UPSTREAM_CACHE_MIN_CALLS)
-    if detail:
-        _lane_trip("PROMPT_CACHE_COLLAPSE", detail)
+    breach = cache_judgement(terms, UPSTREAM_CACHE_MIN_RATE,
+                             UPSTREAM_CACHE_MIN_CALLS)
+    if breach:
+        _lane_trip(*breach)
+        return
+    # LOUDLY, WHILE THE RUN IS ALIVE. The v39 CloseRouter lane paid for 2.4M
+    # uncached prompt tokens and the only thing that mentioned it killed the
+    # run. Printed at every min-calls boundary so the figure is in the run's
+    # stderr whether or not anything later goes wrong.
+    if calls >= UPSTREAM_CACHE_MIN_CALLS and calls % UPSTREAM_CACHE_MIN_CALLS == 0:
+        sys.stderr.write("upstream-log-proxy: %s\n"
+                         % cache_cost_fact(terms, UPSTREAM_CACHE_MIN_RATE,
+                                           UPSTREAM_CACHE_MIN_CALLS))
+        sys.stderr.flush()
 
 
 def _update_inflight(request_id, row=None):
