@@ -443,8 +443,8 @@ def green_report(root, extra=""):
 attacked-not-proven
 """ % (_cite_line(root, "Security.jsonl", 1), extra,
        _cite_line(root, "notes.log", 2),
-       _cite_line(root, "Security.jsonl", 2),
-       _cite_line(root, "spray.jsonl", 1),
+       _cite_line(root, "Security.jsonl", 16),
+       _cite_line(root, "spray.jsonl", 9),
        _cite_line(root, "notes.log", 3))
 
 
@@ -472,7 +472,7 @@ class TestBlockingAccounting(unittest.TestCase):
         self.ledger = os.path.join(self.out, "worklist.tsv")
         with open(self.ledger, "w", encoding="utf-8") as fh:
             fh.write("# id\tвердикт\tось\tссылка\n")
-            fh.write("W-1\tN 1\tчастота\tSecurity.jsonl:2\n")
+            fh.write("W-1\tN 1\tчастота\tSecurity.jsonl:16\n")
 
     def tearDown(self):
         self.tmp.cleanup()
