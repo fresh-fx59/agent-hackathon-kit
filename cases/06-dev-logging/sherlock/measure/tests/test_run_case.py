@@ -668,26 +668,26 @@ exit 0
     def test_the_cli_is_given_the_clean_id(self):
         with tempfile.TemporaryDirectory() as d:
             argv, _seen, _rd = self.go(d, {})
-            self.assertEqual(self.cli_model(argv), "deepseek-v4-flash-0731")
+            self.assertEqual(self.cli_model(argv), "deepseek-v4-flash")
 
     def test_the_provider_still_receives_the_aliased_id(self):
         with tempfile.TemporaryDirectory() as d:
             _argv, seen, _rd = self.go(d, {})
             self.assertEqual([r.get("model") for r in seen],
-                             ["[SP]deepseek-v4-flash-0731"])
+                             ["[SP]deepseek-v4-flash"])
 
     def test_without_the_proxy_the_cli_keeps_the_alias(self):
         """Nothing restores the prefix, so stripping it would 404 the model."""
         with tempfile.TemporaryDirectory() as d:
             argv, _seen, _rd = self.go(d, {"SHERLOCK_UPSTREAM_LOG": "0"})
-            self.assertEqual(self.cli_model(argv), "[SP]deepseek-v4-flash-0731")
+            self.assertEqual(self.cli_model(argv), "[SP]deepseek-v4-flash")
 
     def test_the_ledger_still_names_the_provider_alias(self):
         """`model` is the attribution axis: it must stay what answered."""
         with tempfile.TemporaryDirectory() as d:
             _argv, _seen, rd = self.go(d, {})
             with open(os.path.join(rd, "meta.json"), encoding="utf-8") as fh:
-                self.assertEqual(json.load(fh)["model"], "[SP]deepseek-v4-flash-0731")
+                self.assertEqual(json.load(fh)["model"], "[SP]deepseek-v4-flash")
 
     def test_a_model_with_no_prefix_is_passed_through_untouched(self):
         with tempfile.TemporaryDirectory() as d:

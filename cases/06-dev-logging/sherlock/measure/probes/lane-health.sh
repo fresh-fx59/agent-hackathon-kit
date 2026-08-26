@@ -24,7 +24,17 @@
 set -uo pipefail
 
 BASE_URL="${PROBE_BASE_URL:-${SHERLOCK_BASE_URL:-https://linkapi.ai/v1}}"
-MODEL="${SHERLOCK_MODEL:-[SP]deepseek-v4-flash-0731}"
+# The ALIAS on purpose — do NOT "pin" a dated snapshot here (PR #77 did; it
+# broke the lane). Measured 2026-08-26: GET https://linkapi.ai/v1/models lists
+# 130 models and exactly four deepseek-v4 ids — [SP]deepseek-v4-flash,
+# [SP]deepseek-v4-pro, and their [次] twins. No dated id is routable:
+# `[SP]deepseek-v4-flash-0731` answered HTTP 503
+# {"error":{"code":"model_not_found","message":"No available channel for model
+# [SP]deepseek-v4-flash-0731 under group auto (distributor)"}} on all 13 calls
+# of the v38 launch, zero billed usage. `-0731` is a value the provider RETURNS,
+# never one you can SEND. The only defence against provider substitution is the
+# returned-side family check in measure/lane_guard.py — see measure/upstream-lane.sh job 1.
+MODEL="${SHERLOCK_MODEL:-[SP]deepseek-v4-flash}"
 SIZES_KB="${PROBE_SIZES_KB:-100 250 400}"
 REPS="${PROBE_REPS:-2}"
 # A batch is worth starting at <=10 % and never at >=35 %; between the two it is

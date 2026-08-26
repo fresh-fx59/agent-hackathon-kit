@@ -166,12 +166,12 @@ class TheBenchRunnerUsesTheSameUpstreamLane(BenchRunnerRig, unittest.TestCase):
 
     def test_the_cli_is_given_the_clean_id(self):
         argv, _seen, _rows, p = self.go()
-        self.assertEqual(self.cli_model(argv), "deepseek-v4-flash-0731",
+        self.assertEqual(self.cli_model(argv), "deepseek-v4-flash",
                          "stderr: %s" % p.stderr[-800:])
 
     def test_the_provider_receives_the_aliased_id(self):
         _argv, seen, _rows, _p = self.go()
-        self.assertEqual([r.get("model") for r in seen], ["[SP]deepseek-v4-flash-0731"])
+        self.assertEqual([r.get("model") for r in seen], ["[SP]deepseek-v4-flash"])
 
     def test_the_runner_does_not_append_an_unchecked_ledger_row(self):
         _argv, _seen, rows, _p = self.go()
@@ -179,7 +179,7 @@ class TheBenchRunnerUsesTheSameUpstreamLane(BenchRunnerRig, unittest.TestCase):
 
     def test_without_the_lane_the_cli_keeps_the_alias(self):
         argv, _seen, _rows, _p = self.go({"SHERLOCK_UPSTREAM_LOG": "0"})
-        self.assertEqual(self.cli_model(argv), "[SP]deepseek-v4-flash-0731")
+        self.assertEqual(self.cli_model(argv), "[SP]deepseek-v4-flash")
 
     def test_it_states_the_context_window_too(self):
         """The 649 MB corpus is where a 177,000-token ceiling hurts most."""

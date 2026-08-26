@@ -43,10 +43,20 @@ EOF
 run_canary() {                     # $1 = yolo | noyolo  -> echoes yes/no
   local extra=()
   [ "$1" = "yolo" ] && extra=(--approval-mode yolo)
+  # The ALIAS on purpose — do NOT "pin" a dated snapshot here (PR #77 did; it
+  # broke the lane). Measured 2026-08-26: GET https://linkapi.ai/v1/models lists
+  # 130 models and exactly four deepseek-v4 ids — [SP]deepseek-v4-flash,
+  # [SP]deepseek-v4-pro, and their [次] twins. No dated id is routable:
+  # `[SP]deepseek-v4-flash-0731` answered HTTP 503
+  # {"error":{"code":"model_not_found","message":"No available channel for model
+  # [SP]deepseek-v4-flash-0731 under group auto (distributor)"}} on all 13 calls
+  # of the v38 launch, zero billed usage. `-0731` is a value the provider RETURNS,
+  # never one you can SEND. The only defence against provider substitution is the
+  # returned-side family check in measure/lane_guard.py — see measure/upstream-lane.sh job 1.
   ( cd "$W" && QWEN_HOME="$W/home" OPENAI_API_KEY="$SHERLOCK_API_KEY" \
     OPENAI_BASE_URL="${SHERLOCK_BASE_URL:-https://linkapi.ai/v1}" \
     timeout "${SHERLOCK_TIMEOUT:-300}" "$QWEN" --auth-type openai \
-      --model "${SHERLOCK_MODEL:-[SP]deepseek-v4-flash-0731}" ${extra[@]+"${extra[@]}"} \
+      --model "${SHERLOCK_MODEL:-[SP]deepseek-v4-flash}" ${extra[@]+"${extra[@]}"} \
       -p "Посмотри лог $W/test.log — что случилось?" --output-format json </dev/null \
   ) > "$W/out-$1.json" 2>"$W/err-$1.txt"
   python3 "$W/check.py" "$W/out-$1.json"

@@ -17,10 +17,19 @@ Two consequences, and the harness could see BOTH as they happened:
      68.1 % -> 28.0 %, and fresh prompt tokens went 5.92M -> 13.38M. That is
      the money signal, and it moves on call ~20, not on call 180.
 
-Pinning the requested id (the previous commit) stops the fan-out. It does NOT
-detect a provider that substitutes anyway — only a gate does, and a gate that
-reads its own error path as "clean" is not a gate. Hence: every unknown here
-is a breach, never a pass. That rule is load-bearing in four places and each
+THIS CHECK IS THE ONLY DEFENCE, NOT A SECOND LINE. PR #77 tried to stop the
+fan-out on the request side by pinning `[SP]deepseek-v4-flash-0731`. Measured
+2026-08-26: that id is not routable. `GET https://linkapi.ai/v1/models` returns
+130 models and exactly four `deepseek-v4` ids — `[SP]deepseek-v4-flash`,
+`[SP]deepseek-v4-pro` and their `[次]` twins — and the pinned launch got HTTP
+503 `model_not_found` ("No available channel for model
+[SP]deepseek-v4-flash-0731 under group auto (distributor)") on all 13 of its
+calls, with zero billed usage. `-0731` is a value the provider RETURNS; it
+cannot be SENT. So the runners request the alias, the expected identity is the
+alias, and the returned-side family check below is the whole defence: nothing
+upstream of it prevents a substitution, it only detects one. A gate that reads
+its own error path as "clean" is not a gate. Hence: every unknown here is a
+breach, never a pass. That rule is load-bearing in four places and each
 one was a real defect found by review on 2026-08-26:
 
   * an EMPTY expected identity used to disable the identity check silently.
@@ -106,13 +115,20 @@ DEFAULT_CACHE_MIN_CALLS = 30
 #     deepseek-v4-flash-1210            a DIFFERENT snapshot     -> BREACH
 #     deepseek-v4-pro-0813              a different model        -> BREACH
 #
+# IN PRACTICE, on this provider, `expected` is always the ALIAS
+# `[SP]deepseek-v4-flash` (a dated id 503s — see the module docstring), so the
+# live shape is row 4 above: we ask for the alias and `deepseek-v4-flash-0731`
+# comes back and matches by suffix, while `deepseek-v4-pro-0813` breaches. The
+# stamped-expected rows are kept because the rule must stay correct if a
+# provider ever does list a dated id.
+#
 # The alias case is the one exception, and it is narrow on purpose: when the
 # expected id carries a release stamp, the id with that ONE stamp removed also
 # matches, because `[SP]deepseek-v4-flash-0731` and `[SP]deepseek-v4-flash`
 # name the same model and the guard must not fire on its own fix. A DIFFERENT
-# stamp does not match — pinning `-0731` exists precisely to nail one snapshot,
-# and a provider rolling flash to `-1210` is a new cache pool, i.e. the v37
-# failure again wearing a friendlier name.
+# stamp does not match — a stamped expectation exists precisely to nail one
+# snapshot, and a provider rolling flash to `-1210` is a new cache pool, i.e.
+# the v37 failure again wearing a friendlier name.
 #
 # Suffix matching is what keeps `-preview` / `-fp8` / `-thinking` from killing
 # a run that got exactly the model it asked for; the previous rule stripped one

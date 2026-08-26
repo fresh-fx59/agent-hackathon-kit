@@ -19,23 +19,49 @@
 #     requests it answered as two identities ~19x apart on whether they emit a
 #     tool call. qwen-code stamps only the REQUESTED name, so without a
 #     pass-through no recorded row can ever be attributed to an upstream.
-#     SINCE 2026-08-26 the runners request the PINNED id
-#     `[SP]deepseek-v4-flash-0731` instead of the alias: on the v37 full run the
-#     alias fanned 180 calls across deepseek-v4-pro-0813 (93) and
-#     deepseek-v4-flash-0731 (81), i.e. two provider cache pools, and the cache
-#     rate fell 68.1% -> 28.0% (fresh prompt tokens 5.92M -> 13.38M). The
-#     pass-through stays: attribution is still how we prove the pin held.
+#
+#     THE RUNNERS REQUEST THE ALIAS `[SP]deepseek-v4-flash`, AND A REQUEST-SIDE
+#     PIN IS IMPOSSIBLE AT THIS PROVIDER. Read this before you "fix" it again.
+#
+#     The v37 full run sent the alias on all 180 calls and linkapi answered as
+#     TWO models: deepseek-v4-pro-0813 (93 calls) and deepseek-v4-flash-0731
+#     (81). Two provider cache pools; the hit rate fell 68.1% -> 28.0% and fresh
+#     prompt tokens went 5.92M -> 13.38M. PR #77 concluded from that: pin the
+#     dated id, and changed all 9 request-path scripts to send
+#     `[SP]deepseek-v4-flash-0731`. Its reviewer flagged the premise as the one
+#     claim that could not be checked without a metered call.
+#
+#     MEASURED 2026-08-26, and the premise is false. The v38 launch with the pin
+#     died on call 1: 13 calls, ALL HTTP 503, zero billed usage. The upstream
+#     ledger recorded, verbatim,
+#
+#       "sent_model": "[SP]deepseek-v4-flash-0731", "status": 503, "usage": null,
+#       "upstream_error": "{\"error\":{\"code\":\"model_not_found\",
+#          \"message\":\"No available channel for model
+#          [SP]deepseek-v4-flash-0731 under group auto (distributor)\"}}"
+#
+#     `GET https://linkapi.ai/v1/models` then returned 130 models, of which
+#     EXACTLY FOUR contain `deepseek-v4`:
+#
+#       [SP]deepseek-v4-flash   [SP]deepseek-v4-pro
+#       [次]deepseek-v4-flash   [次]deepseek-v4-pro
+#
+#     There is no routable dated/pinned id. `deepseek-v4-flash-0731` is only ever
+#     a value the provider RETURNS in the response body; it can never be SENT.
+#     So the alias is the only thing we can ask for, the fan-out cannot be
+#     prevented on the request side, and the defence lives entirely on the
+#     RETURNED side — see job 5 and measure/lane_guard.py. Do not re-pin. The
+#     next attempt will burn another launch for zero information.
+#     The pass-through stays: attribution is how the returned-side guard sees
+#     what actually answered.
 #
 #  2. THE MODEL-ID SPLIT. qwen-code sizes its context window from the model id
 #     STRING. Its own normalize() turns "[SP]deepseek-v4-flash" into
 #     "[sp]deepseek-v4-flash", which matches nothing in its table, so it falls
 #     back to DEFAULT_TOKEN_LIMIT = 200,000 — and the "177,000 hard limit" error
 #     follows from that. The same table gives the clean id /^deepseek-v4/ =>
-#     1,000,000. The pinned id is unchanged here: the tag-strip below yields
-#     `deepseek-v4-flash-0731`, which matches the SAME /^deepseek-v4/ rule (and
-#     is also listed verbatim at 1,000,000), so the window is identical.
-#     Verified by running qwen-code's own normalize() against its own table.
-#     The provider needs the prefix to route; qwen-code must not see it.
+#     1,000,000. Verified by running qwen-code's own normalize() against its own
+#     table. The provider needs the prefix to route; qwen-code must not see it.
 #     So: the CLI gets the clean id, the proxy restores the alias on the way out.
 #
 #  3. RIDING OUT A BURST. linkapi's 400s are transient and minute-scale, and are
@@ -47,9 +73,11 @@
 #     proxy waits longer than the client will, and records every attempt because
 #     every retry re-uploads the context and is therefore billed.
 #
-#  5. LANE INTEGRITY. The pin in job 1 stops the harness ASKING for an alias.
-#     It cannot stop the provider ANSWERING as something else, which is what
-#     actually happened on v37, and the harness noticed nothing for days. The
+#  5. LANE INTEGRITY — THE ONLY DEFENCE THERE IS. Job 1 shows why: this provider
+#     accepts only the floating alias, so nothing on the request side can stop it
+#     ANSWERING as a different model, which is what happened on v37 while the
+#     harness noticed nothing for days. This is not a second line of defence
+#     behind a request-side pin; there is no pin, and there cannot be one. The
 #     proxy now aborts the lane the moment a returned model is from a different
 #     FAMILY than the requested one, and the moment the cumulative prompt-cache
 #     hit rate falls below SHERLOCK_CACHE_MIN_RATE (default 0.35) after

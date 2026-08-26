@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """lane-audit.py — did this run actually measure the model it says it measured?
 
+The requested model id cannot protect us: linkapi routes only the floating
+alias `[SP]deepseek-v4-flash` (a dated `-0731` request is 503 model_not_found —
+see lane_guard.py), so a returned-side check is the only defence there is.
+
 The live guard inside upstream-log-proxy.py is the one that saves money: it
 trips on the offending call and every later call is refused, so a substitution
 costs one call instead of 180. This is the SECOND line, and it exists because
@@ -14,7 +18,7 @@ human line on stderr), 2 = this tool was called wrong.
 
     lane-audit.py --ledger TRACE.upstream.jsonl \
                   --abort TRACE.upstream.abort.json \
-                  --expected '[SP]deepseek-v4-flash-0731'
+                  --expected '[SP]deepseek-v4-flash'
 
 `--expected` is not optional in practice: an empty one is EXPECTED_IDENTITY_UNKNOWN,
 a breach. That is finding #2 of the 2026-08-26 review — the paid launcher set no

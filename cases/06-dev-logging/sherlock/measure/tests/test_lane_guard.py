@@ -45,7 +45,13 @@ from lane_guard import (DEFAULT_CACHE_MIN_CALLS, DEFAULT_CACHE_MIN_RATE,  # noqa
                         UsageUnreadable, audit_ledger, cache_breach,
                         cache_tokens, model_family, normalised_id, same_family)
 
+# A HYPOTHETICAL stamped expectation, NOT what the runners send. linkapi does
+# not route a dated id (503 model_not_found; /v1/models lists only the four
+# aliases — see lane_guard.py's docstring), so the live expected identity is
+# `[SP]deepseek-v4-flash`. These cases keep the stamped branch of the family
+# rule honest in case a provider ever does list one.
 PINNED = "[SP]deepseek-v4-flash-0731"
+ALIAS = "[SP]deepseek-v4-flash"
 
 # CUMULATIVE cache rate at call 30, replayed on 2026-08-26 from the real
 # ledgers with lane_guard.cache_tokens. Not the final rates: the guard never
@@ -85,6 +91,11 @@ class FamilyRule(unittest.TestCase):
         self.assertTrue(same_family(PINNED, "deepseek-v4-flash"))
         self.assertTrue(same_family(PINNED, "deepseek-v4-flash-0731"))
         self.assertTrue(same_family("deepseek-v4-flash", "deepseek-v4-flash-0731"))
+        # THE LIVE SHAPE of every real run since 2026-08-26: we can only ask
+        # for the alias, and the provider answers with the dated id.
+        self.assertTrue(same_family(ALIAS, "deepseek-v4-flash-0731"))
+        self.assertTrue(same_family(ALIAS, "DeepSeek-V4-Flash-0731"))
+        self.assertFalse(same_family(ALIAS, "deepseek-v4-pro-0813"))
 
     def test_case_variant_normalises(self):
         # 6 of the 180 v37 calls came back in this casing. Display, not
