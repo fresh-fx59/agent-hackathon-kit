@@ -36,6 +36,7 @@ The four defects, all of the shape "a gate prints failure and exits 0":
      `1 if bad else 0`, so a census-only run and an empty corpus both printed
      «не отвечено: 0 из 0» and exited 0.
 """
+import hashlib
 import io
 import json
 import os
@@ -327,6 +328,68 @@ MARKERS = [
 ]
 LINE_CEILING = 500
 
+# THE CEILING IS CHECKED FOR v36 ONLY, ON PURPOSE. v38's SKILL.md is 585 lines
+# and the operator has explicitly decided NOT to cut it: the six merged fixes
+# (#77-#81) are worth more than the line budget. Do not generalise this check
+# over every arm, and do not add a v38 ceiling check — that is the operator's
+# call, recorded here so the next agent does not "fix" it.
+
+# skills/v37 is FROZEN as of 4625105 — the exact tree that produced the recorded
+# paid run 20260825T173021Z-v37. The six fixes that used to live here moved to
+# skills/v38. Content-pinned, not git-status-pinned, so an edit is caught in the
+# working tree, before it can be committed.
+V37_TREE_4625105 = "6818273abaa3df8584943a57a4e9117938deb084"
+V37_FROZEN = {
+    "reference/bulk-closure.md":       "22fd216deacb4d5d279162f409ef0614",
+    "reference/code-and-spec.md":      "3dbfc0ca8f3386b318e868b23d52f1cf",
+    "reference/report-format.md":      "b6d90148f17bec32df9bf61fa029fb20",
+    "reference/tools.md":              "cdd1eca61addae06f6f51f2c50bcda35",
+    "SKILL.md":                        "437f0942e2d4bb7f9b69c4d7135de245",
+    "tools/brief.py":                  "12602a59addf285bf08ed6d35a251854",
+    "tools/checkpoint.py":             "ca8d11ccaebebdb3535a668d8dbc374a",
+    "tools/citecheck.py":              "3bf4394c225859c8ae49894f2f49e546",
+    "tools/cite.py":                   "8492d5469569cfbefa3de8fcfbf7cb57",
+    "tools/covermap.py":               "0a7b9742abc8b2f8d2d31ecb4a2d6bf2",
+    "tools/logjoin.py":                "dd4465b4736215f1f78bd641cd40a264",
+    "tools/logmap.py":                 "4c11dfa6b07efdefe26ee5eb9b0c4f31",
+    "tools/stage-corpus.py":           "761eff5c844a11fbd290ff3ec9f0a0de",
+    "tools/statecheck.py":             "960204ec4d953580b9689e675758e0e0",
+    "tools/stopcheck.py":              "bb2ce339a189eab32a2da69fd20dcf1c",
+    "tools/triagecheck.py":            "bb9f4307242c8482756b385b0c19a20e",
+}
+
+
+def v37_frozen_checks():
+    """v37 carries a paid result. A byte moving here makes that result
+    unreproducible, so this fails on content, on a new file, and on a
+    deletion."""
+    root = os.path.join(SKILLS, "v37")
+    seen = set()
+    drift = []
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [d for d in dirnames if d != "__pycache__"]
+        for name in filenames:
+            ap = os.path.join(dirpath, name)
+            rel = os.path.relpath(ap, root).replace(os.sep, "/")
+            seen.add(rel)
+            want = V37_FROZEN.get(rel)
+            if want is None:
+                drift.append("%s: NEW file in a frozen arm" % rel)
+                continue
+            got = hashlib.md5(open(ap, "rb").read()).hexdigest()
+            if got != want:
+                drift.append("%s: %s != %s" % (rel, got[:12], want[:12]))
+    for rel in sorted(set(V37_FROZEN) - seen):
+        drift.append("%s: MISSING from a frozen arm" % rel)
+    check("skills/v37 is byte-identical to the recorded paid run (4625105)",
+          not drift, "; ".join(drift))
+
+    tree = subprocess.check_output(
+        ["git", "-C", KIT, "rev-parse",
+         "HEAD:cases/06-dev-logging/sherlock/skills/v37"]).decode().strip()
+    check("skills/v37 committed tree still is 4625105's tree",
+          tree == V37_TREE_4625105, tree)
+
 
 def version_and_freeze_checks():
     v36 = os.path.join(SKILLS, "v36")
@@ -346,11 +409,12 @@ def version_and_freeze_checks():
     print("  v36 SKILL.md: %d lines / %d bytes"
           % (len(lines), len(skill.encode("utf-8"))))
 
-    # v1..v35 must be byte-for-byte what HEAD's merge-base already had.
+    # v1..v36 must be byte-for-byte what HEAD's merge-base already had.
+    # (v37 is pinned separately, by content, in v37_frozen_checks.)
     base = subprocess.check_output(
         ["git", "-C", KIT, "merge-base", "HEAD", "origin/main"]
     ).decode().strip()
-    names = ["v%d" % n for n in range(1, 36)] + ["v4.1"]
+    names = ["v%d" % n for n in range(1, 37)] + ["v4.1"]
     drift = []
     for name in names:
         rel = "cases/06-dev-logging/sherlock/skills/%s" % name
@@ -365,7 +429,7 @@ def version_and_freeze_checks():
             ["git", "-C", KIT, "rev-parse", "HEAD:%s" % rel]).decode().strip()
         if want != got:
             drift.append("%s: %s != %s" % (name, want[:12], got[:12]))
-    check("skills/v1..v35 tree hashes are unchanged from the merge-base",
+    check("skills/v1..v36 tree hashes are unchanged from the merge-base",
           not drift, "; ".join(drift))
 
 
@@ -429,6 +493,7 @@ def main():
     stopcheck_checks(tmp)
     statecheck_checks(tmp)
     version_and_freeze_checks()
+    v37_frozen_checks()
     real_data_checks()
     if FAILED:
         print("✗ v36 gates: %d проверок упало" % len(FAILED))

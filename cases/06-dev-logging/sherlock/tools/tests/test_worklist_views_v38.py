@@ -32,7 +32,7 @@ import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SKILLS = os.path.normpath(os.path.join(HERE, "..", "..", "skills"))
-LOGMAP = os.path.join(SKILLS, "v37", "tools", "logmap.py")
+LOGMAP = os.path.join(SKILLS, "v38", "tools", "logmap.py")
 V36_LOGMAP = os.path.join(SKILLS, "v36", "tools", "logmap.py")
 
 # The measured harness ceiling on one tool result.

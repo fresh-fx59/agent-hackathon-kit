@@ -33,9 +33,9 @@ import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SKILLS = os.path.normpath(os.path.join(HERE, "..", "..", "skills"))
-V37 = os.path.join(SKILLS, "v37", "tools")
-CITE = os.path.join(V37, "cite.py")
-CITECHECK = os.path.join(V37, "citecheck.py")
+V38 = os.path.join(SKILLS, "v38", "tools")
+CITE = os.path.join(V38, "cite.py")
+CITECHECK = os.path.join(V38, "citecheck.py")
 
 # A real winevtx record, trimmed. This is the line the full run cited six times
 # and got wrong every time.
@@ -89,7 +89,7 @@ class CorpusCase(unittest.TestCase):
 
 class TestCiteExists(CorpusCase):
     def test_tool_is_present_and_runs(self):
-        self.assertTrue(os.path.exists(CITE), "v37 must ship tools/cite.py")
+        self.assertTrue(os.path.exists(CITE), "v38 must ship tools/cite.py")
         done = self.cite("System.jsonl:263")
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertTrue(done.stdout.strip(), "cite.py printed nothing")
@@ -147,7 +147,7 @@ class TestFrozenArms(unittest.TestCase):
         """v36 has a paid result attached; the repair lands one version later."""
         self.assertFalse(
             os.path.exists(os.path.join(SKILLS, "v36", "tools", "cite.py")),
-            "v36 is frozen — cite.py belongs to v37")
+            "v36 is frozen — cite.py belongs to v38")
 
 
 if __name__ == "__main__":

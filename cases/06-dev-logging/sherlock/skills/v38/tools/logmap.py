@@ -3479,6 +3479,26 @@ def stitch(reports, args):
 # ---------------------------------------------------------------------------
 # assembling the three artefacts
 # ---------------------------------------------------------------------------
+# THE FIRST-MEMBER REFERENCE IS NOT BEING CHANGED IN THIS PASS, and this is the
+# note that says so out loud rather than leaving the next reader to guess.
+#
+# MEASURED on the recorded v37 run (20260825T173021Z-v37): of the 250 references
+# this function put on the worklist, 74 point at LINE 1 — the next most common
+# line number appears ten times. That is not an accident of the corpus, it is
+# this design: a group is referenced by its FIRST member, and for a `cat`,
+# `level` or `burst` group whose first record is record 1 the reference is
+# `path:1`. Everything downstream inherits it, which is how «quote a flagged
+# line» degenerated into «quote line 1» for 81 of 93 coverage rows.
+#
+# `citecheck.coverage_admissible_lines` (P8) removes line 1 from the admissible
+# set for coverage rows, so the coverage table is protected. TRIAGE RECEIPTS AND
+# FINDING CITATIONS ARE NOT: they draw on the same references, and a receipt
+# quoting the dullest record of a group is as uninformative as a coverage row
+# doing it. Changing which member a group is referenced by is a mapper change
+# with its own answer-key and acceptance consequences across every arm, so it is
+# deliberately OUT OF SCOPE of the coverage-line fix rather than smuggled into
+# it — and it is the actual root cause. Until it is done the gate is blocking a
+# symptom this function still produces, and it will keep fighting the mapper.
 def build_worklist(reports, cap, per_file_cap):
     """Round-robin across files, rarest first — but streams and state artefacts
     draw from SEPARATE budgets.
@@ -3819,7 +3839,59 @@ def write_worklist(out_dir, rows, rate_rows, name="worklist.tsv", body=None):
         written = write_worklist_views(out_dir, lines, header)
         if written:
             write_worklist_index(out_dir, written, len(lines))
+        write_worklist_manifest(out_dir, lines)
     return path
+
+
+WORKLIST_MANIFEST = "worklist.manifest.json"
+
+
+def write_worklist_manifest(out_dir, lines):
+    """The ids `logmap` emitted, written where the model does not have to touch them.
+
+    WHY THIS EXISTS (P8 review #5). The worklist is the ledger: `citecheck
+    --ledger` counts its unresolved rows, and `citecheck`'s coverage rule
+    derives its CLOSED set of admissible lines from the reference column. Both
+    read a file the model writes back into. Nothing checked that the rows it
+    hands back are the rows this tool emitted — so `awk`-ing out every reference
+    that is not `:1` took the recorded v37 report from 59 blocking to 7, with
+    `triagecheck` and `statecheck` still exiting 0. A shorter worklist was a
+    cheaper worklist, which is exactly the claim `SKILL.md` makes cannot exist.
+
+    Closing a row is the intended edit; DELETING one is not, and the difference
+    is an id. So the ids go in a sidecar at emission time. `citecheck --ledger`
+    reports every id that is in the manifest and not in the ledger as a
+    blocking defect, and the digest lets a reader see the body changed at all.
+
+    TAMPER-EVIDENT, NOT TAMPER-PROOF, and the difference is stated rather than
+    hidden: this process can rewrite any file it can read, so a model that
+    decides to forge must now forge two artefacts consistently instead of
+    running one `awk`. There is no key in this sandbox that would make it
+    tamper-proof. What it buys is that the cheap path is gone and the expensive
+    path leaves a record.
+
+    ABSENT MANIFEST = NO CHECK. A worklist written by hand (every fixture in
+    tools/tests, and any corpus prepared without `logmap`) has no manifest and
+    is graded exactly as before. That is deliberate: a gate that fails on
+    fixtures gets switched off. The gate the paid run uses always runs `logmap`
+    first, so the manifest is always there.
+    """
+    ids, digest = [], hashlib.sha256()
+    for raw in lines:
+        digest.update(raw.encode("utf-8", "replace"))
+        if raw.startswith("#") or not raw.strip():
+            continue
+        rid = raw.split("\t", 1)[0].strip()
+        if rid:
+            ids.append(rid)
+    body = json.dumps({"schema": 1, "tool": "logmap.py",
+                       "rows": len(ids), "ids": ids,
+                       "sha256": digest.hexdigest()},
+                      ensure_ascii=False, sort_keys=True) + "\n"
+    try:
+        return _write_text_atomic(out_dir, WORKLIST_MANIFEST, body)
+    except OSError:
+        return None            # best effort: never lose the worklist over this
 
 
 # ONE READ, ONE SLICE. MEASURED on the v36 winevtx run: `work/worklist.tsv` was

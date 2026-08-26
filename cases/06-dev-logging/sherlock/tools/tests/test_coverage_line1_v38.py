@@ -27,10 +27,10 @@ import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[5]
-V37 = ROOT / "cases" / "06-dev-logging" / "sherlock" / "skills" / "v37" / "tools"
-TOOL = V37 / "citecheck.py"
-COVERMAP = V37 / "covermap.py"
-ROLLOVER = V37 / "rollover.py"
+V38 = ROOT / "cases" / "06-dev-logging" / "sherlock" / "skills" / "v38" / "tools"
+TOOL = V38 / "citecheck.py"
+COVERMAP = V38 / "covermap.py"
+ROLLOVER = V38 / "rollover.py"
 
 FAILED = []
 
@@ -285,7 +285,7 @@ def main():
         # WITH `--ledger`, because that is the gate's own argv and because
         # without it citecheck does not KNOW what logmap flagged: the empty map
         # is not the fact «nothing was flagged». See the `flagged_known` note in
-        # citecheck.report_evidence and test_coverage_line1_review_v37.py.
+        # citecheck.report_evidence and test_coverage_line1_review_v38.py.
         r2 = subprocess.run([sys.executable, str(TOOL), path, "--corpus", corp,
                              "--require-quote", "--ledger", wl],
                             capture_output=True, text=True)
