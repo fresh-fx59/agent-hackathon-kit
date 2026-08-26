@@ -31,6 +31,10 @@ the agent to shrug at.
 
 ```
 python3 citecheck.py report.md --corpus ./logs        # human output, exit 1 if bad
+python3 citecheck.py report.md --corpus ./logs --ledger work/worklist.tsv
+#   ^ the gate's own form. WITHOUT --ledger citecheck does not know which lines
+#     logmap flagged, so it SKIPS the coverage admissible-line rule and says so
+#     rather than guessing; a mid-draft check should pass --ledger too.
 python3 citecheck.py - --corpus ./logs --json         # from stdin, for scoring
 ```
 
