@@ -80,6 +80,14 @@ def main(argv=None):
                 target.write("\n")
         except OSError as exc:
             sys.stderr.write("⚠ lane summary not written: %s\n" % exc)
+    if breach is None and summary and not summary.get("complete"):
+        # A COST THAT WAS NEVER MEASURED IS NOT A CLEAN RUN. Every accounting
+        # term is named in lane_guard.ACCOUNTING_TERMS and checked, so this is
+        # how the accounting reaches the exit code instead of only the console
+        # — a printed-only number is the defect class this lane keeps shipping.
+        breach = ("LANE_ACCOUNTING_INCOMPLETE",
+                  summary.get("incomplete_reason")
+                  or "the run's cost was never measured")
     if breach is None:
         _report(summary)
         return 0
@@ -93,22 +101,61 @@ def main(argv=None):
 
 
 def _report(summary):
-    """One line, always, so a rising substitution rate is impossible to miss."""
+    """One line, always — and NEVER a zero it did not measure.
+
+    The v38 full run printed "0 accepted calls, 0 discarded substitutions
+    (0.0% of 0 billed answers, 0 prompt tokens paid for nothing)" while its own
+    ledger held 463 rows and 27,773,863 prompt tokens. A zero that means
+    "nothing happened" and a zero that means "nobody counted" cannot share a
+    line, so an uncomputed summary prints the REASON instead of numbers.
+
+    MEASURED and ESTIMATED are separate words for separate keys. The provider
+    reports no usage at all on an aborted stream, so the wasted tokens can only
+    be estimated from request bytes, and an estimate that can be mistaken for a
+    measurement is worse than none.
+    """
     if not summary:
         return
     _report_routes(summary)
+    if not summary.get("complete"):
+        sys.stderr.write(
+            "✗ lane cost: NOT MEASURED — %s\n"
+            % (summary.get("incomplete_reason")
+               or "the accounting was never computed"))
+        return
     discarded = summary.get("discarded_substitutions", 0)
-    accepted = summary.get("accepted_calls", 0)
-    total = accepted + discarded
-    mark = "⚠" if discarded else "ℹ"
-    sys.stderr.write(
-        "%s lane cost: %d accepted calls, %d discarded substitutions "
-        "(%.1f%% of %d billed answers, %d prompt tokens paid for nothing)%s\n"
-        % (mark, accepted, discarded, (100.0 * discarded / total) if total else 0.0,
-           total, summary.get("discarded_prompt_tokens", 0),
-           (" — " + ", ".join("%s x%d" % (name, count) for name, count
-                              in sorted(summary.get("discarded_by_model", {}).items()))
-            ) if discarded else ""))
+    answered = summary.get("accepted_rows", 0)
+    charged = summary.get("billed_calls", 0)
+    parts = [
+        "%d charged calls = %d answered + %d discarded substitutions (%.1f%%)"
+        % (charged, answered, discarded,
+           (100.0 * discarded / charged) if charged else 0.0),
+        "MEASURED: %d calls with provider usage, %d prompt tokens (%d cached), "
+        "%d prompt tokens reported on discarded calls, %d request bytes "
+        "discarded"
+        % (summary.get("accepted_calls", 0), summary.get("prompt_tokens", 0),
+           summary.get("cached_tokens", 0),
+           summary.get("discarded_prompt_tokens", 0),
+           summary.get("discarded_request_bytes", 0)),
+        "ESTIMATED (%s): ~%d discarded prompt tokens"
+        % (summary.get("estimate_basis", "estimate"),
+           summary.get("discarded_prompt_tokens_estimated", 0)),
+    ]
+    if summary.get("cost_usd_reported_calls"):
+        parts.append("provider-reported cost $%s over %d call(s)"
+                     % (summary["cost_usd_reported"],
+                        summary["cost_usd_reported_calls"]))
+    if discarded:
+        parts.append("discarded: " + ", ".join(
+            "%s x%d" % (name, count) for name, count
+            in sorted(summary.get("discarded_by_model", {}).items())))
+    if summary.get("provider_refusals"):
+        parts.append("refused: " + ", ".join(
+            "%s x%d" % (name, count) for name, count
+            in sorted(summary["provider_refusals"].items())))
+    sys.stderr.write("%s lane cost: %s\n"
+                     % ("⚠" if discarded or summary.get("refused_calls")
+                        else "ℹ", "; ".join(parts)))
 
 
 def _report_routes(summary):

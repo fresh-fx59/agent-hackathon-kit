@@ -512,6 +512,86 @@ class ItRecordsWhyTheUpstreamRefused(ProxyCase):
             json.dumps({"error": {"message": "context_length_exceeded: 412000 > 400000"}}))
 
 
+class ItRefusesToSpendRetriesOnADeterministic400(ProxyCase):
+    """A 400 THAT RETRYING CANNOT FIX MUST NOT ENTER THE BURST PATH.
+
+    The class above rides out a linkapi burst because those 400s are transient
+    and minute-scale. These are not. `deepseek-v4-flash` is a REASONING model:
+    probed against CloseRouter 2026-08-26 with max_tokens=4 it answers HTTP 400
+    "the output token limit was exhausted by model reasoning before an answer
+    was produced; increase max_completion_tokens/max_output_tokens", and a
+    second probe confirmed the mechanism (8 output tokens requested, all 8
+    returned as reasoning_tokens, content empty). The v38 dead run's single 400
+    is the sibling: 220 KB of request and an SSE body reading "The
+    `reasoning_content` in the thinking mode must be passed back to the API."
+
+    Twelve retries cannot help either one - they need a different request. So
+    the class is NAMED in the row with the request's max_tokens beside it, the
+    provider is asked exactly once, and the tuning is left to a launcher
+    decision made with the receipt in hand.
+    """
+
+    RELAY = ("The `reasoning_content` in the thinking mode must be passed back "
+             "to the API.")
+    BUDGET = ("the output token limit was exhausted by model reasoning before an "
+              "answer was produced; increase max_completion_tokens/max_output_tokens")
+
+    def refuse(self, message):
+        self.srv.fail_body = message
+        self.srv.fail_times = 99
+        self.start_retrying("json_toolcall", attempts=6, delay_ms="10")
+        return self.post({"model": "m", "messages": [], "max_tokens": 32768})
+
+    def test_the_dead_runs_400_is_asked_exactly_once(self):
+        code, _ = self.refuse(self.RELAY)
+        self.assertEqual(code, 400, "a genuine failure must reach the client")
+        rows = self.lines(1)
+        self.assertEqual(len(self.srv.seen), 1,
+                         "a deterministic 400 was retried: %d upstream calls"
+                         % len(self.srv.seen))
+        self.assertEqual(len(rows), 1, rows)
+        self.assertEqual(rows[0]["upstream_refusal_class"],
+                         "REASONING_CONTENT_NOT_RELAYED")
+
+    def test_the_output_budget_400_is_asked_exactly_once(self):
+        code, _ = self.refuse(self.BUDGET)
+        self.assertEqual(code, 400)
+        rows = self.lines(1)
+        self.assertEqual(len(self.srv.seen), 1)
+        self.assertEqual(rows[0]["upstream_refusal_class"],
+                         "OUTPUT_BUDGET_EXHAUSTED_BY_REASONING")
+
+    def test_the_row_carries_the_max_tokens_that_caused_it(self):
+        """The fix for this is a bigger budget, so the row must say what it was.
+        This file changes no default: it names the failure and surfaces it."""
+        self.refuse(self.BUDGET)
+        rows = self.lines(1)
+        self.assertEqual(rows[0]["request_max_tokens"], 32768)
+
+    def test_the_provider_s_own_words_still_reach_the_client_and_the_ledger(self):
+        code, body = self.refuse(self.RELAY)
+        self.assertEqual(code, 400)
+        self.assertIn("reasoning_content", body.decode("utf-8", "replace"))
+        self.assertIn("reasoning_content", self.lines(1)[0]["upstream_error"])
+
+    def test_a_transient_400_still_rides_out_the_burst(self):
+        """The whole point of the split: patience is still spent where it works."""
+        self.srv.fail_body = "Upstream request failed"
+        self.srv.fail_times = 3
+        self.start_retrying("json_toolcall", attempts=6, delay_ms="10")
+        code, _ = self.post({"model": "m", "messages": []})
+        self.assertEqual(code, 200)
+        self.assertEqual(len(self.lines(4)), 4)
+
+    def test_a_transient_400_gets_no_class_key_at_all(self):
+        """A clean ledger keeps the exact shape every previous run wrote."""
+        self.srv.fail_body = "Rate limit exceeded for org-42"
+        self.srv.fail_times = 1
+        self.start("json_toolcall")
+        self.post({"model": "m", "messages": []})
+        self.assertNotIn("upstream_refusal_class", self.lines(1)[0])
+
+
 class ItCanRestoreTheProviderAlias(ProxyCase):
     """The whole 177,000-token ceiling was a MODEL-ID PARSING artifact.
 

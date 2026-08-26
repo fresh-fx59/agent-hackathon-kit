@@ -52,7 +52,8 @@ from urllib.parse import urlsplit
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from lane_guard import (DEFAULT_CACHE_MIN_CALLS, DEFAULT_CACHE_MIN_RATE,
-                        cache_breach, cache_tokens, model_family, same_family)
+                        cache_breach, cache_tokens, deterministic_refusal,
+                        model_family, same_family)
 
 UPSTREAM_BASE = os.environ.get("UPSTREAM_BASE", "https://linkapi.ai/v1").rstrip("/")
 UPSTREAM_LOG = os.environ.get("UPSTREAM_LOG", "upstream.jsonl")
@@ -1825,7 +1826,15 @@ class Proxy(BaseHTTPRequestHandler):
                 break
             except urllib.error.HTTPError as e:
                 resp, status = e, e.code
-                if (status in _RETRYABLE and attempt <= UPSTREAM_RETRY_MAX):
+                # THE BODY IS READ FOR EVERY 400, not only a retried one: the
+                # class of a 400 lives in the provider's words, and a
+                # deterministic refusal must never enter the burst path. When
+                # the body is read here THIS branch owns the row and the
+                # client's copy — nothing falls through to the pump, so one
+                # attempt still writes exactly one ledger row.
+                eager = (status == 400
+                         or (status in _RETRYABLE and attempt <= UPSTREAM_RETRY_MAX))
+                if eager:
                     # EVERY attempt is recorded, because every attempt re-uploads
                     # the whole context and is therefore billed. An invisible
                     # retry is the "failed calls are free" mistake all over again.
@@ -1837,14 +1846,19 @@ class Proxy(BaseHTTPRequestHandler):
                     except Exception:
                         raw = b""
                     why = _err_text(raw)
+                    refusal = deterministic_refusal(status, why)
                     if BODY_DIR:
                         # upstream_error keeps 300 chars so the ledger stays
                         # readable; the file keeps all of it, which is where a
                         # provider's structured refusal actually lives.
                         _capture_write("%s.a%d.res.json.gz" % (request_id, attempt),
                                        [raw], capture, "response")
+                    # The class is written ONLY when there is one, so a
+                    # clean ledger keeps the exact shape every previous run
+                    # wrote and no reader sees a new field appear unbidden.
+                    named = {"upstream_refusal_class": refusal} if refusal else {}
                     try:
-                        record(**_capture_row(capture), **route_fields,
+                        record(**_capture_row(capture), **named, **route_fields,
                                request_max_tokens=request_max_tokens, requested_model=requested, returned_model=None,
                                tool_call=False, status=status, attempt=attempt,
                                duration_ms=int((time.time() - t_try) * 1000),
@@ -1857,13 +1871,21 @@ class Proxy(BaseHTTPRequestHandler):
                     except BudgetUnknown:
                         self._budget_refusal()
                         return
-                    time.sleep(min(60.0, (UPSTREAM_RETRY_BASE_MS / 1000.0)
-                                   * (2 ** (attempt - 1))))
-                    req = urllib.request.Request(route.url_for(self.path),
-                                                 data=body or None,
-                                                 headers=headers,
-                                                 method=self.command)
-                    continue
+                    if (refusal is None and status in _RETRYABLE
+                            and attempt <= UPSTREAM_RETRY_MAX):
+                        time.sleep(min(60.0, (UPSTREAM_RETRY_BASE_MS / 1000.0)
+                                       * (2 ** (attempt - 1))))
+                        req = urllib.request.Request(route.url_for(self.path),
+                                                     data=body or None,
+                                                     headers=headers,
+                                                     method=self.command)
+                        continue
+                    # TERMINAL. Either the refusal is deterministic (retrying
+                    # is pure waste) or the budget is spent. The row is already
+                    # written and the body already read, so hand the client the
+                    # provider's own refusal verbatim from here.
+                    self._relay_error(status, e, raw)
+                    return outcome
                 break
             except Exception as e:                   # DNS, TLS, refused, timeout
                 try:
@@ -2104,6 +2126,20 @@ class Proxy(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(payload)
         state["released"] = True
+
+    def _relay_error(self, status, resp, raw):
+        """The provider's own refusal, verbatim and exactly once.
+
+        A proxy that logs the reason and hands the client an empty 400 has
+        moved the blindness, not removed it.
+        """
+        try:
+            self._relay_headers(resp, status,
+                                extra=[("Content-Length", str(len(raw)))])
+            self.end_headers()
+            self.wfile.write(raw)
+        except Exception:
+            pass
 
     def _iter_with_deadline(self, resp, state, sock):
         """Yield stream lines, giving up if no CONTENT arrives in time.
