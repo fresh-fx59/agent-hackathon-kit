@@ -257,6 +257,17 @@ Generate it, never type it:
     | --- | --- | --- | --- | --- |
     | Security.jsonl | Security | окно=402275–437190 | записей=34916 | нет=0 |
 
+* PLACEMENT IS PART OF THE FORMAT: the heading must be TOP-LEVEL — `# Окно
+  записей` (h1), or `## Окно записей` (h2) placed AFTER the whole «Покрытие»
+  section. NEVER nest it inside «Покрытие». A deeper heading does not end where
+  its author thinks: the span runs to the next heading of its OWN level, so
+  either the coverage rows get read as rollover rows, or — the usual case, the
+  table placed at the end of «Покрытие» — the rollover rows get read as COVERAGE
+  rows. Measured on the recorded v37 report, `## Окно записей` nested inside
+  `# Покрытие` is **12** blocking defects (6 «повторные пути покрытия» + 6
+  «без адреса»), not one of which says the word rollover. It is NOT «+2». The
+  same report at `# Окно записей`, or with the h2 section moved after all of
+  «Покрытие», is exit 0;
 * the `итог:` line is mandatory, exactly once, and all six counts are re-derived
   from the corpus by `citecheck` — a wrong count blocks;
 * one row per channel WITH A GAP, and one row per channel of a file your

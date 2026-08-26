@@ -365,6 +365,35 @@ class GateTest(unittest.TestCase):
             "| big.jsonl | Big | окно=1–1\u00a0234 | записей=1 224 | нет=10 |\n"))
         self.assertEqual(v["blocking"], 0, cc.render_rollover(v))
 
+    def test_a_wrong_count_in_the_summary_is_the_whole_defect(self):
+        """summary_mismatch alone must block — the table here is correct."""
+        v = self.verdict(FINDINGS + (
+            "\n# Окно записей\n\n"
+            "итог: файлов=1 каналов=1 сплошных=1 с-пропусками=0 неприменимо=3 "
+            "ошибок=0\n\n| a.jsonl | Alpha | окно=1–2 | записей=2 | нет=0 |\n"))
+        self.assertEqual(v["undeclared"], [])
+        self.assertEqual(v["wrong"], [])
+        self.assertEqual(v["malformed"], [])
+        self.assertTrue(v["summary_mismatch"])
+        self.assertEqual(v["blocking"], 1, cc.render_rollover(v))
+
+    def test_a_fenced_summary_line_does_not_discharge_the_section(self):
+        """Hiding «итог:» in a code fence is the same as not writing it."""
+        v = self.verdict(FINDINGS + (
+            "\n# Окно записей\n\n```\n"
+            "итог: файлов=1 каналов=1 сплошных=1 с-пропусками=0 неприменимо=0 "
+            "ошибок=0\n```\n\n| a.jsonl | Alpha | окно=1–2 | записей=2 | нет=0 |\n"))
+        self.assertTrue(v["summary_missing"], cc.render_rollover(v))
+        self.assertGreater(v["blocking"], 0)
+
+    def test_a_dot_slash_path_is_the_same_row(self):
+        """«./a.jsonl» and «a.jsonl» are one channel, not two."""
+        v = self.verdict(FINDINGS + (
+            "\n# Окно записей\n\n"
+            "итог: файлов=1 каналов=1 сплошных=1 с-пропусками=0 неприменимо=0 "
+            "ошибок=0\n\n| ./a.jsonl | Alpha | окно=1–2 | записей=2 | нет=0 |\n"))
+        self.assertEqual(v["blocking"], 0, cc.render_rollover(v))
+
     # ---- fail closed at the gate ----------------------------------------
     def test_a_scan_error_blocks_even_with_a_perfect_section(self):
         write(os.path.join(self.corpus, "bad.jsonl"), [rec("K", 1), "{broken"])
@@ -459,6 +488,41 @@ class WiringTest(unittest.TestCase):
                          "the mutation changed nothing — the rollover term was "
                          "already dead on the real path:\n" + r.stdout)
 
+    # ---- every term of the rollover blocking sum, pinned by mutation --------
+    # Two of them used to be free: `malformed` and `summary_missing` could each
+    # be deleted from the sum and all 36 tests stayed green. `malformed` is the
+    # ONLY thing between the gate and a rollover table full of unparseable rows.
+    def _report(self, name, text):
+        path = os.path.join(self.dir, name)
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(text)
+        return path
+
+    def test_malformed_rows_are_live_in_the_blocking_sum(self):
+        """A declared section plus one unparseable row must still block."""
+        bad = self._report("report-malformed.md", FINDINGS + GOOD_SECTION
+                           + "| Security.jsonl | Security | мусор |\n")
+        self.assertEqual(self.run_gate(CITECHECK, bad).returncode, 1)
+        mutant = self._mutant('+ len(out["malformed"]) + len(out["scan_errors"]))',
+                              '+ 0 + len(out["scan_errors"]))')
+        r = self.run_gate(mutant, bad)
+        self.assertEqual(r.returncode, 0,
+                         "dropping `malformed` from the sum changed nothing — "
+                         "the term was already dead:\n" + r.stdout)
+
+    def test_summary_missing_is_live_in_the_blocking_sum(self):
+        """A section with a table but no «итог:» line must still block."""
+        itog = [l for l in GOOD_SECTION.splitlines() if l.startswith("итог")][0]
+        bad = self._report("report-no-itog.md",
+                           FINDINGS + GOOD_SECTION.replace(itog + "\n", ""))
+        self.assertEqual(self.run_gate(CITECHECK, bad).returncode, 1)
+        mutant = self._mutant('out["blocking"] = (int(out["summary_missing"])',
+                              'out["blocking"] = (0 * int(out["summary_missing"])')
+        r = self.run_gate(mutant, bad)
+        self.assertEqual(r.returncode, 0,
+                         "zeroing `summary_missing` changed nothing — the term "
+                         "was already dead:\n" + r.stdout)
+
     def test_never_calling_the_check_flips_the_exit_code(self):
         """A second mutation: stub the whole verdict out. Same proof, one layer up."""
         mutant = self._mutant(
@@ -467,6 +531,151 @@ class WiringTest(unittest.TestCase):
             "    rollover = {'blocking': 0}")
         r = self.run_gate(mutant, self.bad)
         self.assertEqual(r.returncode, 0, r.stdout)
+
+
+# ----------------------------------------------- the section regex is NARROW --
+class SectionRegexTest(unittest.TestCase):
+    """«Ротация журналов» is an ordinary FINDING title in a log-analysis case.
+
+    The regex is matched against section TITLES, so the `rollover|ротаци`
+    aliases that used to be in it turned any such section into a rollover span
+    and read every `|`-line in it as a rollover row. The arm's only escape was
+    renaming its finding. One spelling — the one `rollover.py --report` emits.
+    """
+
+    def setUp(self):
+        self.dir = tempfile.mkdtemp(prefix="rollover-re-")
+        self.addCleanup(shutil.rmtree, self.dir, True)
+        self.corpus = os.path.join(self.dir, "corpus")
+        one_file_corpus(self.corpus)
+
+    def test_the_regex_matches_only_the_one_spelling(self):
+        self.assertTrue(cc.ROLLOVER_SECTION_RE.search("Окно записей"))
+        for alias in ("Ротация журналов", "rollover policy", "Ротация"):
+            self.assertIsNone(cc.ROLLOVER_SECTION_RE.search(alias),
+                              "%r must NOT be read as the rollover section" % alias)
+
+    def test_an_ordinary_rotation_finding_does_not_hijack_the_gate(self):
+        report = (FINDINGS + GOOD_SECTION
+                  + "\n# Ротация журналов\n\n| параметр | значение |\n"
+                    "| --- | --- |\n| Security MaxSize | 20 MB |\n")
+        v = cc.rollover_evidence(report, self.corpus, ["a.jsonl"])
+        self.assertEqual(v["malformed"], [], cc.render_rollover(v))
+        self.assertEqual(v["blocking"], 0, cc.render_rollover(v))
+
+
+# ------------------------------- a channel name is ADVERSARY-CONTROLLED text --
+class CellEscapeTest(unittest.TestCase):
+    """A `|` in a channel name used to wedge the run, permanently.
+
+    `row_for` interpolated the channel straight into a markdown row, so the
+    grader read the row back as a DIFFERENT channel and the required key could
+    never match: `undeclared` + `spurious` on the tool's own output, with no
+    report the producer could emit to clear it. It failed closed, so it hid
+    nothing — it just made the corpus ungradeable.
+    """
+
+    HOSTILE = "Ev | X | окно=1–999 | записей=999 | нет=0"
+
+    def setUp(self):
+        self.dir = tempfile.mkdtemp(prefix="rollover-esc-")
+        self.addCleanup(shutil.rmtree, self.dir, True)
+        self.corpus = os.path.join(self.dir, "corpus")
+        os.makedirs(self.corpus)
+        write(os.path.join(self.corpus, "p.jsonl"),
+              [rec(self.HOSTILE, i) for i in (1, 2, 9, 10)])
+
+    def test_the_row_stays_a_five_cell_row(self):
+        e = ro.scan_corpus(self.corpus)["entries"][0]
+        row = ro.row_for(e)
+        cells = cc.split_cells(row)
+        self.assertEqual(len(cells), 5, row)
+        self.assertEqual(cells[1], ro.cell_safe(self.HOSTILE))
+        self.assertNotIn("|", cells[1])
+
+    def test_the_tools_own_output_grades_clean(self):
+        """The producer's output must satisfy the grader. It could not before."""
+        scan = ro.scan_corpus(self.corpus)
+        report = (FINDINGS + "\n# Окно записей\n\n"
+                  + ro.render(scan, True, []) + "\n")
+        v = cc.rollover_evidence(report, self.corpus, [])
+        self.assertEqual(v["blocking"], 0, cc.render_rollover(v))
+
+    def test_the_escape_is_injective(self):
+        """Two different channels must never collapse onto one key."""
+        self.assertNotEqual(ro.key_of("a", "X|Y"), ro.key_of("a", "X\\7cY"))
+        self.assertNotEqual(ro.key_of("a", "X\nY"), ro.key_of("a", "X\\0aY"))
+
+    def test_a_newline_in_a_channel_cannot_forge_extra_rows(self):
+        row = ro.row_for({"path": "p.jsonl", "channel": "A\nB", "lo": 1,
+                          "hi": 1, "records": 1, "missing": 0})
+        self.assertEqual(len(row.splitlines()), 1, row)
+
+
+# ---------------------------------------------- nothing may vanish in silence --
+class SilenceTest(unittest.TestCase):
+    def setUp(self):
+        self.dir = tempfile.mkdtemp(prefix="rollover-silent-")
+        self.addCleanup(shutil.rmtree, self.dir, True)
+
+    def test_a_channel_with_records_but_no_id_is_reported(self):
+        """B has 1 000 records and no EventRecordID. It used to be dropped."""
+        p = os.path.join(self.dir, "m.jsonl")
+        write(p, [rec("A", i) for i in range(1, 11)]
+              + [json.dumps({"Event": {"System": {"Channel": "B",
+                                                  "EventID": 4624}}})] * 1000)
+        got = {e["channel"]: e for e in ro.scan_file(p, "m.jsonl")}
+        self.assertIn("B", got)
+        self.assertEqual(got["B"]["status"], ro.NA)
+        self.assertEqual(got["B"]["detail"], "поле=нет-EventRecordID")
+        self.assertEqual(got["B"]["rows"], 1000)
+        self.assertEqual(got["A"]["status"], ro.OK)
+
+    def test_a_symlinked_directory_inside_the_corpus_is_walked(self):
+        corpus = os.path.join(self.dir, "corpus")
+        real = os.path.join(self.dir, "elsewhere")
+        os.makedirs(corpus)
+        os.makedirs(real)
+        write(os.path.join(real, "s.jsonl"), [rec("Sym", i) for i in (1, 2, 9)])
+        os.symlink(real, os.path.join(corpus, "linked"))
+        scan = ro.scan_corpus(corpus)
+        self.assertEqual(scan["files"], 1, scan["entries"])
+        self.assertEqual([e["channel"] for e in scan["entries"]], ["Sym"])
+
+    def test_a_symlink_loop_does_not_hang_the_walk(self):
+        corpus = os.path.join(self.dir, "loop")
+        os.makedirs(os.path.join(corpus, "sub"))
+        write(os.path.join(corpus, "sub", "s.jsonl"), [rec("L", 1)])
+        os.symlink(corpus, os.path.join(corpus, "sub", "up"))
+        self.assertGreaterEqual(ro.scan_corpus(corpus)["files"], 1)
+
+    def test_a_gzipped_jsonl_with_a_gap_is_not_neprimenimo(self):
+        """A real .gz used to read as «формат=двоичный» — a gap hidden as N/A."""
+        import gzip as _gz
+        corpus = os.path.join(self.dir, "gz")
+        os.makedirs(corpus)
+        with _gz.open(os.path.join(corpus, "g.jsonl.gz"), "wt",
+                      encoding="utf-8") as fh:
+            for i in (1, 2, 9, 10):
+                fh.write(rec("Gz", i) + "\n")
+        e = ro.scan_corpus(corpus)["entries"][0]
+        self.assertEqual(e["status"], ro.GAP)
+        self.assertEqual((e["lo"], e["hi"], e["records"], e["missing"]),
+                         (1, 10, 4, 6))
+
+    def test_a_comment_banner_does_not_make_valid_jsonl_look_foreign(self):
+        """25 header lines then real JSONL: the sniff budget must not run out."""
+        p = os.path.join(self.dir, "banner.jsonl")
+        write(p, ["# exported by some tool" for _ in range(25)]
+              + [rec("Ban", i) for i in (1, 2, 9, 10)])
+        e = ro.scan_file(p, "banner.jsonl")[0]
+        self.assertEqual(e["status"], ro.GAP, e)
+        self.assertEqual(e["missing"], 6)
+
+    def test_a_space_is_a_thousands_separator_not_filler(self):
+        self.assertEqual(ro._as_int("1 234"), 1234)
+        self.assertEqual(ro._as_int("1\u00a0234"), 1234)
+        self.assertIsNone(ro._as_int("1 0"))
 
 
 if __name__ == "__main__":

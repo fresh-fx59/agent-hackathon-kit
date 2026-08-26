@@ -1247,7 +1247,13 @@ def resolve_coverage_path(path, by_rel, by_base):
 # EVERY COUNTER BELOW FEEDS THE ONE `blocking` SUM AT THE END OF
 # report_evidence(). There is no second ledger: defect #4 two rounds ago was a
 # private counter that printed 160 where the gate printed 161.
-ROLLOVER_SECTION_RE = re.compile(r"окно\s+запис|rollover|ротаци", re.IGNORECASE)
+# MATCHED AGAINST SECTION TITLES. Keep it NARROW. The `rollover|ротаци`
+# aliases that used to live here were a false positive with teeth: in a
+# log-analysis case «Ротация журналов» is an ordinary finding title, and any
+# section whose heading matched became a rollover span, so every `|`-line in
+# it was parsed as a rollover row and counted as `malformed`. The only escape
+# the arm had was renaming its finding. One spelling, the one the tool emits.
+ROLLOVER_SECTION_RE = re.compile(r"окно\s+запис", re.IGNORECASE)
 ROLLOVER_SUMMARY_RE = re.compile(r"^\s*(?:[-*+>]\s*)?(?:\*\*|__)?\s*итог\s*:",
                                  re.IGNORECASE)
 _RO_NUM = r"[\d   ]+"
@@ -1334,6 +1340,28 @@ def rollover_rows(lines, spans, structural):
     return rows, malformed
 
 
+ROLLOVER_ROW_SHAPE_RE = re.compile(
+    r"окно\s*[:=].*запис(?:ей|и|ь)\s*[:=].*нет\s*[:=]", re.IGNORECASE)
+
+
+def misplaced_rollover_rows(lines, structural):
+    """Report lines that LOOK like «окно записей» rows but sit outside the section.
+
+    Without this the diagnosis for a nested table is «дубликаты покрытия» and
+    «строки покрытия без адреса» — twelve messages, none of which says the word
+    rollover, for what is really one placement mistake.
+    """
+    hits = []
+    for i, raw in enumerate(lines, 1):
+        if not structural[i - 1]:
+            continue
+        if not raw.lstrip().startswith("|"):
+            continue
+        if ROLLOVER_ROW_SHAPE_RE.search(raw):
+            hits.append(i)
+    return hits
+
+
 def rollover_evidence(report, corpus, cited_paths, structural=None, sections=None):
     """The whole «окно записей» verdict, as counters. Fails closed everywhere."""
     lines = report.splitlines()
@@ -1344,6 +1372,7 @@ def rollover_evidence(report, corpus, cited_paths, structural=None, sections=Non
            "summary_duplicate": False, "summary_mismatch": None,
            "undeclared": [], "wrong": [], "spurious": [], "duplicate_rows": [],
            "malformed": [], "scan_errors": [], "scan_failed": None,
+           "misplaced_rows": [], "nested_section": False,
            "scan": None, "required": 0, "blocking": 0}
 
     try:
@@ -1371,7 +1400,20 @@ def rollover_evidence(report, corpus, cited_paths, structural=None, sections=Non
         out["missing_section"] = True
         out["blocking"] = 1 + len(out["scan_errors"]) + len(want)
         out["undeclared"] = ["%s | %s" % k for k in sorted(want)]
+        # Nesting the table under another heading («# Покрытие» is the one that
+        # happens) is NOT a small mistake: the section stops existing, the rows
+        # are then read as COVERAGE rows, and every message names coverage while
+        # the real cause is placement. Say the real cause here.
+        out["misplaced_rows"] = misplaced_rollover_rows(lines, structural)
         return out
+
+    # A section NESTED inside «Покрытие» (a deeper heading level) does not end
+    # where its author thinks: the span runs on to the next heading of the same
+    # level, so the coverage rows below it are read as rollover rows and every
+    # message names the wrong table. Name the real cause: placement.
+    cov = _spans_for(sections, COVERAGE_SECTION_RE)
+    out["nested_section"] = any(a < d and c < b
+                                for a, b in spans for c, d in cov)
 
     summary, hits = rollover_summary_line(lines, spans, structural)
     if summary is None:
@@ -1390,7 +1432,8 @@ def rollover_evidence(report, corpus, cited_paths, structural=None, sections=Non
     out["malformed"] = malformed
     seen = {}
     for r in rows:
-        key = ro.key_of(r["path"], r["channel"])
+        # The row was written by `row_for`, so its cells are ALREADY escaped.
+        key = ro.key_of_cells(r["path"], r["channel"])
         seen.setdefault(key, []).append(r)
     out["duplicate_rows"] = sorted("%s | %s" % k for k, v in seen.items()
                                    if len(v) > 1)
@@ -1431,8 +1474,13 @@ def render_rollover(r):
         out.append("  ПРОВЕРКА НЕ ОТРАБОТАЛА: %s — это НЕ «чисто»." % r["scan_failed"])
         return "\n".join(out)
     s = r.get("scan") or {}
+    # NOT «потеряно записей». «Lost» is the diagnosis, and «~402 000 записей
+    # вытеснено» is the exact false claim this whole check exists to prevent;
+    # printing it in the gate's own output re-introduces it. State the FACT:
+    # ids absent inside the window. The cause — filtered export or a real wrap —
+    # is the report's job, not this line's.
     out.append("  на диске: файлов %d, каналов %d, сплошных %d, с пропусками %d, "
-               "неприменимо %d, ошибок %d, потеряно записей %d"
+               "неприменимо %d, ошибок %d, id нет внутри окон %d"
                % (s.get("files", 0), s.get("channels", 0), s.get("contiguous", 0),
                   s.get("gapped", 0), s.get("na", 0), s.get("errors", 0),
                   s.get("lost", 0)))
@@ -1440,6 +1488,19 @@ def render_rollover(r):
         out.append("  НЕТ РАЗДЕЛА «Окно записей». Добавь его: "
                    "python3 rollover.py --corpus <корпус> --report --required-only "
                    "--cite <файл-улики> >> report.md")
+    if r.get("nested_section"):
+        out.append("  РАЗДЕЛ ВЛОЖЕН в «Покрытие»: его строки читаются ещё и как "
+                   "строки ПОКРЫТИЯ (повторные пути, без адреса), а вложенный "
+                   "заголовок не кончается там, где ты думаешь. «Окно записей» "
+                   "обязан быть заголовком ВЕРХНЕГО уровня — «# Окно записей», "
+                   "или «## Окно записей» ПОСЛЕ всего раздела «Покрытие», "
+                   "НЕ внутри него.")
+    if r.get("misplaced_rows"):
+        out.append("  НО строки нужной формы в отчёте ЕСТЬ — строки %s. Раздел "
+                   "вложен в чужой: «# Окно записей» обязан быть заголовком "
+                   "ВЕРХНЕГО уровня (h1 «# », или h2 «## » сразу ПОСЛЕ раздела "
+                   "«Покрытие»), НЕ внутри него."
+                   % ", ".join(str(i) for i in r["misplaced_rows"][:10]))
     if r.get("summary_missing"):
         out.append("  нет строки «итог:» — раздел есть, чисел нет")
     if r.get("summary_duplicate"):
