@@ -33,6 +33,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 V37 = os.path.normpath(os.path.join(HERE, "..", "..", "skills", "v37", "tools"))
 CITE = os.path.join(V37, "cite.py")
 CITECHECK = os.path.join(V37, "citecheck.py")
+ROLLOVER = os.path.join(V37, "rollover.py")
 
 
 def load(name, path):
@@ -411,6 +412,20 @@ def _cite_line(root, path, lineno):
     return p.stdout.strip()
 
 
+def _rollover_section(root):
+    """The «Окно записей» section, from the real producer.
+
+    v38 makes a report that cites corpus files owe this section; without it
+    `report_evidence()` counts a blocking defect and these tests would then be
+    measuring the rollover term instead of the aggregate one.
+    """
+    p = subprocess.run([sys.executable, ROLLOVER, "--corpus", root,
+                        "--report", "--required-only"],
+                       capture_output=True, text=True)
+    assert p.returncode == 0, p.stderr
+    return p.stdout.strip()
+
+
 def green_report(root, extra=""):
     """A report on the mini corpus that citecheck grades with ZERO defects."""
     return """# Находки
@@ -446,6 +461,8 @@ reason and the three accounting tests below would grade the wrong defect.
 | notes.log | наблюдение | %s |
 | blob.bin | двоичный | формат=двоичный |
 
+%s
+
 # Разбор рабочего списка
 
 # Чего я не знаю
@@ -457,7 +474,7 @@ attacked-not-proven
        _cite_line(root, "Security.jsonl", 1),
        _cite_line(root, "Security.jsonl", 2),
        _cite_line(root, "spray.jsonl", 1),
-       _cite_line(root, "notes.log", 3))
+       _cite_line(root, "notes.log", 3), _rollover_section(root))
 
 
 class TestBlockingAccounting(unittest.TestCase):

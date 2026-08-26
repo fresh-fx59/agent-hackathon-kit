@@ -88,6 +88,8 @@ citation is ok or unverifiable, 1 when any is wrong-content / out-of-range /
 missing-file / ambiguous, 2 on usage error.
 """
 import argparse
+import importlib.util
+import hashlib
 import gzip
 import json
 import os
@@ -1387,19 +1389,120 @@ def _enum_norm(s):
     return " ".join((s or "").strip().lower().replace("ё", "е").split()).strip(" .;,")
 
 
+# --- DESIGN DECISION (fix #3): Russian is inflected; exact strings are not ---
+# MEASURED false positives on real prose: «блокировка», «разрешено», «сетевое
+# подключение» and «входящий» were all rejected as `unknown_decode` against a
+# hand-listed alias set. Two of the twelve v37 defects were correct informal
+# glosses. A gate that rejects correct Russian is a gate that gets switched off.
+#
+# The rule, in three parts:
+#   1. strip inflectional endings off CYRILLIC words only -- latin tokens such as
+#      `tcp` or `bypass` are identifiers and must still match exactly;
+#   2. a decode matches when the table entry's STEM SET is a SUBSET of what the
+#      author wrote: «сетевой» is inside «сетевое подключение»;
+#   3. subset alone would be too weak -- «домен» is a subset of «домен+частная»,
+#      so profiles=1 could be decoded with profiles=3's words. The winner is
+#      therefore the MOST SPECIFIC value (an exact listed spelling beats stems;
+#      more matched stems beats fewer), and the pair is right only when the value
+#      the author quoted is among the winners. `wrong_decode` keeps firing.
+_RU_ENDINGS = (
+    "ность", "ения", "ение", "ению", "ние", "ния", "нию", "ний", "ами", "ями",
+    "ать", "ять", "ить", "еть", "уть", "ыть", "ого", "его", "ому", "ему",
+    "ыми", "ими", "ых", "их", "ым", "им",
+    "ая", "яя", "ое", "ее", "ые", "ие", "ый", "ий", "ой", "ей", "ом", "ем",
+    "ах", "ях", "ов", "ев", "ью", "ия", "ья", "ть", "ти", "ся", "сь",
+    "но", "на", "ны", "не", "ла", "ло", "ли", "ет", "ут", "ют", "ат", "ят",
+    "ка", "ки", "ку", "ко",
+    "а", "о", "е", "и", "ы", "й", "ь", "я", "у", "ю", "н")
+_RU_MIN_STEM = 4
+_CYR_RE = re.compile(r"[\u0430-\u044f\u0451]")
+
+
+def _enum_stem(word):
+    """One Cyrillic word -> its stem. Latin/digit tokens come back untouched."""
+    if not _CYR_RE.search(word):
+        return word
+    w = word
+    changed = True
+    while changed and len(w) > _RU_MIN_STEM:
+        changed = False
+        for end in _RU_ENDINGS:
+            if len(end) < len(w) and w.endswith(end) \
+                    and len(w) - len(end) >= _RU_MIN_STEM:
+                w = w[:-len(end)]
+                changed = True
+                break
+    return w
+
+
+_ENUM_WORD_RE = re.compile(r"[0-9A-Za-z_\u0400-\u04ff]+")
+
+
+def _enum_stem_set(text):
+    return frozenset(_enum_stem(w) for w in _ENUM_WORD_RE.findall(_enum_norm(text)))
+
+
+def enum_match_scores(table, field, text):
+    """-> {value: specificity} for every value of `field` this decode could name.
+
+    1000 = the author wrote a listed spelling exactly; otherwise the number of
+    table stems the author's words cover. Bigger is more specific."""
+    norm = _enum_norm(text)
+    written = _enum_stem_set(norm)
+    out = {}
+    for (f, v), e in table.items():
+        if f != field:
+            continue
+        if norm in e["accepted"]:
+            out[v] = 1000
+            continue
+        best = 0
+        for st in e["stem_sets"]:
+            if st and st <= written and len(st) > best:
+                best = len(st)
+        if best:
+            out[v] = best
+    return out
+
+
 def _enum_build(rows):
     t = {}
     for field, value, canon, aliases in rows:
         key = (field.lower(), int(value))
         accepted = set([_enum_norm(canon)] + [_enum_norm(a) for a in aliases])
         accepted.discard("")
-        t[key] = {"canonical": canon, "accepted": accepted}
+        t[key] = {"canonical": canon, "accepted": accepted,
+                  "stem_sets": [_enum_stem_set(a) for a in accepted]}
     return t
 
 
 ENUM_BUILTIN = _enum_build(ENUM_BUILTIN_ROWS)
 assert not any("(" in r[2] or ")" in r[2] for r in ENUM_BUILTIN_ROWS), \
     "a canonical decode with a paren can never be written in Field=N (decode)"
+
+
+def enum_builtin_digest(rows=None):
+    """sha256 over a canonical serialisation of the LOCKED half of the table.
+
+    fix #7. The design says the builtin half cannot be edited by the arm and the
+    growth path must not legislate -- but nothing enforced it. MEASURED: rewriting
+    `logontype 5`, `direction 1` or `origin 2` to a lie each left rc=0 with a
+    fully green suite; 30 of the 33 pairs could be silently rewritten one file up
+    the stack from the TSV lock, which is the exact bypass the TSV lock exists to
+    stop. So: hash it here, check it at runtime (fail closed, `builtin_tampered`),
+    and pin the SAME constant from the test file. Two files must now be edited in
+    step, and the second diff is the review signal.
+    """
+    rows = ENUM_BUILTIN_ROWS if rows is None else rows
+    blob = "\n".join(
+        "%s\t%d\t%s\t%s" % (f.lower(), int(v), c, "|".join(sorted(a)))
+        for f, v, c, a in sorted(rows, key=lambda r: (r[0].lower(), int(r[1]))))
+    return hashlib.sha256(blob.encode("utf-8")).hexdigest()
+
+
+# UPDATE DELIBERATELY: changing a builtin row changes this constant AND the copy
+# pinned in tools/tests/test_enum_decode_ownership_v37.py.
+ENUM_BUILTIN_SHA256 = "eca87a979b118d08fda79f02a93e7792d6e7e6a853351049ca869be6284b50c3"
 
 # Russian prose names for the same fields. WHY THIS EXISTS, measured: the first
 # version of this gate matched only `"Field":N` and `Field=N`. Attacking it
@@ -1422,12 +1525,15 @@ ENUM_JSON_PAIR_RE = re.compile(
     r'"([A-Za-z_][A-Za-z0-9_]{0,31})"\s*:\s*(\d{1,10})\b')
 
 
-def _enum_prose_re(fields):
-    """`Action=2`, `Action 2`, «действие 2/3» — every way prose states the pair.
+def _enum_field_alternation(fields):
+    """Every spelling of every known field name, longest first.
 
-    The `2/3` form is deliberate: merging two different values into one slash
-    pair IS the v37 error, so both numbers must be seen and both must be
-    decoded separately."""
+    ONE list, used by BOTH recognisers. fix #2 exists because they had two: the
+    claim side already accepted Russian field names and the decode side was
+    `[A-Za-z_]`-only, in a report SKILL.md requires to be written in Russian.
+    Consequence, measured on the real v37 report: «действие 2/3 (разрешить)»
+    produced two `missing_decode` and `wrong_decode` — the outcome the whole
+    design is named for — could never fire on the wording that caused it."""
     names = []
     for f in sorted(fields):
         names.append(re.escape(f))
@@ -1435,10 +1541,27 @@ def _enum_prose_re(fields):
             names.append(re.escape(alias))
     if not names:
         return None
+    return "|".join(sorted(names, key=len, reverse=True))
+
+
+#: a value, or the «2/3» merge that IS the v37 error — both numbers must be seen
+_ENUM_VALUES = r'(\d{1,10}(?:\s*/\s*\d{1,10}){0,4})(?!\d)(?!\.\d)'
+#: fix #9: «протокол 3proxy» is a product name, not `протокол 3`
+_ENUM_VALUE_END = r'(?![A-Za-z\u0400-\u04ff])'
+
+
+def _enum_prose_re(fields):
+    """`Action=2`, `Action 2`, «действие 2/3» — every way prose states the pair.
+
+    The `2/3` form is deliberate: merging two different values into one slash
+    pair IS the v37 error, so both numbers must be seen and both must be
+    decoded separately."""
+    alt = _enum_field_alternation(fields)
+    if alt is None:
+        return None
     return re.compile(
-        r'(?<![A-Za-z0-9_\u0400-\u04ff])(%s)\s*[:=]?\s*'
-        r'(\d{1,10}(?:\s*/\s*\d{1,10}){0,4})(?!\d)(?!\.\d)'
-        % "|".join(sorted(names, key=len, reverse=True)), re.IGNORECASE)
+        r'(?<![A-Za-z0-9_\u0400-\u04ff])(%s)\s*[:=]?\s*' % alt
+        + _ENUM_VALUES + _ENUM_VALUE_END, re.IGNORECASE)
 
 
 ENUM_NAME_TO_FIELD = {}
@@ -1452,9 +1575,34 @@ for _f, _al in ENUM_FIELD_NAMES.items():
 # the FIELD NAME, the EXACT value, and a parenthesised decode. Widening the
 # separator can only ever find MORE decode tokens, and every token found is
 # still validated against the table — so it cannot weaken the gate.
-ENUM_DECODE_RE = re.compile(
-    r'(?<![A-Za-z0-9_])([A-Za-z_][A-Za-z0-9_]{0,31})\s*(?:=|\s)\s*(\d{1,10})\s*'
-    r'\(\s*([^)\n]{1,80}?)\s*\)')
+def _enum_decode_re(fields):
+    """`Field N (расшифровка)` in every spelling of the field name.
+
+    fix #2: built from the SAME alternation as the claim recogniser, so a
+    Russian field name is now readable on both sides. `2/3` is accepted here too
+    and the decode is attached to EVERY value in the run — that is what turns the
+    real v37 «действие 2/3 (разрешить)» into a `wrong_decode` on action=2
+    (which is «блокировать») instead of two silent `missing_decode`."""
+    alt = _enum_field_alternation(fields)
+    if alt is None:
+        return None
+    return re.compile(
+        r'(?<![A-Za-z0-9_\u0400-\u04ff])(%s)\s*[:=]?\s*' % alt
+        + _ENUM_VALUES + _ENUM_VALUE_END
+        # A DECODE IS A SHORT NOUN PHRASE, not the next sentence. Measured on
+        # the real v37 report: «LogonType 10/3 (их нет - все 4624 в Security.jsonl
+        # это LogonType 5 службы и 3xLogonType 2)» is an aside, and reading it as
+        # a decode produced the nonsense «расшифровано как "их нет ..." - это
+        # logontype=5». Longest canonical decode in the table is 36 chars, so cap
+        # at 48 and refuse sentence punctuation; anything longer is not an
+        # attempt to decode and the pair stays an honest `missing_decode`.
+        + r'\s*\(\s*([^)\n\u2014.;:!?]{1,48}?)\s*\)', re.IGNORECASE)
+
+
+ENUM_DECODE_RE = _enum_decode_re(set(ENUM_FIELD_NAMES))
+#: fix #10: an unbounded, unchecked TSV is a second way to legislate
+ENUM_TABLE_MAX_BYTES = 65536
+ENUM_TABLE_MAX_ROWS = 500
 
 
 def load_enum_extensions(path):
@@ -1465,6 +1613,11 @@ def load_enum_extensions(path):
             raw = fh.read()
     except (OSError, UnicodeDecodeError) as e:
         return [], [{"kind": "table_unreadable", "path": path, "text": str(e)}]
+    if len(raw.encode("utf-8")) > ENUM_TABLE_MAX_BYTES:
+        return [], [{"kind": "table_too_large", "path": path,
+                     "text": "таблица больше %d байт — это уже не расширение"
+                             % ENUM_TABLE_MAX_BYTES}]
+    seen = {}
     for n, line in enumerate(raw.splitlines(), 1):
         if not line.strip() or line.lstrip().startswith("#"):
             continue
@@ -1494,8 +1647,21 @@ def load_enum_extensions(path):
             problems.append({"kind": "table_no_source", "path": path, "line": n,
                              "text": "строка без источника: %s=%s" % (field, value)})
             continue
+        key = (field.lower(), ival)
+        if key in seen:
+            # fix #10. Last-wins was silent, and a CONTRADICTORY duplicate is a
+            # way to legislate twice and have the second line quietly govern.
+            problems.append({"kind": "table_duplicate", "path": path, "line": n,
+                             "text": "%s=%s уже объявлено в строке %d"
+                                     % (field, ival, seen[key])})
+            continue
+        seen[key] = n
         rows.append((field, ival, decode,
                      [a for a in (aliases or "").split("|") if a.strip()]))
+        if len(rows) > ENUM_TABLE_MAX_ROWS:
+            problems.append({"kind": "table_too_large", "path": path, "line": n,
+                             "text": "больше %d строк" % ENUM_TABLE_MAX_ROWS})
+            return [], problems
     return rows, problems
 
 
@@ -1506,6 +1672,14 @@ def enum_table(reference_dir=None):
                                      "..", "reference")
     path = os.path.normpath(os.path.join(reference_dir, ENUM_TABLE_FILE))
     rows, problems = load_enum_extensions(path)
+    # fix #7. THE LOCK ON THE LOCKED HALF. The TSV lock below stops the arm
+    # redefining a builtin pair from the growth path; nothing stopped it editing
+    # the builtin row itself, one file up. Fail closed and say so.
+    if enum_builtin_digest() != ENUM_BUILTIN_SHA256:
+        problems.append({"kind": "builtin_tampered", "path": __file__,
+                         "text": "встроенная таблица изменена: sha256 %s, "
+                                 "ожидается %s" % (enum_builtin_digest()[:16],
+                                                   ENUM_BUILTIN_SHA256[:16])})
     table = dict(ENUM_BUILTIN)
     for field, value, decode, aliases in rows:
         key = (field.lower(), int(value))
@@ -1533,6 +1707,7 @@ def enum_decode_check(report, blocks, structural=None, reference_dir=None):
     table, problems = enum_table(reference_dir)
     fields = enum_known_fields(table)
     prose_re = _enum_prose_re(fields)
+    decode_re = _enum_decode_re(fields)
     items = []
     for label, lo, hi in blocks:
         pairs, decodes = {}, {}
@@ -1552,11 +1727,16 @@ def enum_decode_check(report, blocks, structural=None, reference_dir=None):
                         continue
                     for part in m.group(2).split("/"):
                         pairs.setdefault((f, int(part.strip())), i)
-            for m in ENUM_DECODE_RE.finditer(raw):
-                f = m.group(1).lower()
-                if f in fields:
-                    decodes.setdefault((f, int(m.group(2))), []).append(
-                        (i, _enum_norm(m.group(3))))
+            if decode_re is not None:
+                for m in decode_re.finditer(raw):
+                    f = ENUM_NAME_TO_FIELD.get(m.group(1).lower(),
+                                               m.group(1).lower())
+                    if f not in fields:
+                        continue
+                    txt = _enum_norm(m.group(3))
+                    for part in m.group(2).split("/"):
+                        decodes.setdefault((f, int(part.strip())), []).append(
+                            (i, txt))
         for (f, v), line_no in sorted(pairs.items()):
             entry = table.get((f, v))
             if entry is None:
@@ -1571,17 +1751,27 @@ def enum_decode_check(report, blocks, structural=None, reference_dir=None):
                               "expected": entry["canonical"]})
                 continue
             for dline, text in got:
-                if text in entry["accepted"]:
+                scores = enum_match_scores(table, f, text)
+                if not scores:
+                    items.append({"block": label, "line": dline, "field": f,
+                                  "value": v, "text": text,
+                                  "expected": entry["canonical"],
+                                  "kind": "unknown_decode", "means": None})
                     continue
-                other = [ov for (of, ov), e in sorted(table.items())
-                         if of == f and ov != v and text in e["accepted"]]
+                top = max(scores.values())
+                winners = sorted(ov for ov, sc in scores.items() if sc == top)
+                if v in winners:
+                    continue        # the author named THIS value, inflection and all
                 items.append({"block": label, "line": dline, "field": f,
                               "value": v, "text": text,
                               "expected": entry["canonical"],
-                              "kind": "wrong_decode" if other else "unknown_decode",
-                              "means": other[0] if other else None})
-    blocking = len(items) + len(problems)
-    return {"items": items, "table_problems": problems,
+                              "kind": "wrong_decode", "means": winners[0]})
+    # fix #1 (structural half). NAMED COUNTERS, then one `sum()`. A term added
+    # later cannot be forgotten out of the total, and `enum_counter_keys()` lets a
+    # single test insist that every name is exercised by an exit-code test.
+    counters = {"items": len(items), "table_problems": len(problems)}
+    blocking = sum(counters.values())          # 6a
+    return {"items": items, "table_problems": problems, "counters": counters,
             "table_size": len(table), "blocking": blocking}
 
 
@@ -1674,7 +1864,15 @@ def render_enum_decode(e):
 # FAIL CLOSED throughout: no section, unreadable corpus file, unparseable
 # timestamp, an exception in the scan — all blocking, never "clean".
 
-OWNERSHIP_SECTION_RE = re.compile(r"принадлежност|ownership", re.IGNORECASE)
+# fix #6 — SECTION-TITLE HIJACK, the identical bug PR #79 fixed for `ротаци`.
+# `принадлежност|ownership` is a substring match against section TITLES, so
+# «Принадлежность файлов корпуса» or «Ownership of the corpus» both satisfied
+# `missing_section` AND turned that section into an ownership span: every row in
+# it that was not exactly 6 cells became a blocking `malformed`, and the arm's
+# only escape was renaming its own section. ONE spelling — the one the gate asks
+# for and `render_ownership` prints.
+OWNERSHIP_SECTION_RE = re.compile(
+    r"^\s*принадлежность\s+уч[её]тных\s+записей\s*[:.]?\s*$", re.IGNORECASE)
 OWNERSHIP_KINDS = ("профиль", "создание", "удалённый вход", "локальный вход",
                    "служба", "неизвестно")
 OWNERSHIP_VERDICTS = ("владелец", "посторонний", "не определяется")
@@ -1687,6 +1885,51 @@ INTRUDER_RE = re.compile(
 ACCOUNT_SKIP = {"system", "локальная система", "local service", "network service",
                 "anonymous logon", "-", "", "нет", "n/a", "localsystem",
                 "система", "iusr", "dwm", "umfd"}
+# fix #5. `DOMAIN\word` is a shape, not an account, and the corpus is FULL of
+# that shape. MEASURED on the v37 staged corpus (400 lines/file): 229 "accounts",
+# among them `cimv2`, `securitycenter`, `basicdisplay`, `audioendpoints`,
+# `atbroker.exe`, `core-js`, `css`, `14`; 185 more on evtx-attack-samples-jsonl.
+# Every one of those would demand an ownership row for an account that does not
+# exist — the textbook way a gate gets switched off.
+#
+# DESIGN DECISION. The reviewer's real fix is «require the account to come from
+# an account-bearing JSON field», and ACCOUNT_FIELD_RE already is exactly that.
+# But the report is Russian prose and legitimately writes «вход `IPSERVER\root`»
+# with no JSON around it, so the qualified form has to stay. It is kept, and
+# fenced by three closed rules:
+#   1. the LEFT half must not be a namespace/hive/device/path root — that is what
+#      `ROOT\SecurityCenter`, `ROOT\CIMV2` and `HKLM\…` are;
+#   2. the RIGHT half must not look like a file, a bare number, or a pseudo-
+#      principal (`UMFD-2`, `DWM-1`) — prefix-matched, because ACCOUNT_SKIP's
+#      exact-or-«umfd »-prefixed test never matched the real principal;
+#   3. the right half must contain a letter and be at least two characters.
+# Anything the JSON extractor finds is still taken as-is: that path is sound.
+ACCOUNT_NS_DOMAINS = {
+    "root", "hklm", "hkcu", "hkcr", "hku", "hkey_local_machine",
+    "hkey_current_user", "hkey_users", "hkey_classes_root", "registry",
+    "machine", "device", "harddiskvolume1", "harddiskvolume2", "systemroot",
+    "windows", "system32", "syswow64", "winnt", "program files", "programdata",
+    "users", "temp", "tmp", "appdata", "documents and settings", "driverstore",
+    "servicing", "winsxs", "global", "policy", "software", "system",
+    "controlset001", "currentcontrolset", "\\?", "?", "global??", "??",
+    # PnP / device enumerator roots: `MMDEVAPI\\AudioEndpoints`, `SWD\\MMDEVAPI`,
+    # `ACPI_HAL\\0000`, `HDAUDIO\\FUNC_01` — a device id is not a principal.
+    "mmdevapi", "swd", "hdaudio", "acpi", "acpi_hal", "pci", "usb", "usbstor",
+    "hid", "bth", "bthenum", "display", "umb", "scsi", "ide", "storage",
+    "sw", "root_hub", "pcmcia", "roothub", "node_modules", "vendor",
+    "monitor", "printenum", "storage", "volmgr", "vdrvroot", "umbus", "con",
+    "wns", "qos", "defender", "files", "menu", "default", "data",
+}
+#: characters a Windows path segment is made of, walking LEFT from a match
+_OWN_SEG_CHARS = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 ._-"
+#: pseudo-principals Windows numbers per session: `UMFD-0`, `DWM-3`, `Font Driver Host`
+ACCOUNT_PSEUDO_RE = re.compile(
+    r"^(?:umfd|dwm|font driver host|window manager|nvda|defaultaccount)[-_ ]?\d*$",
+    re.IGNORECASE)
+#: a filename is not a principal
+ACCOUNT_FILEISH_RE = re.compile(
+    r"\.(?:exe|dll|sys|js|css|json|jsonl|log|txt|md|ps1|bat|cmd|xml|evtx|"
+    r"tsv|csv|mof|inf|cat|msi|tmp)$", re.IGNORECASE)
 ACCOUNT_FIELD_RE = re.compile(
     r'"(?:TargetUserName|SubjectUserName|AccountName|UserName|LogonUser|User)"'
     r'\s*:\s*"([^"\\\n]{1,64})"')
@@ -1718,7 +1961,39 @@ def _own_skip(name):
     («…ITY\\LOCAL SERVICE» cut to `LOCAL`) must not invent an account."""
     if (not name) or name in ACCOUNT_SKIP or name.endswith("$"):
         return True
+    if ACCOUNT_PSEUDO_RE.match(name):       # fix #5: UMFD-2, DWM-1, …
+        return True
     return any(k.startswith(name + " ") for k in ACCOUNT_SKIP)
+
+
+def _own_in_path(text, start):
+    """fix #5 — is the `DOMAIN\name` at `start` a FRAGMENT of a longer path?
+
+    The blacklist cannot name every root, because the shape appears mid-path:
+    `C:\\Program Files\\Microsoft Update` yields `Files\\Microsoft`, and
+    `Start Menu\\Programs` yields `Menu\\Programs`. Walk left across the
+    characters a path SEGMENT is made of; if that walk lands on a `\\` or `/`, the
+    match sits inside a path and is not an account. A prose line —
+    «учётная запись: IPSERVER\\root» — stops on a Cyrillic letter or a `:` and is
+    kept, which is the case the qualified form exists for."""
+    i = start
+    while i > 0 and text[i - 1] in _OWN_SEG_CHARS:
+        i -= 1
+    return i > 0 and text[i - 1] in "\\/"
+
+
+def _own_plausible_account(domain, name):
+    """fix #5 — the three closed rules above. -> True when `DOMAIN\name` may be
+    read as a principal at all."""
+    d = (domain or "").strip().lower()
+    if d in ACCOUNT_NS_DOMAINS or d.startswith("harddiskvolume"):
+        return False
+    n = (name or "").strip()
+    if len(n) < 2 or not re.search(r"[A-Za-z\u0400-\u04ff]", n):
+        return False
+    if ACCOUNT_FILEISH_RE.search(n):
+        return False
+    return True
 
 
 def accounts_in_text(text):
@@ -1729,6 +2004,10 @@ def accounts_in_text(text):
         if not _own_skip(n):
             out.setdefault(n, m.group(1).strip())
     for m in ACCOUNT_QUALIFIED_RE.finditer(text):
+        if not _own_plausible_account(m.group(1), m.group(2)):
+            continue
+        if _own_in_path(text, m.start()):
+            continue
         n = _own_norm_account(m.group(2))
         if not _own_skip(n):
             out.setdefault(n, "%s\\%s" % (m.group(1), m.group(2)))
@@ -1763,9 +2042,25 @@ ACCOUNT_CTX = (
     # DOMAIN\root — never followed by another separator (that is a device path)
     r'(?<![A-Za-z0-9_:\\])[A-Za-z][A-Za-z0-9._-]{1,30}\\{1,4}%s'
     r'(?![\\A-Za-z0-9._-])',
-    # C:\Users\root\... — the profile directory
-    r'[A-Za-z]:\\{1,2}Users\\{1,2}%s(?![A-Za-z0-9._-])',
+    # …\Users\root\… — the profile directory, under ANY volume spelling.
+    # fix #4: requiring a drive letter made `\Device\HarddiskVolume2\Users\bob`
+    # invisible, and Windows writes profile paths both ways in the same corpus.
+    # With bob's true first appearance in a `\Device\…` path, the gate reported
+    # `not_earliest []` and stamped the report's LATER, FALSE timestamp as
+    # `verified` — certifying a false first appearance, which is worse than
+    # blocking a true one.
+    r'(?<![A-Za-z0-9_])Users\\{1,2}%s(?![A-Za-z0-9._-])',
 )
+
+# fix #8 — the scan had NO bound. `corpus_first_appearance` walks the WHOLE
+# corpus once per `report_evidence()` call, one `contains` + regex per name per
+# line. MEASURED: v37 (90 MB) × 20 names = 12.2 s; evtx (33 MB) × 20 = 4.9 s;
+# `--delivered` doubles it; and `sherlock-corpora/ait-lds-v2` is 15 GB, where the
+# same walk is hours. `index_corpus` has had an `index_truncated` guard all
+# along; this one had none. Budget it, and FAIL CLOSED: a truncated scan is a
+# blocking `scan_truncated`, never a quiet "no earlier appearance found".
+OWN_SCAN_MAX_BYTES = 512 * 1024 * 1024
+OWN_SCAN_MAX_FILES = 20000
 
 
 def account_context_re(name):
@@ -1774,17 +2069,40 @@ def account_context_re(name):
                       re.IGNORECASE)
 
 
-def corpus_first_appearance(root, names):
-    """-> ({name: (instant, relpath, lineno, text)}, problems). Fails closed."""
-    found, problems = {}, []
+def corpus_first_appearance(root, names, max_bytes=None, max_files=None):
+    """-> ({name: (instant, relpath, lineno, text)}, problems, untimed).
+
+    Fails closed on every path: unreadable file, exception, exhausted budget.
+    `untimed[name]` = places the account WAS found but no instant could be read;
+    an appearance we cannot order is not an appearance we may certify."""
+    max_bytes = OWN_SCAN_MAX_BYTES if max_bytes is None else max_bytes
+    max_files = OWN_SCAN_MAX_FILES if max_files is None else max_files
+    found, problems, untimed = {}, [], {}
+    budget = {"bytes": 0, "files": 0}
     if not names:
-        return found, problems
+        return found, problems, untimed
     pats = dict((n, account_context_re(n)) for n in names)
     if not root or not os.path.isdir(root):
         return found, [{"kind": "scan_error", "path": root or "",
-                        "text": "корпус недоступен"}]
-    for dirpath, _dirs, files in os.walk(root):
+                        "text": "корпус недоступен"}], untimed
+    for dirpath, _dirs, files in sorted(os.walk(root)):
         for fn in sorted(files):
+            if budget["files"] >= max_files or budget["bytes"] >= max_bytes:
+                problems.append({
+                    "kind": "scan_truncated", "path": os.path.relpath(
+                        os.path.join(dirpath, fn), root),
+                    "text": "бюджет сканирования исчерпан: %d файлов / %d байт "
+                            "(лимит %d / %d). Сузь корпус или число учёток — "
+                            "непросканированный корпус не доказывает «раньше "
+                            "никого не было»."
+                            % (budget["files"], budget["bytes"], max_files,
+                               max_bytes)})
+                return found, problems, untimed
+            budget["files"] += 1
+            try:
+                budget["bytes"] += os.path.getsize(os.path.join(dirpath, fn))
+            except OSError:
+                pass
             full = os.path.join(dirpath, fn)
             rel = os.path.relpath(full, root)
             try:
@@ -1805,6 +2123,11 @@ def corpus_first_appearance(root, names):
                                 continue
                             ts = _own_line_time(line)
                             if ts is None:
+                                # fix #4: an appearance with no readable instant
+                                # used to be dropped silently, so the report's
+                                # own (later) timestamp became «verified».
+                                untimed.setdefault(n, []).append("%s:%d"
+                                                                 % (rel, no))
                                 continue
                             cur = found.get(n)
                             if cur is None or ts < cur[0]:
@@ -1812,7 +2135,7 @@ def corpus_first_appearance(root, names):
             except Exception as e:          # fail closed, never "clean"
                 problems.append({"kind": "scan_error", "path": rel,
                                  "text": "%s: %s" % (type(e).__name__, e)})
-    return found, problems
+    return found, problems, untimed
 
 
 def _own_rows(report, spans, structural):
@@ -1876,14 +2199,15 @@ def ownership_check(report, blocks, corpus=None, structural=None):
     for r in good:
         by_account.setdefault(r["account"], []).append(r)
     duplicates = sorted(a for a, rs in by_account.items() if len(rs) > 1)
-    missing_rows = sorted(n for n in cited if n not in by_account)
+    missing_rows = [] if missing_section else sorted(
+        n for n in cited if n not in by_account)
 
     scan_names = sorted(set(list(cited) + [r["account"] for r in good]))
-    first_seen, problems = corpus_first_appearance(corpus, scan_names)
+    first_seen, problems, untimed = corpus_first_appearance(corpus, scan_names)
 
     bad_verdict, bad_kind, bad_first = [], [], []
     bad_evidence, not_earliest, false_undet = [], [], []
-    contradiction, no_earlier_owner = [], []
+    contradiction, no_earlier_owner, unverifiable = [], [], []
     verified = {}
     by_rel, by_base = ({}, {})
     if corpus and os.path.isdir(corpus):
@@ -1953,6 +2277,17 @@ def ownership_check(report, blocks, corpus=None, structural=None):
                                  "earlier": "%s:%d" % (seen[1], seen[2]),
                                  "time": seen[0]})
             continue
+        if acct in untimed:
+            # fix #4 — FAIL CLOSED. The account IS somewhere the scan could not
+            # date (no SystemTime on the line). We cannot say the claimed instant
+            # is the earliest, so we must not stamp it `verified` and let
+            # «посторонний» through on it. An unverifiable first appearance is
+            # not a verified one.
+            unverifiable.append({"line": ln, "account": acct,
+                                 "claimed": claimed,
+                                 "where": untimed[acct][:3],
+                                 "count": len(untimed[acct])})
+            continue
         verified[acct] = claimed
 
     for r in good:
@@ -1977,12 +2312,39 @@ def ownership_check(report, blocks, corpus=None, structural=None):
                                       "verdict": r["verdict"],
                                       "text": where["text"]})
 
-    blocking = ((1 if missing_section else 0) + len(malformed) + len(duplicates)
-                + len(missing_rows) + len(bad_verdict) + len(bad_kind)
-                + len(bad_first) + len(bad_evidence) + len(not_earliest)
-                + len(false_undet) + len(contradiction) + len(no_earlier_owner)
-                + len(problems))
-    return {"grammar": "| учётная запись | первое появление | path:line «цитата» | "
+    # ===================== fix #1 — THE STRUCTURAL FIX ======================
+    # This sum used to be thirteen hand-written `+ len(...)` terms and the
+    # MUTATIONS dict tested exactly TWO mutants, both one level up in
+    # report_evidence(). MEASURED: EIGHT individual terms could each be zeroed
+    # with all 44 tests still green — `not_earliest`, `no_earlier_owner`,
+    # `false_undetermined`, `contradiction`, `bad_evidence`, `duplicates`,
+    # `bad_kind`, and `ledger()`'s `ev` term. The worst was `no_earlier_owner`,
+    # THE rule that catches the actual v37 error: same report, same corpus,
+    # unmutated -> exit 1 / blocking 1; zeroed -> exit 0 / blocking 0, suite green.
+    #
+    # So: NAMED COUNTERS, then one `sum()`. Nothing can be forgotten out of the
+    # total any more, `counters` is published in the JSON, and
+    # `ownership_counter_keys()` lets one test insist that EVERY name — including
+    # names added after this commit — has an exit-code test of its own.
+    counters = {
+        "missing_section": 1 if missing_section else 0,
+        "malformed": len(malformed),
+        "duplicate_rows": len(duplicates),
+        "missing_rows": len(missing_rows),
+        "invalid_verdict": len(bad_verdict),
+        "invalid_kind": len(bad_kind),
+        "invalid_first": len(bad_first),
+        "bad_evidence": len(bad_evidence),
+        "not_earliest": len(not_earliest),
+        "false_undetermined": len(false_undet),
+        "contradiction": len(contradiction),
+        "no_earlier_owner": len(no_earlier_owner),
+        "unverifiable_first": len(unverifiable),
+        "scan_problems": len(problems),
+    }
+    blocking = sum(counters.values())          # 6b
+    return {"counters": counters, "unverifiable_first": unverifiable,
+            "grammar": "| учётная запись | первое появление | path:line «цитата» | "
                        "как | вывод | раньше |",
             "kinds": list(OWNERSHIP_KINDS), "verdicts": list(OWNERSHIP_VERDICTS),
             "cited_accounts": sorted(cited), "characterised": sorted(characterised),
@@ -2042,10 +2404,338 @@ def render_ownership(o):
                    "владельцу; если запись самая ранняя в корпусе, посторонней "
                    "по отношению к кому она является?"
                    % (r["line"], r["account"], r["first"], r["earlier"]))
+    for r in o.get("unverifiable_first") or []:
+        out.append("  ✗ стр.%d «%s»: заявлено первое появление %s, но учётка "
+                   "встречается в корпусе на строках без времени (%s; всего %d). "
+                   "Непроверяемое первое появление — не проверенное: датируй "
+                   "эти записи или откажись от вывода «посторонний»."
+                   % (r["line"], r["account"], r["claimed"],
+                      ", ".join(r["where"]), r["count"]))
     for p in o["scan_problems"]:
         out.append("  ✗ скан корпуса: %s — %s" % (p["path"], p["text"]))
     return "\n".join(out)
 
+
+def ownership_counter_keys():
+    """Every named term of ownership_check()'s blocking sum. fix #1: the test
+    suite asserts this set equals the set it has an exit-code test for, so a term
+    added later cannot ship untested."""
+    return frozenset(ownership_check("", [], None)["counters"])
+
+
+def enum_counter_keys():
+    return frozenset(("items", "table_problems"))
+
+
+
+# --------------------------------------------------------------------------
+# v38: окно записей — did records go missing INSIDE the window we reason about?
+#
+# WHY A GATE AND NOT JUST A TOOL. covermap.py pairs with the coverage rules in
+# this file for one reason the v37 run proved: the arm omits whatever the gate
+# does not demand. `rollover.py` can compute the window for every channel in
+# 3.6 s, and on the v37 report that number appears nowhere, because nothing
+# asked for it. A number nobody is required to state is a number that will not
+# be stated. So the producer is rollover.py and the grader is here — and the
+# grader RE-DERIVES the truth from the corpus rather than believing the report.
+#
+# WHAT THE REPORT OWES (see rollover.required_keys for the full argument):
+#   1. one «итог:» line whose six counts equal the gate's own scan;
+#   2. one row per channel WITH A GAP;
+#   3. one row per channel of a file that a FINDING cites — the anchor case:
+#      the false «402 000 evicted from Security.jsonl» claim was about exactly
+#      the channel the findings rested on.
+# NOT one row per corpus file. The coverage table already costs 143 rows for
+# 143 files and the project has an open question about whether that survives a
+# 10 000-file corpus; a second full-corpus table doubles a cost already in
+# doubt. This set is bounded by findings + gaps, not by corpus size.
+#
+# EVERY COUNTER BELOW FEEDS THE ONE `blocking` SUM AT THE END OF
+# report_evidence(). There is no second ledger: defect #4 two rounds ago was a
+# private counter that printed 160 where the gate printed 161.
+# MATCHED AGAINST SECTION TITLES. Keep it NARROW. The `rollover|ротаци`
+# aliases that used to live here were a false positive with teeth: in a
+# log-analysis case «Ротация журналов» is an ordinary finding title, and any
+# section whose heading matched became a rollover span, so every `|`-line in
+# it was parsed as a rollover row and counted as `malformed`. The only escape
+# the arm had was renaming its finding. One spelling, the one the tool emits.
+ROLLOVER_SECTION_RE = re.compile(r"окно\s+запис", re.IGNORECASE)
+ROLLOVER_SUMMARY_RE = re.compile(r"^\s*(?:[-*+>]\s*)?(?:\*\*|__)?\s*итог\s*:",
+                                 re.IGNORECASE)
+_RO_NUM = r"[\d   ]+"
+ROLLOVER_KEYS = ("файлов", "каналов", "сплошных", "с-пропусками",
+                 "неприменимо", "ошибок")
+ROLLOVER_FIELDS = {"files": "файлов", "channels": "каналов",
+                   "contiguous": "сплошных", "gapped": "с-пропусками",
+                   "na": "неприменимо", "errors": "ошибок"}
+ROLLOVER_WINDOW_RE = re.compile(
+    r"окно\s*[:=]?\s*(" + _RO_NUM + r")\s*[-‐-―~.]{1,2}\s*(" + _RO_NUM + r")")
+ROLLOVER_RECORDS_RE = re.compile(r"запис(?:ей|и|ь)\s*[:=]\s*(" + _RO_NUM + r")")
+ROLLOVER_MISSING_RE = re.compile(r"нет\s*[:=]\s*(" + _RO_NUM + r")")
+
+
+def _ro_int(text):
+    """«34 916», «34 916» and «34916» are the same number; anything else is None."""
+    s = re.sub(r"[  \s]", "", text or "")
+    return int(s) if s.isdigit() else None
+
+
+def load_rollover():
+    """One definition of the scan, shared by the producer and this grader.
+
+    Missing or broken module = a blocking defect, never a skip: `scan_failed`.
+    """
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "rollover.py")
+    spec = importlib.util.spec_from_file_location("_sherlock_rollover", path)
+    if spec is None or spec.loader is None:
+        raise ImportError("rollover.py не загружается: %s" % path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def rollover_summary_line(lines, spans, structural):
+    """-> (parsed dict or None, list of report_lines carrying «итог:»)."""
+    hits = []
+    for i in range(1, len(lines) + 1):
+        if not structural[i - 1] or not _in_spans(i, spans):
+            continue
+        if ROLLOVER_SUMMARY_RE.match(lines[i - 1]):
+            hits.append(i)
+    if not hits:
+        return None, []
+    text = lines[hits[0] - 1]
+    got = {}
+    for key in ROLLOVER_KEYS:
+        m = re.search(re.escape(key) + r"\s*[:=]\s*(" + _RO_NUM + r")", text)
+        got[key] = _ro_int(m.group(1)) if m else None
+    return got, hits
+
+
+def rollover_rows(lines, spans, structural):
+    """Parse the «окно записей» table. Unparseable rows are defects, not noise."""
+    rows, malformed = [], []
+    for lo, hi in spans:
+        for i in range(lo, min(hi, len(lines) + 1)):
+            if not structural[i - 1]:
+                continue
+            raw = lines[i - 1]
+            if not raw.lstrip().startswith("|") or TABLE_SEP_RE.match(raw):
+                continue
+            cells = split_cells(raw)
+            if cells and cells[0].strip().lower() in ("путь", "path", "файл", "file"):
+                continue
+            if len(cells) < 3:
+                malformed.append(i)
+                continue
+            tail = " | ".join(cells[2:])
+            w = ROLLOVER_WINDOW_RE.search(tail)
+            n = ROLLOVER_RECORDS_RE.search(tail)
+            g = ROLLOVER_MISSING_RE.search(tail)
+            if not (w and n and g):
+                malformed.append(i)
+                continue
+            lo_id, hi_id = _ro_int(w.group(1)), _ro_int(w.group(2))
+            recs, miss = _ro_int(n.group(1)), _ro_int(g.group(1))
+            if None in (lo_id, hi_id, recs, miss):
+                malformed.append(i)
+                continue
+            rows.append({"report_line": i, "path": cells[0], "channel": cells[1],
+                         "lo": lo_id, "hi": hi_id, "records": recs,
+                         "missing": miss})
+    return rows, malformed
+
+
+ROLLOVER_ROW_SHAPE_RE = re.compile(
+    r"окно\s*[:=].*запис(?:ей|и|ь)\s*[:=].*нет\s*[:=]", re.IGNORECASE)
+
+
+def misplaced_rollover_rows(lines, structural):
+    """Report lines that LOOK like «окно записей» rows but sit outside the section.
+
+    Without this the diagnosis for a nested table is «дубликаты покрытия» and
+    «строки покрытия без адреса» — twelve messages, none of which says the word
+    rollover, for what is really one placement mistake.
+    """
+    hits = []
+    for i, raw in enumerate(lines, 1):
+        if not structural[i - 1]:
+            continue
+        if not raw.lstrip().startswith("|"):
+            continue
+        if ROLLOVER_ROW_SHAPE_RE.search(raw):
+            hits.append(i)
+    return hits
+
+
+def rollover_evidence(report, corpus, cited_paths, structural=None, sections=None):
+    """The whole «окно записей» verdict, as counters. Fails closed everywhere."""
+    lines = report.splitlines()
+    structural = structural if structural is not None else structural_mask(lines)
+    sections = sections if sections is not None else _sections(report, structural)
+    spans = _spans_for(sections, ROLLOVER_SECTION_RE)
+    out = {"missing_section": False, "summary_missing": False,
+           "summary_duplicate": False, "summary_mismatch": None,
+           "undeclared": [], "wrong": [], "spurious": [], "duplicate_rows": [],
+           "malformed": [], "scan_errors": [], "scan_failed": None,
+           "misplaced_rows": [], "nested_section": False,
+           "scan": None, "required": 0, "blocking": 0}
+
+    try:
+        ro = load_rollover()
+        if not (corpus and os.path.isdir(corpus)):
+            raise OSError("нет каталога корпуса: %r" % corpus)
+        scan = ro.scan_corpus(corpus)
+    except Exception as exc:
+        # An exception in the check is NOT a clean run. This repo has shipped a
+        # guard that failed open on a malformed gates.json; not twice.
+        out["scan_failed"] = "%s: %s" % (type(exc).__name__, exc)
+        out["blocking"] = 1
+        return out
+
+    out["scan"] = {k: scan[k] for k in
+                   ("files", "channels", "contiguous", "gapped", "na",
+                    "errors", "lost")}
+    out["scan_errors"] = [{"path": e["path"], "detail": e["detail"]}
+                          for e in scan["entries"] if e["status"] == ro.ERR]
+
+    want = ro.required_keys(scan, cited_paths)
+    out["required"] = len(want)
+
+    if not spans:
+        out["missing_section"] = True
+        out["blocking"] = 1 + len(out["scan_errors"]) + len(want)
+        out["undeclared"] = ["%s | %s" % k for k in sorted(want)]
+        # Nesting the table under another heading («# Покрытие» is the one that
+        # happens) is NOT a small mistake: the section stops existing, the rows
+        # are then read as COVERAGE rows, and every message names coverage while
+        # the real cause is placement. Say the real cause here.
+        out["misplaced_rows"] = misplaced_rollover_rows(lines, structural)
+        return out
+
+    # A section NESTED inside «Покрытие» (a deeper heading level) does not end
+    # where its author thinks: the span runs on to the next heading of the same
+    # level, so the coverage rows below it are read as rollover rows and every
+    # message names the wrong table. Name the real cause: placement.
+    cov = _spans_for(sections, COVERAGE_SECTION_RE)
+    out["nested_section"] = any(a < d and c < b
+                                for a, b in spans for c, d in cov)
+
+    summary, hits = rollover_summary_line(lines, spans, structural)
+    if summary is None:
+        out["summary_missing"] = True
+    else:
+        if len(hits) > 1:
+            out["summary_duplicate"] = True
+        bad = {}
+        for field, key in ROLLOVER_FIELDS.items():
+            if summary.get(key) != scan[field]:
+                bad[key] = {"заявлено": summary.get(key), "на диске": scan[field]}
+        if bad:
+            out["summary_mismatch"] = bad
+
+    rows, malformed = rollover_rows(lines, spans, structural)
+    out["malformed"] = malformed
+    seen = {}
+    for r in rows:
+        # The row was written by `row_for`, so its cells are ALREADY escaped.
+        key = ro.key_of_cells(r["path"], r["channel"])
+        seen.setdefault(key, []).append(r)
+    out["duplicate_rows"] = sorted("%s | %s" % k for k, v in seen.items()
+                                   if len(v) > 1)
+
+    for key, e in sorted(want.items()):
+        got = (seen.get(key) or [None])[0]
+        if got is None:
+            out["undeclared"].append("%s | %s" % key)
+            continue
+        if (got["lo"], got["hi"], got["records"], got["missing"]) != (
+                e["lo"], e["hi"], e["records"], e["missing"]):
+            out["wrong"].append(
+                {"line": got["report_line"], "row": "%s | %s" % key,
+                 "заявлено": "окно=%d–%d записей=%d нет=%d"
+                             % (got["lo"], got["hi"], got["records"], got["missing"]),
+                 "на диске": "окно=%d–%d записей=%d нет=%d"
+                             % (e["lo"], e["hi"], e["records"], e["missing"])})
+    # Declaring every channel «gapped» to be safe is not a cheap way out: a row
+    # the corpus does not support costs exactly as much as a missing one.
+    for key in sorted(seen):
+        if key not in want:
+            out["spurious"].append({"line": seen[key][0]["report_line"],
+                                    "row": "%s | %s" % key})
+
+    out["blocking"] = (int(out["summary_missing"]) + int(out["summary_duplicate"])
+                       + (1 if out["summary_mismatch"] else 0)
+                       + len(out["undeclared"]) + len(out["wrong"])
+                       + len(out["spurious"]) + len(out["duplicate_rows"])
+                       + len(out["malformed"]) + len(out["scan_errors"]))
+    return out
+
+
+def render_rollover(r):
+    if not r:
+        return ""
+    out = ["ОКНО ЗАПИСЕЙ v38: %d блокирующих дефектов" % r.get("blocking", 0)]
+    if r.get("scan_failed"):
+        out.append("  ПРОВЕРКА НЕ ОТРАБОТАЛА: %s — это НЕ «чисто»." % r["scan_failed"])
+        return "\n".join(out)
+    s = r.get("scan") or {}
+    # NOT «потеряно записей». «Lost» is the diagnosis, and «~402 000 записей
+    # вытеснено» is the exact false claim this whole check exists to prevent;
+    # printing it in the gate's own output re-introduces it. State the FACT:
+    # ids absent inside the window. The cause — filtered export or a real wrap —
+    # is the report's job, not this line's.
+    out.append("  на диске: файлов %d, каналов %d, сплошных %d, с пропусками %d, "
+               "неприменимо %d, ошибок %d, id нет внутри окон %d"
+               % (s.get("files", 0), s.get("channels", 0), s.get("contiguous", 0),
+                  s.get("gapped", 0), s.get("na", 0), s.get("errors", 0),
+                  s.get("lost", 0)))
+    if r.get("missing_section"):
+        out.append("  НЕТ РАЗДЕЛА «Окно записей». Добавь его: "
+                   "python3 rollover.py --corpus <корпус> --report --required-only "
+                   "--cite <файл-улики> >> report.md")
+    if r.get("nested_section"):
+        out.append("  РАЗДЕЛ ВЛОЖЕН в «Покрытие»: его строки читаются ещё и как "
+                   "строки ПОКРЫТИЯ (повторные пути, без адреса), а вложенный "
+                   "заголовок не кончается там, где ты думаешь. «Окно записей» "
+                   "обязан быть заголовком ВЕРХНЕГО уровня — «# Окно записей», "
+                   "или «## Окно записей» ПОСЛЕ всего раздела «Покрытие», "
+                   "НЕ внутри него.")
+    if r.get("misplaced_rows"):
+        out.append("  НО строки нужной формы в отчёте ЕСТЬ — строки %s. Раздел "
+                   "вложен в чужой: «# Окно записей» обязан быть заголовком "
+                   "ВЕРХНЕГО уровня (h1 «# », или h2 «## » сразу ПОСЛЕ раздела "
+                   "«Покрытие»), НЕ внутри него."
+                   % ", ".join(str(i) for i in r["misplaced_rows"][:10]))
+    if r.get("summary_missing"):
+        out.append("  нет строки «итог:» — раздел есть, чисел нет")
+    if r.get("summary_duplicate"):
+        out.append("  строк «итог:» больше одной — какая из них твоя?")
+    if r.get("summary_mismatch"):
+        out.append("  итог не сходится с диском: %s"
+                   % json.dumps(r["summary_mismatch"], ensure_ascii=False))
+    for k in ("undeclared", "duplicate_rows"):
+        if r.get(k):
+            out.append("  %s: %s" % ({"undeclared": "не объявлены окна",
+                                      "duplicate_rows": "повторные строки"}[k],
+                                     ", ".join(r[k][:10])))
+    if r.get("wrong"):
+        out.append("  окна заявлены неверно:")
+        for w in r["wrong"][:10]:
+            out.append("    строка %d %s — заявлено %s, на диске %s"
+                       % (w["line"], w["row"], w["заявлено"], w["на диске"]))
+    if r.get("spurious"):
+        out.append("  лишние строки (корпус их не подтверждает): %s"
+                   % ", ".join("строка %d %s" % (x["line"], x["row"])
+                               for x in r["spurious"][:10]))
+    if r.get("malformed"):
+        out.append("  строки не по схеме | путь | канал | окно=a–b | записей=n | нет=m |: %s"
+                   % ", ".join(str(i) for i in r["malformed"][:10]))
+    if r.get("scan_errors"):
+        out.append("  файлы, окно которых прочитать НЕ УДАЛОСЬ (каждый блокирует):")
+        for e in r["scan_errors"][:10]:
+            out.append("    %s — %s" % (e["path"], e["detail"]))
+    return "\n".join(out)
 
 
 def report_evidence(report, checked=None):
@@ -2218,6 +2908,17 @@ def report_evidence(report, checked=None):
     enums = enum_decode_check(report, arg_blocks, structural)
     ownership = ownership_check(report, arg_blocks, corpus, structural)
 
+    # v38 rollover. `cited` = every corpus file a FINDING leans on; those
+    # channels owe a window even when they are contiguous, because "no such
+    # event in the log" is only sound inside a window with no holes.
+    cited_by_findings = set()
+    for _num, flo, fhi in finding_blocks_here:
+        for c in _line_citations(citations, flo, fhi):
+            if c.get("resolved"):
+                cited_by_findings.add(c["resolved"])
+    rollover = rollover_evidence(report, corpus, sorted(cited_by_findings),
+                                 structural, sections)
+
     blocking = (len(attr_missing) + len(attr_invalid) + len(finding_dupes)
                 + enums["blocking"] + ownership["blocking"]
                 + (1 if rejected_missing_section else 0)
@@ -2235,7 +2936,8 @@ def report_evidence(report, checked=None):
                 + len(cov_false_empty) + len(cov_false_binary)
                 + len(cov_duplicate_paths)
                 + len(cov_uncovered) + len(cov_unexamined)
-                + (1 if index_truncated else 0))
+                + (1 if index_truncated else 0)
+                + rollover["blocking"])
     return {
         "grammar": {
             "finding_attribution": "атрибуция: установлена|не установлена",
@@ -2286,6 +2988,7 @@ def report_evidence(report, checked=None):
                      "malformed": [r["report_line"] for r in cov_malformed]},
         "enum_decode": enums,
         "ownership": ownership,
+        "rollover": rollover,
         "blocking": blocking,
     }
 
@@ -2402,6 +3105,9 @@ def render_report_evidence(e):
                    % ", ".join(str(x) for x in bad_no_addr))
     if e["blocking"]:
         out.append("  исправь грамматику: наблюдение = path:line + дословная цитата; без адреса — только закрытая деталь доступа вида байт=0, формат=двоичный, ошибка=код или причина=лимит.")
+    ro = render_rollover(e.get("rollover"))
+    if ro:
+        out.append("  " + ro.replace("\n", "\n  "))
     return "\n".join(out)
 
 
@@ -3052,8 +3758,16 @@ def ledger(d, report, path, report_path=None):
     if agg_block:
         out.append("")
         out.append(agg_block)
-    total = (len(open_rows) + len(unproven) + bad + nonref + o["blocking"]
-             + ev.get("blocking", 0) + agg["blocking"])
+    # fix #1. `ev.get("blocking", 0)` was the eighteenth survivor: zeroing it
+    # left every one of the 44 tests green while the ledger stopped counting
+    # every report-evidence defect there is. Named terms, one sum, same rule as
+    # the two checks above.
+    ledger_terms = {"open_rows": len(open_rows), "unproven": len(unproven),
+                    "bad_citations": bad, "non_references": nonref,
+                    "outcomes": o["blocking"],
+                    "report_evidence": ev.get("blocking", 0),
+                    "aggregates": agg["blocking"]}
+    total = sum(ledger_terms.values())         # ledger
     out.append("")
     if total:
         out.append("ИТОГ: НЕ ЗАКОНЧЕНО — осталось %d" % total)
@@ -3283,7 +3997,16 @@ def main():
                          "тому же корпусу, и его ссылки обязаны быть "
                          "подмножеством проверенных")
     ap.add_argument("--json", action="store_true")
+    # fix #8. The account scan is linear in accounts x corpus bytes and had no
+    # bound at all; ait-lds-v2 is 15 GB. The budget is a real knob so the limit
+    # can be tightened on a huge corpus AND exercised end-to-end by a test --
+    # exhausting it is a BLOCKING `scan_truncated`, never a quiet clean scan.
+    ap.add_argument("--ownership-scan-bytes", type=int,
+                    default=OWN_SCAN_MAX_BYTES, metavar="N",
+                    help="бюджет сканирования корпуса для 6b, байт "
+                         "(по умолчанию %d)" % OWN_SCAN_MAX_BYTES)
     args = ap.parse_args()
+    globals()["OWN_SCAN_MAX_BYTES"] = args.ownership_scan_bytes
 
     if not os.path.isdir(args.corpus):
         sys.exit("нет такого каталога: %s" % args.corpus)

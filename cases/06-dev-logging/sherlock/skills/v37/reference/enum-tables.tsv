@@ -25,3 +25,20 @@
 # Level/Keywords описывают ЗАПИСЬ, а не СОБЫТИЕ, и не несут смысла разбора.
 # Гейт, который срабатывает на всём, выключают. Здесь только семантические поля.
 field	value	decode	aliases	source
+
+# --- ЗАСЕЯНО (fix #9/#10) --------------------------------------------------
+# Реальные значения, которые встречаются в обычных 4624/сетевых записях и
+# раньше давали блокирующий enum_unknown_value. Это ровно та половина таблицы,
+# которую можно растить: каждая строка с источником, ни одна не переопределяет
+# встроенную пару. Заодно путь роста теперь работает в проде, а не только в тестах.
+LogonType	0	система	system|система (0)	https://learn.microsoft.com/windows/security/threat-protection/auditing/event-4624
+LogonType	12	кэшированный удалённый интерактивный	cachedremoteinteractive	https://learn.microsoft.com/windows/security/threat-protection/auditing/event-4624
+LogonType	13	кэшированная разблокировка	cachedunlock	https://learn.microsoft.com/windows/security/threat-protection/auditing/event-4624
+Protocol	0	hopopt	hop-by-hop	https://www.iana.org/assignments/protocol-numbers/protocol-numbers.xhtml
+Protocol	2	igmp		https://www.iana.org/assignments/protocol-numbers/protocol-numbers.xhtml
+Protocol	41	ipv6	ipv6-encap	https://www.iana.org/assignments/protocol-numbers/protocol-numbers.xhtml
+Protocol	47	gre		https://www.iana.org/assignments/protocol-numbers/protocol-numbers.xhtml
+Protocol	50	esp		https://www.iana.org/assignments/protocol-numbers/protocol-numbers.xhtml
+Protocol	51	ah		https://www.iana.org/assignments/protocol-numbers/protocol-numbers.xhtml
+Protocol	89	ospf		https://www.iana.org/assignments/protocol-numbers/protocol-numbers.xhtml
+Protocol	132	sctp		https://www.iana.org/assignments/protocol-numbers/protocol-numbers.xhtml

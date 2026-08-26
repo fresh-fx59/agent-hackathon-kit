@@ -175,8 +175,14 @@
     LogonType=10 (удалённый интерактивный rdp)
     Profiles=4 (общедоступная сеть)
 
-Разделитель — `=` или пробел. Слово в скобках берётся из таблицы, а не из
-головы: встроенная таблица в `tools/citecheck.py` плюс `reference/enum-tables.tsv`.
+Разделитель — `=` или пробел; имя поля можно писать по-русски с обеих сторон —
+«действие 2 (блокировать)» читается так же, как `Action=2 (блокировать)`.
+Слово в скобках берётся из таблицы, а не из головы: встроенная таблица в
+`tools/citecheck.py` плюс `reference/enum-tables.tsv`. Склонение и близкий
+синоним принимаются («блокировка», «разрешено», «сетевое подключение»); слово,
+которое в той же таблице означает ДРУГОЕ значение того же поля, — нет.
+В скобках должна быть короткая расшифровка: целое предложение — это ремарка,
+а не расшифровка, и пара остаётся нерасшифрованной.
 Поля: `Action`, `Direction`, `Protocol`, `Profiles`, `Origin`, `LogonType` — и
 их русские имена («действие», «направление», «протокол», «профили»,
 «происхождение», «тип входа»).
@@ -187,6 +193,8 @@
 * Значения нет в таблице — `unknown_value`. Добавь строку в
   `reference/enum-tables.tsv` С ИСТОЧНИКОМ. Убирать цитату нельзя.
 * Переопределить встроенную строку через TSV нельзя — это `table_conflict`.
+  Сама встроенная таблица захэширована (`ENUM_BUILTIN_SHA256`), и её тихая
+  правка — `builtin_tampered`. Две одинаковые пары в TSV — `table_duplicate`.
 * `EventID`, `Level`, `Keywords` в таблицу НЕ входят: `EventID` — идентификатор
   внутри провайдера, а не закрытое перечисление; `Level`/`Keywords` описывают
   запись, а не событие.
@@ -218,7 +226,13 @@
 * дата разбирается как ISO-8601;
 * по `path:line` действительно есть запись, она называет эту учётку, и её
   `SystemTime` совпадает с заявленным;
-* нигде в корпусе НЕТ более ранней записи об этой учётке;
+* нигде в корпусе НЕТ более ранней записи об этой учётке — включая пути вида
+  `\\Device\\HarddiskVolume2\\Users\\<имя>`, а не только `C:\\Users\\<имя>`;
+* если учётка встречается на строках БЕЗ времени, первое появление считается
+  непроверяемым (`unverifiable_first`) и блокирует: недатированное появление —
+  не проверенное;
+* скан корпуса ограничен бюджетом (`--ownership-scan-bytes`); исчерпание —
+  блокирующий `scan_truncated`, а не «чисто»;
 * `вывод: посторонний` требует, чтобы колонка «раньше» называла другую учётку,
   у которой в её собственной строке ПОДТВЕРЖДЕНО более раннее появление.
   Посторонний — это отношение к владельцу. Если запись самая ранняя в корпусе,
@@ -400,3 +414,43 @@ answer. The answer of the whole report is the **strongest outcome among the
 findings**: at least one `успех` — compromise; none, but there is a `попытка` —
 attacked, success not confirmed; all `норма` — clean. A registry made only of
 `норма` cannot end with the word "compromised", and the check verifies that.
+
+## `## Окно записей` — окно записей канала
+
+Ring buffers evict. Without this section a report says «в журнале нет X» as if
+it meant «X не было», and the project has already shipped one false claim of
+exactly that shape («~402 000 записей вытеснено из Security.jsonl» — in fact
+402275…437190 over 34 916 records, i.e. nothing lost).
+
+Generate it, never type it:
+
+    python3 <SKILL_BASE_DIR>/tools/rollover.py --corpus <LOG_DIR> --report --required-only --cite <файл-улики>
+
+    # Окно записей
+
+    итог: файлов=143 каналов=93 сплошных=93 с-пропусками=0 неприменимо=50 ошибок=0
+
+    | путь | канал | окно | записей | нет |
+    | --- | --- | --- | --- | --- |
+    | Security.jsonl | Security | окно=402275–437190 | записей=34916 | нет=0 |
+
+* PLACEMENT IS PART OF THE FORMAT: the heading must be TOP-LEVEL — `# Окно
+  записей` (h1), or `## Окно записей` (h2) placed AFTER the whole «Покрытие»
+  section. NEVER nest it inside «Покрытие». A deeper heading does not end where
+  its author thinks: the span runs to the next heading of its OWN level, so
+  either the coverage rows get read as rollover rows, or — the usual case, the
+  table placed at the end of «Покрытие» — the rollover rows get read as COVERAGE
+  rows. Measured on the recorded v37 report, `## Окно записей` nested inside
+  `# Покрытие` is **12** blocking defects (6 «повторные пути покрытия» + 6
+  «без адреса»), not one of which says the word rollover. It is NOT «+2». The
+  same report at `# Окно записей`, or with the h2 section moved after all of
+  «Покрытие», is exit 0;
+* the `итог:` line is mandatory, exactly once, and all six counts are re-derived
+  from the corpus by `citecheck` — a wrong count blocks;
+* one row per channel WITH A GAP, and one row per channel of a file your
+  FINDINGS cite. Not one row per corpus file: the «Покрытие» table already pays
+  that price;
+* a row the corpus does not support blocks just as hard as a missing one, so
+  declaring everything «с пропусками» to be safe costs more, not less;
+* a file whose window cannot be read (corrupt JSONL, an id that is not a number,
+  an unreadable path) is a blocking defect — it is never «чисто».
