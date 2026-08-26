@@ -30,10 +30,21 @@ Every file gets exactly one row:
   * unreadable at that line -> `нечитабельно` + `ошибка=<причина>`
   * otherwise               -> `наблюдение` + `path:line «дословная цитата»`
 
-The quoted line is the one `logmap` flagged, when there is one. That is not a
-nicety: `citecheck` counts a coverage quote that landed on no flagged line as
-`cov_unflagged_citation` and blocks on it, because an arbitrary line proves
-only that the file was opened.
+The quoted line is chosen by `citecheck.coverage_admissible_lines` — the one
+implementation of the rule, shared with the grader. That is not a nicety:
+
+  * a quote that lands on no line `logmap` flagged is `cov_unflagged_citation`
+    and blocks — an arbitrary line proves only that the file was opened;
+  * a quote that lands on LINE 1 of a file with other flagged lines is
+    `cov_inadmissible_line` and blocks too. Measured on the v37 gate-clean run:
+    81 of 93 «наблюдение» rows quoted line 1 and every one of them passed,
+    because `logmap` names a group's FIRST member as the group's reference. The
+    oldest record in the file is what a tool reaches for when it needs *a*
+    line. Line 1 stays legal only where it is honest — a file of two lines or
+    fewer, or a file whose only flagged line is line 1.
+
+So: run this tool. It returns the admissible line for free; guessing one costs
+more and the gate enumerates the answers.
 
 «не смотрел» is never emitted. It does not discharge a file — it is
 unverifiable by construction — so generating it would be writing a lie.
@@ -141,17 +152,31 @@ def rows_for(corpus, flagged, cc):
                 rows.append((rel, "двоичный", "формат=двоичный"))
                 continue
             marks = flagged.get(rel) or {}
-            # A file usually has several flagged lines. Quote the one TRIAGE
-            # called a defect, not the numerically first: covermap on the real
-            # corpus otherwise cited System.jsonl:3 (a kernel boot record) for
-            # the file whose point is System.jsonl:263 (the 3proxy install).
-            # Both pass the gate; only one is worth a reader's time.
-            want = sorted(marks, key=lambda n: (
-                not (marks[n][0] or "").startswith("D"), n))
+            # WHICH LINE. Not "any flagged line" and never "line 1 because it
+            # is there": `citecheck.coverage_admissible_lines` owns that rule
+            # and this is the only place it is consulted, so the producer
+            # cannot drift from the grader. It hands back the CLOSED set of
+            # lines a coverage row is allowed to cite for this file — flagged
+            # lines above 1, or line 1 when line 1 is the only flag, or the
+            # whole of a <=2-line file, or the last quotable line when the
+            # mapper flagged nothing. Read its docstring before touching this.
+            try:
+                allowed = cc.coverage_admissible_lines(ap, set(marks), rel)
+            except OSError as exc:
+                rows.append((rel, "нечитабельно",
+                             "ошибка=%s" % (getattr(exc, "errno", "io") or "io")))
+                continue
+            # Inside the allowed set, prefer the line TRIAGE called a defect,
+            # then the mapper's own order: covermap on the real corpus
+            # otherwise cited System.jsonl:3 (a kernel boot record) for the
+            # file whose point is System.jsonl:263 (the 3proxy install). Both
+            # are admissible; only one is worth a reader's time.
+            want = sorted(allowed, key=lambda n: (
+                not (marks.get(n, ("", ""))[0] or "").startswith("D"), n))
             picked = None
-            # A flagged line can be too short to quote; try the next one before
-            # falling back to line 1, so a real flag is not silently discarded.
-            for candidate in (want + [1]):
+            # There is no fallback outside `allowed`. A file with nothing
+            # citable is reported as such, not papered over with line 1.
+            for candidate in want:
                 text, why = line_at(ap, candidate)
                 if text is None:
                     continue

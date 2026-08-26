@@ -89,6 +89,7 @@ missing-file / ambiguous, 2 on usage error.
 """
 import argparse
 import gzip
+import io
 import json
 import os
 import re
@@ -746,6 +747,125 @@ def _flagged_for(flagged, path):
     return flagged.get(key)
 
 
+COVERAGE_SMALL_FILE = 2   # a file this short has no "boring first line"
+
+
+def coverage_admissible_lines(abs_path, flagged=None, rel=None):
+    """-> the set of line numbers a «наблюдение» coverage row MAY cite.
+
+    P8, and the other half of P7. `flagged_lines` already refuses a quote that
+    landed on no flagged line at all. It was not enough: MEASURED on the v37
+    gate-clean run, 81 of 93 «наблюдение» rows quoted LINE 1, and the gate
+    passed all 81. Line 1 is legal under P7 because `logmap` names the FIRST
+    member of a group as that group's reference — every `cat`/`level`/`burst`
+    class whose first record happens to be record 1 puts `path:1` on the
+    worklist. So «quote a flagged line» degenerates to «quote line 1», which is
+    what a tool does when it needs *a* line, not what an analyst does who has
+    read the file. Opera, the daily PowerShell script and DPAPI were all
+    "covered" that way and all three are missing from the findings.
+
+    WHEN LINE 1 IS LEGITIMATE — a blanket ban would false-block small files,
+    and a false-blocking gate gets switched off:
+      * a file of <= COVERAGE_SMALL_FILE lines: there is no older, duller
+        record to prefer, so any line, line 1 included, is the whole story;
+      * a file whose ONLY flagged line is line 1: the mapper found exactly one
+        interesting record and it genuinely is the first one.
+
+    WHAT STOPS «then I will quote line 2» — the failure mode that killed the
+    last four rounds. Nothing here says "line 1 is expensive". The admissible
+    set is *closed*: for a file with flagged lines it is exactly the flagged
+    lines above 1, so line 2 is admissible only when the mapper flagged line 2,
+    and a file with no flags at all admits exactly ONE line — the last quotable
+    one. There is therefore no cheaper answer than the correct answer, because
+    for every file the correct answers are enumerated here and nothing else is
+    accepted. `covermap.py` calls this same function to CHOOSE its line, so the
+    honest row costs one tool invocation and the lazy row costs a guess against
+    a closed set.
+
+    WHY THE LAST LINE for an unflagged file: it is the newest record, the one
+    an operator cares about; reaching it means reading to EOF; and it is
+    single-valued, so it cannot be shopped for.
+
+    Only lines `quote_example` can actually turn into a citation are admitted,
+    at every tier — otherwise the rule would push an honest run into claiming
+    «нечитабельно», which nothing machine-checks.
+
+    Raises OSError if the file cannot be read. BOTH callers must fail closed:
+    an unreadable file is not a clean one.
+    """
+    marks = {n for n in (flagged or ()) if isinstance(n, int) and n > 0}
+    need_last = not marks
+    quotable_marks, small, last_q, total = set(), set(), None, 0
+    with io.open(abs_path, encoding="utf-8", errors="replace") as fh:
+        for i, text in enumerate(fh, 1):
+            total = i
+            if not (need_last or i in marks or i <= COVERAGE_SMALL_FILE):
+                continue
+            if not quote_example({"path": rel or abs_path, "line": i,
+                                  "text": text.rstrip("\n")}):
+                continue
+            last_q = i
+            if i in marks:
+                quotable_marks.add(i)
+            if i <= COVERAGE_SMALL_FILE:
+                small.add(i)
+    if total == 0:
+        return set()
+    if total <= COVERAGE_SMALL_FILE:
+        return small
+    alts = {n for n in quotable_marks if n > 1}
+    if alts:
+        return alts
+    if 1 in quotable_marks:
+        return {1}
+    return {last_q} if last_q else set()
+
+
+def _coverage_line_admissible(row, cites, by_rel, want):
+    """Does this «наблюдение» row cite a line the file is allowed to answer with?
+
+    FAILS CLOSED. No resolved path, no ok quote, an unreadable file, a line
+    number that never parsed, an admissible set that came back empty, any
+    exception at all — every one of them returns False and the row blocks.
+    This repo has already shipped a guard that failed open on a malformed
+    gates.json and a lane audit that was dead code on the healthy path; the
+    fourth one is not going to be this.
+    """
+    try:
+        resolved = row.get("resolved_path")
+        if not resolved:
+            # A path that did not resolve is already counted as traversal /
+            # ambiguous / missing, and that row already blocks. Anything else
+            # with no resolved path is unverifiable, so it blocks here.
+            if row.get("path_problem"):
+                return True
+            row["inadmissible_why"] = "путь не разрешился"
+            return False
+        abs_path = by_rel.get(resolved)
+        if not abs_path:
+            row["inadmissible_why"] = "файл не найден в корпусе"
+            return False
+        lines = {c.get("line") for c in cites
+                 if c.get("verdict") == "ok" and c.get("resolved") == resolved}
+        lines = {n for n in lines if isinstance(n, int) and n > 0}
+        if not lines:
+            row["inadmissible_why"] = "номер строки не разобран"
+            return False
+        ok = coverage_admissible_lines(abs_path, want, resolved)
+        if not ok:
+            row["inadmissible_why"] = "в файле нет ни одной цитируемой строки"
+            return False
+        if lines & ok:
+            return True
+        row["inadmissible_why"] = ("процитировано %s; допустимо %s"
+                                   % (",".join(str(n) for n in sorted(lines)),
+                                      ",".join(str(n) for n in sorted(ok)[:8])))
+        return False
+    except Exception as exc:                       # noqa: BLE001 — fail closed
+        row["inadmissible_why"] = "проверка не выполнилась: %s" % (exc,)
+        return False
+
+
 def read_ledger(path):
     """-> (rows, closed_ids) from a worklist.tsv the model has written back."""
     rows, closed = [], set()
@@ -1341,6 +1461,7 @@ def report_evidence(report, checked=None):
     cov_traversal, cov_ambiguous, cov_missing_path = [], [], []
     cov_false_empty, cov_false_binary, cov_duplicate_paths = [], [], []
     cov_unflagged_citation = []
+    cov_inadmissible_line, cov_false_unreadable = [], []
     flagged = (checked or {}).get("flagged") or {}
     cov_observed = cov_no_address = 0
     corpus = (checked or {}).get("corpus")
@@ -1359,6 +1480,7 @@ def report_evidence(report, checked=None):
             row.get("path"), by_rel, by_base)
         row["normalized_path"] = normalized
         row["resolved_path"] = candidates[0] if len(candidates) == 1 else None
+        row["path_problem"] = bool(path_problem)
         if path_problem:
             if ".." in path_problem:
                 cov_traversal.append(row)
@@ -1386,6 +1508,12 @@ def report_evidence(report, checked=None):
                 if want and not any(
                         c.get("verdict") == "ok" and c.get("line") in want for c in cites):
                     cov_unflagged_citation.append(row)
+                elif not _coverage_line_admissible(row, cites, by_rel, want):
+                    # P8: quoting line 1 of a long file, or any line of a file
+                    # the mapper never flagged other than the last, proves the
+                    # file was opened and nothing more. See
+                    # `coverage_admissible_lines`.
+                    cov_inadmissible_line.append(row)
         elif status in COVERAGE_NO_ADDRESS:
             cov_no_address += 1
             if cites:
@@ -1401,6 +1529,21 @@ def report_evidence(report, checked=None):
             if row["resolved_path"] and status == "двоичный":
                 if not looks_binary(by_rel[row["resolved_path"]]):
                     cov_false_binary.append(row)
+            if row["resolved_path"] and status == "нечитабельно":
+                # Banning the lazy line-1 quote makes «нечитабельно» the next
+                # cheapest way out — «I could not read it» costs nothing and,
+                # until now, nothing falsified it, unlike «пусто» and
+                # «двоичный». A rule that only moves the cliff is not a fix.
+                # The same function that enumerates admissible lines answers
+                # this: if the file yields a citable line, it was readable.
+                try:
+                    ap = by_rel[row["resolved_path"]]
+                    if (not looks_binary(ap)
+                            and coverage_admissible_lines(
+                                ap, None, row["resolved_path"])):
+                        cov_false_unreadable.append(row)
+                except Exception:                  # noqa: BLE001
+                    pass   # genuinely unreadable — the row's claim stands
         else:
             cov_unsupported.append(row)
     for resolved, rows in sorted(path_rows.items()):
@@ -1446,6 +1589,7 @@ def report_evidence(report, checked=None):
                 + (1 if coverage_empty_section else 0)
                 + len(cov_missing_citation) + len(cov_invalid_citation)
                 + len(cov_mismatched_citation) + len(cov_unflagged_citation)
+                + len(cov_inadmissible_line) + len(cov_false_unreadable)
                 + len(cov_unsupported) + len(cov_smuggled) + len(cov_malformed)
                 + len(cov_traversal) + len(cov_ambiguous) + len(cov_missing_path)
                 + len(cov_false_empty) + len(cov_false_binary)
@@ -1484,6 +1628,11 @@ def report_evidence(report, checked=None):
                      "invalid_citation": [r["report_line"] for r in cov_invalid_citation],
                      "mismatched_citation": [r["report_line"] for r in cov_mismatched_citation],
                      "unflagged_citation": [r["report_line"] for r in cov_unflagged_citation],
+                     "inadmissible_line": [r["report_line"] for r in cov_inadmissible_line],
+                     "inadmissible_line_detail": [
+                         {"line": r["report_line"], "path": r.get("path"),
+                          "why": r.get("inadmissible_why")}
+                         for r in cov_inadmissible_line],
                      "traversal_path": [r["report_line"] for r in cov_traversal],
                      "ambiguous_path": [{"line": r["report_line"], "path": r["path"],
                                          "candidates": resolve_coverage_path(
@@ -1492,6 +1641,7 @@ def report_evidence(report, checked=None):
                      "missing_path": [r["report_line"] for r in cov_missing_path],
                      "false_empty": [r["report_line"] for r in cov_false_empty],
                      "false_binary": [r["report_line"] for r in cov_false_binary],
+                     "false_unreadable": [r["report_line"] for r in cov_false_unreadable],
                      "duplicate_paths": cov_duplicate_paths,
                      "uncovered_paths": cov_uncovered,
                     "unexamined_paths": cov_unexamined,
@@ -1580,6 +1730,16 @@ def render_report_evidence(e):
     if c.get("unflagged_citation"):
         out.append("  строки покрытия, цитата которых не попала ни в одну строку, отмеченную logmap: %s"
                    % ", ".join(str(x) for x in c["unflagged_citation"]))
+    if c.get("inadmissible_line"):
+        out.append("  строки покрытия, цитата которых стоит на строке-заглушке "
+                   "(строка 1 длинного файла или произвольная строка неотмеченного "
+                   "файла — доказывает, что файл открыли, и ничего больше): %s"
+                   % ", ".join(str(x) for x in c["inadmissible_line"]))
+        for det in (c.get("inadmissible_line_detail") or [])[:10]:
+            out.append("    строка %s · %s · %s"
+                       % (det.get("line"), det.get("path"), det.get("why")))
+        out.append("    почини так: python3 covermap.py --corpus <LOG_DIR> "
+                   "--worklist ./work/worklist.tsv — он выбирает допустимую строку сам")
     if c.get("mismatched_citation"):
         out.append("  цитата наблюдения указывает не на файл своей строки покрытия: %s"
                    % ", ".join(str(x) for x in c["mismatched_citation"]))
@@ -1596,6 +1756,9 @@ def render_report_evidence(e):
     if c.get("false_empty"):
         out.append("  строки «пусто», чей файл не нулевого размера: %s"
                    % ", ".join(str(x) for x in c["false_empty"]))
+    if c.get("false_unreadable"):
+        out.append("  строки «нечитабельно», чей файл читается и даёт цитату: %s"
+                   % ", ".join(str(x) for x in c["false_unreadable"]))
     if c.get("false_binary"):
         out.append("  строки «двоичный», чей файл читается как текст: %s"
                    % ", ".join(str(x) for x in c["false_binary"]))
