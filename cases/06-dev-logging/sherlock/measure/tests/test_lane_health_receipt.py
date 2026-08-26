@@ -84,7 +84,7 @@ class LaneHealthReceiptTests(unittest.TestCase):
         row = json.loads(receipt.read_text())
         self.assertEqual(row["verdict"], "HEALTHY")
         run_manifest.validate_health(str(receipt), "local-lane", "local-provider",
-                                     "[SP]deepseek-v4-flash-0731", "DeepSeek-V4-Flash")
+                                     "[SP]deepseek-v4-flash", "DeepSeek-V4-Flash")
         self.assertEqual(set(row["sizes_kb"]), {100, 250, 400})
 
     def test_wrong_identity_malformed_sse_and_non200_are_not_healthy(self):
@@ -121,7 +121,7 @@ class LaneHealthReceiptTests(unittest.TestCase):
         receipt.write_text(json.dumps(row))
         with self.assertRaises(run_manifest.ManifestError):
             run_manifest.validate_health(str(receipt), "local-lane", "local-provider",
-                                         "[SP]deepseek-v4-flash-0731", "DeepSeek-V4-Flash")
+                                         "[SP]deepseek-v4-flash", "DeepSeek-V4-Flash")
 
     def test_bad_config_fails_without_traceback_or_receipt_claim(self):
         proc, receipt = self.run_probe(PROBE_SIZES_KB="100 nope 400")

@@ -44,9 +44,13 @@ mkdir -p ~/hack/petstore-pack && unzip -q petstore_input_pack.zip -d ~/hack/pets
 usage-строке скрипта перечислены не все) либо `none` — та же модель **без**
 навыка, это baseline.
 Обязательна `SHERLOCK_API_KEY`; остальное с умолчаниями: `SHERLOCK_BASE_URL=https://linkapi.ai/v1`,
-`SHERLOCK_MODEL=[SP]deepseek-v4-flash-0731` (пин снапшота — не заменяйте его
-плавающим алиасом `[SP]deepseek-v4-flash`, иначе провайдер снова разложит вызовы
-по двум моделям, как в v37), `SHERLOCK_TIMEOUT=900`,
+`SHERLOCK_MODEL=[SP]deepseek-v4-flash` (**не пиньте датированный снапшот**:
+`GET https://linkapi.ai/v1/models` отдаёт только `[SP]deepseek-v4-flash` и
+`[SP]deepseek-v4-pro` плюс их `[次]`-двойники; запрос
+`[SP]deepseek-v4-flash-0731` возвращает HTTP 503 `model_not_found` — запуск v38
+умер так на 13 вызовах. `-0731` — это то, что провайдер **отвечает**, а не то,
+что можно **послать**. Подмену модели ловит проверка на стороне ответа в
+`measure/lane_guard.py`), `SHERLOCK_TIMEOUT=900`,
 `SHERLOCK_PACK=~/hack/petstore-pack/petstore_input_pack`, `QWEN_BIN=~/.local/bin/qwen`.
 `--approval-mode yolo` раннер выставляет сам — без него Qwen отказывает и навыку, и
 `run_shell_command`, и меряется не то.

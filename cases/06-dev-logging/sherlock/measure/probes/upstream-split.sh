@@ -23,9 +23,10 @@ N="${1:-20}"
 SEC=/home/claude-developer/personal-os/.claude/skills/secret-use/with-secret.sh
 SECRET="${SHERLOCK_SECRET:-eval_linkapi_key}"
 URL="${SHERLOCK_BASE_URL:-https://linkapi.ai/v1}/chat/completions"
-# DELIBERATELY the ALIAS, not the pinned `-0731` id the runners now send: this
-# probe exists to measure the alias fan-out itself. Pinning it here would make it
-# answer a question nobody asked.
+# The ALIAS — the same id the runners send, because it is the ONLY deepseek-v4
+# id linkapi will route (a dated `-0731` request is 503 model_not_found; see
+# measure/upstream-lane.sh job 1). This probe exists to measure the alias
+# fan-out itself, which is now a permanent property of the lane, not a bug.
 MODEL="${SHERLOCK_MODEL:-[SP]deepseek-v4-flash}"
 CURL=/home/claude-developer/personal-os/.claude/skills/secret-use/secret-curl.sh
 

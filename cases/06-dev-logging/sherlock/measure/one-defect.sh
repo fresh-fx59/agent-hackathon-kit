@@ -80,10 +80,20 @@ for try in $(seq 1 "$MAX_TRIES"); do
   fi
   echo "== $CASE x $ARM  try $try/$MAX_TRIES  burned so far: ${b} tok  $(date -u +%H:%M:%SZ)"
 
+  # The ALIAS on purpose — do NOT "pin" a dated snapshot here (PR #77 did; it
+  # broke the lane). Measured 2026-08-26: GET https://linkapi.ai/v1/models lists
+  # 130 models and exactly four deepseek-v4 ids — [SP]deepseek-v4-flash,
+  # [SP]deepseek-v4-pro, and their [次] twins. No dated id is routable:
+  # `[SP]deepseek-v4-flash-0731` answered HTTP 503
+  # {"error":{"code":"model_not_found","message":"No available channel for model
+  # [SP]deepseek-v4-flash-0731 under group auto (distributor)"}} on all 13 calls
+  # of the v38 launch, zero billed usage. `-0731` is a value the provider RETURNS,
+  # never one you can SEND. The only defence against provider substitution is the
+  # returned-side family check in measure/lane_guard.py — see measure/upstream-lane.sh job 1.
   timeout 2400 $SEC eval_linkapi_key --env SHERLOCK_API_KEY -- \
     $SEC eval_broker_api_key --env JUDGE_API_KEY -- \
     env SHERLOCK_BASE_URL=https://linkapi.ai/v1 \
-        SHERLOCK_MODEL='[SP]deepseek-v4-flash-0731' \
+        SHERLOCK_MODEL='[SP]deepseek-v4-flash' \
         JUDGE_BASE_URL=http://127.0.0.1:8317/v1 JUDGE_MODEL=gpt-5.5 \
         bash gate.sh 1 "$ARM" "$CASE" 2>&1 | tail -4
 
