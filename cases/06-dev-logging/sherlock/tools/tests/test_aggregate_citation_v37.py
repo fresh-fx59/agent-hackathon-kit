@@ -471,9 +471,9 @@ reason and the three accounting tests below would grade the wrong defect.
 attacked-not-proven
 """ % (_cite_line(root, "Security.jsonl", 1), extra,
        _cite_line(root, "notes.log", 2),
-       _cite_line(root, "Security.jsonl", 1),
-       _cite_line(root, "Security.jsonl", 2),
-       _cite_line(root, "spray.jsonl", 1),
+       _cite_line(root, "Security.jsonl", 1),   # the 6b ownership row
+       _cite_line(root, "Security.jsonl", 16),  # PR #80: a coverage row may
+       _cite_line(root, "spray.jsonl", 9),      # not answer a file with line 1
        _cite_line(root, "notes.log", 3), _rollover_section(root))
 
 
@@ -501,7 +501,7 @@ class TestBlockingAccounting(unittest.TestCase):
         self.ledger = os.path.join(self.out, "worklist.tsv")
         with open(self.ledger, "w", encoding="utf-8") as fh:
             fh.write("# id\tвердикт\tось\tссылка\n")
-            fh.write("W-1\tN 1\tчастота\tSecurity.jsonl:2\n")
+            fh.write("W-1\tN 1\tчастота\tSecurity.jsonl:16\n")
 
     def tearDown(self):
         self.tmp.cleanup()
