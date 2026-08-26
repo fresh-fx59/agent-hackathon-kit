@@ -1523,6 +1523,33 @@ def resolve_coverage_path(path, by_rel, by_base):
 
 ENUM_TABLE_FILE = "enum-tables.tsv"
 
+# ==========================================================================
+# fix 5a — A HINT MUST NAME A PATH THE ARM CAN OPEN
+# ==========================================================================
+# MEASURED, v38 paid run 20260826T132832Z-v38, last 90 minutes. This file told
+# the arm «добавь строку в reference/enum-tables.tsv с источником» — a path
+# relative to the SKILL ROOT — while loading that same table from the absolute
+# path below. The arm's cwd is the bench scratch dir; no `reference/` exists
+# anywhere under it. It answered the way a maze is answered: 8 `read_file` +
+# 4 `grep_search` on THIS file, grepping `ENUM_DECODE_RE|def enum_decode_ok`,
+# hunting for a file that was never where it was told to look.
+#
+# NOTE CORRECTION, recorded because the project note has it backwards: the note
+# says the skill "never taught the required `Field=value (decode)` form". FALSE.
+# SKILL.md teaches it with worked examples and `render_enum_decode()` prints the
+# exact required string at the point of failure («напиши «Action=2
+# (блокировать)»»). The teaching was there. The RESOLVABLE PATH was missing.
+#
+# So: the gate resolves paths, because the gate is the only party that knows
+# where it lives. A hint the arm cannot follow from its own cwd is not a hint.
+TOOLS_DIR = os.path.dirname(os.path.abspath(__file__))
+
+
+def tool_cmd(name):
+    """`python3 /abs/path/<name>` — never a bare basename the arm cannot find."""
+    return "python3 %s" % os.path.join(TOOLS_DIR, name)
+
+
 # (field, value) -> (canonical decode, extra accepted spellings)
 # Sources: [MS-FASP] 2.2.30 FW_RULE_ACTION, 2.2.10 FW_DIRECTION,
 # 2.2.2 FW_PROFILE_TYPE, 2.2.44 FW_RULE_ORIGIN_TYPE, IANA protocol numbers,
@@ -1847,12 +1874,17 @@ def load_enum_extensions(path):
     return rows, problems
 
 
+def enum_table_path(reference_dir=None):
+    """The ABSOLUTE path of the growth-path table — the one printed at the arm."""
+    if reference_dir is None:
+        reference_dir = os.path.join(TOOLS_DIR, "..", "reference")
+    return os.path.abspath(os.path.normpath(
+        os.path.join(reference_dir, ENUM_TABLE_FILE)))
+
+
 def enum_table(reference_dir=None):
     """The locked builtin half plus the growable TSV half. -> (table, problems)."""
-    if reference_dir is None:
-        reference_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                                     "..", "reference")
-    path = os.path.normpath(os.path.join(reference_dir, ENUM_TABLE_FILE))
+    path = enum_table_path(reference_dir)
     rows, problems = load_enum_extensions(path)
     # fix #7. THE LOCK ON THE LOCKED HALF. The TSV lock below stops the arm
     # redefining a builtin pair from the growth path; nothing stopped it editing
@@ -1954,7 +1986,9 @@ def enum_decode_check(report, blocks, structural=None, reference_dir=None):
     counters = {"items": len(items), "table_problems": len(problems)}
     blocking = sum(counters.values())          # 6a
     return {"items": items, "table_problems": problems, "counters": counters,
-            "table_size": len(table), "blocking": blocking}
+            "table_size": len(table), "blocking": blocking,
+            # fix 5a: the renderer must not have to guess where the table is.
+            "table_path": enum_table_path(reference_dir)}
 
 
 def render_enum_decode(e):
@@ -1962,8 +1996,10 @@ def render_enum_decode(e):
         return ""
     out = ["РАСШИФРОВКА ПЕРЕЧИСЛЕНИЙ (6a): %d блокирующих, таблица %d пар"
            % (e["blocking"], e["table_size"])]
+    table_path = e.get("table_path") or enum_table_path()
     for p in e["table_problems"]:
-        out.append("  ✗ таблица: %s — %s" % (p["kind"], p.get("text")))
+        out.append("  ✗ таблица %s: %s — %s"
+                   % (p.get("path") or table_path, p["kind"], p.get("text")))
     for it in e["items"]:
         if it["kind"] == "missing_decode":
             out.append("  ✗ %s стр.%d: %s=%s процитировано без расшифровки — "
@@ -1983,9 +2019,10 @@ def render_enum_decode(e):
                           it["text"], it["expected"]))
         else:
             out.append("  ✗ %s стр.%d: %s=%s — значения нет в таблице; добавь "
-                       "строку в reference/%s с источником"
+                       "строку в %s с источником (5 колонок, tab-separated: "
+                       "field/value/decode/aliases/source)"
                        % (it["block"], it["line"], it["field"], it["value"],
-                          ENUM_TABLE_FILE))
+                          table_path))
     return "\n".join(out)
 
 
@@ -2874,8 +2911,8 @@ def render_rollover(r):
                   s.get("lost", 0)))
     if r.get("missing_section"):
         out.append("  НЕТ РАЗДЕЛА «Окно записей». Добавь его: "
-                   "python3 rollover.py --corpus <корпус> --report --required-only "
-                   "--cite <файл-улики> >> report.md")
+                   "%s --corpus <корпус> --report --required-only "
+                   "--cite <файл-улики> >> report.md" % tool_cmd("rollover.py"))
     if r.get("nested_section"):
         out.append("  РАЗДЕЛ ВЛОЖЕН в «Покрытие»: его строки читаются ещё и как "
                    "строки ПОКРЫТИЯ (повторные пути, без адреса), а вложенный "
@@ -3321,8 +3358,9 @@ def render_report_evidence(e):
         for det in (c.get("inadmissible_line_detail") or [])[:10]:
             out.append("    строка %s · %s · %s"
                        % (det.get("line"), det.get("path"), det.get("why")))
-        out.append("    почини так: python3 covermap.py --corpus <LOG_DIR> "
-                   "--worklist ./work/worklist.tsv — он выбирает допустимую строку сам")
+        out.append("    почини так: %s --corpus <LOG_DIR> "
+                   "--worklist ./work/worklist.tsv — он выбирает допустимую строку сам"
+                   % tool_cmd("covermap.py"))
     if c.get("mismatched_citation"):
         out.append("  цитата наблюдения указывает не на файл своей строки покрытия: %s"
                    % ", ".join(str(x) for x in c["mismatched_citation"]))
@@ -4070,8 +4108,8 @@ def ledger(d, report, path, report_path=None):
                       ", ".join(removed[:12]),
                       " …" if len(removed) > 12 else ""))
         out.append("  Строку закрывают вердиктом, её не удаляют. Верни "
-                   "рабочий список logmap (или перезапусти logmap.py) и "
-                   "закрой строки вердиктом.")
+                   "рабочий список logmap (или перезапусти `%s`) и "
+                   "закрой строки вердиктом." % tool_cmd("logmap.py"))
     # fix #1. `ev.get("blocking", 0)` was the eighteenth survivor: zeroing it
     # left every one of the 44 tests green while the ledger stopped counting
     # every report-evidence defect there is. Named terms, one sum, same rule as
