@@ -426,6 +426,17 @@ def green_report(root, extra=""):
 улики: %s
 исход: норма
 
+# Принадлежность учётных записей
+
+Added for v37 fix-6b: the finding quotes a record carrying
+`"TargetUserName":"ADMINI"`, so the report must say whose account that is
+before it may lean on it. Without this the control is blocking for a REAL
+reason and the three accounting tests below would grade the wrong defect.
+
+| учётная запись | первое появление | path:line «цитата» | как | вывод | раньше |
+| --- | --- | --- | --- | --- | --- |
+| ADMINI | 2021-06-01T18:36:04Z | %s | удалённый вход | не определяется | — |
+
 # Покрытие
 
 | файл | статус | наблюдение |
@@ -443,6 +454,7 @@ def green_report(root, extra=""):
 attacked-not-proven
 """ % (_cite_line(root, "Security.jsonl", 1), extra,
        _cite_line(root, "notes.log", 2),
+       _cite_line(root, "Security.jsonl", 1),
        _cite_line(root, "Security.jsonl", 2),
        _cite_line(root, "spray.jsonl", 1),
        _cite_line(root, "notes.log", 3))

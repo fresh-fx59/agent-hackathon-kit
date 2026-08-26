@@ -1275,6 +1275,779 @@ def resolve_coverage_path(path, by_rel, by_base):
     return normalized, candidates, None
 
 
+# ==========================================================================
+# fix 6a — A NUMERIC ENUM QUOTED WITHOUT A DECODE IS A DEFECT
+# ==========================================================================
+# MEASURED. In sherlock-winevtx-runs-v37-full-r1/20260825T173021Z-v37 the
+# firewall records are two different events six seconds apart:
+#
+#   Firewall.jsonl:443,444  EventID 2004  "Action":2  22:37:55Z
+#   Firewall.jsonl:445-450  EventID 2005  "Action":3  22:38:01Z
+#
+# Finding Н-3 quoted «"Action":2» VERBATIM and wrote «действие 2/3
+# (разрешить)». Action=2 is BLOCK (MS-FASP FW_RULE_ACTION_BLOCK). The
+# block→allow pair is the strongest evidence in the corpus: the block proves
+# 3proxy ran and bound a socket, the allow proves a human clicked through the
+# Windows dialog. Merged into one «allow» it proves neither. The citation gate
+# passed it, because a citation proves a quote is GENUINE and never that it was
+# READ CORRECTLY.
+#
+# --- DESIGN DECISION 1: how do we know a number is an enum? ----------------
+# A CLOSED TABLE, in two halves.
+#   * ENUM_BUILTIN below is LOCKED. It carries only fields whose value domain
+#     is small, standardised and semantic. It cannot be edited by the arm
+#     without touching a skill file the integrity tests hash.
+#   * reference/enum-tables.tsv is the GROWTH PATH. It may only ADD pairs the
+#     builtin does not have. A row that contradicts a builtin row is itself a
+#     blocking defect (`table_conflict`) — so «Action 2 = разрешить» cannot be
+#     legislated into truth. Every added row must carry a source.
+# A table that cannot grow becomes a table that gets bypassed; a table anyone
+# can rewrite is not a table. This is both.
+#
+# DELIBERATELY ABSENT: EventID, Level, Keywords, Task, Opcode, Version.
+# EventID is a per-provider identifier, not a closed enum — the table would be
+# unbounded and the gate would fire on nearly every quote. Level/Keywords
+# describe the RECORD, not the EVENT. A gate that over-fires gets disabled.
+#
+# --- DESIGN DECISION 2: what counts as "decoded"? -------------------------
+# NOT "there is parenthetical text nearby" — «действие 2/3 (разрешить)» looks
+# decoded and is wrong. The admissible answer is an ENUMERATED SET, which is
+# what made the line-1 coverage fix work: the block must contain the literal
+# token
+#
+#       Field=<value> (<decode>)
+#
+# and <decode> must be one of the spellings THE TABLE gives for that exact
+# (field, value). Three distinct outcomes, all blocking:
+#   missing_decode  — no such token for a pair the block quoted
+#   wrong_decode    — the token's text is the table's decode for a DIFFERENT
+#                     value of the same field (this is the v37 error)
+#   unknown_decode  — the text is not in the table at all (free prose barred)
+#   unknown_value   — known field, value absent from both halves of the table
+#                     → extend the TSV with a source; never drop the quote
+#
+# --- DESIGN DECISION 3: scope ---------------------------------------------
+# NOT every number in the report. Only a (field, value) pair that appears, on a
+# STRUCTURAL line (markdown fences are examples, not evidence), inside a finding
+# block Н-n or a rejected-candidate block К-n — the places where the report is
+# making an argument. Prose mentions count as well as quoted ones, so deleting
+# the quote while keeping the claim does not buy silence.
+#
+# FAIL CLOSED: an unreadable or unparseable table is a blocking defect on its
+# own; the builtin half still applies, so removing the TSV cannot turn a
+# wrong_decode into a pass.
+
+ENUM_TABLE_FILE = "enum-tables.tsv"
+
+# (field, value) -> (canonical decode, extra accepted spellings)
+# Sources: [MS-FASP] 2.2.30 FW_RULE_ACTION, 2.2.10 FW_DIRECTION,
+# 2.2.2 FW_PROFILE_TYPE, 2.2.44 FW_RULE_ORIGIN_TYPE, IANA protocol numbers,
+# and the Windows 4624/4625 LogonType table.
+ENUM_BUILTIN_ROWS = [
+    ("action", 0, "недействительно", ["invalid"]),
+    ("action", 1, "разрешить в обход bypass", ["allow bypass", "bypass"]),
+    ("action", 2, "блокировать", ["запретить", "block", "запрет", "блок"]),
+    ("action", 3, "разрешить", ["allow", "разрешение"]),
+    ("direction", 1, "входящее", ["in", "inbound", "вход"]),
+    ("direction", 2, "исходящее", ["out", "outbound", "исход"]),
+    ("protocol", 1, "icmpv4", ["icmp"]),
+    ("protocol", 6, "tcp", []),
+    ("protocol", 17, "udp", []),
+    ("protocol", 58, "icmpv6", []),
+    ("protocol", 256, "любой", ["any", "все"]),
+    ("profiles", 1, "домен", ["domain"]),
+    ("profiles", 2, "частная сеть", ["private", "частный"]),
+    ("profiles", 3, "домен+частная", ["domain+private"]),
+    ("profiles", 4, "общедоступная сеть", ["public", "общедоступный", "публичная"]),
+    ("profiles", 5, "домен+общедоступная", ["domain+public"]),
+    ("profiles", 6, "частная+общедоступная", ["private+public"]),
+    ("profiles", 7, "все профили", ["all", "все"]),
+    ("profiles", 2147483647, "все профили", ["all", "все"]),
+    ("origin", 0, "недействительно", ["invalid"]),
+    ("origin", 1, "локальное правило", ["local", "локально", "локальное"]),
+    ("origin", 2, "групповая политика", ["group policy", "gpo"]),
+    ("origin", 3, "динамическое", ["dynamic"]),
+    ("origin", 4, "автосозданное", ["autogen", "auto-generated"]),
+    ("logontype", 2, "интерактивный", ["interactive"]),
+    ("logontype", 3, "сетевой", ["network"]),
+    ("logontype", 4, "пакетный", ["batch"]),
+    ("logontype", 5, "служба", ["service"]),
+    ("logontype", 7, "разблокировка", ["unlock"]),
+    ("logontype", 8, "сетевой открытым текстом", ["networkcleartext"]),
+    ("logontype", 9, "новые учётные данные", ["newcredentials"]),
+    # NOTE: no parentheses in any canonical decode — ENUM_DECODE_RE reads up to
+    # the first `)`, so a decode containing one could never be written.
+    ("logontype", 10, "удалённый интерактивный rdp",
+     ["remoteinteractive", "rdp", "удалённый интерактивный"]),
+    ("logontype", 11, "кэшированный интерактивный", ["cachedinteractive"]),
+]
+
+
+def _enum_norm(s):
+    return " ".join((s or "").strip().lower().replace("ё", "е").split()).strip(" .;,")
+
+
+def _enum_build(rows):
+    t = {}
+    for field, value, canon, aliases in rows:
+        key = (field.lower(), int(value))
+        accepted = set([_enum_norm(canon)] + [_enum_norm(a) for a in aliases])
+        accepted.discard("")
+        t[key] = {"canonical": canon, "accepted": accepted}
+    return t
+
+
+ENUM_BUILTIN = _enum_build(ENUM_BUILTIN_ROWS)
+assert not any("(" in r[2] or ")" in r[2] for r in ENUM_BUILTIN_ROWS), \
+    "a canonical decode with a paren can never be written in Field=N (decode)"
+
+# Russian prose names for the same fields. WHY THIS EXISTS, measured: the first
+# version of this gate matched only `"Field":N` and `Field=N`. Attacking it
+# (attempt G5) showed the bypass in one edit — delete the quote and write
+# «Action 2», or, exactly as the real v37 report did, write «действие 2/3».
+# Neither was a pair the gate could see, and blocking went back to 0. The
+# admissible spellings of the CLAIM must be as wide as the language; only the
+# spelling of the DECODE stays a single enumerated form.
+ENUM_FIELD_NAMES = {
+    "action": ["действие"],
+    "direction": ["направление"],
+    "protocol": ["протокол"],
+    "profiles": ["профили", "профиль"],
+    "origin": ["происхождение", "источник правила"],
+    "logontype": ["тип входа", "logon type"],
+}
+
+# `"Field":12` — JSON, as it appears inside a verbatim quote.
+ENUM_JSON_PAIR_RE = re.compile(
+    r'"([A-Za-z_][A-Za-z0-9_]{0,31})"\s*:\s*(\d{1,10})\b')
+
+
+def _enum_prose_re(fields):
+    """`Action=2`, `Action 2`, «действие 2/3» — every way prose states the pair.
+
+    The `2/3` form is deliberate: merging two different values into one slash
+    pair IS the v37 error, so both numbers must be seen and both must be
+    decoded separately."""
+    names = []
+    for f in sorted(fields):
+        names.append(re.escape(f))
+        for alias in ENUM_FIELD_NAMES.get(f, []):
+            names.append(re.escape(alias))
+    if not names:
+        return None
+    return re.compile(
+        r'(?<![A-Za-z0-9_\u0400-\u04ff])(%s)\s*[:=]?\s*'
+        r'(\d{1,10}(?:\s*/\s*\d{1,10}){0,4})(?!\d)(?!\.\d)'
+        % "|".join(sorted(names, key=len, reverse=True)), re.IGNORECASE)
+
+
+ENUM_NAME_TO_FIELD = {}
+for _f, _al in ENUM_FIELD_NAMES.items():
+    ENUM_NAME_TO_FIELD[_f] = _f
+    for _a in _al:
+        ENUM_NAME_TO_FIELD[_a.lower()] = _f
+# The ONE admissible decode form. Nothing else is read as a decode.
+# The separator may be `=` or a plain space (`LogonType 3 (сетевой)`), because
+# both read naturally in Russian prose. What is NOT negotiable is the shape:
+# the FIELD NAME, the EXACT value, and a parenthesised decode. Widening the
+# separator can only ever find MORE decode tokens, and every token found is
+# still validated against the table — so it cannot weaken the gate.
+ENUM_DECODE_RE = re.compile(
+    r'(?<![A-Za-z0-9_])([A-Za-z_][A-Za-z0-9_]{0,31})\s*(?:=|\s)\s*(\d{1,10})\s*'
+    r'\(\s*([^)\n]{1,80}?)\s*\)')
+
+
+def load_enum_extensions(path):
+    """reference/enum-tables.tsv -> (rows, problems). Fails closed, never silent."""
+    problems, rows = [], []
+    try:
+        with open(path, "r", encoding="utf-8", errors="strict") as fh:
+            raw = fh.read()
+    except (OSError, UnicodeDecodeError) as e:
+        return [], [{"kind": "table_unreadable", "path": path, "text": str(e)}]
+    for n, line in enumerate(raw.splitlines(), 1):
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        cells = [c.strip() for c in line.split("\t")]
+        if cells[0].lower() in ("field", "поле"):
+            continue
+        if len(cells) < 5:
+            problems.append({"kind": "table_malformed", "path": path, "line": n,
+                             "text": "нужно 5 колонок field/value/decode/aliases/source"})
+            continue
+        field, value, decode, aliases, source = cells[:5]
+        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]{0,31}", field or ""):
+            problems.append({"kind": "table_malformed", "path": path, "line": n,
+                             "text": "плохое имя поля %r" % field})
+            continue
+        try:
+            ival = int(value)
+        except (TypeError, ValueError):
+            problems.append({"kind": "table_malformed", "path": path, "line": n,
+                             "text": "значение не целое: %r" % value})
+            continue
+        if not _enum_norm(decode):
+            problems.append({"kind": "table_malformed", "path": path, "line": n,
+                             "text": "пустая расшифровка"})
+            continue
+        if not (source or "").strip():
+            problems.append({"kind": "table_no_source", "path": path, "line": n,
+                             "text": "строка без источника: %s=%s" % (field, value)})
+            continue
+        rows.append((field, ival, decode,
+                     [a for a in (aliases or "").split("|") if a.strip()]))
+    return rows, problems
+
+
+def enum_table(reference_dir=None):
+    """The locked builtin half plus the growable TSV half. -> (table, problems)."""
+    if reference_dir is None:
+        reference_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                     "..", "reference")
+    path = os.path.normpath(os.path.join(reference_dir, ENUM_TABLE_FILE))
+    rows, problems = load_enum_extensions(path)
+    table = dict(ENUM_BUILTIN)
+    for field, value, decode, aliases in rows:
+        key = (field.lower(), int(value))
+        entry = _enum_build([(field, value, decode, aliases)])[key]
+        if key in ENUM_BUILTIN:
+            # THE LOCK. Without it the cheapest path to green is one TSV line.
+            if entry["accepted"] != ENUM_BUILTIN[key]["accepted"]:
+                problems.append({"kind": "table_conflict", "path": path,
+                                 "text": "%s=%s уже во встроенной таблице как «%s»"
+                                         % (field, value, ENUM_BUILTIN[key]["canonical"])})
+            continue
+        table[key] = entry
+    return table, problems
+
+
+def enum_known_fields(table):
+    return {f for f, _v in table}
+
+
+def enum_decode_check(report, blocks, structural=None, reference_dir=None):
+    """Every numeric enum a finding/candidate block quotes must carry a decode
+    that comes FROM THE TABLE for that exact value."""
+    lines = report.splitlines()
+    structural = structural if structural is not None else structural_mask(lines)
+    table, problems = enum_table(reference_dir)
+    fields = enum_known_fields(table)
+    prose_re = _enum_prose_re(fields)
+    items = []
+    for label, lo, hi in blocks:
+        pairs, decodes = {}, {}
+        for i in range(max(1, lo), min(hi, len(lines)) + 1):
+            if not structural[i - 1]:
+                continue          # a fenced example is not evidence
+            raw = lines[i - 1]
+            for m in ENUM_JSON_PAIR_RE.finditer(raw):
+                f = m.group(1).lower()
+                if f in fields:
+                    pairs.setdefault((f, int(m.group(2))), i)
+            if prose_re is not None:
+                for m in prose_re.finditer(raw):
+                    f = ENUM_NAME_TO_FIELD.get(m.group(1).lower(),
+                                               m.group(1).lower())
+                    if f not in fields:
+                        continue
+                    for part in m.group(2).split("/"):
+                        pairs.setdefault((f, int(part.strip())), i)
+            for m in ENUM_DECODE_RE.finditer(raw):
+                f = m.group(1).lower()
+                if f in fields:
+                    decodes.setdefault((f, int(m.group(2))), []).append(
+                        (i, _enum_norm(m.group(3))))
+        for (f, v), line_no in sorted(pairs.items()):
+            entry = table.get((f, v))
+            if entry is None:
+                items.append({"block": label, "line": line_no, "field": f,
+                              "value": v, "kind": "unknown_value", "text": None,
+                              "expected": None})
+                continue
+            got = decodes.get((f, v)) or []
+            if not got:
+                items.append({"block": label, "line": line_no, "field": f,
+                              "value": v, "kind": "missing_decode", "text": None,
+                              "expected": entry["canonical"]})
+                continue
+            for dline, text in got:
+                if text in entry["accepted"]:
+                    continue
+                other = [ov for (of, ov), e in sorted(table.items())
+                         if of == f and ov != v and text in e["accepted"]]
+                items.append({"block": label, "line": dline, "field": f,
+                              "value": v, "text": text,
+                              "expected": entry["canonical"],
+                              "kind": "wrong_decode" if other else "unknown_decode",
+                              "means": other[0] if other else None})
+    blocking = len(items) + len(problems)
+    return {"items": items, "table_problems": problems,
+            "table_size": len(table), "blocking": blocking}
+
+
+def render_enum_decode(e):
+    if not e:
+        return ""
+    out = ["РАСШИФРОВКА ПЕРЕЧИСЛЕНИЙ (6a): %d блокирующих, таблица %d пар"
+           % (e["blocking"], e["table_size"])]
+    for p in e["table_problems"]:
+        out.append("  ✗ таблица: %s — %s" % (p["kind"], p.get("text")))
+    for it in e["items"]:
+        if it["kind"] == "missing_decode":
+            out.append("  ✗ %s стр.%d: %s=%s процитировано без расшифровки — "
+                       "напиши «%s=%s (%s)»"
+                       % (it["block"], it["line"], it["field"], it["value"],
+                          it["field"], it["value"], it["expected"]))
+        elif it["kind"] == "wrong_decode":
+            out.append("  ✗ %s стр.%d: %s=%s расшифровано как «%s» — это %s=%s. "
+                       "%s=%s — это «%s»"
+                       % (it["block"], it["line"], it["field"], it["value"],
+                          it["text"], it["field"], it["means"], it["field"],
+                          it["value"], it["expected"]))
+        elif it["kind"] == "unknown_decode":
+            out.append("  ✗ %s стр.%d: %s=%s расшифровано как «%s» — такой "
+                       "расшифровки нет в таблице; ожидается «%s»"
+                       % (it["block"], it["line"], it["field"], it["value"],
+                          it["text"], it["expected"]))
+        else:
+            out.append("  ✗ %s стр.%d: %s=%s — значения нет в таблице; добавь "
+                       "строку в reference/%s с источником"
+                       % (it["block"], it["line"], it["field"], it["value"],
+                          ENUM_TABLE_FILE))
+    return "\n".join(out)
+
+
+# ==========================================================================
+# fix 6b — OWNERSHIP BEFORE INTRUDER
+# ==========================================================================
+# MEASURED. Finding Н-1 of the same v37 report calls the RDP login by `root`
+# «признак постороннего доступа». But `root` IS the machine owner:
+#
+#   System.jsonl:1                            2021-05-08T15:04:30.215370Z  (first boot)
+#   User-Profile-Service-4Operational.jsonl:1 2021-05-08T15:04:51.390916Z
+#       {"File":"C:\\Users\\root\\ntuser.dat","Key":"S-1-5-21-...-1001"}
+#
+# 21 seconds into the very first boot of the machine, a full day before the
+# 2021-05-09T21:43:09Z RDP login. Everything downstream inherits the wrong
+# framing. No gate could tell, because every citation was genuine.
+#
+# --- DESIGN DECISION 1: what triggers the requirement? --------------------
+# NOT the characterisation vocabulary. A vocabulary that misses a phrasing
+# FAILS OPEN, and silent non-triggering is exactly the failure this fix exists
+# to remove. So the presence requirement is ACCOUNT-DRIVEN and vocabulary-free:
+# every account name the report cites inside a finding block needs a row in
+# «## Принадлежность учётных записей». Machine accounts (`HOST$`) and the
+# well-known service principals are skipped by a closed list.
+# The vocabulary (INTRUDER_RE) is used ONLY to escalate: it decides whether the
+# extra contradiction checks apply. A phrasing it misses costs those two extra
+# checks — it can never cost the determination itself.
+#
+# --- DESIGN DECISION 2: what is machine-checked, and what is prose? -------
+# Row grammar, six cells:
+#   | учётная запись | первое появление | path:line | как | вывод | раньше |
+#
+# MACHINE-CHECKED, against the corpus, every time:
+#   * `первое появление` parses as ISO-8601 (or is the literal «не определяется»)
+#   * the cited `path:line` resolves, the line really names the account, and its
+#     SystemTime equals the claimed instant           -> bad_evidence
+#   * NO earlier record anywhere in the corpus names the account. This is what
+#     makes it a FIRST appearance, and it is fully checkable -> not_earliest
+#   * «не определяется» is true only if the corpus really has nothing
+#                                                     -> false_undetermined
+#   * `как` and `вывод` are members of closed sets    -> bad_kind / bad_verdict
+#   * `вывод: посторонний` requires `раньше` to name another account whose own
+#     row has a VERIFIED EARLIER first appearance. Calling X an outsider is a
+#     claim relative to an owner; if X is the earliest-appearing account in the
+#     corpus there is nobody for it to be an outsider to. This is the rule that
+#     catches the v37 error with no arbitrary threshold -> no_earlier_owner
+# PROSE, and declared as such: nothing beyond membership is checked in `как`.
+# The gate cannot tell a profile creation from a remote logon; it can and does
+# force the author to pick one of six words and to hang a verified record on it.
+#
+# --- DESIGN DECISION 3: the honest "cannot determine" path ----------------
+# `не определяется | не определяется | — | неизвестно | не определяется | —`.
+# It is one line, it is cheap, and it PRINTS IN THE REPORT, so a reader sees the
+# limit instead of inheriting a guess. It is not an escape from work: the gate
+# scans the corpus and, if the account IS there, the claim is false and blocks.
+# Without this path the gate would teach the arm to fabricate a timestamp.
+#
+# FAIL CLOSED throughout: no section, unreadable corpus file, unparseable
+# timestamp, an exception in the scan — all blocking, never "clean".
+
+OWNERSHIP_SECTION_RE = re.compile(r"принадлежност|ownership", re.IGNORECASE)
+OWNERSHIP_KINDS = ("профиль", "создание", "удалённый вход", "локальный вход",
+                   "служба", "неизвестно")
+OWNERSHIP_VERDICTS = ("владелец", "посторонний", "не определяется")
+OWNERSHIP_UNDET = "не определяется"
+# Closed characterisation vocabulary. ESCALATION ONLY — see design decision 1.
+INTRUDER_RE = re.compile(
+    r"посторонн|злоумышленник|атакующ|взлом|нарушител|неавторизован|"
+    r"несанкционирован|чуж(ой|ая|ие|ого|ому)|intruder|attacker|adversary|"
+    r"unauthoriz|threat actor", re.IGNORECASE)
+ACCOUNT_SKIP = {"system", "локальная система", "local service", "network service",
+                "anonymous logon", "-", "", "нет", "n/a", "localsystem",
+                "система", "iusr", "dwm", "umfd"}
+ACCOUNT_FIELD_RE = re.compile(
+    r'"(?:TargetUserName|SubjectUserName|AccountName|UserName|LogonUser|User)"'
+    r'\s*:\s*"([^"\\\n]{1,64})"')
+# `DOMAIN\user`, but never a path component: a match preceded by `\` or `:` or
+# an identifier character is inside a path like `C:\Windows\System32`.
+# The name half allows ONE internal space because the well-known Windows
+# principals have them (`NT AUTHORITY\LOCAL SERVICE`). Measured need: a quote in
+# the v37 report is truncated to «ITY\\LOCAL SERVICE», and without the space the
+# name came out as bare `LOCAL`, sailed past ACCOUNT_SKIP and demanded an
+# ownership row for an account that does not exist. That was a false positive,
+# and a false positive is how a gate gets switched off.
+ACCOUNT_QUALIFIED_RE = re.compile(
+    r'(?<![A-Za-z0-9_:\\])([A-Za-z][A-Za-z0-9._-]{1,30})\\{1,4}'
+    r'([A-Za-z][A-Za-z0-9._-]{0,30}(?: [A-Za-z][A-Za-z0-9._-]{0,30})?)'
+    r'(?![\\A-Za-z0-9._-])')
+ISO_RE = re.compile(r"\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?Z?")
+SYSTEMTIME_RE = re.compile(r'"SystemTime"\s*:\s*"([^"]{1,40})"')
+
+
+def _own_norm_account(name):
+    n = (name or "").strip().strip("`*_ ").replace("\\\\", "\\")
+    if "\\" in n:
+        n = n.rsplit("\\", 1)[-1]
+    return n.strip().lower()
+
+
+def _own_skip(name):
+    """Also skips a PREFIX of a well-known principal: a quote truncated mid-name
+    («…ITY\\LOCAL SERVICE» cut to `LOCAL`) must not invent an account."""
+    if (not name) or name in ACCOUNT_SKIP or name.endswith("$"):
+        return True
+    return any(k.startswith(name + " ") for k in ACCOUNT_SKIP)
+
+
+def accounts_in_text(text):
+    """-> {normalized account: display spelling} from one line of report text."""
+    out = {}
+    for m in ACCOUNT_FIELD_RE.finditer(text):
+        n = _own_norm_account(m.group(1))
+        if not _own_skip(n):
+            out.setdefault(n, m.group(1).strip())
+    for m in ACCOUNT_QUALIFIED_RE.finditer(text):
+        n = _own_norm_account(m.group(2))
+        if not _own_skip(n):
+            out.setdefault(n, "%s\\%s" % (m.group(1), m.group(2)))
+    return out
+
+
+def _own_iso(s):
+    """-> comparable second-precision instant, or None."""
+    m = ISO_RE.search(s or "")
+    if not m:
+        return None
+    t = m.group(0).replace(" ", "T").rstrip("Z")
+    return t.split(".")[0]
+
+
+def _own_line_time(line):
+    m = SYSTEMTIME_RE.search(line)
+    return _own_iso(m.group(1)) if m else _own_iso(line)
+
+
+# WHAT "THE ACCOUNT APPEARS HERE" MEANS — a CLOSED set of contexts, the same
+# three the report-side extractor uses. A bare word-boundary search is not it:
+# measured on the winevtx corpus, `root` matched
+# `"DeviceInstanceId":"ROOT\\ACPI_HAL\\0000"` in Kernel-PnP at 15:04:03, i.e.
+# a PnP device-enumerator path, and would have called the TRUE first appearance
+# of the user profile at 15:04:51 «not earliest» — blocking a correct report.
+# A substring is not an account.
+ACCOUNT_CTX = (
+    # "TargetUserName":"root" / "SubjectUserName":"IPSERVER\root"
+    r'"(?:TargetUserName|SubjectUserName|AccountName|UserName|LogonUser|User)"'
+    r'\s*:\s*"(?:[A-Za-z0-9._-]{1,32}\\\\?)?%s"',
+    # DOMAIN\root — never followed by another separator (that is a device path)
+    r'(?<![A-Za-z0-9_:\\])[A-Za-z][A-Za-z0-9._-]{1,30}\\{1,4}%s'
+    r'(?![\\A-Za-z0-9._-])',
+    # C:\Users\root\... — the profile directory
+    r'[A-Za-z]:\\{1,2}Users\\{1,2}%s(?![A-Za-z0-9._-])',
+)
+
+
+def account_context_re(name):
+    esc = re.escape(name)
+    return re.compile("|".join("(?:%s)" % c % esc for c in ACCOUNT_CTX),
+                      re.IGNORECASE)
+
+
+def corpus_first_appearance(root, names):
+    """-> ({name: (instant, relpath, lineno, text)}, problems). Fails closed."""
+    found, problems = {}, []
+    if not names:
+        return found, problems
+    pats = dict((n, account_context_re(n)) for n in names)
+    if not root or not os.path.isdir(root):
+        return found, [{"kind": "scan_error", "path": root or "",
+                        "text": "корпус недоступен"}]
+    for dirpath, _dirs, files in os.walk(root):
+        for fn in sorted(files):
+            full = os.path.join(dirpath, fn)
+            rel = os.path.relpath(full, root)
+            try:
+                # FAIL CLOSED. `looks_binary` swallows OSError and answers True,
+                # so a file we simply cannot open would be skipped as "binary"
+                # and the scan would report a clean earliest-appearance it never
+                # established. Open it first, and let the failure be a defect.
+                with open(full, "rb") as _probe:
+                    _probe.read(1)
+                if looks_binary(full):
+                    continue
+                with opener(full)(full, "rt", encoding="utf-8",
+                                  errors="replace") as fh:
+                    for no, line in enumerate(fh, 1):
+                        low = line.lower()
+                        for n, pat in pats.items():
+                            if n not in low or not pat.search(line):
+                                continue
+                            ts = _own_line_time(line)
+                            if ts is None:
+                                continue
+                            cur = found.get(n)
+                            if cur is None or ts < cur[0]:
+                                found[n] = (ts, rel, no, line.strip()[:200])
+            except Exception as e:          # fail closed, never "clean"
+                problems.append({"kind": "scan_error", "path": rel,
+                                 "text": "%s: %s" % (type(e).__name__, e)})
+    return found, problems
+
+
+def _own_rows(report, spans, structural):
+    lines = report.splitlines()
+    rows = []
+    for lo, hi in spans:
+        for i in range(lo, min(hi, len(lines) + 1)):
+            if not structural[i - 1]:
+                continue
+            raw = lines[i - 1]
+            if not raw.lstrip().startswith("|") or TABLE_SEP_RE.match(raw):
+                continue
+            cells = split_cells(raw)
+            if cells and cells[0].strip().lower() in (
+                    "учётная запись", "учетная запись", "account", "учётка"):
+                continue
+            if len(cells) < 6:
+                rows.append({"report_line": i, "problem":
+                             "строка не по схеме: нужно 6 колонок "
+                             "«учётная запись | первое появление | path:line «цитата» | "
+                             "как | вывод | раньше»", "raw": raw.strip()[:160]})
+                continue
+            rows.append({"report_line": i, "problem": None,
+                         "account_raw": cells[0].strip(),
+                         "account": _own_norm_account(cells[0]),
+                         "first": cells[1].strip(),
+                         "evidence": cells[2].strip().strip("`"),
+                         "kind": cells[3].strip().lower(),
+                         "verdict": cells[4].strip().lower(),
+                         "earlier": _own_norm_account(cells[5]),
+                         "earlier_raw": cells[5].strip()})
+    return rows
+
+
+def ownership_check(report, blocks, corpus=None, structural=None):
+    """No account may be called an intruder before its ownership is settled."""
+    lines = report.splitlines()
+    structural = structural if structural is not None else structural_mask(lines)
+    sections = _sections(report, structural)
+    spans = _spans_for(sections, OWNERSHIP_SECTION_RE)
+
+    cited, characterised = {}, {}
+    for label, lo, hi in blocks:
+        for i in range(max(1, lo), min(hi, len(lines)) + 1):
+            if not structural[i - 1]:
+                continue
+            raw = lines[i - 1]
+            got = accounts_in_text(raw)
+            for n, disp in got.items():
+                cited.setdefault(n, {"display": disp, "line": i, "block": label})
+            if INTRUDER_RE.search(raw):
+                for n in got:
+                    characterised.setdefault(n, {"line": i, "block": label,
+                                                 "text": raw.strip()[:160]})
+
+    missing_section = bool(cited) and not spans
+    rows = _own_rows(report, spans, structural) if spans else []
+    malformed = [r for r in rows if r["problem"]]
+    good = [r for r in rows if not r["problem"]]
+    by_account = {}
+    for r in good:
+        by_account.setdefault(r["account"], []).append(r)
+    duplicates = sorted(a for a, rs in by_account.items() if len(rs) > 1)
+    missing_rows = sorted(n for n in cited if n not in by_account)
+
+    scan_names = sorted(set(list(cited) + [r["account"] for r in good]))
+    first_seen, problems = corpus_first_appearance(corpus, scan_names)
+
+    bad_verdict, bad_kind, bad_first = [], [], []
+    bad_evidence, not_earliest, false_undet = [], [], []
+    contradiction, no_earlier_owner = [], []
+    verified = {}
+    by_rel, by_base = ({}, {})
+    if corpus and os.path.isdir(corpus):
+        by_rel, by_base = index_corpus(corpus)
+
+    for r in good:
+        acct, ln = r["account"], r["report_line"]
+        if r["verdict"] not in OWNERSHIP_VERDICTS:
+            bad_verdict.append({"line": ln, "account": acct, "text": r["verdict"]})
+        if r["kind"] not in OWNERSHIP_KINDS:
+            bad_kind.append({"line": ln, "account": acct, "text": r["kind"]})
+        undetermined = _enum_norm(r["first"]) == OWNERSHIP_UNDET
+        if undetermined:
+            if r["verdict"] != OWNERSHIP_UNDET or r["kind"] != "неизвестно":
+                bad_verdict.append({"line": ln, "account": acct,
+                                    "text": "«не определяется» требует "
+                                            "как=неизвестно и вывод=не определяется"})
+            if acct in first_seen:
+                ts, rel, no, _t = first_seen[acct]
+                false_undet.append({"line": ln, "account": acct,
+                                    "found": "%s:%d" % (rel, no), "time": ts})
+            continue
+        claimed = _own_iso(r["first"])
+        if claimed is None:
+            bad_first.append({"line": ln, "account": acct, "text": r["first"]})
+            continue
+        # `path:line «цитата»` — the trailing quote is graded by the ORDINARY
+        # citation gate (--require-quote), so this cell cannot be a bare
+        # pointer either. Here we only need the address.
+        m = re.match(r"^(.*?):(\d+)(?![0-9])", r["evidence"])
+        if not m:
+            bad_evidence.append({"line": ln, "account": acct,
+                                 "text": "улика не в форме path:line: %r" % r["evidence"]})
+            continue
+        cands, _how = resolve(m.group(1).replace("\\", "/"), by_rel, by_base)
+        if len(cands) != 1:
+            bad_evidence.append({"line": ln, "account": acct,
+                                 "text": "путь не разрешается однозначно: %s" % m.group(1)})
+            continue
+        want = int(m.group(2))
+        try:
+            got, _total = read_lines(by_rel[cands[0]], {want})
+        except Exception as e:
+            bad_evidence.append({"line": ln, "account": acct,
+                                 "text": "не прочитал %s: %s" % (cands[0], e)})
+            continue
+        text = got.get(want)
+        if text is None:
+            bad_evidence.append({"line": ln, "account": acct,
+                                 "text": "строки %d нет в %s" % (want, cands[0])})
+            continue
+        if not re.search(r"(?<![A-Za-z0-9_])%s(?![A-Za-z0-9_])" % re.escape(acct),
+                         text, re.IGNORECASE):
+            bad_evidence.append({"line": ln, "account": acct,
+                                 "text": "в %s:%d нет упоминания «%s»"
+                                         % (cands[0], want, acct)})
+            continue
+        actual = _own_line_time(text)
+        if actual is None or actual != claimed:
+            bad_evidence.append({"line": ln, "account": acct,
+                                 "text": "время в %s:%d = %s, заявлено %s"
+                                         % (cands[0], want, actual, claimed)})
+            continue
+        seen = first_seen.get(acct)
+        if seen and seen[0] < claimed:
+            not_earliest.append({"line": ln, "account": acct, "claimed": claimed,
+                                 "earlier": "%s:%d" % (seen[1], seen[2]),
+                                 "time": seen[0]})
+            continue
+        verified[acct] = claimed
+
+    for r in good:
+        if r["verdict"] != "посторонний":
+            continue
+        mine = verified.get(r["account"])
+        other = verified.get(r["earlier"]) if r["earlier"] else None
+        if mine is None:
+            continue        # already blocking above; do not double-count
+        if not r["earlier"] or r["earlier"] == r["account"] or other is None \
+                or not (other < mine):
+            no_earlier_owner.append({"line": r["report_line"],
+                                     "account": r["account"],
+                                     "first": mine, "earlier": r["earlier_raw"]})
+
+    for acct, where in sorted(characterised.items()):
+        rs = by_account.get(acct) or []
+        for r in rs:
+            if r["verdict"] in ("владелец", OWNERSHIP_UNDET):
+                contradiction.append({"line": where["line"], "row_line":
+                                      r["report_line"], "account": acct,
+                                      "verdict": r["verdict"],
+                                      "text": where["text"]})
+
+    blocking = ((1 if missing_section else 0) + len(malformed) + len(duplicates)
+                + len(missing_rows) + len(bad_verdict) + len(bad_kind)
+                + len(bad_first) + len(bad_evidence) + len(not_earliest)
+                + len(false_undet) + len(contradiction) + len(no_earlier_owner)
+                + len(problems))
+    return {"grammar": "| учётная запись | первое появление | path:line «цитата» | "
+                       "как | вывод | раньше |",
+            "kinds": list(OWNERSHIP_KINDS), "verdicts": list(OWNERSHIP_VERDICTS),
+            "cited_accounts": sorted(cited), "characterised": sorted(characterised),
+            "rows": len(rows), "missing_section": missing_section,
+            "malformed": malformed, "duplicate_rows": duplicates,
+            "missing_rows": missing_rows, "invalid_verdict": bad_verdict,
+            "invalid_kind": bad_kind, "invalid_first": bad_first,
+            "bad_evidence": bad_evidence, "not_earliest": not_earliest,
+            "false_undetermined": false_undet, "contradiction": contradiction,
+            "no_earlier_owner": no_earlier_owner, "scan_problems": problems,
+            "verified": verified, "blocking": blocking}
+
+
+def render_ownership(o):
+    if not o:
+        return ""
+    out = ["ПРИНАДЛЕЖНОСТЬ УЧЁТНЫХ ЗАПИСЕЙ (6b): %d блокирующих, строк %d, "
+           "учёток в находках %d" % (o["blocking"], o["rows"],
+                                     len(o["cited_accounts"]))]
+    if o["missing_section"]:
+        out.append("  ✗ нет раздела «## Принадлежность учётных записей»; схема: %s"
+                   % o["grammar"])
+    for a in o["missing_rows"]:
+        out.append("  ✗ учётка «%s» упомянута в находке, но её принадлежность "
+                   "не определена" % a)
+    for a in o["duplicate_rows"]:
+        out.append("  ✗ учётка «%s»: больше одной строки" % a)
+    for r in o["malformed"]:
+        out.append("  ✗ стр.%d: %s" % (r["report_line"], r["problem"]))
+    for r in o["invalid_verdict"]:
+        out.append("  ✗ стр.%d «%s»: вывод «%s» — допустимо только %s"
+                   % (r["line"], r["account"], r["text"],
+                      "|".join(OWNERSHIP_VERDICTS)))
+    for r in o["invalid_kind"]:
+        out.append("  ✗ стр.%d «%s»: как «%s» — допустимо только %s"
+                   % (r["line"], r["account"], r["text"], "|".join(OWNERSHIP_KINDS)))
+    for r in o["invalid_first"]:
+        out.append("  ✗ стр.%d «%s»: первое появление «%s» — нужен ISO-8601 или "
+                   "«не определяется»" % (r["line"], r["account"], r["text"]))
+    for r in o["bad_evidence"]:
+        out.append("  ✗ стр.%d «%s»: %s" % (r["line"], r["account"], r["text"]))
+    for r in o["not_earliest"]:
+        out.append("  ✗ стр.%d «%s»: заявлено первое появление %s, но в корпусе "
+                   "есть раньше — %s (%s)" % (r["line"], r["account"],
+                                              r["claimed"], r["earlier"], r["time"]))
+    for r in o["false_undetermined"]:
+        out.append("  ✗ стр.%d «%s»: «не определяется» неправда — учётка есть в "
+                   "корпусе: %s (%s)" % (r["line"], r["account"], r["found"],
+                                         r["time"]))
+    for r in o["contradiction"]:
+        out.append("  ✗ стр.%d «%s» названа посторонней, а в стр.%d вывод «%s»"
+                   % (r["line"], r["account"], r["row_line"], r["verdict"]))
+    for r in o["no_earlier_owner"]:
+        out.append("  ✗ стр.%d «%s»: вывод «посторонний», первое появление %s, "
+                   "но нет учётки с ПОДТВЕРЖДЁННЫМ более ранним появлением "
+                   "(колонка «раньше» = %r). Посторонний — это отношение к "
+                   "владельцу; если запись самая ранняя в корпусе, посторонней "
+                   "по отношению к кому она является?"
+                   % (r["line"], r["account"], r["first"], r["earlier"]))
+    for p in o["scan_problems"]:
+        out.append("  ✗ скан корпуса: %s — %s" % (p["path"], p["text"]))
+    return "\n".join(out)
+
+
+
 def report_evidence(report, checked=None):
     """Machine-readable v26 evidence grammar for findings, rejections and coverage."""
     citations = (checked or {}).get("citations") or []
@@ -1435,7 +2208,18 @@ def report_evidence(report, checked=None):
         cov_uncovered = sorted(set(by_rel) - set(path_rows))
         cov_unexamined = sorted(set(path_rows) - examined)
 
+    # fix 6a/6b. Computed HERE, inside report_evidence, and folded into ITS
+    # `blocking`. Not a second counter: defect #4 was exactly that — a parallel
+    # tally that printed 160 where the gate printed 161. Everything downstream
+    # (`_blocking_total`, `ledger`, `main`'s exit code) reads this one number and
+    # therefore picks these two up with no further wiring.
+    arg_blocks = ([("Н-%s" % num, lo, hi) for num, lo, hi in finding_blocks_here]
+                  + [(cid, lo, hi) for cid, lo, hi in blocks])
+    enums = enum_decode_check(report, arg_blocks, structural)
+    ownership = ownership_check(report, arg_blocks, corpus, structural)
+
     blocking = (len(attr_missing) + len(attr_invalid) + len(finding_dupes)
+                + enums["blocking"] + ownership["blocking"]
                 + (1 if rejected_missing_section else 0)
                 + (1 if rejected_empty_section else 0)
                 + len(cand_dupes)
@@ -1500,6 +2284,8 @@ def report_evidence(report, checked=None):
                      "invalid_no_address_detail": [r["report_line"] for r in cov_smuggled],
                      "content_claim_in_no_address": [r["report_line"] for r in cov_smuggled],
                      "malformed": [r["report_line"] for r in cov_malformed]},
+        "enum_decode": enums,
+        "ownership": ownership,
         "blocking": blocking,
     }
 
@@ -1508,6 +2294,10 @@ def render_report_evidence(e):
     if not e:
         return ""
     out = ["ОТЧЁТНЫЕ НАБЛЮДЕНИЯ v26: %d блокирующих дефектов" % e["blocking"]]
+    for _sub in (render_enum_decode(e.get("enum_decode")),
+                 render_ownership(e.get("ownership"))):
+        if _sub:
+            out.append(_sub)
     a = e["attribution"]
     if a["findings"]:
         out.append("  атрибуция находок: %d блоков, без строки %d, неверных %d, повторных id %d"
