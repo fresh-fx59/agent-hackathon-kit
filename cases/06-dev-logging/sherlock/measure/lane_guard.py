@@ -286,7 +286,7 @@ def _rows(path):
 def audit_ledger(ledger_path, expected_identity="", cache_guard=True,
                  min_rate=DEFAULT_CACHE_MIN_RATE,
                  min_calls=DEFAULT_CACHE_MIN_CALLS, abort_path="",
-                 identity_check=True):
+                 identity_check=True, summary=None):
     """Judge a finished run's upstream ledger. Returns (reason, detail) or None.
 
     FAIL-CLOSED, deliberately and in every direction. A ledger that is absent,
@@ -301,7 +301,24 @@ def audit_ledger(ledger_path, expected_identity="", cache_guard=True,
     check was off and only the cache guard was live. Pass
     `identity_check=False` to run a lane that genuinely has no declared
     identity; silence no longer buys the same thing.
+
+    DISCARDED SUBSTITUTIONS. A row flagged `discarded_substitution: true` is a
+    wrong-model answer the proxy threw away and re-issued; not one byte of it
+    reached the arm, so it is NOT part of the measurement and must not be read
+    as a breach here — the whole point of the retry is that the run stays
+    valid. It WAS billed, so it is counted separately into `summary` and never
+    silently. The flag is honoured only when the row really does name a
+    different family: it must never become a way to hide a row.
+
+    Pass a dict as `summary` to receive the accounting (accepted calls, billed
+    prompt/cached tokens, discard count and cost). It is filled as the rows are
+    read, so an early breach still leaves true partial counts.
     """
+    if summary is not None:
+        summary.update({"schema": 1, "accepted_calls": 0, "prompt_tokens": 0,
+                        "cached_tokens": 0, "discarded_substitutions": 0,
+                        "discarded_prompt_tokens": 0,
+                        "discarded_cached_tokens": 0, "discarded_by_model": {}})
     if abort_path and os.path.exists(abort_path):
         # The live guard already stopped this run. Its reason wins: it was
         # observed on the call that caused it, with the run still alive.
@@ -347,10 +364,31 @@ def audit_ledger(ledger_path, expected_identity="", cache_guard=True,
                 return "LEDGER_MALFORMED", (
                     "row %d of %s has no %r field" % (index, ledger_path, field))
         status = row.get("status")
+        returned = row.get("returned_model")
+        if row.get("discarded_substitution") is True:
+            # Honoured ONLY when the row is genuinely a substitution. A flag
+            # that could excuse any row would be a hole straight through the
+            # identity check, so an unverifiable one is malformed, not clean.
+            if not expected or same_family(expected, returned):
+                return "LEDGER_MALFORMED", (
+                    "row %d of %s is flagged discarded_substitution but names "
+                    "%r against expected %r — the flag is not a way to hide a "
+                    "row" % (index, ledger_path, returned, expected))
+            if summary is not None:
+                try:
+                    billed, hit = cache_tokens(row.get("usage"))
+                except UsageUnreadable:
+                    billed = hit = 0
+                name = returned if isinstance(returned, str) else "?"
+                summary["discarded_substitutions"] += 1
+                summary["discarded_prompt_tokens"] += billed
+                summary["discarded_cached_tokens"] += hit
+                summary["discarded_by_model"][name] = (
+                    summary["discarded_by_model"].get(name, 0) + 1)
+            continue
         answered = type(status) is int and 200 <= status < 300
         if not answered:
             continue
-        returned = row.get("returned_model")
         if expected and isinstance(returned, str) and returned.strip():
             named += 1
             if not same_family(expected, returned):
@@ -370,6 +408,10 @@ def audit_ledger(ledger_path, expected_identity="", cache_guard=True,
             calls += 1
             prompt_tokens += billed
             cached_tokens += hit
+            if summary is not None:
+                summary["accepted_calls"] = calls
+                summary["prompt_tokens"] = prompt_tokens
+                summary["cached_tokens"] = cached_tokens
 
     if expected and not named:
         return "RETURNED_MODEL_UNKNOWN", (

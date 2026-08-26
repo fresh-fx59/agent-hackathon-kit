@@ -865,7 +865,12 @@ LANE_REASON_ARG=()
 if [ -n "${LANE_PROXY_PID_WAS:-}" ] || [ -n "${LANE_PROXY_PID:-}" ] || [ -f "${LANE_ABORT_PATH:-}" ]; then
   LANE_AUDIT_ARGS=(--ledger "$TRACE.upstream.jsonl"
                    --abort "${LANE_ABORT_PATH:-}"
-                   --expected "$EXPECTED_RETURNED_IDENTITY")
+                   --expected "$EXPECTED_RETURNED_IDENTITY"
+                   # Discarded wrong-model attempts are billed. The count has
+                   # to land in an artifact, or a provider that starts
+                   # substituting on half its calls just triples the bill in
+                   # silence.
+                   --summary-json "$TRACE/lane-substitutions.json")
   # Thresholds are NOT defaulted here. They live in measure/lane_guard.py, and a
   # second copy in shell is a second thing to forget when they move.
   [ -z "${SHERLOCK_CACHE_MIN_RATE:-}" ] || LANE_AUDIT_ARGS+=(--cache-min-rate "$SHERLOCK_CACHE_MIN_RATE")

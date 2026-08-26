@@ -25,6 +25,7 @@ a breach. That is finding #2 of the 2026-08-26 review — the paid launcher set 
 identity, so the family check was off on the exact run that got substituted.
 """
 import argparse
+import json
 import os
 import sys
 
@@ -49,20 +50,56 @@ def main(argv=None):
     parser.add_argument("--no-cache-guard", action="store_true")
     parser.add_argument("--cache-min-rate", type=float, default=DEFAULT_CACHE_MIN_RATE)
     parser.add_argument("--cache-min-calls", type=int, default=DEFAULT_CACHE_MIN_CALLS)
+    parser.add_argument("--summary-json", default="",
+                        help="write the call/discard accounting here. The "
+                             "discarded wrong-model attempts are real money; a "
+                             "provider that starts substituting on half its "
+                             "calls must be visible in the run's artifacts, not "
+                             "only in a bill.")
     args = parser.parse_args(argv)
 
+    summary = {}
     breach = audit_ledger(args.ledger, expected_identity=args.expected,
                           cache_guard=not args.no_cache_guard,
                           identity_check=not args.no_identity_check,
                           min_rate=args.cache_min_rate,
                           min_calls=args.cache_min_calls,
-                          abort_path=args.abort)
+                          abort_path=args.abort, summary=summary)
+    if args.summary_json and summary:
+        try:
+            with open(args.summary_json, "w", encoding="utf-8") as target:
+                json.dump(summary, target, ensure_ascii=False, sort_keys=True)
+                target.write("\n")
+        except OSError as exc:
+            sys.stderr.write("⚠ lane summary not written: %s\n" % exc)
     if breach is None:
+        _report(summary)
         return 0
     reason, detail = breach
     print(reason)
+    # The verdict first: run-bench.sh reads the first three lines of this
+    # stream as the human detail for lane-integrity.json.
     sys.stderr.write("✗ lane integrity: %s — %s\n" % (reason, detail))
+    _report(summary)
     return 1
+
+
+def _report(summary):
+    """One line, always, so a rising substitution rate is impossible to miss."""
+    if not summary:
+        return
+    discarded = summary.get("discarded_substitutions", 0)
+    accepted = summary.get("accepted_calls", 0)
+    total = accepted + discarded
+    mark = "⚠" if discarded else "ℹ"
+    sys.stderr.write(
+        "%s lane cost: %d accepted calls, %d discarded substitutions "
+        "(%.1f%% of %d billed answers, %d prompt tokens paid for nothing)%s\n"
+        % (mark, accepted, discarded, (100.0 * discarded / total) if total else 0.0,
+           total, summary.get("discarded_prompt_tokens", 0),
+           (" — " + ", ".join("%s x%d" % (name, count) for name, count
+                              in sorted(summary.get("discarded_by_model", {}).items()))
+            ) if discarded else ""))
 
 
 if __name__ == "__main__":

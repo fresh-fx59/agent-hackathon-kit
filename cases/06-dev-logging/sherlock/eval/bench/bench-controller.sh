@@ -54,6 +54,11 @@ TARGET_ENV_ALLOW = {
     # provider can turn the cache guard off deliberately (SHERLOCK_CACHE_GUARD=0)
     # instead of someone discovering it cannot be turned off and deleting it.
     "SHERLOCK_CACHE_GUARD", "SHERLOCK_CACHE_MIN_RATE", "SHERLOCK_CACHE_MIN_CALLS",
+    # How many wrong-model answers may be discarded and re-issued per call
+    # before the lane trips. 0 restores the pre-2026-08-26 abort-on-first
+    # behaviour; it is NOT covered by SHERLOCK_UPSTREAM_RETRY, which governs
+    # provider ERRORS and is deliberately 0 on the paid launchers.
+    "SHERLOCK_SUBSTITUTION_RETRY",
 }
 MAX_JSON_BYTES = 1024 * 1024
 MAX_ARTIFACTS = 4096

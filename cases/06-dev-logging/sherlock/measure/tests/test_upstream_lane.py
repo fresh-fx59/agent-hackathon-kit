@@ -148,9 +148,35 @@ class TheLanePutsTheProxyInThePath(unittest.TestCase):
         self.assertEqual(rows[0]["returned_model"], "DeepSeek-V4-Flash")
 
     def test_an_unprefixed_model_is_left_alone(self):
-        out, seen, _rows, _p = self.drive("qwen3-coder-plus")
+        # SHERLOCK_SUBSTITUTION_RETRY=0 because this stub always answers as
+        # `DeepSeek-V4-Flash` whatever it was asked for, so an unprefixed
+        # `qwen3-coder-plus` lane sees a substitution on every call and the
+        # lane default would — correctly — re-issue it twice. This test is
+        # about the ID REWRITE, so the retry is switched off to keep the call
+        # count at one. The retry gets its own test below, and the whole
+        # mechanism is covered in measure/tests/test_substitution_retry.py.
+        out, seen, _rows, _p = self.drive("qwen3-coder-plus",
+                                          {"SHERLOCK_SUBSTITUTION_RETRY": "0"})
         self.assertEqual(out.get("CLIENT_MODEL"), "qwen3-coder-plus")
         self.assertEqual([r.get("model") for r in seen], ["qwen3-coder-plus"])
+
+    def test_the_lane_re_asks_a_substituted_model_by_default(self):
+        """The lane must ship the substitution retry ON.
+
+        A paid run sets SHERLOCK_UPSTREAM_RETRY=0 — provider ERROR retries off,
+        deliberately. If the substitution retry rode on that switch it would be
+        off exactly where it is needed, and one 2 %-probability wrong-model
+        answer would kill a 180-call run. So the lane defaults it to 2, and
+        this stub — which answers as a different family every single time —
+        proves it: one client call, three upstream calls, then fail closed.
+        """
+        _out, seen, rows, _p = self.drive("qwen3-coder-plus",
+                                          {"SHERLOCK_UPSTREAM_RETRY": "0"})
+        self.assertEqual(len(seen), 3, "the lane did not re-ask: %r" % (seen,))
+        self.assertEqual([r.get("discarded_substitution") for r in rows],
+                         [True, True, True])
+        self.assertEqual([r.get("substitution_retry_exhausted") for r in rows],
+                         [False, False, True])
 
     def test_when_the_proxy_cannot_start_the_caller_keeps_the_alias(self):
         """No proxy means nothing can restore the prefix — a stripped id would 404."""

@@ -189,6 +189,7 @@ s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1]); s.clos
     env UPSTREAM_BASE="$up_base" UPSTREAM_LOG="$log_path" UPSTREAM_INFLIGHT="$inflight_path" \
       RUN_TAG="$run_tag" RUN_ATTEMPT_FILE="$attempt_path" UPSTREAM_MODEL="$model" LISTEN_PORT="$port" \
       UPSTREAM_RETRY_MAX="${SHERLOCK_UPSTREAM_RETRY:-6}" \
+      UPSTREAM_SUBSTITUTION_RETRY_MAX="${SHERLOCK_SUBSTITUTION_RETRY:-2}" \
       UPSTREAM_FIRST_TOKEN_MS="${SHERLOCK_UPSTREAM_FIRST_TOKEN_MS:-240000}" \
       UPSTREAM_RETRY_BASE_MS="${SHERLOCK_UPSTREAM_RETRY_BASE_MS:-2000}" \
       UPSTREAM_BODY_DIR="$body_dir" "${lane_env[@]}" "${budget_env[@]}" \
@@ -199,6 +200,7 @@ s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1]); s.clos
     env UPSTREAM_BASE="$up_base" UPSTREAM_LOG="$log_path" UPSTREAM_INFLIGHT="$inflight_path" \
       RUN_TAG="$run_tag" RUN_ATTEMPT_FILE="$attempt_path" UPSTREAM_MODEL="$model" LISTEN_PORT="$port" \
       UPSTREAM_RETRY_MAX="${SHERLOCK_UPSTREAM_RETRY:-6}" \
+      UPSTREAM_SUBSTITUTION_RETRY_MAX="${SHERLOCK_SUBSTITUTION_RETRY:-2}" \
       UPSTREAM_FIRST_TOKEN_MS="${SHERLOCK_UPSTREAM_FIRST_TOKEN_MS:-240000}" \
       UPSTREAM_RETRY_BASE_MS="${SHERLOCK_UPSTREAM_RETRY_BASE_MS:-2000}" \
       UPSTREAM_BODY_DIR="$body_dir" "${lane_env[@]}" \

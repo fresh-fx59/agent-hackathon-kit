@@ -81,6 +81,54 @@ UPSTREAM_MODEL = os.environ.get("UPSTREAM_MODEL", "")
 # Off by default (0) so the proxy stays a pass-through unless a runner asks.
 UPSTREAM_RETRY_MAX = int(os.environ.get("UPSTREAM_RETRY_MAX", "0") or 0)
 UPSTREAM_RETRY_BASE_MS = int(os.environ.get("UPSTREAM_RETRY_BASE_MS", "2000") or 2000)
+# RETRY THE SUBSTITUTED CALL - DO NOT KILL THE RUN, AND DO NOT TOLERATE IT.
+#
+# MEASURED 2026-08-26 on `[次]deepseek-v4-flash`, 51 paid calls: 50 answered as
+# the flash family and ONE as `deepseek-v4-pro`. The lane guard did its job and
+# aborted, which was the right call given the only two options it had. But at
+# ~2 % per call a 180-call run has a ~97 % chance of meeting at least one
+# substitution, so a strict per-call abort means the run can NEVER finish, and
+# ~50 good calls are thrown away every time.
+#
+# The answer is NOT a tolerance threshold. Tolerating a wrong-model response
+# means the report is partly built on a model we did not request - a validity
+# compromise, and a cap that merely moves the cliff. The answer is that a
+# wrong-model response must never reach the client at all: DISCARD it and
+# re-issue the same request upstream. The substitution is random, so a retry
+# lands on the right model ~98 % of the time. Cost: one wasted call. Validity:
+# untouched, because no wrong-model byte is ever relayed.
+#
+# BOUNDED AND FAIL-CLOSED. After this many discards on ONE client request the
+# proxy stops retrying, trips the lane exactly as before, and REFUSES the
+# client instead of handing back the wrong-model body - strictly stronger than
+# the pre-retry behaviour, which relayed the offending body and then tripped.
+#
+# Off by default (0) so the proxy stays a pass-through unless a runner asks;
+# measure/upstream-lane.sh turns it on for every lane it starts. It is
+# deliberately NOT wired to UPSTREAM_RETRY_MAX / SHERLOCK_UPSTREAM_RETRY: those
+# govern retrying a provider ERROR (a 400 burst) and the paid runners set them
+# to 0 on purpose. This is a different failure and gets its own switch, so
+# `SHERLOCK_UPSTREAM_RETRY=0` cannot silently disable it.
+UPSTREAM_SUBSTITUTION_RETRY_MAX = int(
+    os.environ.get("UPSTREAM_SUBSTITUTION_RETRY_MAX", "0") or 0)
+# STREAMING IS THE ONLY CASE THAT MATTERS HERE. Every one of the 51 rows on the
+# v38 run - the substituted one included - is `"stream": true`, so a fix that
+# only handled whole JSON bodies would be a no-op on the real lane.
+#
+# A stream can be retried only while NOTHING has been written to the client, so
+# the proxy holds the head of the stream back until it learns which model is
+# answering. That is cheap: the id arrives in the first `data:` chunk and the
+# measured ttft on that run is 0 ms.
+#
+# If the model is STILL unknown after this much held data or this much time the
+# head is released anyway - a proxy that buffers a whole answer is a proxy that
+# has broken streaming. A substitution discovered after that release cannot be
+# retried (bytes are on the wire), so it falls through to the existing lane
+# abort. That is the honest fallback; it is never a silent pass-through.
+UPSTREAM_SUBSTITUTION_HOLD_BYTES = int(
+    os.environ.get("UPSTREAM_SUBSTITUTION_HOLD_BYTES") or 262144)
+UPSTREAM_SUBSTITUTION_HOLD_MS = int(
+    os.environ.get("UPSTREAM_SUBSTITUTION_HOLD_MS") or 20000)
 # DO NOT RIDE A DEAD STREAM. urlopen's timeout is a PER-SOCKET-READ deadline, not
 # a call budget, so `for raw in resp:` on a stream that sends nothing blocks for
 # up to UPSTREAM_READ_TIMEOUT — half an hour. MEASURED on the v36 winevtx run: 20
@@ -424,6 +472,14 @@ _LANE_LOCK = threading.Lock()
 _LANE_ABORT = None          # first breach, {"reason": ..., "detail": ...}
 _LANE_MARKER_WRITTEN = threading.Event()   # set once abort.json exists on disk
 _LANE_CACHE = {"calls": 0, "prompt_tokens": 0, "cached_tokens": 0}
+# THE WASTED CALL IS REAL MONEY. A provider that starts substituting on half of
+# its calls has to show up loudly rather than silently triple the bill, so every
+# discard is counted here AND flagged in its own ledger row
+# (`discarded_substitution`). measure/lane_guard.py re-derives these numbers
+# from the finished ledger and lane-audit.py writes them into the run's
+# artifacts, so the count survives the proxy.
+_SUBSTITUTION = {"discarded": 0, "prompt_tokens": 0, "cached_tokens": 0,
+                 "by_model": {}}
 
 
 def _write_lane_abort(row):
@@ -501,6 +557,36 @@ def _lane_trip(reason, detail):
         pass
 
 
+def _is_substitution(returned):
+    """True only when the provider NAMED a model and it is the wrong family.
+
+    A 2xx that names nothing is NOT evidence of a substitution and is never
+    retried on that basis - it is an unmeasured row, which lane-audit.py
+    refuses at the end of the run as RETURNED_MODEL_UNKNOWN.
+    """
+    return bool(UPSTREAM_EXPECTED_RETURNED_IDENTITY
+                and isinstance(returned, str) and returned.strip()
+                and not same_family(UPSTREAM_EXPECTED_RETURNED_IDENTITY, returned))
+
+
+def _note_substitution(returned, usage):
+    """Count one discarded wrong-model answer, and what it cost."""
+    try:
+        billed, hit = cache_tokens(usage)
+    except Exception:
+        billed = hit = 0
+    name = returned if isinstance(returned, str) and returned.strip() else "?"
+    with _LANE_LOCK:
+        _SUBSTITUTION["discarded"] += 1
+        _SUBSTITUTION["prompt_tokens"] += billed
+        _SUBSTITUTION["cached_tokens"] += hit
+        _SUBSTITUTION["by_model"][name] = _SUBSTITUTION["by_model"].get(name, 0) + 1
+        total = _SUBSTITUTION["discarded"]
+    sys.stderr.write("upstream-log-proxy: DISCARDED SUBSTITUTION #%d - %s "
+                     "(%d prompt tokens billed for nothing)\n" % (total, name, billed))
+    sys.stderr.flush()
+
+
 def _lane_observe(status, returned, usage):
     """Judge one completed call. Called after its ledger row is written.
 
@@ -515,9 +601,7 @@ def _lane_observe(status, returned, usage):
     """
     if not (type(status) is int and 200 <= status < 300):
         return
-    if (UPSTREAM_EXPECTED_RETURNED_IDENTITY and isinstance(returned, str)
-            and returned.strip()
-            and not same_family(UPSTREAM_EXPECTED_RETURNED_IDENTITY, returned)):
+    if _is_substitution(returned):
         _lane_trip("RETURNED_MODEL_FAMILY_MISMATCH",
                    "requested %s (family %s), provider answered as %s (family %s)"
                    % (UPSTREAM_EXPECTED_RETURNED_IDENTITY,
@@ -790,7 +874,6 @@ class Proxy(BaseHTTPRequestHandler):
         if _LANE_ABORT is not None:
             self._lane_refusal()
             return
-        t0 = time.time()
         requested = sent = None
         if UPSTREAM_MODEL and body:
             # Rewrite ONLY the model field, and only when the body parses as the
@@ -830,6 +913,34 @@ class Proxy(BaseHTTPRequestHandler):
         # identity so the body stays scannable; the client gets it un-encoded,
         # which is what every OpenAI-compatible client already accepts.
         headers["Accept-Encoding"] = "identity"
+        # THE SUBSTITUTION LOOP, and the only thing it does is decide whether
+        # to ask again. Each turn is one COMPLETE upstream call with its own
+        # ledger row, its own budget reservation and its own captured bodies;
+        # a turn that saw a wrong-model answer wrote nothing to the client, so
+        # re-issuing is safe. `discarded` is both the counter and the cap, and
+        # the last permitted turn fails closed inside `_relay_once`.
+        discarded = 0
+        while self._relay_once(body, headers, requested, sent,
+                               request_max_tokens, discarded) == "SUBSTITUTED":
+            discarded += 1
+
+    def _relay_once(self, body, headers, requested, sent, request_max_tokens,
+                    discarded):
+        """One upstream call.
+
+        Returns "SUBSTITUTED" when the provider answered as the wrong model
+        family, the answer was discarded WITHOUT relaying a byte of it, and a
+        retry is still allowed. Anything else means the client has been
+        answered and `_relay` must stop.
+        """
+        retryable = discarded < UPSTREAM_SUBSTITUTION_RETRY_MAX
+        # HOLD ON THE LAST ATTEMPT TOO. Holding only while a retry remains
+        # would relay the wrong-model body on the attempt that exhausts the
+        # cap — the exact thing the abort is supposed to prevent, arrived at
+        # by the back door. The hold is on whenever the feature is on; whether
+        # the discarded call is re-issued or ends the run is decided after.
+        hold = UPSTREAM_SUBSTITUTION_RETRY_MAX > 0
+        t0 = time.time()
         req = urllib.request.Request(self._upstream_url(), data=body or None,
                                      headers=headers, method=self.command)
         request_id = uuid.uuid4().hex
@@ -859,9 +970,15 @@ class Proxy(BaseHTTPRequestHandler):
                  "content_events": 0, "ttft_ms": None, "stream_started_at": None,
                  "deadline_unenforceable": False,
                  "stream_complete": None, "stream_bytes": 0,
-                 "response_valid": False, "res_chunks": []}
+                 "response_valid": False, "res_chunks": [],
+                 # The substitution retry's own state: bytes held back from the
+                 # client while the answering model is still unknown, whether
+                 # the head has been released, and the discard verdict.
+                 "held": [], "held_bytes": 0, "released": False,
+                 "substituted": False}
         status = None
         attempt = 0
+        outcome = "DONE"
         try:
           while True:
             attempt += 1
@@ -945,9 +1062,9 @@ class Proxy(BaseHTTPRequestHandler):
           streaming = "text/event-stream" in ctype.lower()
           try:
               if streaming:
-                  self._pump_stream(resp, state)
+                  self._pump_stream(resp, state, hold)
               else:
-                  self._pump_whole(resp, status, state)
+                  self._pump_whole(resp, status, state, hold)
           finally:
               success = (type(status) is int and 200 <= status < 300 and
                          state["returned_model"] == UPSTREAM_EXPECTED_RETURNED_IDENTITY and
@@ -965,8 +1082,20 @@ class Proxy(BaseHTTPRequestHandler):
                   _capture_write("%s.a%d.res.%s.gz"
                                  % (request_id, attempt, "sse" if streaming else "json"),
                                  state["res_chunks"], capture, "response")
+              # A DISCARDED ATTEMPT IS FLAGGED, NEVER HIDDEN, AND NEVER
+              # COUNTED AS A CALL. The keys are written ONLY on a discard, so a
+              # clean run keeps the exact ledger shape every previous run wrote
+              # and no existing reader sees a new field appear unbidden.
+              # measure/lane_guard.py skips these rows for the identity check
+              # and for the cache rate, and counts them separately as money
+              # spent on nothing.
+              discard_fields = {}
+              if state["substituted"]:
+                  discard_fields = {"discarded_substitution": True,
+                                    "substitution_attempt": discarded + 1,
+                                    "substitution_retry_exhausted": not retryable}
               try:
-                  record(**_capture_row(capture),
+                  record(**_capture_row(capture), **discard_fields,
                          request_max_tokens=request_max_tokens, requested_model=requested,
                          returned_model=state["returned_model"], attempt=attempt,
                          tool_call=state["tool_call"], status=status,
@@ -980,15 +1109,34 @@ class Proxy(BaseHTTPRequestHandler):
                          stream_complete=state["stream_complete"], stream_bytes=state["stream_bytes"])
               except OSError:
                   pass
-              # AFTER the row, always. The call that trips the guard has to be
-              # in the ledger, or the artifact that explains the abort is the
-              # one call the ledger does not contain.
-              _lane_observe(status, state["returned_model"], state["usage"])
+              if state["substituted"]:
+                  try:
+                      resp.close()        # the rest of a discarded stream is waste
+                  except Exception:
+                      pass
+                  _note_substitution(state["returned_model"], state["usage"])
+                  if retryable:
+                      # Nothing reached the client and nothing was counted
+                      # towards the lane: ask the provider again.
+                      outcome = "SUBSTITUTED"
+                  else:
+                      # FAIL CLOSED. The cap is spent, so this is the honest
+                      # outcome: trip the lane exactly as before - and refuse
+                      # the client rather than hand back the wrong-model body,
+                      # which is STRICTER than the pre-retry behaviour.
+                      _lane_observe(status, state["returned_model"], state["usage"])
+                      self._lane_refusal()
+              else:
+                  # AFTER the row, always. The call that trips the guard has to
+                  # be in the ledger, or the artifact that explains the abort is
+                  # the one call the ledger does not contain.
+                  _lane_observe(status, state["returned_model"], state["usage"])
         finally:
             try:
                 _update_inflight(request_id)
             except OSError:
                 pass
+        return outcome
 
     def _lane_refusal(self):
         """403, not 503 - a lane breach is a verdict, not a transport hiccup.
@@ -1037,7 +1185,7 @@ class Proxy(BaseHTTPRequestHandler):
         for k, v in extra:
             self.send_header(k, v)
 
-    def _pump_whole(self, resp, status, state):
+    def _pump_whole(self, resp, status, state, hold=False):
         payload = resp.read()
         if BODY_DIR:
             state["res_chunks"].append(payload)
@@ -1052,10 +1200,16 @@ class Proxy(BaseHTTPRequestHandler):
             _scan_obj(parsed, state)
         except Exception:
             pass
+        # THE DISCARD, on the easy path: nothing has been written yet, so a
+        # wrong-model body simply never becomes a response.
+        if hold and _is_substitution(state["returned_model"]):
+            state["substituted"] = True
+            return
         self._relay_headers(resp, status)
         self.send_header("Content-Length", str(len(payload)))
         self.end_headers()
         self.wfile.write(payload)
+        state["released"] = True
 
     def _iter_with_deadline(self, resp, state, sock):
         """Yield stream lines, giving up if no CONTENT arrives in time.
@@ -1098,12 +1252,29 @@ class Proxy(BaseHTTPRequestHandler):
                     and sock.gettimeout() != UPSTREAM_READ_TIMEOUT):
                 sock.settimeout(UPSTREAM_READ_TIMEOUT)
 
-    def _pump_stream(self, resp, state):
+    def _release_head(self, resp, state):
+        """Send the stream headers and everything held back, exactly once."""
+        if state["released"]:
+            return
         # No Content-Length is known up front and chunked framing is one more
         # thing to get wrong, so the response ends at connection close.
         self._relay_headers(resp, 200, extra=[("Connection", "close")])
         self.end_headers()
         self.close_connection = True
+        state["released"] = True
+        held, state["held"] = state["held"], []
+        for raw in held:
+            self.wfile.write(raw)
+        self.wfile.flush()
+
+    def _hold_expired(self, state):
+        """Stop holding: this stream is not going to name its model in time."""
+        started = state["stream_started_at"]
+        return (state["held_bytes"] > UPSTREAM_SUBSTITUTION_HOLD_BYTES
+                or (started is not None and (time.time() - started) * 1000
+                    > UPSTREAM_SUBSTITUTION_HOLD_MS))
+
+    def _pump_stream(self, resp, state, hold=False):
         state["stream_started_at"] = time.time()
         sock = _stream_socket(resp) if UPSTREAM_FIRST_TOKEN_MS else None
         if UPSTREAM_FIRST_TOKEN_MS and sock is None:
@@ -1114,32 +1285,58 @@ class Proxy(BaseHTTPRequestHandler):
             state["deadline_unenforceable"] = True
         if sock is not None:
             sock.settimeout(UPSTREAM_FIRST_TOKEN_MS / 1000.0)
-        for raw in self._iter_with_deadline(resp, state, sock):
-            state["stream_bytes"] += len(raw)
-            if BODY_DIR:
-                # Appended before the relay write so a client that hangs up
-                # cannot cost us the chunk we already read off the wire. Raw,
-                # unparsed: the concatenation IS the stream as it arrived.
-                state["res_chunks"].append(raw)
-            self.wfile.write(raw)
-            self.wfile.flush()
-            line = raw.strip()
-            if line.startswith(b"data:"):
-                chunk = line[5:].strip()
-                if chunk == b"[DONE]":
-                    state["stream_complete"] = True
-                elif chunk:
-                    state["stream_events"] += 1
-                    try:
-                        _scan_obj(json.loads(chunk.decode("utf-8", "replace")), state)
-                    except Exception:
-                        state["stream_parse_errors"] += 1
-                        # Do not persist arbitrary model text or corpus lines.
-                        # Keep only a gateway status embedded by a broken stream.
-                        match = re.search(br"HTTP/\d(?:\.\d)?\s+(\d{3})", chunk)
-                        state["error"] = ("malformed_sse_embedded_http_status:%s" %
-                                          match.group(1).decode("ascii") if match else
-                                          "malformed_sse_json")
+        if not hold:
+            # Byte-for-byte the pre-retry behaviour when the feature is off:
+            # headers first, then relay each line as it arrives.
+            self._release_head(resp, state)
+        try:
+            for raw in self._iter_with_deadline(resp, state, sock):
+                state["stream_bytes"] += len(raw)
+                if BODY_DIR:
+                    # Appended before the relay write so a client that hangs up
+                    # cannot cost us the chunk we already read off the wire. Raw,
+                    # unparsed: the concatenation IS the stream as it arrived.
+                    state["res_chunks"].append(raw)
+                # PARSED BEFORE IT IS RELAYED, not after. The whole retry rests
+                # on knowing the model id before the first byte leaves for the
+                # client; for every other purpose the two orders are identical.
+                line = raw.strip()
+                if line.startswith(b"data:"):
+                    chunk = line[5:].strip()
+                    if chunk == b"[DONE]":
+                        state["stream_complete"] = True
+                    elif chunk:
+                        state["stream_events"] += 1
+                        try:
+                            _scan_obj(json.loads(chunk.decode("utf-8", "replace")), state)
+                        except Exception:
+                            state["stream_parse_errors"] += 1
+                            # Do not persist arbitrary model text or corpus lines.
+                            # Keep only a gateway status embedded by a broken stream.
+                            match = re.search(br"HTTP/\d(?:\.\d)?\s+(\d{3})", chunk)
+                            state["error"] = ("malformed_sse_embedded_http_status:%s" %
+                                              match.group(1).decode("ascii") if match else
+                                              "malformed_sse_json")
+                if state["released"]:
+                    self.wfile.write(raw)
+                    self.wfile.flush()
+                    continue
+                state["held"].append(raw)
+                state["held_bytes"] += len(raw)
+                if _is_substitution(state["returned_model"]):
+                    # DISCARD. Not one byte of this stream was relayed, so the
+                    # request can be re-issued as if it had never happened.
+                    state["substituted"] = True
+                    state["held"] = []
+                    return
+                if state["returned_model"] or self._hold_expired(state):
+                    self._release_head(resp, state)
+        finally:
+            # Anything held that is NOT a discard must still be delivered,
+            # including a stream that ended, errored or timed out before it
+            # ever named a model. Holding is a delay, never a loss.
+            if not state["substituted"]:
+                self._release_head(resp, state)
 
 
 def main():
