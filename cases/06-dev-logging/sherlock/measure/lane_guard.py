@@ -272,6 +272,151 @@ def cache_breach(calls, prompt_tokens, cached_tokens,
             % (rate * 100, calls, min_rate * 100, cached_tokens, prompt_tokens))
 
 
+# ======================================================================
+# A PROXY SIGNAL MUST NEVER OVERRULE THE DIRECT MEASUREMENT IT STANDS IN FOR.
+#
+# The cache floor above is not a cost policy. Its own breach message says what
+# it is for: "a provider-side model substitution splits the cache pool exactly
+# like this". It was calibrated on the v37 shape, where the provider answered
+# with a floating ALIAS and some billed rows named NO MODEL AT ALL, so the
+# returned-side family check could not see the substitution and the cache rate
+# was the only witness left. On that shape it is the right and only guard.
+#
+# MEASURED 2026-08-26, CloseRouter, run 20260826T212613Z-v39 (the ledger is
+# committed verbatim at measure/tests/fixtures/v39-closerouter-30-calls.upstream.jsonl):
+#   * 30 billed calls, HTTP 200 x30, finish_reason tool_calls x30,
+#     stream_complete x30, upstream_error None x30, 0 discarded substitutions
+#   * returned_model == route_expected_identity == deepseek/deepseek-v4-flash-0731
+#     on 30 of 30 rows — the DIRECT signal, present and unanimous
+#   * 399,232 cached / 2,427,380 prompt = 16.4 % cumulative, provider-reported
+#     cost $0.021036 (lane-audit.py's own line on this exact fixture)
+#   * only 7 of the 30 calls reported ANY cached_tokens, while the prompt grew
+#     monotonically inside one conversation (45,636 -> 142,609 over calls 1-17,
+#     then a fresh 25,593 at call 18 when a subagent started)
+# A split cache pool halves hits across two models; this is a gateway that
+# simply does not cache most calls. THIS 16.4 % IS A PROVIDER-POLICY FIGURE,
+# NOT A TARGET, and it is recorded here for future calibration only. The floor
+# is NOT lowered and there is deliberately no per-provider threshold table: a
+# threshold nudge moves the cliff instead of removing it, and the next provider
+# with a different caching policy walks straight off the new one.
+#
+# The live proxy guard tripped PROMPT_CACHE_COLLAPSE on call 30 of that healthy
+# lane, call 31 got `403 proxy: lane aborted`, and a paid run was over.
+#
+# SO: the floor may judge ONLY the billed calls whose model identity is not
+# directly established. When every billed call is identity-confirmed, a low
+# rate is a COST FACT — reported loudly, with the numbers, because it is real
+# money — and it is not a breach.
+# ======================================================================
+CACHE_JUDGEMENT_TERMS = (
+    # Billed 2xx rows whose returned model was checked against the identity the
+    # row was SENT under and matched. The floor may not judge these.
+    "identity_confirmed_calls",
+    "identity_confirmed_prompt_tokens",
+    "identity_confirmed_cached_tokens",
+    # Billed 2xx rows that named NO model, or that could not be checked because
+    # no expected identity was declared for them. These, and only these, are
+    # what the cache floor is a proxy signal FOR.
+    "identity_unconfirmed_calls",
+    "identity_unconfirmed_prompt_tokens",
+    "identity_unconfirmed_cached_tokens",
+)
+
+
+def cache_terms():
+    """A fresh named-counter dict. Never a bare running sum."""
+    return dict.fromkeys(CACHE_JUDGEMENT_TERMS, 0)
+
+
+def cache_terms_gaps(terms):
+    """The terms that never got computed. Every key reaches the verdict here.
+
+    This is the guard against this file's signature defect: a term that is
+    computed and printed but absent from the exit code. If any of the six is
+    missing or not a plain int, `cache_judgement` refuses the ledger instead of
+    quietly judging over a bucket nobody filled.
+    """
+    if not isinstance(terms, dict):
+        return CACHE_JUDGEMENT_TERMS
+    return tuple(term for term in CACHE_JUDGEMENT_TERMS
+                 if type(terms.get(term)) is not int)
+
+
+def note_cache_call(terms, billed, hit, identity_confirmed):
+    """Book one billed call into the confirmed or the unconfirmed bucket."""
+    prefix = ("identity_confirmed_" if identity_confirmed
+              else "identity_unconfirmed_")
+    terms[prefix + "calls"] += 1
+    terms[prefix + "prompt_tokens"] += billed
+    terms[prefix + "cached_tokens"] += hit
+
+
+def _rate(cached, prompt):
+    return (100.0 * cached / prompt) if prompt else 0.0
+
+
+def cache_cost_fact(terms, min_rate=DEFAULT_CACHE_MIN_RATE,
+                    min_calls=DEFAULT_CACHE_MIN_CALLS):
+    """One line stating what the cache actually cost, always. Never a verdict.
+
+    Returned even when the rate is fine, because the operator's question is
+    "what did this run pay for uncached prompt tokens", and that answer must not
+    only exist on the path where something broke.
+    """
+    if cache_terms_gaps(terms):
+        return ("prompt-cache: NOT MEASURED — %s never reached the judgement"
+                % ", ".join(cache_terms_gaps(terms)))
+    confirmed = terms["identity_confirmed_calls"]
+    unconfirmed = terms["identity_unconfirmed_calls"]
+    prompt = (terms["identity_confirmed_prompt_tokens"]
+              + terms["identity_unconfirmed_prompt_tokens"])
+    cached = (terms["identity_confirmed_cached_tokens"]
+              + terms["identity_unconfirmed_cached_tokens"])
+    line = ("prompt-cache COST FACT: %.1f%% hit rate over %d billed call(s) "
+            "(%d cached / %d prompt tokens); %d identity-confirmed, %d "
+            "unconfirmed — the %.1f%% floor judges the %d unconfirmed call(s) "
+            "only"
+            % (_rate(cached, prompt), confirmed + unconfirmed, cached, prompt,
+               confirmed, unconfirmed, min_rate * 100, unconfirmed))
+    if (unconfirmed == 0 and confirmed >= min_calls
+            and _rate(cached, prompt) < min_rate * 100):
+        # LOUDLY. This is the v39 CloseRouter shape: nothing is wrong with the
+        # lane and the bill is still bigger than a cached lane's would be.
+        line += ("; REAL MONEY: every billed call named the expected model, so "
+                 "this low rate is the provider's caching policy, not a "
+                 "substitution, and it is NOT a breach")
+    return line
+
+
+def cache_judgement(terms, min_rate=DEFAULT_CACHE_MIN_RATE,
+                    min_calls=DEFAULT_CACHE_MIN_CALLS):
+    """(reason, detail) when the cache floor is genuinely breached, else None.
+
+    Judged over the UNCONFIRMED bucket only. See the block comment above.
+    """
+    gaps = cache_terms_gaps(terms)
+    if gaps:
+        return "CACHE_TERMS_INCOMPLETE", (
+            "the cache judgement was asked for before %s were computed — an "
+            "unfilled bucket cannot be scored as a healthy one"
+            % ", ".join(gaps))
+    detail = cache_breach(terms["identity_unconfirmed_calls"],
+                          terms["identity_unconfirmed_prompt_tokens"],
+                          terms["identity_unconfirmed_cached_tokens"],
+                          min_rate, min_calls)
+    if not detail:
+        return None
+    return "PROMPT_CACHE_COLLAPSE", (
+        "%s; judged over the %d billed call(s) whose model identity was NOT "
+        "directly confirmed (%d identity-confirmed call(s), %d cached / %d "
+        "prompt tokens, are excluded — a proxy signal may not overrule the "
+        "direct measurement it stands in for)"
+        % (detail, terms["identity_unconfirmed_calls"],
+           terms["identity_confirmed_calls"],
+           terms["identity_confirmed_cached_tokens"],
+           terms["identity_confirmed_prompt_tokens"]))
+
+
 def _ledger_declares_identity(path):
     """True when at least one row carries a usable `route_expected_identity`.
 
@@ -815,6 +960,13 @@ def _ledger_verdict(ledger_path, expected_identity, cache_guard, min_rate,
 
     calls = prompt_tokens = cached_tokens = 0
     named = 0
+    # THE CACHE FLOOR'S JURISDICTION, as named counters. Handed to `summary` by
+    # identity so lane-audit.py can print the cost fact, but the guard reads
+    # this local dict and never `summary`: a check that switches off when the
+    # caller passes no dict is the dead-gate shape this file exists to prevent.
+    terms = cache_terms()
+    if summary is not None:
+        summary["cache_judgement"] = terms
     # Counted here and not only in `summary`, because `summary` is optional and
     # a check that silently switches off when the caller passes no dict is the
     # dead-gate shape this file exists to prevent.
@@ -904,6 +1056,13 @@ def _ledger_verdict(ledger_path, expected_identity, cache_guard, min_rate,
             calls += 1
             prompt_tokens += billed
             cached_tokens += hit
+            # DIRECTLY CONFIRMED means: this row was judged against a real
+            # expected identity, it named a model, and the family matched. The
+            # mismatch case never gets here — it returned above.
+            note_cache_call(terms, billed, hit,
+                            bool(row_expected
+                                 and isinstance(returned, str) and returned.strip()
+                                 and same_family(row_expected, returned)))
 
     # LIVE, NOT DECORATIVE. `route_identity_rows` is what makes this gate fire on
     # a swapped run audited with no global --expected: those rows DID declare an
@@ -924,7 +1083,7 @@ def _ledger_verdict(ledger_path, expected_identity, cache_guard, min_rate,
         return advance_breach
 
     if cache_guard:
-        detail = cache_breach(calls, prompt_tokens, cached_tokens, min_rate, min_calls)
-        if detail:
-            return "PROMPT_CACHE_COLLAPSE", detail
+        breach = cache_judgement(terms, min_rate, min_calls)
+        if breach:
+            return breach
     return None

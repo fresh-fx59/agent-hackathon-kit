@@ -31,7 +31,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from lane_guard import (DEFAULT_CACHE_MIN_CALLS, DEFAULT_CACHE_MIN_RATE,  # noqa: E402
-                        audit_ledger)
+                        audit_ledger, cache_cost_fact)
 
 
 def main(argv=None):
@@ -89,18 +89,19 @@ def main(argv=None):
                   summary.get("incomplete_reason")
                   or "the run's cost was never measured")
     if breach is None:
-        _report(summary)
+        _report(summary, args.cache_min_rate, args.cache_min_calls)
         return 0
     reason, detail = breach
     print(reason)
     # The verdict first: run-bench.sh reads the first three lines of this
     # stream as the human detail for lane-integrity.json.
     sys.stderr.write("✗ lane integrity: %s — %s\n" % (reason, detail))
-    _report(summary)
+    _report(summary, args.cache_min_rate, args.cache_min_calls)
     return 1
 
 
-def _report(summary):
+def _report(summary, min_rate=DEFAULT_CACHE_MIN_RATE,
+            min_calls=DEFAULT_CACHE_MIN_CALLS):
     """One line, always — and NEVER a zero it did not measure.
 
     The v38 full run printed "0 accepted calls, 0 discarded substitutions
@@ -117,6 +118,7 @@ def _report(summary):
     if not summary:
         return
     _report_routes(summary)
+    _report_cache(summary, min_rate, min_calls)
     if not summary.get("complete"):
         sys.stderr.write(
             "✗ lane cost: NOT MEASURED — %s\n"
@@ -156,6 +158,23 @@ def _report(summary):
     sys.stderr.write("%s lane cost: %s\n"
                      % ("⚠" if discarded or summary.get("refused_calls")
                         else "ℹ", "; ".join(parts)))
+
+
+def _report_cache(summary, min_rate, min_calls):
+    """THE COST FACT, ALWAYS — even on a clean run.
+
+    A low prompt-cache hit rate on an identity-confirmed lane is no longer a
+    breach (see lane_guard.CACHE_JUDGEMENT_TERMS: the v39 CloseRouter run was
+    killed at call 30 for a 16.4 % rate while 30 of 30 rows named the exact
+    expected model). It is still real money, so it gets a line of its own here
+    rather than only existing on the path where the guard fired.
+    """
+    terms = summary.get("cache_judgement")
+    if not isinstance(terms, dict):
+        return
+    line = cache_cost_fact(terms, min_rate, min_calls)
+    sys.stderr.write("%s %s\n" % ("⚠" if "REAL MONEY" in line
+                                   or "NOT MEASURED" in line else "ℹ", line))
 
 
 def _report_routes(summary):
