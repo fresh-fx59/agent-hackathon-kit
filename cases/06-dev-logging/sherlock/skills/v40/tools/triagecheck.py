@@ -1198,7 +1198,11 @@ def maybe_refresh_checkpoint(worklist_path, force):
     unresolved = total - resolved
     row = dict(prior)
     row.update({
-        "schema": 1,
+        # v40: the schema number and the stage default are OWNED by
+        # checkpoint.py. This writer used to hard-code `1`, so whichever of the
+        # two tools ran last decided what the file claimed to be.
+        "schema": ckmod.SCHEMA,
+        "stage": prior.get("stage", "triage"),
         "state": "ready_for_synthesis" if unresolved == 0 else "resume_triage",
         "total": total,
         "resolved": resolved,

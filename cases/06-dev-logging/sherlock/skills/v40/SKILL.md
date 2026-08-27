@@ -89,6 +89,49 @@ already exists, read it first. In state `ready_for_synthesis` do not repeat MAP
 and TRIAGE: use the saved `worklist*.tsv`, `rules.tsv`, `axis3.tsv` and
 `map*.txt`.
 
+### ONE SESSION PER STAGE — THE BOUNDARY IS `/clear`, AND YOU ANNOUNCE IT
+
+**This investigation runs as three bounded sessions, not one long one:
+`triage` (steps 1-2) → `draft` (step 3) → `repair` (gate fixes).** The session
+boundary is the user typing `/clear`; the only thing that crosses it is
+`./work`. MEASURED on the last paid run: a single session that did all stages
+reached a **327,639-token prompt against a 262,000 ceiling**, while every
+bounded session in the same run stayed at 186,812 and 43,279. Splitting the run
+is not tidiness, it is the difference between a report and a refused request.
+
+**FIRST COMMAND OF EVERY SESSION, before any other action:**
+
+    python3 <SKILL_BASE_DIR>/tools/checkpoint.py resume --work ./work
+
+It prints `СТУПЕНЬ СЕЙЧАС: <stage>`. **Run that stage and only that stage.** If
+it fails because there is no checkpoint, this is a new investigation: the stage
+is `triage`, start at STEP 0. Never infer the stage from the conversation — a
+cleared session has no conversation, and this file is the only memory.
+
+**WHEN THE STAGE'S WORK IS DONE, close it with one command:**
+
+    python3 <SKILL_BASE_DIR>/tools/checkpoint.py handoff --work ./work --done <stage>
+
+It refuses while the stage is unfinished (open worklist rows for `triage`, a
+placeholder `report.md` for `draft`), and that refusal is the answer: finish the
+work, run it again. When it exits 0 it advances the stage on disk and prints a
+short Russian block.
+
+**THEN DO EXACTLY TWO THINGS: print that block VERBATIM as the last thing in
+your turn, and END THE TURN. Do not start the next stage, do not summarise, do
+not add a sentence after it.** The block tells the user to type `/clear`, then
+`/sherlock`, then one line. Both halves matter: `/clear` drops the loaded skill,
+so without `/sherlock` the next session has no instructions at all — and a model
+that keeps working past the boundary rebuilds the exact 327,639-token prompt
+this protocol exists to prevent.
+
+**RUN EVERY COMMAND IN THE FOREGROUND. Never leave a background task alive at
+the end of a stage.** `/clear` REFUSES while background work is running
+(«Stop the current session's running background tasks before starting a new
+session.»), and a refused `/clear` looks exactly like one that worked — the user
+types `/sherlock`, the old context is still there, and the ceiling is breached
+anyway.
+
 **STEP 0 — RUN BOTH OF THESE COMMANDS BEFORE ANYTHING ELSE. They are not
 conditional and they cost nothing: two local python calls, no model tokens.**
 Why (measured): `reference/tools.md`, «Resident bytes».
@@ -139,8 +182,16 @@ You do NOT read the corpus yourself: you run `logmap.py`, read `map.txt` and
    **Step 2 is over only when `triagecheck` exits zero.** A line still carrying
    `?`, or a verdict that lives in a message instead of in the file, is an
    unfinished step 2 — and while one remains, step 3 must not start.
-3. **DRAFT** — YOURSELF, in this session. Not delegated: this is one author's
-   job and the measurement says so.
+   **THIS IS THE END OF THE `triage` STAGE.** Run
+   `checkpoint.py handoff --work ./work --done triage`, print its block
+   verbatim, end the turn. Step 3 belongs to the next session.
+3. **DRAFT** — YOURSELF, in the `draft` session (the one that starts after the
+   `triage` handoff). Not delegated: this is one author's job and the
+   measurement says so. When the report is written and the marker line deleted,
+   close the stage with
+   `checkpoint.py handoff --work ./work --done draft` and print its block
+   verbatim. If a gate then fails, that repair is the `repair` stage — a third
+   session, not a continuation of this one.
    Only now, immediately before writing the draft, read
    `reference/report-format.md` (do not read it at the start). Write the full
    report into `work/report.md`.

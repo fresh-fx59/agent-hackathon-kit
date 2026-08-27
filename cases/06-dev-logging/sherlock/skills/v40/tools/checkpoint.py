@@ -1,5 +1,18 @@
 #!/usr/bin/env python3
-"""Create a durable resume receipt and an honest report skeleton."""
+"""Create a durable resume receipt and an honest report skeleton.
+
+v40 adds the STAGE MACHINE the interactive lane needs. The corporate harness runs
+`qwen` interactively, so a stage cannot be a separate process: it is a `/clear`
+plus a re-invoked skill inside the same process, and the only thing that survives
+that boundary is this directory. So the stage lives HERE, on disk, beside the
+counts — and `handoff` prints the literal block the human copies.
+
+Read out of the installed qwen-code 0.22.0 bundle (clearCommand.ts), and both
+facts are load-bearing below: `/clear` calls `skillTool.clearLoadedSkills()`, so
+the skill body is dropped and `/sherlock` must be typed again; and it REFUSES
+while blocking background work is alive, so a stage must not end with a
+background task running.
+"""
 import argparse
 import datetime
 import hashlib
@@ -96,6 +109,26 @@ def render_placeholder(row):
     return "\n".join(out) + "\n"
 
 
+#: the bounded stages, in order. A stage is one `/clear`-to-`/clear` span.
+#: `triage` covers MAP + TRIAGE (they share the worklist and must not be split);
+#: `draft` writes the report; `repair` exists because a gate can fail after the
+#: report is written and repairing it in the draft session is what re-grew the
+#: context on r6.
+STAGES = ("triage", "draft", "repair", "done")
+
+#: THE schema number. It lives here because `checkpoint.py` is not the only
+#: writer of checkpoint.json — `triagecheck.py --refresh-checkpoint` rewrites it
+#: too, and on v39 that second writer hard-coded `"schema": 1` while this one
+#: wrote 1 as well. The moment this file moved to 2, the two writers would have
+#: disagreed depending on which ran last, and a reader cannot tell a v1 row from
+#: a v2 row that lost its stage. One constant, imported by the other writer.
+SCHEMA = 2
+
+
+def next_stage(stage):
+    return STAGES[STAGES.index(stage) + 1]
+
+
 _SHAPE_SENTINEL = 987654321
 
 
@@ -123,12 +156,115 @@ def is_placeholder(text):
     return any(rx.match(text) for rx in PLACEHOLDER_SHAPES)
 
 
+def read_row(work):
+    """The checkpoint as it stands, or {} — never an invented one."""
+    try:
+        text = (Path(work) / "checkpoint.json").read_text(encoding="utf-8")
+    except OSError:
+        return {}
+    try:
+        row = json.loads(text)
+    except ValueError:
+        return {}
+    return row if isinstance(row, dict) else {}
+
+
+def render_handoff(work, done, row):
+    """The literal block a human copies. Russian: a human reads it.
+
+    Every line is load-bearing. The absolute path is here because a cleared
+    session has no memory of the working directory. The background-work warning
+    is here because `/clear` REFUSES while a background task is alive, and a
+    refused clear looks exactly like a clear that worked.
+    """
+    stage = row["stage"]
+    lines = [
+        "СТУПЕНЬ ЗАВЕРШЕНА: %s" % done,
+        "СОСТОЯНИЕ: %s/checkpoint.json (stage=%s, разобрано %d из %d)"
+        % (work, stage, row["resolved"], row["total"]),
+    ]
+    if stage == "done":
+        lines += ["", "РАССЛЕДОВАНИЕ ЗАВЕРШЕНО. Отчёт: %s/report.md" % work,
+                  "Больше ступеней нет — /clear не нужен."]
+        return "\n".join(lines) + "\n"
+    lines += [
+        "",
+        "ДАЛЬШЕ — ВЫПОЛНИ ТРИ ДЕЙСТВИЯ ПО ПОРЯДКУ, НЕ ПРОДОЛЖАЙ В ЭТОЙ СЕССИИ:",
+        "  1) /clear",
+        "  2) /sherlock",
+        "  3) вставь одной строкой:",
+        "     ПРОДОЛЖИ РАССЛЕДОВАНИЕ ИЗ %s — СТУПЕНЬ %s" % (work, stage),
+        "",
+        "ПОЧЕМУ: следующая ступень должна начаться с чистого контекста — на "
+        "оплаченном прогоне r6 одна сессия дошла до 327 639 токенов в запросе "
+        "при потолке 262 000.",
+        "/clear стирает загружённый навык, поэтому шаг 2 обязателен.",
+        "/clear ОТКАЖЕТСЯ, пока живёт фоновая задача — фоновых задач тут быть "
+        "не должно.",
+    ]
+    return "\n".join(lines) + "\n"
+
+
+def handoff(work, done):
+    """Close stage `done`, advance the stage on disk, print the block."""
+    work = Path(work).resolve(strict=True)
+    if done not in STAGES or done == "done":
+        raise ValueError("unknown stage %r — stages are %s"
+                         % (done, ", ".join(STAGES[:-1])))
+    row = init(work)                      # refresh the counts before judging
+    if row["stage"] != done:
+        raise ValueError("checkpoint says stage=%s, not %s — finish that stage "
+                         "first" % (row["stage"], done))
+    if done == "triage" and row["unresolved"]:
+        raise ValueError("triage is not finished: %d of %d worklist rows still "
+                         "open — close them, then run handoff again"
+                         % (row["unresolved"], row["total"]))
+    if done in ("draft", "repair"):
+        report = work / "report.md"
+        try:
+            text = report.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            text = ""
+        if not text.strip() or is_placeholder(text):
+            raise ValueError("work/report.md is still the placeholder — the "
+                             "draft stage is not finished")
+        if PLACEHOLDER_MARKER in text:
+            raise ValueError("work/report.md still carries the "
+                             "«СИНТЕЗ НЕ ЗАВЕРШЁН» line — synthesis is not done")
+    row["stage"] = next_stage(done)
+    row["stage_closed"] = done
+    row["updated_at"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    atomic_text(work / "checkpoint.json",
+                json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n")
+    block = render_handoff(str(work), done, row)
+    atomic_text(work / "handoff.txt", block)
+    return row, block
+
+
+def resume(work):
+    """What a freshly cleared, freshly re-invoked skill must do next."""
+    work = Path(work).resolve(strict=True)
+    row = read_row(work)
+    if not row:
+        raise ValueError("no readable checkpoint.json in %s — this is a new "
+                         "investigation: start at stage triage" % work)
+    stage = row.get("stage", "triage")
+    return row, ("СТУПЕНЬ СЕЙЧАС: %s\nСОСТОЯНИЕ: %s (разобрано %s из %s)\n"
+                 % (stage, row.get("state", "?"), row.get("resolved", "?"),
+                    row.get("total", "?")))
+
+
 def init(work):
     work = work.resolve(strict=True)
     total, resolved, seals = inspect_worklists(work)
     unresolved = total - resolved
+    previous = read_row(work)
     row = {
-        "schema": 1,
+        "schema": SCHEMA,
+        # The stage is SEPARATE from the state on purpose. `state` answers "is
+        # the worklist closed"; `stage` answers "which bounded session am I".
+        # init must never rewind a stage: it is re-run inside every stage.
+        "stage": previous.get("stage", "triage") if previous else "triage",
         "state": "ready_for_synthesis" if unresolved == 0 else "resume_triage",
         "total": total,
         "resolved": resolved,
@@ -156,11 +292,33 @@ def init(work):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("command", choices=("init",))
+    parser.add_argument("command", choices=("init", "handoff", "resume"))
     parser.add_argument("--work", required=True)
+    parser.add_argument("--done", help="the stage being closed (handoff only)")
+    parser.add_argument("--json", action="store_true",
+                        help="print the machine receipt instead of the block")
     args = parser.parse_args()
-    print(json.dumps(init(Path(args.work)), ensure_ascii=False, sort_keys=True))
+    if args.command == "init":
+        print(json.dumps(init(Path(args.work)), ensure_ascii=False,
+                         sort_keys=True))
+        return
+    if args.command == "handoff":
+        if not args.done:
+            raise SystemExit("handoff needs --done <stage>")
+        row, block = handoff(args.work, args.done)
+        print(json.dumps(row, ensure_ascii=False, sort_keys=True) if args.json
+              else block, end="" if not args.json else "\n")
+        return
+    row, text = resume(args.work)
+    print(json.dumps(row, ensure_ascii=False, sort_keys=True) if args.json
+          else text, end="" if not args.json else "\n")
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except (ValueError, OSError) as exc:
+        # A gate that cannot advance must SAY SO and exit non-zero. The v36
+        # lesson: a check that prints failure and exits 0 is not a check.
+        print("✗ %s" % exc)
+        raise SystemExit(1)
