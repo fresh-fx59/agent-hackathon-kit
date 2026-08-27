@@ -119,6 +119,30 @@ def main():
     check("a 503 and an error-in-200 are not judged — they were never answered",
           rc == 0, "rc=%d %s" % (rc, (out + err)[-500:]))
 
+    # ── AND THE FREE v41 REHEARSAL FOUND THE SECOND SHAPE, 2026-08-27 ───────
+    # Broker run 20260827T133731Z-v41 returned
+    # «PER_REQUEST_TOKEN_GATE_UNMEASURED — row 31 carries no prompt token count»
+    # and rows 31 and 47 (1-based) were EMPTY HTTP 200s: `stream_events: 1`, no
+    # delta, no `finish_reason`, `stream_complete` falsy, 259 response bytes,
+    # `usage: null`. The same shape was measured on ten rows of v35 r2, where it
+    # burned 33.1% of the fresh spend riding the client stream timeout.
+    #
+    # A stream that carried no terminal chunk is not an answer: there is no
+    # prompt to judge and no completion to bill against. The distinguishing
+    # fact is the STREAM, not the status — `stream_complete` falsy AND no
+    # `finish_reason` — which is exactly what separates it from the case below,
+    # where the provider DID finish and simply withheld the numbers.
+    dead_stream = legal + [
+        dict(row(0, 20000), status=200, usage=None, stream_complete=None,
+             finish_reason=None, stream_events=1, stream_bytes=259),
+        dict(row(0, 20000), status=200, usage=None, stream_complete=False,
+             finish_reason=None, stream_events=1, stream_bytes=259),
+    ]
+    rc, out, err = audit(dead_stream, "--per-request-token-gate", str(GATE))
+    check("an EMPTY HTTP 200 — one stream event, no finish_reason, no terminal "
+          "chunk — is not judged; the provider never answered",
+          rc == 0, "rc=%d %s" % (rc, (out + err)[-600:]))
+
     answered_but_silent = legal + [dict(row(0, 20000), usage=None,
                                         stream_complete=True, status=200)]
     rc, out, err = audit(answered_but_silent, "--per-request-token-gate",

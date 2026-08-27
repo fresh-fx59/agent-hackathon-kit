@@ -1069,6 +1069,18 @@ def _was_answered(row):
         return False
     if row.get("finish_reason") == "error":
         return False
+    # THE EMPTY HTTP 200, measured on the free v41 rehearsal (rows 31 and 47 of
+    # 20260827T133731Z-v41) and on ten rows of v35 r2: the gateway returns 200,
+    # opens a stream, sends ONE event and no delta, and closes without a
+    # terminal chunk. `usage` is null because nothing was generated. That is a
+    # dead connection, not an answer.
+    #
+    # The test is the STREAM, never the status: no terminal chunk AND no
+    # finish_reason. A provider that genuinely finished sets one or the other —
+    # so the «provider hid the numbers» case (stream complete, counts missing)
+    # is untouched and still a breach.
+    if row.get("stream_complete") is not True and not row.get("finish_reason"):
+        return False
     return True
 
 
