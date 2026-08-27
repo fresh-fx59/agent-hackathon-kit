@@ -54,6 +54,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from lane_guard import (CACHE_JUDGEMENT_TERMS, DEFAULT_CACHE_MIN_CALLS,
                         DEFAULT_CACHE_MIN_RATE, cache_cost_fact,
                         cache_judgement, cache_terms, cache_tokens,
+                        GENERATION_WINDOW_EXCEEDED,
                         deterministic_refusal, model_family, note_cache_call,
                         same_family)
 
@@ -86,6 +87,16 @@ UPSTREAM_MODEL = os.environ.get("UPSTREAM_MODEL", "")
 # the path that can wait longer than the client will.
 # Off by default (0) so the proxy stays a pass-through unless a runner asks.
 UPSTREAM_RETRY_MAX = int(os.environ.get("UPSTREAM_RETRY_MAX", "0") or 0)
+# THIS LANE'S MEASURED GENERATION WINDOW, in seconds. CloseRouter's is 90: a
+# call that dies at or near it carrying the gateway's timeout chunk was cut by
+# the PROVIDER'S clock, and retrying a deterministic clock cut is pure waste.
+# Unset, 0 or -1 means this lane declares no window, and then nothing below is
+# ever judged against one - the ledger keeps the exact shape it has today.
+try:
+    GENERATION_WINDOW_S = float(
+        os.environ.get("UPSTREAM_GENERATION_WINDOW_S", "-1") or -1)
+except ValueError:
+    GENERATION_WINDOW_S = -1.0
 UPSTREAM_RETRY_BASE_MS = int(os.environ.get("UPSTREAM_RETRY_BASE_MS", "2000") or 2000)
 # RETRY THE SUBSTITUTED CALL - DO NOT KILL THE RUN, AND DO NOT TOLERATE IT.
 #
@@ -1874,7 +1885,14 @@ class Proxy(BaseHTTPRequestHandler):
                     except Exception:
                         raw = b""
                     why = _err_text(raw)
-                    refusal = deterministic_refusal(status, why)
+                    # ONE duration, judged and recorded. Two `time.time()`
+                    # reads would leave a ledger row whose own number does not
+                    # quite match the number the class was decided on, and that
+                    # is a row nobody can explain six weeks later.
+                    attempt_ms = int((time.time() - t_try) * 1000)
+                    refusal = deterministic_refusal(
+                        status, why, duration_ms=attempt_ms,
+                        generation_window_s=GENERATION_WINDOW_S)
                     if BODY_DIR:
                         # upstream_error keeps 300 chars so the ledger stays
                         # readable; the file keeps all of it, which is where a
@@ -1889,7 +1907,7 @@ class Proxy(BaseHTTPRequestHandler):
                         record(**_capture_row(capture), **named, **route_fields,
                                request_max_tokens=request_max_tokens, requested_model=requested, returned_model=None,
                                tool_call=False, status=status, attempt=attempt,
-                               duration_ms=int((time.time() - t_try) * 1000),
+                               duration_ms=attempt_ms,
                                sent_model=sent, request_bytes=len(body),
                                path=self.path, stream=False, upstream_error=why)
                     except OSError:
@@ -1968,18 +1986,33 @@ class Proxy(BaseHTTPRequestHandler):
               # measure/lane_guard.py skips these rows for the identity check
               # and for the cache rate, and counts them separately as money
               # spent on nothing.
+              # THE PROVIDER'S CLOCK, NAMED IN THE ROW. r3's nine dead calls
+              # were HTTP 200s carrying a gateway error chunk at ~90.4 s and
+              # the ledger said nothing about why - so "I was cut by the
+              # provider's clock" could not be answered from the run's own
+              # artifacts. Written ONLY when there is one, so a lane with no
+              # declared window keeps the exact ledger shape it has today.
+              row_duration_ms = int((time.time() - t0) * 1000)
+              window_fields = {}
+              if deterministic_refusal(
+                      status, state["error"], duration_ms=row_duration_ms,
+                      generation_window_s=GENERATION_WINDOW_S
+              ) == GENERATION_WINDOW_EXCEEDED:
+                  window_fields = {
+                      "upstream_refusal_class": GENERATION_WINDOW_EXCEEDED}
               discard_fields = {}
               if state["substituted"]:
                   discard_fields = {"discarded_substitution": True,
                                     "substitution_attempt": discarded + 1,
                                     "substitution_retry_exhausted": not retryable}
               try:
-                  record(**_capture_row(capture), **discard_fields, **route_fields,
+                  record(**_capture_row(capture), **discard_fields,
+                         **window_fields, **route_fields,
                          request_max_tokens=request_max_tokens, requested_model=requested,
                          returned_model=state["returned_model"], attempt=attempt,
                          tool_call=state["tool_call"], status=status,
                          usage=state["usage"], finish_reason=state["finish_reason"],
-                         duration_ms=int((time.time() - t0) * 1000), sent_model=sent,
+                         duration_ms=row_duration_ms, sent_model=sent,
                          request_bytes=len(body), path=self.path, stream=streaming,
                          upstream_error=state["error"], stream_events=state["stream_events"],
                          content_events=state["content_events"], ttft_ms=state["ttft_ms"],
