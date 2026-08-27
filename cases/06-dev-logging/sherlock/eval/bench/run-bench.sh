@@ -556,8 +556,99 @@ CTX_WINDOW="${SHERLOCK_CONTEXT_WINDOW:-200000}"
 # per run rather than living in an env var nobody records. 32,768 covers the
 # largest report we have ever produced (53,435 bytes ~= 15.6k tokens) twice over.
 # 0 writes nothing and restores the old auto-escalating behaviour.
-MAX_OUT="${SHERLOCK_MAX_OUTPUT_TOKENS:-32768}"
+# AND IT MUST FIT THE PROVIDER'S GENERATION WINDOW (fix 9). CloseRouter cuts a
+# generation at 90 s - TTFT included - and bills the HTTP 200 it hands back
+# with a gateway error chunk in it. Nine of run 20260827T005241Z-v39's ten dead
+# calls died at 90,341-90,416 ms, a 75 ms spread across nine independent calls:
+# a hard ceiling, not jitter. Measured on that run's own 142 good calls, the
+# lane generates 122.6 tokens/s excluding TTFT, so a 32,768-token budget is
+# FIVE TIMES more than it can ever deliver and any long turn is guaranteed to
+# die. The budget is therefore DERIVED from the window, never chosen by taste:
+#   floor((window - ttft_reserve) x tokens_per_s)  =  floor(55 x 122.6) = 6743
+# The reserve is 35 s, the largest TTFT this project has ever recorded (v38) -
+# not the 6.4 s average, because the average is not what kills a run.
+# A lane that declares NO window (-1, the default) skips all of this, so
+# linkapi and the free lanes behave exactly as they did before.
+# ONE PYTHON GATE, because a shell `case` glob cannot tell a number from `.`,
+# `-` or `e` — and every one of those would be read by the arithmetic below as
+# "this lane declares no window", DISARMING the check on the exact run that
+# asked for it. It also supplies the measured defaults straight out of
+# measure/lane_guard.py rather than repeating 122.6 and 35 here: a second copy
+# of a measurement is a second thing to forget when the measurement is redone,
+# and that is this project's signature defect.
+# Each value arrives with a `=` marker when the variable was SET, so an
+# UNSET variable (take the default) stays distinguishable from one set to an
+# empty or whitespace-only string (a typo, which must fail the run — the same
+# rule fix 8 applies to every other budget).
+GEN_VARS="$(python3 - "$MEASURE_DIR" \
+                     "${SHERLOCK_GENERATION_WINDOW_S+=}${SHERLOCK_GENERATION_WINDOW_S-}" \
+                     "${SHERLOCK_OUTPUT_TOKENS_PER_S+=}${SHERLOCK_OUTPUT_TOKENS_PER_S-}" \
+                     "${SHERLOCK_TTFT_RESERVE_S+=}${SHERLOCK_TTFT_RESERVE_S-}" <<'PY'
+import sys
+sys.path.insert(0, sys.argv[1])
+from lane_guard import (GENERATION_WINDOW_TOKENS_PER_S,
+                        GENERATION_WINDOW_TTFT_RESERVE_S,
+                        fitting_max_output_tokens)
+
+
+def number(name, marked, default):
+    """A NUMBER OR AN ABORT. Never a silent fallback: reading an unparseable
+    window as "no window" is how a guard disarms itself, and a blank one is a
+    typo rather than a decision."""
+    if not marked.startswith("="):
+        return default                      # the variable was never set
+    raw = marked[1:]
+    try:
+        return float(raw)
+    except ValueError:
+        sys.stderr.write("\u2717 %s must be a number (got %r)\n" % (name, raw))
+        raise SystemExit(1)
+
+
+window = number("SHERLOCK_GENERATION_WINDOW_S", sys.argv[2], -1.0)
+rate = number("SHERLOCK_OUTPUT_TOKENS_PER_S", sys.argv[3],
+              GENERATION_WINDOW_TOKENS_PER_S)
+reserve = number("SHERLOCK_TTFT_RESERVE_S", sys.argv[4],
+                 float(GENERATION_WINDOW_TTFT_RESERVE_S))
+print("GEN_WINDOW_S=%s" % ("%g" % window))
+print("OUTPUT_TOKENS_PER_S=%s" % ("%g" % rate))
+print("TTFT_RESERVE_S=%s" % ("%g" % reserve))
+print("GEN_FITTING=%d" % fitting_max_output_tokens(window, rate, reserve))
+PY
+)" || { echo "✗ refusing to launch: the generation window could not be read" >&2; exit 1; }
+eval "$GEN_VARS"
+case "${GEN_FITTING:-}" in ''|*[!0-9]*) echo "✗ could not derive the fitting output budget" >&2; exit 1 ;; esac
+# The DEFAULT comes from the window when there is one. It is a default, not a
+# clamp: an explicitly-set value is refused below rather than quietly shrunk,
+# so the number in the launcher always matches the number on the wire.
+if [ -n "${SHERLOCK_MAX_OUTPUT_TOKENS:-}" ]; then
+  MAX_OUT="$SHERLOCK_MAX_OUTPUT_TOKENS"
+elif [ "$GEN_FITTING" != "0" ]; then
+  MAX_OUT="$GEN_FITTING"
+else
+  MAX_OUT=32768
+fi
 case "$MAX_OUT" in *[!0-9]*|'') echo "✗ invalid SHERLOCK_MAX_OUTPUT_TOKENS" >&2; exit 1 ;; esac
+# REFUSE AN IMPOSSIBLE LAUNCH BEFORE SPENDING MONEY. Names all four numbers and
+# the value that would fit; silent on a lane that declares no window.
+if ! python3 - "$MEASURE_DIR" "$MAX_OUT" "$OUTPUT_TOKENS_PER_S" "$TTFT_RESERVE_S" "$GEN_WINDOW_S" <<'PY'
+import sys
+sys.path.insert(0, sys.argv[1])
+from lane_guard import generation_window_refusal
+why = generation_window_refusal(sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5])
+if why:
+    sys.stderr.write("\u2717 %s\n" % why)
+    raise SystemExit(1)
+PY
+then
+  echo "✗ refusing to launch: the output budget does not fit the lane's generation window" >&2
+  exit 1
+fi
+if [ "$GEN_FITTING" != "0" ]; then
+  echo "▶ generation window: ${GEN_WINDOW_S}s at ${OUTPUT_TOKENS_PER_S} tok/s with ${TTFT_RESERVE_S}s reserved for the first token ⇒ max_tokens $MAX_OUT (fits $GEN_FITTING)"
+else
+  echo "▶ generation window: none declared for this lane (SHERLOCK_GENERATION_WINDOW_S=$GEN_WINDOW_S) ⇒ max_tokens $MAX_OUT unchecked"
+fi
 SAMPLING_JSON=''
 if [ "$MAX_OUT" != "0" ]; then
   SAMPLING_JSON=", \"samplingParams\": { \"max_tokens\": $MAX_OUT }"
@@ -699,11 +790,20 @@ ARM_COMMIT="$(git -C "$HERE" rev-parse HEAD 2>/dev/null || echo unknown)"
 # `fork_subagent_max_turns` is qwen-code 0.22.0's hard-coded
 # FORK_DEFAULT_MAX_TURNS: not ours to choose, still ours to record, because it
 # is what terminated a subagent on run 20260826T224846Z-v39.
+# AND THE GENERATION WINDOW, beside them (fix 9). A window is not one of
+# `budgets`: those are all positive integers the launcher chose, and this is a
+# measured property of the PROVIDER plus the arithmetic derived from it. It
+# lives in its own object so the numbers that produced max_output_tokens are on
+# disk next to the value itself - "why 6743?" has to be answerable from the
+# trace alone, and -1 records "this lane declares no window" explicitly rather
+# than by the absence of a key.
 python3 - "$TRACE/run-inputs.json" "$CORPUS_SOURCE" "$RUN_CORPUS" "$PROMPT_SHA" "$ARM_COMMIT" "$ARM" \
-  "$MAX_SESSION_TURNS" "$MAX_WALL_TIME_S" "$MAX_TOOL_CALLS" "$WORKFLOW_AGENT_MAX_TURNS" "$TIMEOUT" <<'PY'
+  "$MAX_SESSION_TURNS" "$MAX_WALL_TIME_S" "$MAX_TOOL_CALLS" "$WORKFLOW_AGENT_MAX_TURNS" "$TIMEOUT" \
+  "$GEN_WINDOW_S" "$OUTPUT_TOKENS_PER_S" "$TTFT_RESERVE_S" "$MAX_OUT" "$GEN_FITTING" <<'PY'
 import json, sys
 (target, corpus_source, staged_root, prompt_sha, arm_commit, arm,
- turns, wall_s, tool_calls, workflow_turns, outer_timeout) = sys.argv[1:]
+ turns, wall_s, tool_calls, workflow_turns, outer_timeout,
+ window_s, tokens_per_s, ttft_reserve_s, max_out, fitting) = sys.argv[1:]
 with open(target, "w", encoding="utf-8") as fh:
     json.dump({"schema": 1, "arm": arm,
                "corpus_source": corpus_source, "staged_root": staged_root,
@@ -714,7 +814,13 @@ with open(target, "w", encoding="utf-8") as fh:
                            "max_tool_calls": int(tool_calls),
                            "workflow_agent_max_turns": int(workflow_turns),
                            "outer_timeout_seconds": int(outer_timeout),
-                           "fork_subagent_max_turns": 200}},
+                           "fork_subagent_max_turns": 200},
+               "generation_window": {
+                   "generation_window_seconds": float(window_s),
+                   "output_tokens_per_second": float(tokens_per_s),
+                   "ttft_reserve_seconds": float(ttft_reserve_s),
+                   "max_output_tokens": int(max_out),
+                   "fitting_max_output_tokens": int(fitting)}},
               fh, ensure_ascii=False, sort_keys=True)
     fh.write("\n")
 PY

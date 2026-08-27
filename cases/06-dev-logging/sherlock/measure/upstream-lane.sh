@@ -345,6 +345,7 @@ PY
       UPSTREAM_ROUTE_ADVANCE_MAX="$advance_max" \
       UPSTREAM_FIRST_TOKEN_MS="${SHERLOCK_UPSTREAM_FIRST_TOKEN_MS:-240000}" \
       UPSTREAM_RETRY_BASE_MS="${SHERLOCK_UPSTREAM_RETRY_BASE_MS:-2000}" \
+      UPSTREAM_GENERATION_WINDOW_S="${SHERLOCK_GENERATION_WINDOW_S:--1}" \
       UPSTREAM_BODY_DIR="$body_dir" "${lane_env[@]}" "${budget_env[@]}" \
       python3 "$proxy" >/dev/null 2>>"${log_path%.jsonl}.proxy.err" &
   else
@@ -360,6 +361,7 @@ PY
       UPSTREAM_ROUTE_ADVANCE_MAX="$advance_max" \
       UPSTREAM_FIRST_TOKEN_MS="${SHERLOCK_UPSTREAM_FIRST_TOKEN_MS:-240000}" \
       UPSTREAM_RETRY_BASE_MS="${SHERLOCK_UPSTREAM_RETRY_BASE_MS:-2000}" \
+      UPSTREAM_GENERATION_WINDOW_S="${SHERLOCK_GENERATION_WINDOW_S:--1}" \
       UPSTREAM_BODY_DIR="$body_dir" "${lane_env[@]}" \
       python3 "$proxy" >/dev/null 2>>"${log_path%.jsonl}.proxy.err" &
   fi

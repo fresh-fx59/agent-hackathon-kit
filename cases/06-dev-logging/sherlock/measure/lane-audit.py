@@ -54,6 +54,16 @@ def main(argv=None):
                              "say so with --no-identity-check.")
     parser.add_argument("--no-identity-check", action="store_true",
                         help="this lane genuinely has no declared model identity")
+    parser.add_argument("--generation-window-s", type=float, default=0.0,
+                        help="THIS LANE'S MEASURED GENERATION WINDOW, in "
+                             "seconds (CloseRouter: 90). A call that dies at "
+                             "or near it carrying the gateway's timeout chunk "
+                             "was cut by the PROVIDER'S clock: billed, and not "
+                             "an answer. Nine such calls on run "
+                             "20260827T005241Z-v39 were being counted as "
+                             "accepted. 0 or -1 means this lane declares no "
+                             "window, and then nothing here is judged against "
+                             "one - linkapi and the free lanes are untouched.")
     parser.add_argument("--no-cache-guard", action="store_true")
     parser.add_argument("--cache-min-rate", type=float, default=DEFAULT_CACHE_MIN_RATE)
     parser.add_argument("--cache-min-calls", type=int, default=DEFAULT_CACHE_MIN_CALLS)
@@ -72,7 +82,8 @@ def main(argv=None):
                           min_rate=args.cache_min_rate,
                           min_calls=args.cache_min_calls,
                           abort_path=args.abort, summary=summary,
-                          advances_path=args.advances)
+                          advances_path=args.advances,
+                          generation_window_s=args.generation_window_s)
     if args.summary_json and summary:
         try:
             with open(args.summary_json, "w", encoding="utf-8") as target:
@@ -143,6 +154,23 @@ def _report(summary, min_rate=DEFAULT_CACHE_MIN_RATE,
         % (summary.get("estimate_basis", "estimate"),
            summary.get("discarded_prompt_tokens_estimated", 0)),
     ]
+    cut = summary.get("generation_window_exceeded_calls", 0)
+    if cut:
+        # BILLED AND THROWN AWAY. HTTP 200, tokens generated, a gateway error
+        # chunk instead of an answer. Its own clause because it is neither a
+        # substitution nor a clean answer, and a run cut repeatedly by the
+        # provider's clock must show the waste rather than a mystery.
+        budgets = sorted({row.get("request_max_tokens")
+                          for row in summary.get(
+                              "generation_window_exceeded_detail", [])
+                          if row.get("request_max_tokens")})
+        parts.append(
+            "%d call(s) CUT BY THE PROVIDER'S %g s generation window "
+            "(billed, answer discarded; %d ms of wall clock spent, request "
+            "max_tokens %s) - the output budget does not fit the window"
+            % (cut, summary.get("generation_window_s", 0),
+               summary.get("generation_window_exceeded_ms", 0),
+               ", ".join(str(b) for b in budgets) or "unrecorded"))
     if summary.get("cost_usd_reported_calls"):
         parts.append("provider-reported cost $%s over %d call(s)"
                      % (summary["cost_usd_reported"],
@@ -156,7 +184,7 @@ def _report(summary, min_rate=DEFAULT_CACHE_MIN_RATE,
             "%s x%d" % (name, count) for name, count
             in sorted(summary["provider_refusals"].items())))
     sys.stderr.write("%s lane cost: %s\n"
-                     % ("⚠" if discarded or summary.get("refused_calls")
+                     % ("⚠" if discarded or summary.get("refused_calls") or cut
                         else "ℹ", "; ".join(parts)))
 
 

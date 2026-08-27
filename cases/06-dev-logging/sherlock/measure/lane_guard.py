@@ -642,6 +642,15 @@ ACCOUNTING_TERMS = (
     "discarded_prompt_tokens_estimated", "estimate_bytes_per_token",
     "cost_usd_reported", "cost_usd_reported_calls",
     "refused_calls", "route_rows", "route_span",
+    # THE PROVIDER'S OWN CLOCK, counted separately because it is neither a
+    # substitution nor a clean answer: an HTTP 200 that generated tokens for
+    # the full generation window and then handed back a gateway error chunk.
+    # Nine of them on run 20260827T005241Z-v39. They are BILLED, so a run cut
+    # repeatedly by the window must show the waste rather than a mystery.
+    # `generation_window_s` is the window they were judged against — 0 when the
+    # lane declares none, in which case the other two are always 0.
+    "generation_window_exceeded_calls", "generation_window_exceeded_ms",
+    "generation_window_s",
 )
 
 
@@ -683,13 +692,186 @@ _DETERMINISTIC_400 = (
 )
 
 
-def deterministic_refusal(status, text):
-    """The named class of a 400 that retrying cannot fix, else None.
+# ======================================================================
+# AN OUTPUT BUDGET THE PROVIDER CANNOT DELIVER INSIDE ITS OWN GENERATION
+# WINDOW IS NOT A BUDGET - it is a guaranteed failure waiting for a long turn.
+#
+# Three paid runs in a row died here. On run 20260827T005241Z-v39 (r3) ten of
+# 152 calls failed and NINE of them died at 90,341-90,416 ms: a 75-millisecond
+# spread across nine independent calls is not jitter, it is a hard ceiling.
+# Each one is an HTTP 200 carrying a gateway error chunk, recorded as
+# `upstream_error_in_200:upstream_error` with `finish_reason: error`; r2 caught
+# the payload verbatim:
+#   {"error":{"code":"upstream_error","message":"upstream_timeout","status":502,
+#    "metadata":{"provider_name":"Deepseek"}}}
+# That is CloseRouter's own upstream generation timeout, 90 seconds. qwen
+# surfaces it as `[API Error: ... Request timeout after 90s]`, whose "increase
+# contentGenerator.timeout" hint is a HARD-CODED STRING and not a config read,
+# so raising a client timeout cannot help. The request has to get smaller.
+#
+# Measured on r3's own 142 good calls: 142,661 completion tokens over
+# 2,073,964 ms of wall clock, of which 909,873 ms was time-to-first-token.
+# 1,164,091 ms of actual generation => 122.55 tok/s, average TTFT 6.4 s,
+# largest completion actually returned 8,497 tokens. Every call requested up to
+# 32,768 output tokens - FIVE TIMES more than the lane can produce inside its
+# own window.
+#
+# So the budget is DERIVED: floor((window - ttft_reserve) x tok/s). The reserve
+# is 35 s, the largest TTFT this project has ever recorded (the v38 run), NOT
+# the 6.4 s average - the average is not what kills a run.
+#
+# TWO RULES, both of them load-bearing:
+#   * a lane that declares NO window (unset, empty, 0 or -1) is never judged
+#     here at all, so linkapi and the free lanes behave exactly as before;
+#   * a budget that does not fit is REFUSED, never silently clamped, so the
+#     number in the launcher always matches the number on the wire.
+# ======================================================================
+GENERATION_WINDOW_EXCEEDED = "GENERATION_WINDOW_EXCEEDED"
+# The largest TTFT this project has recorded on any run, in seconds.
+GENERATION_WINDOW_TTFT_RESERVE_S = 35
+# Generation-only throughput, measured on r3's 142 good calls (see above).
+GENERATION_WINDOW_TOKENS_PER_S = 122.6
+# How close to the window counts as "at the window", as a FRACTION of the
+# window rather than a fixed number of seconds - a fixed slack that is sane for
+# a 90 s window silently matches everything on a short one. The nine r3 rows
+# landed at 90,341-90,416 ms against a 90,000 ms window: all nine within 0.5 %,
+# and slightly OVER it. 5 % is generous enough for a slower provider's own
+# rounding and nowhere near the tenth failure, which died at 32,354 ms - 36 %
+# of the window, and a different animal.
+GENERATION_WINDOW_NEAR_FRACTION = 0.05
+# The ledger keeps the error CODE, never the message text (a message can echo
+# the request), so the needles have to match what is actually recorded. That is
+# why the duration gate below is not optional: `upstream_error` on its own is
+# far too generic to name a cause.
+_WINDOW_ERROR_NEEDLES = ("upstream_timeout", "upstream_error",
+                         "request timeout after")
+
+
+def _positive_number(value):
+    """`value` as a float when it is a usable positive number, else None."""
+    if isinstance(value, bool):
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    if number != number or number in (float("inf"), float("-inf")):
+        return None
+    return number if number > 0 else None
+
+
+def generation_window_declared(generation_window_s):
+    """True when this lane declared a generation window worth judging against.
+
+    Unset, empty, 0, -1 and unparseable all mean UNDECLARED, and an undeclared
+    window disarms every part of fix 9. That is deliberate: linkapi and the
+    free lanes never measured a window, and a check they cannot pass is a check
+    that would break them.
+    """
+    return _positive_number(generation_window_s) is not None
+
+
+def generation_window_exceeded(text, duration_ms, generation_window_s):
+    """True when this row is the provider's own generation clock cutting a turn.
+
+    Needs BOTH halves: the gateway's error shape AND a duration at or near the
+    declared window. The tenth r3 failure carries the identical error string at
+    32,354 ms and is a different animal; matching on the message alone would
+    mislabel it, and matching on the clock alone would mislabel a slow success.
+    """
+    window = _positive_number(generation_window_s)
+    if window is None:
+        return False
+    duration = _positive_number(duration_ms)
+    if duration is None:
+        return False
+    if duration < window * (1.0 - GENERATION_WINDOW_NEAR_FRACTION) * 1000.0:
+        return False
+    low = str(text or "").lower()
+    return any(needle in low for needle in _WINDOW_ERROR_NEEDLES)
+
+
+def fitting_max_output_tokens(generation_window_s, tokens_per_s,
+                              ttft_reserve_s=GENERATION_WINDOW_TTFT_RESERVE_S):
+    """The largest output budget this lane can actually deliver, or 0.
+
+    0 means "not derivable" - an undeclared window, an unmeasured throughput,
+    or a reserve that already eats the whole window. It is never a budget.
+    """
+    window = _positive_number(generation_window_s)
+    rate = _positive_number(tokens_per_s)
+    if window is None or rate is None:
+        return 0
+    reserve = _positive_number(ttft_reserve_s) or 0.0
+    usable = window - reserve
+    if usable <= 0:
+        return 0
+    return int(usable * rate)
+
+
+def generation_window_refusal(max_output_tokens, tokens_per_s, ttft_reserve_s,
+                              generation_window_s):
+    """The abort message for an impossible launch, or None when it fits.
+
+    Names ALL FOUR numbers it judged on and the value that would fit, because a
+    refusal that does not say what to set instead only moves the problem. An
+    undeclared window returns None without looking at anything else.
+    """
+    window = _positive_number(generation_window_s)
+    if window is None:
+        return None
+    budget = _positive_number(max_output_tokens)
+    if budget is None:
+        # No budget declared at all means qwen-code auto-escalates max_tokens
+        # (64K floor), which is strictly worse than the value we just refused.
+        return ("SHERLOCK_MAX_OUTPUT_TOKENS is unset or unusable (%r) on a lane "
+                "that declares a %g s generation window: qwen-code would "
+                "auto-escalate max_tokens to at least 65536, which this lane "
+                "cannot deliver. Set SHERLOCK_MAX_OUTPUT_TOKENS=%d."
+                % (max_output_tokens, window,
+                   fitting_max_output_tokens(window, tokens_per_s, ttft_reserve_s)))
+    rate = _positive_number(tokens_per_s)
+    if rate is None:
+        # A declared window that cannot be checked is not a window that passes:
+        # unmeasured is not safe, the same fail-closed rule as the rest of this
+        # file.
+        return ("SHERLOCK_OUTPUT_TOKENS_PER_S is unset or unusable (%r) on a "
+                "lane that declares a %g s generation window, so the output "
+                "budget of %d tokens could not be checked against it - and "
+                "unmeasured is not safe. Measure the lane's generation-only "
+                "throughput and declare it."
+                % (tokens_per_s, window, int(budget)))
+    reserve = _positive_number(ttft_reserve_s) or 0.0
+    needed = budget / rate + reserve
+    if needed <= window:
+        return None
+    fits = fitting_max_output_tokens(window, rate, reserve)
+    return ("SHERLOCK_MAX_OUTPUT_TOKENS=%d cannot be delivered inside this "
+            "lane's generation window: %d tokens / %g tokens-per-second = "
+            "%.1f s of generation, + %g s reserved for the first token = "
+            "%.1f s, against a declared SHERLOCK_GENERATION_WINDOW_S=%g. "
+            "The provider cuts the turn and bills it. Set "
+            "SHERLOCK_MAX_OUTPUT_TOKENS=%d or lower."
+            % (int(budget), int(budget), rate, budget / rate, reserve, needed,
+               window, fits))
+
+
+def deterministic_refusal(status, text, duration_ms=None,
+                          generation_window_s=0):
+    """The named class of a failure that retrying cannot fix, else None.
 
     Matched on the provider's own message because that is the only place the
-    distinction lives: linkapi's transient burst and this permanent refusal are
+    distinction lives: linkapi's transient burst and a permanent refusal are
     the same integer.
+
+    GENERATION_WINDOW_EXCEEDED is checked FIRST and for ANY status, because the
+    real shape is an HTTP 200 with an error chunk spliced into the stream and
+    the gateway can also surface it as a 502 - which IS in the burst-retry set.
+    It is deterministic for a long turn, so naming it here is what keeps it out
+    of the retry path entirely.
     """
+    if generation_window_exceeded(text, duration_ms, generation_window_s):
+        return GENERATION_WINDOW_EXCEEDED
     if status != 400 or not text:
         return None
     low = str(text).lower()
@@ -712,6 +894,10 @@ def _accounting_zero():
         "incomplete_reason": "the ledger was never read",
         "estimate_basis": _ESTIMATE_BASIS,
         "discarded_by_model": {}, "provider_refusals": {},
+        # One entry per call the provider's clock cut, with the duration and
+        # the request budget that caused it - so a run can say "I was cut by
+        # the provider's clock" from its own artifacts.
+        "generation_window_exceeded_detail": [],
         "route_generations": {}, "route_bases": {}, "route_identities": {},
         "route_advances": 0, "route_advances_blocked": 0,
         "route_advance_checks": {},
@@ -738,7 +924,7 @@ def _int(value):
     return value if type(value) is int and value > 0 else 0
 
 
-def _account_call(row, summary, identity_check):
+def _account_call(row, summary, identity_check, generation_window_s=0):
     """One call row into the summary. Never raises, never judges."""
     nbytes = _int(row.get("request_bytes"))
     summary["call_rows"] += 1
@@ -785,6 +971,20 @@ def _account_call(row, summary, identity_check):
         _bump(summary["discarded_by_model"],
               name if isinstance(name, str) else "?")
         return
+    # CUT BY THE PROVIDER'S CLOCK: billed, and not an answer. It is counted
+    # above as a call and a billed call, and it stops here - a turn the
+    # provider killed at its own generation window never reached the client,
+    # so calling it an accepted answer is how nine wasted calls became a
+    # mystery on run 20260827T005241Z-v39.
+    if (generation_window_exceeded(row.get("upstream_error"),
+                                   row.get("duration_ms"), generation_window_s)
+            or row.get("upstream_refusal_class") == GENERATION_WINDOW_EXCEEDED):
+        summary["generation_window_exceeded_calls"] += 1
+        summary["generation_window_exceeded_ms"] += _int(row.get("duration_ms"))
+        summary["generation_window_exceeded_detail"].append(
+            {"duration_ms": _int(row.get("duration_ms")),
+             "request_max_tokens": _int(row.get("request_max_tokens"))})
+        return
     summary["accepted_rows"] += 1
     if billed:
         summary["accepted_calls"] += 1
@@ -792,7 +992,8 @@ def _account_call(row, summary, identity_check):
         summary["cached_tokens"] += hit
 
 
-def account_ledger(ledger_path, summary, identity_check=True):
+def account_ledger(ledger_path, summary, identity_check=True,
+                   generation_window_s=0):
     """Fill `summary` from the WHOLE ledger, whatever the verdict turns out to be.
 
     Deliberately separate from the verdict walk: the verdict can stop on row 1
@@ -824,8 +1025,12 @@ def account_ledger(ledger_path, summary, identity_check=True):
             if isinstance(row.get("event"), str) and row["event"]:
                 summary["event_rows"] += 1
                 continue
-            _account_call(row, summary, identity_check)
+            _account_call(row, summary, identity_check, generation_window_s)
     summary["route_span"] = len(summary["route_identities"])
+    # The window these rows were judged against, in the summary rather than
+    # only in an argument: a reader must never have to guess whether zero cut
+    # calls means "none happened" or "nobody was looking".
+    summary["generation_window_s"] = _positive_number(generation_window_s) or 0
     if not summary["ledger_rows"]:
         _incomplete(summary,
                     "the upstream ledger %s has no rows, so no call was ever "
@@ -851,7 +1056,8 @@ def account_ledger(ledger_path, summary, identity_check=True):
 def audit_ledger(ledger_path, expected_identity="", cache_guard=True,
                  min_rate=DEFAULT_CACHE_MIN_RATE,
                  min_calls=DEFAULT_CACHE_MIN_CALLS, abort_path="",
-                 identity_check=True, summary=None, advances_path=""):
+                 identity_check=True, summary=None, advances_path="",
+                 generation_window_s=0):
     """Judge a finished run's upstream ledger. Returns (reason, detail) or None.
 
     FAIL-CLOSED, deliberately and in every direction. A ledger that is absent,
@@ -898,7 +1104,8 @@ def audit_ledger(ledger_path, expected_identity="", cache_guard=True,
     """
     if summary is not None:
         summary.update(_accounting_zero())
-        account_ledger(ledger_path, summary, identity_check=identity_check)
+        account_ledger(ledger_path, summary, identity_check=identity_check,
+                       generation_window_s=generation_window_s)
     # THE LIVE GUARD'S REASON WINS - but it no longer short-circuits the
     # accounting above, and the ledger is still judged so that
     # `ledger_verdict` records what the after-the-fact audit made of the same
