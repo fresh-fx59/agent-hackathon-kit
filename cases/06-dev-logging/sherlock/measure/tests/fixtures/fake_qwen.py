@@ -55,6 +55,47 @@ while True:
     if MODE == "die":
         say("boom")
         raise SystemExit(1)
+    if MODE == "partial_then_finish":
+        # First turn of the triage stage: close HALF the rows and take a BATCH
+        # boundary, exactly as a real arm does when its context is filling and
+        # rows are still open. Then behave normally.
+        import json as _json
+        st = stage()
+        if st == "triage" and not os.path.exists(os.path.join(WORK, ".half")):
+            rows = open(os.path.join(WORK, "worklist.tsv"),
+                        encoding="utf-8").read().splitlines()
+            out = []
+            closed = 0
+            for line in rows:
+                if line.startswith("#") or "\t?" not in line:
+                    out.append(line); continue
+                if closed < 3:
+                    out.append(line.replace("\t?", "\tN a.log:1 «q» n=1 фон"))
+                    closed += 1
+                else:
+                    out.append(line)
+            open(os.path.join(WORK, "worklist.tsv"), "w",
+                 encoding="utf-8").write("\n".join(out) + "\n")
+            open(os.path.join(WORK, ".half"), "w").write("done")
+            out = subprocess.run([sys.executable, CHECKPOINT, "handoff",
+                                  "--work", WORK, "--done", "triage",
+                                  "--partial"], capture_output=True, text=True)
+            say(out.stdout or ("partial handoff failed: " + out.stderr))
+            continue
+        if st == "triage":
+            rows = open(os.path.join(WORK, "worklist.tsv"),
+                        encoding="utf-8").read()
+            open(os.path.join(WORK, "worklist.tsv"), "w",
+                 encoding="utf-8").write(
+                rows.replace("\t?", "\tN a.log:1 «q» n=1 фон"))
+        if st == "draft":
+            open(os.path.join(WORK, "report.md"), "w", encoding="utf-8").write(
+                "# Отчёт Sherlock\n\n## Находки\n\n### Н-1 fake\n")
+        out = subprocess.run([sys.executable, CHECKPOINT, "handoff", "--work",
+                              WORK, "--done", st], capture_output=True,
+                             text=True)
+        say(out.stdout or ("handoff failed: " + out.stderr))
+        continue
     if MODE == "stall":
         # Working, talkative, and never finishing a stage — the shape of a run
         # that has to be judged by its checkpoint and not by its chatter.

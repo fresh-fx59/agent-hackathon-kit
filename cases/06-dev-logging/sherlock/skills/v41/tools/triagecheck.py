@@ -1203,6 +1203,9 @@ def maybe_refresh_checkpoint(worklist_path, force):
         # two tools ran last decided what the file claimed to be.
         "schema": ckmod.SCHEMA,
         "stage": prior.get("stage", "triage"),
+        # Carried forward, never reset: the driver watches this counter to know a
+        # boundary happened, and dropping it here would hide one.
+        ckmod.BOUNDARY_SEQ: int(prior.get(ckmod.BOUNDARY_SEQ, 0) or 0),
         "state": "ready_for_synthesis" if unresolved == 0 else "resume_triage",
         "total": total,
         "resolved": resolved,

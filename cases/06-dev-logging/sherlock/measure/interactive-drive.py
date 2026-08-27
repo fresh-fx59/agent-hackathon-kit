@@ -98,13 +98,32 @@ def stage_index(stage):
         return -1
 
 
-def stage_of(work):
+def checkpoint_row(work):
     try:
         row = json.load(open(os.path.join(work, "checkpoint.json"),
                              encoding="utf-8"))
     except (OSError, ValueError):
-        return None
-    return row.get("stage") if isinstance(row, dict) else None
+        return {}
+    return row if isinstance(row, dict) else {}
+
+
+def stage_of(work):
+    return checkpoint_row(work).get("stage")
+
+
+def boundary_of(work):
+    """How many handoffs the arm has taken — partial ones included.
+
+    THE SIGNAL THE DRIVER ACTUALLY NEEDS, and the reason it is separate from the
+    stage. `handoff --partial` closes a BATCH and deliberately leaves the stage
+    where it is, so a driver that watched only the stage saw nothing, nudged the
+    model to carry on in the same session, and eventually called a healthy batch
+    boundary a stall. Caught in review before the v41 paid launch.
+    """
+    try:
+        return int(checkpoint_row(work).get("boundary_seq", 0) or 0)
+    except (TypeError, ValueError):
+        return 0
 
 
 class Session(object):
@@ -220,6 +239,7 @@ def drive(argv, cwd, work, first_prompt, reseed, stage_budget_s, settle_s,
         # difference between a driver that works and one that reports
         # STAGE_TIMEOUT on a healthy run.
         seen = stage_of(work)
+        seen_boundary = boundary_of(work)
         # THE STAGE ACCUMULATOR IS RESET BEFORE TYPING, NEVER AT THE TOP OF THE
         # WAIT LOOP. A fast target answers during the settle that follows the
         # reseed line, so a reset at the top of the next iteration WIPES the
@@ -239,8 +259,15 @@ def drive(argv, cwd, work, first_prompt, reseed, stage_budget_s, settle_s,
                     note("DIED", "child exited at stage %s" % seen)
                     return 3, events
                 now = stage_of(work)
-                if stage_index(now) > stage_index(seen):
-                    seen = now
+                now_boundary = boundary_of(work)
+                # EITHER fact is a boundary: the stage moved forward, or the arm
+                # took a batch boundary inside the same stage. The counter is
+                # monotonic, so «greater than» is the whole test.
+                if (stage_index(now) > stage_index(seen)
+                        or now_boundary > seen_boundary):
+                    partial = (stage_index(now) <= stage_index(seen))
+                    seen = now if now is not None else seen
+                    seen_boundary = now_boundary
                     break
                 # A STALL IS NOT A LONG STAGE, and the ledger can tell them
                 # apart. Bounded on purpose: a target that answers a nudge with
@@ -286,7 +313,7 @@ def drive(argv, cwd, work, first_prompt, reseed, stage_budget_s, settle_s,
                      "stage is now %s but work/handoff.txt does not exist — the "
                      "boundary was not taken through checkpoint.py handoff" % seen)
                 return 5, events
-            note("stage_advanced", seen)
+            note("batch_boundary" if partial else "stage_advanced", seen)
             if on_screen:
                 note("handoff_block_on_screen", seen)
             elif ses.stage_truncated:
@@ -296,7 +323,7 @@ def drive(argv, cwd, work, first_prompt, reseed, stage_budget_s, settle_s,
             else:
                 note("handoff_block_not_shown", seen)
 
-            if seen == "done":
+            if seen == "done" and not partial:
                 note("finished", "stage=done")
                 return 0, events
 

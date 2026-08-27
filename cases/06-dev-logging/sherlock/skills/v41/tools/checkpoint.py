@@ -116,6 +116,22 @@ def render_placeholder(row):
 #: context on r6.
 STAGES = ("triage", "draft", "repair", "done")
 
+#: THE BOUNDARY COUNTER'S NAME, and why the stage alone was not enough.
+#:
+#: CAUGHT IN REVIEW before the v41 launch: `handoff --partial` deliberately does
+#: NOT advance the stage, while the driver reacted only to a stage ADVANCE. So the
+#: first batch boundary was invisible: the driver waited, nudged the model to carry
+#: on in the SAME session — the opposite of what a batch boundary is for — and
+#: exited STAGE_STALLED without ever typing `/clear`. Both halves had tests; no
+#: test ran them together, which is exactly how an integration failure hides.
+#:
+#: «A boundary happened» and «the stage changed» are two different facts. They
+#: only looked like one while every boundary ended a stage. This counter is the
+#: first fact, on its own: it rises on EVERY handoff, partial or full, and never
+#: falls — not on an `init` inside a stage, and not when
+#: `triagecheck --refresh-checkpoint` rewrites the same file.
+BOUNDARY_SEQ = "boundary_seq"
+
 #: THE schema number. It lives here because `checkpoint.py` is not the only
 #: writer of checkpoint.json — `triagecheck.py --refresh-checkpoint` rewrites it
 #: too, and on v39 that second writer hard-coded `"schema": 1` while this one
@@ -255,6 +271,7 @@ def handoff(work, done, partial=False):
                              "piece of work, not a countable list"
                              % (", ".join(BATCHED_STAGES), done))
         row["stage_partial"] = True
+        row[BOUNDARY_SEQ] = int(row.get(BOUNDARY_SEQ, 0) or 0) + 1
         row["updated_at"] = datetime.datetime.now(
             datetime.timezone.utc).isoformat()
         atomic_text(work / "checkpoint.json",
@@ -280,6 +297,7 @@ def handoff(work, done, partial=False):
                              "«СИНТЕЗ НЕ ЗАВЕРШЁН» line — synthesis is not done")
     row["stage"] = next_stage(done)
     row["stage_closed"] = done
+    row[BOUNDARY_SEQ] = int(row.get(BOUNDARY_SEQ, 0) or 0) + 1
     # The stage really ended, so the batch marker is spent. Left explicitly False
     # rather than deleted: a reader must be able to tell "no partial boundary was
     # ever taken" from "this key predates the feature".
@@ -300,9 +318,10 @@ def resume(work):
         raise ValueError("no readable checkpoint.json in %s — this is a new "
                          "investigation: start at stage triage" % work)
     stage = row.get("stage", "triage")
-    return row, ("СТУПЕНЬ СЕЙЧАС: %s\nСОСТОЯНИЕ: %s (разобрано %s из %s)\n"
+    return row, ("СТУПЕНЬ СЕЙЧАС: %s\nСОСТОЯНИЕ: %s (разобрано %s из %s, "
+                 "границ пройдено %s)\n"
                  % (stage, row.get("state", "?"), row.get("resolved", "?"),
-                    row.get("total", "?")))
+                    row.get("total", "?"), row.get(BOUNDARY_SEQ, 0)))
 
 
 def init(work):
@@ -316,6 +335,9 @@ def init(work):
         # the worklist closed"; `stage` answers "which bounded session am I".
         # init must never rewind a stage: it is re-run inside every stage.
         "stage": previous.get("stage", "triage") if previous else "triage",
+        # NEVER LOWERED. `init` runs inside every stage, so resetting this would
+        # erase a boundary the driver has not seen yet.
+        BOUNDARY_SEQ: int(previous.get(BOUNDARY_SEQ, 0) or 0) if previous else 0,
         "state": "ready_for_synthesis" if unresolved == 0 else "resume_triage",
         "total": total,
         "resolved": resolved,

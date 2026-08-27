@@ -98,10 +98,11 @@ class PreSendGate(base.ProxyCase):
         self.assertEqual(len(self.srv.seen), 1, "a legal call must reach upstream")
 
     def test_an_illegal_request_never_reaches_the_provider(self):
-        # 3.20 chars/token calibrated on this lane: 800,000 chars ≈ 250,000
-        # tokens, plus a 20,000 output budget = 270,000 > 262,000.
+        # Sized from the gate, not from a magic number: whatever the calibrated
+        # ratio is, 1,200,000 characters is over 262,000 tokens for any divisor
+        # this project would defend (it is 352,941 tokens even at 3.40).
         self.start_gated(gate=262000)
-        big = "x" * 800000
+        big = "x" * 1200000
         code, payload = self.post({"model": "m", "max_tokens": 20000,
                                    "messages": [{"role": "user",
                                                  "content": big}]})
@@ -120,7 +121,7 @@ class PreSendGate(base.ProxyCase):
         self.start_gated(gate=262000)
         _, payload = self.post({"model": "m", "max_tokens": 20000,
                                 "messages": [{"role": "user",
-                                              "content": "y" * 800000}]})
+                                              "content": "y" * 1200000}]})
         text = json.dumps(json.loads(payload))
         patterns = [r"\bcontext[_\s-]?length[_\s-]?exceeded\b",
                     r"\bmaximum context length\b"]
@@ -141,7 +142,7 @@ class PreSendGate(base.ProxyCase):
     def test_the_refusal_is_recorded_as_its_own_class_not_as_a_call(self):
         self.start_gated(gate=262000)
         self.post({"model": "m", "max_tokens": 20000,
-                   "messages": [{"role": "user", "content": "z" * 800000}]})
+                   "messages": [{"role": "user", "content": "z" * 1200000}]})
         rows = self.rows()
         self.assertTrue(rows, "the refusal must be recorded")
         row = rows[-1]
@@ -157,10 +158,34 @@ class PreSendGate(base.ProxyCase):
         self.start_gated(gate=0)
         code, _ = self.post({"model": "m", "max_tokens": 20000,
                              "messages": [{"role": "user",
-                                           "content": "q" * 800000}]})
+                                           "content": "q" * 1200000}]})
         self.assertEqual(code, 200)
         self.assertEqual(len(self.srv.seen), 1,
                          "with no gate declared the proxy must not judge")
+
+    def test_the_default_divisor_is_at_or_below_the_measured_minimum(self):
+        """THE SAFETY DIRECTION, pinned against real data rather than taste.
+
+        `request_bytes / usage.prompt_tokens` measured over 316 real calls of two
+        paid runs: min 3.441 (run 20260827T045553Z-v39, n=190), min 3.526 (run
+        20260827T104334Z-v40, n=126), median 3.586 / 3.792, max ~4.17.
+
+        A divisor at or BELOW the observed minimum over-estimates the token count,
+        so the wall can refuse a legal request but cannot pass an illegal one. A
+        divisor above it would be a wall with a hole. This test fails if anyone
+        ever raises the default past the measured floor, which is the only way this
+        gate can silently stop being one.
+        """
+        import re
+        src = open(base.PROXY, encoding="utf-8").read()
+        m = re.search(r'UPSTREAM_CHARS_PER_TOKEN\s*=\s*float\(\s*\n?\s*'
+                      r'os\.environ\.get\("UPSTREAM_CHARS_PER_TOKEN",\s*'
+                      r'"([0-9.]+)"', src)
+        self.assertIsNotNone(m, "the default divisor is not where it was")
+        self.assertLessEqual(
+            float(m.group(1)), 3.441,
+            "a divisor above the measured minimum ratio (3.441) under-estimates "
+            "the prompt, which turns this wall into a suggestion")
 
     def test_the_estimate_is_conservative_not_optimistic(self):
         """A gate that under-counts is not a wall.
@@ -184,7 +209,7 @@ class PreSendGate(base.ProxyCase):
         a third of the prompt."""
         self.start_gated(gate=262000)
         schema = {"type": "function",
-                  "function": {"name": "t", "description": "d" * 400000,
+                  "function": {"name": "t", "description": "d" * 700000,
                                "parameters": {"type": "object"}}}
         code, payload = self.post({"model": "m", "max_tokens": 20000,
                                    "messages": [{"role": "user", "content": "hi"}],

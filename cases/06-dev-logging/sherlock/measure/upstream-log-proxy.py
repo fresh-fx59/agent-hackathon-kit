@@ -95,13 +95,31 @@ UPSTREAM_MODEL = os.environ.get("UPSTREAM_MODEL", "")
 # 0 declares no ceiling and judges nothing, so every existing lane is untouched.
 UPSTREAM_PER_REQUEST_TOKEN_GATE = int(
     os.environ.get("UPSTREAM_PER_REQUEST_TOKEN_GATE", "0") or 0)
-# CALIBRATED, not guessed: 3.20 characters per token, established on this lane
-# against the provider's own reported prompt_tokens. The estimate divides the
-# WHOLE serialised request — messages AND tool schemas, which were 113,061 of the
-# v40 peak request's characters — so it cannot miss a third of the prompt the way
-# a messages-only estimate would.
+# MEASURED ACROSS 316 REAL CALLS, and the direction of the error is the whole
+# point. `request_bytes / usage.prompt_tokens` over both paid runs:
+#
+#   run 20260827T104334Z-v40  n=126  min 3.526  median 3.792  max 4.168
+#   run 20260827T045553Z-v39  n=190  min 3.441  median 3.586  max 4.176
+#
+# So the true ratio never fell below 3.441. A DIVISOR BELOW THE OBSERVED MINIMUM
+# over-estimates the token count, which is the safe direction for a wall: it can
+# refuse a legal request but it cannot pass an illegal one. 3.40 sits just under
+# that minimum, so the worst-case over-estimate is 3.441/3.40 = 1.2 % and the
+# typical one is about 11 % — and an over-estimate is RECOVERABLE, because the
+# refusal is shaped so qwen compacts and retries (see pre_send_refusal_text),
+# while a breach is not recoverable at all.
+#
+# THE COST IS STATED, NOT HIDDEN: at an 11 % over-estimate a genuinely legal
+# request of ~235,000 tokens can be refused at a 262,000 gate. That is one
+# compaction, not a lost run. Every call row records `estimated_prompt_tokens`
+# beside the provider's own count, so this constant can be re-derived from any
+# future run instead of being argued about.
+#
+# The estimate divides the WHOLE serialised request — messages AND tool schemas,
+# which were 113,061 of the v40 peak request's characters — so it cannot miss a
+# third of the prompt the way a messages-only estimate would.
 UPSTREAM_CHARS_PER_TOKEN = float(
-    os.environ.get("UPSTREAM_CHARS_PER_TOKEN", "3.20") or 3.20)
+    os.environ.get("UPSTREAM_CHARS_PER_TOKEN", "3.40") or 3.40)
 # RIDE OUT A PROVIDER BURST. linkapi's 400s are transient and minute-scale —
 # measured 2026-08-02, and NOT explained by request size or shape (both
 # controlled for, interleaved, 12/12 succeeded at the size and shape that had
@@ -2086,6 +2104,12 @@ class Proxy(BaseHTTPRequestHandler):
                          usage=state["usage"], finish_reason=state["finish_reason"],
                          duration_ms=row_duration_ms, sent_model=sent,
                          request_bytes=len(body), path=self.path, stream=streaming,
+                         # THE ESTIMATE, BESIDE THE PROVIDER'S OWN COUNT. One
+                         # integer, so UPSTREAM_CHARS_PER_TOKEN can be re-derived
+                         # from any future run's ledger instead of argued about —
+                         # and so a lane whose real ratio drifts below the divisor
+                         # is visible in an artifact rather than only in a breach.
+                         estimated_prompt_tokens=estimate_prompt_tokens(body),
                          upstream_error=state["error"], stream_events=state["stream_events"],
                          content_events=state["content_events"], ttft_ms=state["ttft_ms"],
                          deadline_unenforceable=state["deadline_unenforceable"] or None,
