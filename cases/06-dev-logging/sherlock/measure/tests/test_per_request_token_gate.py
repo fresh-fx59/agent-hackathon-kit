@@ -152,6 +152,39 @@ def main():
           rc != 0 and "PER_REQUEST_TOKEN_GATE" in out + err,
           "rc=%d %s" % (rc, (out + err)[:300]))
 
+    # ── THE PROVIDER THAT ANSWERS AND WITHHOLDS THE COUNTS, 2026-08-27 ──────
+    # Free wall rehearsal 20260827T135207Z-v41, rows 25 and 62: status 200,
+    # `stream_complete: true`, 129 stream events, 34,079 response bytes — a real
+    # answer — and `usage: null` with no `finish_reason`. The gateway simply did
+    # not send the usage chunk. Calling that UNMEASURED is correct but useless:
+    # the run is failed by the gateway's bookkeeping, not by its own behaviour.
+    #
+    # The proxy records `estimated_prompt_tokens` on EVERY row, and the
+    # estimator is calibrated to OVER-estimate (3.40 chars/token against a
+    # measured floor of 3.441 over 316 real calls). So when the estimate plus
+    # the declared budget fits under the ceiling, the true value fits too —
+    # the safe direction. That is proof, and it is used only as a fallback.
+    #
+    # An estimate that does NOT fit proves nothing either way, so it stays
+    # unmeasured rather than being reported as a breach.
+    hidden_but_estimable = legal + [
+        dict(row(0, 20000), usage=None, stream_complete=True, status=200,
+             finish_reason=None, estimated_prompt_tokens=40000)]
+    rc, out, err = audit(hidden_but_estimable, "--per-request-token-gate",
+                         str(GATE))
+    check("an answered row with no provider counts PASSES on the calibrated "
+          "over-estimate when estimate + budget fits the ceiling",
+          rc == 0, "rc=%d %s" % (rc, (out + err)[-600:]))
+
+    hidden_and_over = legal + [
+        dict(row(0, 20000), usage=None, stream_complete=True, status=200,
+             finish_reason=None, estimated_prompt_tokens=250000)]
+    rc, out, err = audit(hidden_and_over, "--per-request-token-gate", str(GATE))
+    check("an over-ceiling ESTIMATE on a countless row is still UNMEASURED, "
+          "never reported as a proven breach",
+          rc != 0 and "UNMEASURED" in out + err,
+          "rc=%d %s" % (rc, (out + err)[:400]))
+
     # A row that cannot be judged must not pass silently — that is the whole
     # lesson of EXPECTED_IDENTITY_UNKNOWN.
     blind = [dict(row(1000, 20000), stream_complete=True, status=200)]

@@ -1131,6 +1131,22 @@ def per_request_token_breach(rows, gate):
         prompt = usage.get("prompt_tokens") if isinstance(usage, dict) else None
         declared = row.get("request_max_tokens")
         if not isinstance(prompt, int) or isinstance(prompt, bool):
+            # THE GATEWAY THAT ANSWERS AND WITHHOLDS THE COUNTS. Measured on the
+            # free wall rehearsal 20260827T135207Z-v41 (rows 25 and 62): a real
+            # 34 KB streamed answer, `stream_complete: true`, and `usage: null`.
+            #
+            # Fall back to the proxy's own estimate, which is calibrated to
+            # OVER-estimate (3.40 chars/token against a measured floor of 3.441
+            # over 316 real calls). If estimate + declared budget fits the
+            # ceiling, the true request fits too — that is proof in the safe
+            # direction, not a guess. An estimate that does NOT fit proves
+            # nothing, so it stays unmeasured rather than a claimed breach.
+            est = row.get("estimated_prompt_tokens")
+            if (isinstance(est, int) and not isinstance(est, bool)
+                    and isinstance(declared, int)
+                    and not isinstance(declared, bool)
+                    and est + declared <= gate):
+                continue
             return "PER_REQUEST_TOKEN_GATE_UNMEASURED", (
                 "row %d carries no prompt token count, so this run has no proof "
                 "it stayed under the %d-token per-request ceiling — unmeasured "
