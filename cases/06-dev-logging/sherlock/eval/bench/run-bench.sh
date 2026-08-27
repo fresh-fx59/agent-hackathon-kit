@@ -16,6 +16,35 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SKILLS="$(cd "$HERE/../.." && pwd)/skills"
 QWEN="${QWEN_BIN:-$HOME/.local/bin/qwen}"
 ARM="${1:-unknown}"
+# >>> ARM VERSION GATE >>>
+# THE INPUT GATE for the arm name (docs/conventions.md): the version is turned
+# into a NUMBER once, here, and every downstream decision is a `>=` against it.
+# Before this, six decisions — the run timeout, the settings shape, the agent
+# install, the seed path, the brief and the skill copy — each carried its own
+# literal chain of ten `[ "$ARM" = "vNN" ]` tests. Adding an arm meant editing
+# all of them, and forgetting one FAILED SILENTLY: the missed site fell through
+# to the pre-v30 branch, so the run would take a 2700-second timeout or an older
+# settings block while every other site believed it was a modern arm.
+#
+# `none` and `unknown` are documented arm names (see the usage line above; ARM
+# itself defaults to `unknown`), so they resolve to 0 and simply compare false.
+# ANYTHING ELSE ABORTS. That is deliberate and it is the fix-9 lesson: a `case`
+# glob whose no-match branch answers "false" silently disarms every check built
+# on it, which is exactly how the generation-window guard nearly shipped dead.
+arm_num() {
+  case "${1-}" in
+    none|unknown) printf '0\n' ;;
+    v[0-9]|v[0-9][0-9]|v[0-9][0-9][0-9]) printf '%s\n' "${1#v}" ;;
+    *) printf 'run-bench.sh: unusable arm %s - expected none, unknown or v<number>\n' \
+         "${1:-<unset>}" >&2; exit 2 ;;
+  esac
+}
+arm_ge() {   # arm_ge <arm> <floor> - true when <arm> is v<floor> or newer
+  _arm_n="$(arm_num "$1")" || exit 2
+  [ "$_arm_n" -ge "$2" ]
+}
+# <<< ARM VERSION GATE <<<
+arm_num "$ARM" >/dev/null   # abort now, not at the first branch
 CORPUS="${SHERLOCK_CORPUS:-}"
 BASE_URL="${SHERLOCK_BASE_URL:-https://linkapi.ai/v1}"
 # The ALIAS on purpose — do NOT "pin" a dated snapshot here (PR #77 did; it
@@ -42,7 +71,7 @@ EXPECTED_RETURNED_IDENTITY="${SHERLOCK_EXPECTED_RETURNED_IDENTITY:-$MODEL}"
 export SHERLOCK_EXPECTED_RETURNED_IDENTITY="$EXPECTED_RETURNED_IDENTITY"
 if [ -n "${SHERLOCK_TIMEOUT+x}" ]; then
   TIMEOUT="$SHERLOCK_TIMEOUT"
-elif [ "$ARM" = "v30" ] || [ "$ARM" = "v31" ] || [ "$ARM" = "v32" ] || [ "$ARM" = "v33" ] || [ "$ARM" = "v34" ] || [ "$ARM" = "v35" ] || [ "$ARM" = "v36" ] || [ "$ARM" = "v37" ] || [ "$ARM" = "v38" ] || [ "$ARM" = "v39" ]; then
+elif arm_ge "$ARM" 30; then
   TIMEOUT=5400
 else
   TIMEOUT=2700
@@ -511,7 +540,7 @@ W="$(mktemp -d "${TMPDIR:-/tmp}/bench-XXXXXX")"
 RUN_CORPUS="$W/corpus"
 mkdir -p "$RUN_CORPUS"
 cp -a "$CORPUS/." "$RUN_CORPUS/"
-if [ "$ARM" = "v30" ] || [ "$ARM" = "v31" ] || [ "$ARM" = "v32" ] || [ "$ARM" = "v33" ] || [ "$ARM" = "v34" ] || [ "$ARM" = "v35" ] || [ "$ARM" = "v36" ] || [ "$ARM" = "v37" ] || [ "$ARM" = "v38" ] || [ "$ARM" = "v39" ]; then
+if arm_ge "$ARM" 30; then
   mkdir -p "$W/work"
   if [ -n "${SHERLOCK_SEED_WORK:-}" ]; then
     [ -d "$SHERLOCK_SEED_WORK" ] && [ ! -L "$SHERLOCK_SEED_WORK" ] || {
@@ -677,13 +706,13 @@ EXCLUDE_JSON=''
 if [ "${SHERLOCK_ALLOW_SUBAGENT:-0}" != "1" ]; then
   EXCLUDE_JSON=', "tools": { "exclude": ["agent"] }'
 fi
-if [ "$ARM" = "v30" ] || [ "$ARM" = "v31" ] || [ "$ARM" = "v32" ] || [ "$ARM" = "v33" ] || [ "$ARM" = "v34" ] || [ "$ARM" = "v35" ] || [ "$ARM" = "v36" ] || [ "$ARM" = "v37" ] || [ "$ARM" = "v38" ] || [ "$ARM" = "v39" ]; then
+if arm_ge "$ARM" 30; then
   case "$REQUEST_TIMEOUT_MS:$MAX_RETRIES" in
     *[!0-9:]*|:*|*:) echo "✗ invalid v30 request timeout or retry count" >&2; exit 1 ;;
   esac
   mkdir -p "$W/.qwen"
   MEMORY_JSON=''
-  if [ "$ARM" = "v31" ] || [ "$ARM" = "v32" ] || [ "$ARM" = "v33" ] || [ "$ARM" = "v34" ] || [ "$ARM" = "v35" ] || [ "$ARM" = "v36" ] || [ "$ARM" = "v37" ] || [ "$ARM" = "v38" ] || [ "$ARM" = "v39" ]; then
+  if arm_ge "$ARM" 31; then
     MEMORY_JSON=', "memory": { "enableManagedAutoMemory": false, "enableDreams": false }, "model_fallback": { "enabled": false }'
   fi
   printf '{ "model": { "generationConfig": { "contextWindowSize": %s%s, "timeout": %s, "maxRetries": %s } }%s%s }\n' \
@@ -748,7 +777,7 @@ else
   echo "  to a different question. Write the prompt file first." >&2
   exit 1
 fi
-if { [ "$ARM" = "v30" ] || [ "$ARM" = "v31" ] || [ "$ARM" = "v32" ] || [ "$ARM" = "v33" ] || [ "$ARM" = "v34" ] || [ "$ARM" = "v35" ] || [ "$ARM" = "v36" ] || [ "$ARM" = "v37" ] || [ "$ARM" = "v38" ] || [ "$ARM" = "v39" ]; } && [ -n "${SHERLOCK_SEED_WORK:-}" ]; then
+if arm_ge "$ARM" 30 && [ -n "${SHERLOCK_SEED_WORK:-}" ]; then
   PROMPT="$PROMPT
 
 Продолжи расследование из сохранённого checkpoint в $W/work. Сначала прочитай
@@ -758,7 +787,7 @@ work/checkpoint.json. Не повторяй MAP и TRIAGE, если state=ready_
 только ошибки проверки. Последний ответ должен дословно повторять work/report.md."
 fi
 
-if [ "$ARM" = "v31" ] || [ "$ARM" = "v32" ] || [ "$ARM" = "v33" ] || [ "$ARM" = "v34" ] || [ "$ARM" = "v35" ] || [ "$ARM" = "v36" ] || [ "$ARM" = "v37" ] || [ "$ARM" = "v38" ] || [ "$ARM" = "v39" ]; then
+if arm_ge "$ARM" 31; then
   # r4 answered in one request with stats.skills.totalCalls == 0. Name the skill.
   PROMPT="/sherlock
 
@@ -857,7 +886,7 @@ START=$(date +%s)
 # A stream can break after the agent has already mapped most of the corpus. Keep
 # its QWEN_HOME and resume the same session with bounded exponential backoff;
 # never replace useful mid-session work with a fresh, empty investigation.
-if [ "$ARM" = "v30" ] || [ "$ARM" = "v31" ] || [ "$ARM" = "v32" ] || [ "$ARM" = "v33" ] || [ "$ARM" = "v34" ] || [ "$ARM" = "v35" ] || [ "$ARM" = "v36" ] || [ "$ARM" = "v37" ] || [ "$ARM" = "v38" ] || [ "$ARM" = "v39" ]; then
+if arm_ge "$ARM" 30; then
   RESUME_MAX_ATTEMPTS="${SHERLOCK_RESUME_MAX_ATTEMPTS:-0}"
 else
   RESUME_MAX_ATTEMPTS="${SHERLOCK_RESUME_MAX_ATTEMPTS:-2}"
