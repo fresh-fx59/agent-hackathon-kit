@@ -50,6 +50,36 @@ MIN_CLAMPED_OUTPUT_TOKENS = 4000
 GATE = 262000                  # the corporate per-request ceiling
 MAX_TOKENS = SUMMARY_RESERVE   # so a compaction summary can finish
 
+#: THE CEILING IS NOT SELF-ENFORCING, and this constant is the only thing that
+#: makes it enforceable at all. Read out of chunk-T6XLJRQY.js on 2026-08-27:
+#:
+#:   shouldForceFromHard = !exactRoute && isHardTier
+#:                         && hardRescueFailureCount < MAX_CONSECUTIVE_FAILURES(3)
+#:   if (exactRoute || isHardTier && !shouldForceFromHard) compressionInfo = NOOP
+#:   ... shouldStopAfterHardRescue(false, ...) === false  ->  THE PROMPT IS SENT
+#:
+#: with the log line «hard-tier rescue skipped after N failed attempts; relying
+#: on reactive overflow recovery». So after three failed hard-tier rescues qwen
+#: sends whatever it has, and `hard` (= W - 23,000) is a nudge, not a wall. That
+#: is how r6 reached 334,339 tokens against this 262,000 ceiling.
+#:
+#: `model.sessionTokenLimit` is the precise enforcement: before each turn, if the
+#: PROVIDER'S OWN reported prompt_tokens from the previous response exceeds it,
+#: the turn is refused (`session_token_limit_exceeded`) and the session stops. It
+#: is a real number, not an estimate — and it is one turn late by construction,
+#: so it stops steady growth and cannot stop a single turn that balloons on its
+#: own tool output. Hence the content caps below matter as much as this does.
+SESSION_TOKEN_LIMIT = 230000
+
+#: Caps the SUM of one turn's tool responses, in characters, applied in
+#: `sendMessageStream` before the thresholds are even computed
+#: (`enforceFunctionResponseBudget`, verified live in the interactive path).
+#: The default is 200,000 characters — about 62,500 tokens at this lane's
+#: calibrated 3.20 chars/token, i.e. a quarter of the whole ceiling from ONE
+#: turn's tool results. Per-call truncation cannot cover this: ten parallel calls
+#: each under the per-call cap still sum past it.
+TOOL_OUTPUT_BATCH_BUDGET = 60000
+
 #: The tools sherlock actually uses. Everything else is schema weight: the 35
 #: `computer_use__*` tools alone measured 13,748 prompt tokens on r6, and
 #: cron/goal/MCP/artifact another 9,159. `list_directory` is off by default and
@@ -64,7 +94,7 @@ CORE_TOOLS = [
 DISABLED_SKILL_LEVELS = ["bundled", "extension", "user"]
 
 
-def profile(window=GATE, max_tokens=MAX_TOKENS):
+def profile(window=GATE, max_tokens=MAX_TOKENS):  # noqa: C901
     return {
         "model": {
             "generationConfig": {
@@ -76,16 +106,29 @@ def profile(window=GATE, max_tokens=MAX_TOKENS):
             # A compaction that re-attaches recent FILE CONTENTS re-imports the
             # very tool output the truncation below just bounded.
             "chatCompression": {"maxRecentFilesToRetain": 0},
+            # The backstop. See SESSION_TOKEN_LIMIT above for why a backstop is
+            # needed at all.
+            "sessionTokenLimit": SESSION_TOKEN_LIMIT,
         },
-        # Compact earlier than 0.85 so a summary has room while the session is
-        # still small. Kept as a fraction: it is one, in the target's schema.
+        # A SCHEDULING KNOB, NOT A SAFETY KNOB — corrected 2026-08-27. It moves
+        # `auto` and `warn` earlier, so compaction fires sooner and the TYPICAL
+        # prompt is smaller. It cannot move `hard`: in computeThresholds,
+        # `auto <= effectiveWindow - 13000`, so `auto + 3000 <= W - 30000`, which
+        # is always below `hardEdge = W - 23000`. Verified across pct from 0.01
+        # to 1.0 — `hard` stays 239,000 at W = 262,000 for every one of them.
         "context": {"autoCompactThreshold": 0.7},
         "tools": {
             "core": list(CORE_TOOLS),
             # r6's largest single tool result was 35,795 characters of a map
             # that ALREADY EXISTED ON DISK. 8,000 chars ~ 2,500 tokens.
+            # The stock default is 25,000 characters / 1,000 lines — about
+            # 7,800 tokens from a SINGLE tool call. MEASURED on r6's largest
+            # prompt: 103 tool results carried 156,425 tokens, 47.7 % of the
+            # whole request, and the biggest were ~25,000-character re-reads of
+            # the arm's own work/map.txt and work/worklist.tsv.
             "truncateToolOutputThreshold": 8000,
             "truncateToolOutputLines": 200,
+            "toolOutputBatchBudget": TOOL_OUTPUT_BATCH_BUDGET,
         },
         "mcp": {"excluded": []},
         "skills": {"disabledLevels": list(DISABLED_SKILL_LEVELS)},
@@ -120,7 +163,8 @@ def thresholds(window):
 
 
 def prove(window, max_tokens, gate, generation_window_s=None,
-          output_tokens_per_s=122.6, ttft_reserve_s=13.5):
+          output_tokens_per_s=122.6, ttft_reserve_s=13.5,
+          session_token_limit=SESSION_TOKEN_LIMIT):
     """The worst reachable `prompt + max_tokens`, and why.
 
     `generation_window_s` exists for ONE reason and it is not a bypass. The
@@ -191,6 +235,36 @@ def prove(window, max_tokens, gate, generation_window_s=None,
     if worst > gate:
         problems.append("the worst reachable request %d EXCEEDS the gate %d "
                         "(at prompt %d)" % (worst, gate, worst_at))
+    # THE HONEST PART. Everything above assumes qwen never sends a prompt above
+    # `hard`. It does: after three failed hard-tier rescues the rescue is skipped
+    # and the oversized prompt is SENT ANYWAY (chunk-T6XLJRQY.js —
+    # `isHardTier && !shouldForceFromHard` => NOOP, and shouldStopAfterHardRescue
+    # returns false). r6 sent 334,339 tokens that way. So this arithmetic bounds
+    # the OBEDIENT path only, and saying otherwise would make this tool the
+    # thing it exists to prevent.
+    lines.append("")
+    lines.append("CAVEAT, NOT A FOOTNOTE: `hard` = %d is NOT ENFORCED. After 3 "
+                 "failed hard-tier rescues qwen skips the rescue and the "
+                 "oversized prompt is sent anyway — r6 sent 334,339 tokens that "
+                 "way. The arithmetic above bounds the obedient path only."
+                 % int(hard))
+    if not session_token_limit:
+        problems.append("no model.sessionTokenLimit is declared, so nothing "
+                        "precisely enforces the %d-token ceiling: the only exact "
+                        "check qwen has is sessionTokenLimit, which refuses a "
+                        "turn when the PROVIDER'S reported prompt_tokens already "
+                        "exceeds it" % gate)
+    elif session_token_limit + max_tokens > gate:
+        problems.append("model.sessionTokenLimit %d plus the output budget %d "
+                        "exceeds the gate %d — the backstop itself permits an "
+                        "illegal request"
+                        % (session_token_limit, max_tokens, gate))
+    else:
+        lines.append("backstop: model.sessionTokenLimit %d refuses the next turn "
+                     "once the provider reports more than that, so %d + %d = %d "
+                     "is the worst request that can follow a measured one"
+                     % (session_token_limit, session_token_limit, max_tokens,
+                        session_token_limit + max_tokens))
     return lines, problems
 
 
@@ -203,6 +277,10 @@ def main():
     ap.add_argument("--max-tokens", type=int, default=MAX_TOKENS)
     ap.add_argument("--bundle", default=None,
                     help="the installed @qwen-code/qwen-code directory")
+    ap.add_argument("--session-token-limit", type=int, default=SESSION_TOKEN_LIMIT,
+                    help="model.sessionTokenLimit; 0 declares none, and `prove` "
+                         "then REFUSES the profile, because without it nothing "
+                         "precisely enforces the ceiling")
     ap.add_argument("--generation-window-s", type=float, default=None,
                     help="the provider's hard generation clock, if it has one "
                          "(CloseRouter: 90). Derives the output budget and "
@@ -219,14 +297,16 @@ def main():
 
     if args.command == "prove":
         lines, problems = prove(window, args.max_tokens, args.gate,
-                                args.generation_window_s)
+                                args.generation_window_s,
+                                session_token_limit=args.session_token_limit)
         for line in lines:
             print(line)
         for why in problems:
             print("✗ %s" % why)
         if problems:
             return 1
-        print("✓ every request this profile can send fits the gate")
+        print("✓ every request the OBEDIENT path can send fits the gate, and "
+              "model.sessionTokenLimit backstops the rest")
         return 0
 
     bundle = args.bundle

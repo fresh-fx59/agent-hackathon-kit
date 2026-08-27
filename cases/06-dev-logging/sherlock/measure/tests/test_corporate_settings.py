@@ -106,6 +106,44 @@ def main():
     check("the project level stays ON — that is where sherlock lives",
           "project" not in levels, levels)
 
+    # ── THE CORRECTION OF 2026-08-27, and it is the important part ──────────
+    # `hard` (= W - 23,000) is NOT a send-blocking ceiling. Read out of
+    # chunk-T6XLJRQY.js: `shouldForceFromHard = !exactRoute && isHardTier &&
+    # hardRescueFailureCount < MAX_CONSECUTIVE_FAILURES` (3). Once three hard-tier
+    # rescues have failed, the code logs «hard-tier rescue skipped after N failed
+    # attempts; relying on reactive overflow recovery», sets compressionInfo to
+    # NOOP, and `shouldStopAfterHardRescue(false, ...)` returns false — so THE
+    # OVERSIZED PROMPT IS SENT. That is how r6 reached 334,339 tokens against a
+    # 262,000 ceiling. Any claim that the clamp alone bounds the wire is false,
+    # and a tool that prints such a claim is the "gate that passes on failure"
+    # defect this repo keeps finding in itself.
+    #
+    # The only precise enforcement available is `model.sessionTokenLimit`: before
+    # each turn, if the PROVIDER'S OWN reported prompt_tokens from the last
+    # response exceeds it, the turn is refused (`session_token_limit_exceeded`).
+    # It is one turn late by construction, which is why it is a backstop and not
+    # a substitute for keeping the prompt small.
+    check("the profile sets model.sessionTokenLimit — the only precise "
+          "circuit breaker on this ceiling",
+          isinstance(dig(row, "model.sessionTokenLimit"), int)
+          and 0 < dig(row, "model.sessionTokenLimit") <= GATE - 20000,
+          dig(row, "model.sessionTokenLimit"))
+    check("the profile caps a whole turn's tool responses "
+          "(tools.toolOutputBatchBudget, live in sendMessageStream)",
+          isinstance(dig(row, "tools.toolOutputBatchBudget"), int)
+          and dig(row, "tools.toolOutputBatchBudget") < 200000,
+          dig(row, "tools.toolOutputBatchBudget"))
+
+    rc, out, err = run(["prove", "--gate", str(GATE)])
+    check("prove states plainly that hard is not a send ceiling",
+          "not enforced" in out.lower() or "sent anyway" in out.lower(),
+          out[:600])
+    check("prove names the sessionTokenLimit backstop in its verdict",
+          "sessionTokenLimit" in out, out[:600])
+    rc, out, err = run(["prove", "--gate", str(GATE), "--session-token-limit", "0"])
+    check("prove REFUSES to call a profile safe with no session token limit",
+          rc != 0, "rc=%d %s" % (rc, out[:400]))
+
     # ── the arithmetic proof ────────────────────────────────────────────────
     rc, out, err = run(["prove", "--gate", str(GATE)])
     check("prove exits 0 at the gate the profile was built for", rc == 0,
@@ -124,8 +162,12 @@ def main():
     # danger of a small one is a starved compaction summary. Asserted, not
     # assumed, because the plan said to fear the opposite.
     rc, out, err = run(["prove", "--gate", str(GATE), "--max-tokens", "40000"])
-    check("a larger max_tokens still cannot breach — the clamp bounds it",
-          rc == 0 and "248900" in out, out[:400])
+    check("a larger max_tokens still cannot breach the OBEDIENT path — the "
+          "clamp bounds it at the same 248900", "248900" in out, out[:400])
+    check("...but prove now refuses it, because the backstop plus that budget "
+          "would itself permit an illegal request",
+          rc != 0 and "sessionTokenLimit" in out and "230000" in out,
+          "rc=%d %s" % (rc, out[-400:]))
 
     # A profile that WOULD breach must be REJECTED, not warned about: a window
     # declared above the gate is the r6 configuration, and it breached 63 times.
