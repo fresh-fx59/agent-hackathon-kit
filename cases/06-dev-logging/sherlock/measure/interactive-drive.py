@@ -91,6 +91,16 @@ class Session(object):
             os._exit(127)
         self.transcript = open(transcript, "wb")
         self.buffer = ""
+        # A SECOND, PER-STAGE ACCUMULATOR — and it exists because of a measured
+        # mistake. `self.buffer` is trimmed to its last 200,000 characters once
+        # it passes 400,000, which silently invalidates any index taken into it:
+        # the free rehearsal recorded `handoff_block_not_shown` for a boundary
+        # where the model HAD printed the block (428 partial repaints of
+        # «СТУПЕНЬ ЗАВЕРШЕНА» are in that transcript). A stage's own output is
+        # kept whole here, and if it ever has to be trimmed the driver says
+        # `unknown` instead of claiming the block was absent.
+        self.stage_buffer = ""
+        self.stage_truncated = False
 
     def pump(self, seconds):
         """Read for `seconds`, appending to the transcript and the buffer."""
@@ -112,10 +122,19 @@ class Session(object):
                 return False
             self.transcript.write(chunk)
             self.transcript.flush()
-            self.buffer += strip(chunk.decode("utf-8", "replace"))
+            text = strip(chunk.decode("utf-8", "replace"))
+            self.buffer += text
             if len(self.buffer) > 400000:      # keep the tail, bound the RAM
                 self.buffer = self.buffer[-200000:]
+            self.stage_buffer += text
+            if len(self.stage_buffer) > 8000000:
+                self.stage_buffer = self.stage_buffer[-4000000:]
+                self.stage_truncated = True
         return True
+
+    def stage_reset(self):
+        self.stage_buffer = ""
+        self.stage_truncated = False
 
     def type(self, text, settle=1.5):
         """Type a line the way a human does: the text, then Enter."""
@@ -181,7 +200,7 @@ def drive(argv, cwd, work, first_prompt, reseed, stage_budget_s, settle_s,
         note("typed", "the task prompt")
         while True:
             deadline = time.time() + stage_budget_s
-            mark = len(ses.buffer)
+            ses.stage_reset()
             while time.time() < deadline:
                 if not ses.pump(3.0) and not ses.alive():
                     note("DIED", "child exited at stage %s" % seen)
@@ -210,8 +229,7 @@ def drive(argv, cwd, work, first_prompt, reseed, stage_budget_s, settle_s,
             # gone from the visible buffer moments later. Judging a run on that
             # would fail obedient runs. So it is MEASURED per boundary and
             # reported, never used to kill the run.
-            window = ses.buffer[mark:] if mark < len(ses.buffer) else ses.buffer
-            on_screen = HANDOFF_MARK in window
+            on_screen = HANDOFF_MARK in ses.stage_buffer
             handoff_file = os.path.join(work, "handoff.txt")
             if not os.path.exists(handoff_file):
                 note("NO_HANDOFF_BLOCK",
@@ -219,8 +237,14 @@ def drive(argv, cwd, work, first_prompt, reseed, stage_budget_s, settle_s,
                      "boundary was not taken through checkpoint.py handoff" % seen)
                 return 5, events
             note("stage_advanced", seen)
-            note("handoff_block_on_screen" if on_screen
-                 else "handoff_block_not_shown", seen)
+            if on_screen:
+                note("handoff_block_on_screen", seen)
+            elif ses.stage_truncated:
+                note("handoff_block_unknown",
+                     "%s — this stage printed more than 8 MB, so the driver "
+                     "cannot say whether the block was shown" % seen)
+            else:
+                note("handoff_block_not_shown", seen)
 
             if seen == "done":
                 note("finished", "stage=done")
