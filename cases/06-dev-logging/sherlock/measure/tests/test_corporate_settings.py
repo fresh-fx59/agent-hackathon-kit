@@ -85,8 +85,6 @@ def main():
         "model.generationConfig.samplingParams.max_tokens": 20000,
         "model.skipStartupContext": True,
         "model.chatCompression.maxRecentFilesToRetain": 0,
-        "tools.truncateToolOutputThreshold": 8000,
-        "tools.truncateToolOutputLines": 200,
     }
     for path, value in sorted(want.items()):
         check("%s == %r" % (path, value), dig(row, path) == value,
@@ -128,10 +126,34 @@ def main():
           isinstance(dig(row, "model.sessionTokenLimit"), int)
           and 0 < dig(row, "model.sessionTokenLimit") <= GATE - 20000,
           dig(row, "model.sessionTokenLimit"))
-    check("the profile caps a whole turn's tool responses "
-          "(tools.toolOutputBatchBudget, live in sendMessageStream)",
-          isinstance(dig(row, "tools.toolOutputBatchBudget"), int)
-          and dig(row, "tools.toolOutputBatchBudget") < 200000,
+    # TWO TRUNCATION PATHS, ONLY ONE OF THEM RECOVERABLE — and the profile is
+    # allowed to use neither. Reversed 2026-08-27 when the operator questioned an
+    # 8,000-character cap, which sent me to read both paths instead of trusting
+    # the token arithmetic.
+    #
+    # PER-CALL (`truncateToolOutputThreshold`) runs through
+    # `truncateAndSaveToFile`: the FULL output is written to a file, the model is
+    # given the absolute path, head and tail are kept, the cut is marked
+    # «... [CONTENT TRUNCATED] ...». Lossless, and therefore safe — but NOT a
+    # token saving, because this arm answers a truncated page by asking for the
+    # next one (r6: worklist.tsv at offsets 0/60/116/173, each result exactly
+    # 25,060-25,063 chars, i.e. the stock cap hit dead on). A cap reschedules
+    # tokens; it does not delete them.
+    #
+    # SEND-BOUNDARY (`toolOutputBatchBudget`) runs through `fitText`, which names
+    # a persisted artifact only when the entry carries `persistedOutputFiles` —
+    # and the send-boundary entry is built inline with none. The model is told
+    # «Tool output truncated.» and gets head+tail with NO path to the rest. For an
+    # arm whose product is coverage, an unrecoverable hole in the middle of a tool
+    # result is the one failure we cannot detect afterwards.
+    check("the profile leaves per-call truncation at the stock default — a cap "
+          "reschedules tokens rather than deleting them",
+          dig(row, "tools.truncateToolOutputThreshold") is None
+          and dig(row, "tools.truncateToolOutputLines") is None,
+          dig(row, "tools"))
+    check("the profile does NOT use toolOutputBatchBudget — its truncation is "
+          "announced but unrecoverable at the send boundary",
+          dig(row, "tools.toolOutputBatchBudget") is None,
           dig(row, "tools.toolOutputBatchBudget"))
 
     rc, out, err = run(["prove", "--gate", str(GATE)])

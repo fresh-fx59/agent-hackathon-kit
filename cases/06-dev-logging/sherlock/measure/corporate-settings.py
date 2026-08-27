@@ -71,14 +71,32 @@ MAX_TOKENS = SUMMARY_RESERVE   # so a compaction summary can finish
 #: own tool output. Hence the content caps below matter as much as this does.
 SESSION_TOKEN_LIMIT = 230000
 
-#: Caps the SUM of one turn's tool responses, in characters, applied in
-#: `sendMessageStream` before the thresholds are even computed
-#: (`enforceFunctionResponseBudget`, verified live in the interactive path).
-#: The default is 200,000 characters — about 62,500 tokens at this lane's
-#: calibrated 3.20 chars/token, i.e. a quarter of the whole ceiling from ONE
-#: turn's tool results. Per-call truncation cannot cover this: ten parallel calls
-#: each under the per-call cap still sum past it.
-TOOL_OUTPUT_BATCH_BUDGET = 60000
+#: WITHDRAWN, 2026-08-27, and the operator's instinct is what sent me to check.
+#:
+#: `tools.toolOutputBatchBudget` does cap the SUM of one turn's tool responses
+#: (`enforceFunctionResponseBudget` in `sendMessageStream`, verified live). But
+#: the two truncation paths in this codebase are NOT equally safe, and only
+#: reading them tells you which:
+#:
+#:   * PER-CALL truncation (`truncateToolOutputThreshold`, default 25,000 chars /
+#:     1,000 lines) goes through `truncateAndSaveToFile`, which WRITES THE FULL
+#:     OUTPUT TO A FILE, hands the model the absolute path, keeps the head and the
+#:     tail, and marks the cut with «... [CONTENT TRUNCATED] ...». Nothing is
+#:     lost: the evidence is on disk and addressable.
+#:   * THE SEND-BOUNDARY budget goes through `fitText`, which names a persisted
+#:     artifact ONLY when the entry carries `persistedOutputFiles` — and the
+#:     send-boundary call constructs its entry inline (`callId: "send-boundary"`,
+#:     `toolName: "tool-response-batch"`) with none. So the model is told «Tool
+#:     output truncated.» and gets head (1/5) + tail (4/5) with NO path to the
+#:     rest.
+#:
+#: For an arm whose entire product is COVERAGE — every worklist row accounted for,
+#: every finding backed by a citable line — an unrecoverable hole in the middle of
+#: a tool result is exactly the failure we cannot detect afterwards. So this lever
+#: is not used. A turn that would blow the budget is better stopped by
+#: SESSION_TOKEN_LIMIT, which loses no evidence at all: it ends the session and
+#: the next staged session re-reads what it needs from `work/`.
+TOOL_OUTPUT_BATCH_BUDGET = None
 
 #: The tools sherlock actually uses. Everything else is schema weight: the 35
 #: `computer_use__*` tools alone measured 13,748 prompt tokens on r6, and
@@ -121,14 +139,25 @@ def profile(window=GATE, max_tokens=MAX_TOKENS):  # noqa: C901
             "core": list(CORE_TOOLS),
             # r6's largest single tool result was 35,795 characters of a map
             # that ALREADY EXISTED ON DISK. 8,000 chars ~ 2,500 tokens.
-            # The stock default is 25,000 characters / 1,000 lines — about
-            # 7,800 tokens from a SINGLE tool call. MEASURED on r6's largest
-            # prompt: 103 tool results carried 156,425 tokens, 47.7 % of the
-            # whole request, and the biggest were ~25,000-character re-reads of
-            # the arm's own work/map.txt and work/worklist.tsv.
-            "truncateToolOutputThreshold": 8000,
-            "truncateToolOutputLines": 200,
-            "toolOutputBatchBudget": TOOL_OUTPUT_BATCH_BUDGET,
+            # LEFT AT THE STOCK 25,000 chars / 1,000 lines, DELIBERATELY —
+            # reversed 2026-08-27 after the operator questioned an 8,000-char cap.
+            # Two reasons, and the second one invalidates a number I quoted.
+            #
+            # 1. A cap does not delete tokens, it RESCHEDULES them. This arm
+            #    already paginates its own files: r6's peak request holds
+            #    `read_file work/worklist.tsv` at offsets 0/60/116/173 and
+            #    work/map.txt at six offsets, each result landing on exactly
+            #    25,060-25,063 characters — the stock cap, hit dead on, followed
+            #    by a request for the next page. Lower the cap and you get MORE
+            #    pages, not less history. My «−52,933 tokens» estimate assumed the
+            #    cut content simply vanishes; it does not, and the estimate was
+            #    optimistic.
+            # 2. The truncation is safe but not free: the full output IS persisted
+            #    and named, so the model can and does come back for it.
+            #
+            # The real fix is to stop the arm needing the whole file — a batch
+            # worklist interface and a map INDEX — which changes what is
+            # requested instead of chopping what comes back.
         },
         "mcp": {"excluded": []},
         "skills": {"disabledLevels": list(DISABLED_SKILL_LEVELS)},
