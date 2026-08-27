@@ -194,13 +194,19 @@ def drive(argv, cwd, work, first_prompt, reseed, stage_budget_s, settle_s,
         # difference between a driver that works and one that reports
         # STAGE_TIMEOUT on a healthy run.
         seen = stage_of(work)
+        # THE STAGE ACCUMULATOR IS RESET BEFORE TYPING, NEVER AT THE TOP OF THE
+        # WAIT LOOP. A fast target answers during the settle that follows the
+        # reseed line, so a reset at the top of the next iteration WIPES the
+        # block it is about to look for — measured on the stand-in, where the
+        # happy path recorded `not_shown` at every boundary while printing the
+        # block at every boundary. Reset, type, wait, judge.
+        ses.stage_reset()
         ses.type(skill_command, settle=settle_s)
         note("typed", skill_command)
         ses.type(first_prompt, settle=2.0)
         note("typed", "the task prompt")
         while True:
             deadline = time.time() + stage_budget_s
-            ses.stage_reset()
             while time.time() < deadline:
                 if not ses.pump(3.0) and not ses.alive():
                     note("DIED", "child exited at stage %s" % seen)
@@ -250,6 +256,7 @@ def drive(argv, cwd, work, first_prompt, reseed, stage_budget_s, settle_s,
                 note("finished", "stage=done")
                 return 0, events
 
+            ses.stage_reset()
             ses.type("/clear", settle=settle_s)
             if CLEAR_REFUSAL in ses.buffer[-4000:]:
                 note("CLEAR_REFUSED", "a background task was still alive")
