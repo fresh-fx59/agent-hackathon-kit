@@ -1053,6 +1053,25 @@ def account_ledger(ledger_path, summary, identity_check=True,
     summary["incomplete_reason"] = ""
 
 
+def _was_answered(row):
+    """True only for a row the provider actually answered.
+
+    Deliberately narrow, and in this order: a non-200 status is not an answer; an
+    `upstream_error` is not an answer even under HTTP 200 (this lane's gateway
+    returns 200 with an error chunk inside it - `upstream_error_in_200`, measured
+    on five rows of the v40 paid run); and `finish_reason: "error"` is not an
+    answer either. Everything else counts as answered, so the "provider hid the
+    numbers" case cannot slip through by omission.
+    """
+    if row.get("status") != 200:
+        return False
+    if row.get("upstream_error"):
+        return False
+    if row.get("finish_reason") == "error":
+        return False
+    return True
+
+
 def per_request_token_breach(rows, gate):
     """THE EMPIRICAL HALF OF THE CORPORATE PROOF GATE.
 
@@ -1073,12 +1092,29 @@ def per_request_token_breach(rows, gate):
     A discarded substitution is skipped: not one byte of it reached the arm, so
     it is not one of the run's requests (it is still billed, and still counted in
     the accounting).
+
+    AND SO IS A CALL THAT WAS NEVER ANSWERED. Learned on this gate's FIRST live
+    use, paid run 20260827T104334Z-v40: it returned
+    `PER_REQUEST_TOKEN_GATE_UNMEASURED - row 80 carries no prompt token count`,
+    and all ELEVEN rows without a count were failures rather than answers - six
+    HTTP 503 `no_available_provider`, and five HTTP 200 carrying an upstream
+    error chunk (`upstream_error_in_200:upstream_error`, one `invalid_request`).
+    A call the provider never answered carried no prompt to judge and transferred
+    nothing; judging it is the same category error as judging a discarded
+    substitution.
+
+    The rule survives for the case it exists for: an ANSWERED row - status 200,
+    stream complete, no upstream error - that still carries no counts is the
+    "the provider hid the numbers" case, and it stays a breach. A gate that stops
+    crying wolf is worth more than one that shouts at every 503.
     """
     for index, row in enumerate(rows, 1):
         if isinstance(row.get("event"), str) and row["event"]:
             continue                       # a proxy event is not a call
         if row.get("discarded_substitution") is True:
             continue
+        if not _was_answered(row):
+            continue                       # never answered: nothing to judge
         usage = row.get("usage")
         prompt = usage.get("prompt_tokens") if isinstance(usage, dict) else None
         declared = row.get("request_max_tokens")

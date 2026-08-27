@@ -92,15 +92,51 @@ def main():
     check("the gate reads request_max_tokens, not the completion returned",
           rc != 0, "rc=%d %s" % (rc, (out + err)[:300]))
 
+    # ── THE FIRST LIVE USE OF THIS GATE WAS A FALSE POSITIVE ────────────────
+    # On the paid run 20260827T104334Z-v40 it returned
+    # «PER_REQUEST_TOKEN_GATE_UNMEASURED — row 80 carries no prompt token count».
+    # All ELEVEN rows without a prompt count were FAILURES, not answers: six HTTP
+    # 503 `no_available_provider`, and five HTTP 200 carrying an upstream error
+    # chunk (`upstream_error_in_200:upstream_error`, one `invalid_request`). A
+    # call that was never answered carried no prompt to judge and transferred
+    # nothing — judging it is the same mistake as judging a discarded
+    # substitution.
+    #
+    # The rule survives intact for the case it exists for: an ANSWERED row —
+    # status 200, stream complete, no upstream error — that still carries no
+    # counts is the «provider hid the numbers» case and stays a breach.
+    unanswered = legal + [
+        dict(row(0, 20000), status=503, usage=None,
+             upstream_error='{"error":{"code":"no_available_provider"}}'),
+        dict(row(0, 20000), status=200, finish_reason="error", usage=None,
+             stream_complete=None,
+             upstream_error="upstream_error_in_200:upstream_error"),
+        dict(row(0, 20000), status=200, finish_reason="error", usage=None,
+             stream_complete=None,
+             upstream_error="upstream_error_in_200:invalid_request"),
+    ]
+    rc, out, err = audit(unanswered, "--per-request-token-gate", str(GATE))
+    check("a 503 and an error-in-200 are not judged — they were never answered",
+          rc == 0, "rc=%d %s" % (rc, (out + err)[-500:]))
+
+    answered_but_silent = legal + [dict(row(0, 20000), usage=None,
+                                        stream_complete=True, status=200)]
+    rc, out, err = audit(answered_but_silent, "--per-request-token-gate",
+                         str(GATE))
+    check("an ANSWERED row with no counts is still a breach — that is the "
+          "«provider hid the numbers» case",
+          rc != 0 and "PER_REQUEST_TOKEN_GATE" in out + err,
+          "rc=%d %s" % (rc, (out + err)[:300]))
+
     # A row that cannot be judged must not pass silently — that is the whole
     # lesson of EXPECTED_IDENTITY_UNKNOWN.
-    blind = [row(1000, 20000)]
-    blind[0]["usage"] = {"completion_tokens": 5}          # no prompt_tokens
+    blind = [dict(row(1000, 20000), stream_complete=True, status=200)]
+    blind[0]["usage"] = {"completion_tokens": 5}          # answered, no prompt
     rc, out, err = audit(blind, "--per-request-token-gate", str(GATE))
     check("a row with no prompt token count is a breach, not a pass",
           rc != 0 and "PER_REQUEST_TOKEN_GATE" in out + err,
           "rc=%d %s" % (rc, (out + err)[:300]))
-    blind2 = [row(1000, 20000)]
+    blind2 = [dict(row(1000, 20000), stream_complete=True, status=200)]
     del blind2[0]["request_max_tokens"]
     rc, out, err = audit(blind2, "--per-request-token-gate", str(GATE))
     check("a row with no declared output budget is a breach too",
