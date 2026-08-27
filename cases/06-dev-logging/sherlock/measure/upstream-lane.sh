@@ -308,6 +308,13 @@ PY
   local -a lane_env=(
     "UPSTREAM_LANE_ABORT=$abort_path"
     "UPSTREAM_EXPECTED_RETURNED_IDENTITY=$expected"
+    # THE PRE-SEND WALL. The same ceiling lane-audit.py checks AFTER the run, now
+    # enforced BEFORE the request leaves the box — because qwen's own `hard`
+    # threshold provably does not block a send (it skips the rescue after three
+    # failures and sends anyway, which is how r6 put 334,339 tokens on the wire).
+    # Empty or 0 declares no ceiling, so every existing lane is untouched.
+    "UPSTREAM_PER_REQUEST_TOKEN_GATE=${SHERLOCK_PER_REQUEST_TOKEN_GATE:-0}"
+    "UPSTREAM_CHARS_PER_TOKEN=${SHERLOCK_CHARS_PER_TOKEN:-}"
     "UPSTREAM_CACHE_GUARD=${SHERLOCK_CACHE_GUARD:-1}"
     # Empty means "use lane_guard.py's default". Do not restate the numbers here.
     "UPSTREAM_CACHE_MIN_RATE=${SHERLOCK_CACHE_MIN_RATE:-}"

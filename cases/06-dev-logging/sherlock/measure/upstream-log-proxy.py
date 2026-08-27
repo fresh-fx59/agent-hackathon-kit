@@ -78,6 +78,30 @@ PROXY_INSTANCE = str(uuid.uuid4())
 # linkapi needs the prefix; qwen-code must not see it. So qwen-code is given the
 # clean id and this restores the alias on the way out.
 UPSTREAM_MODEL = os.environ.get("UPSTREAM_MODEL", "")
+
+# ── THE PRE-SEND TOKEN GATE ────────────────────────────────────────────────
+# THE ONLY TRUE WALL ON THIS LANE, and it has to live here because nothing in
+# the client is one. Read out of the installed qwen-code 0.22.0 bundle:
+# `hard = W - 23,000` does NOT block a send — `shouldForceFromHard` is
+# `!exactRoute && isHardTier && hardRescueFailureCount < 3`, so once three
+# hard-tier rescues have failed the code logs «hard-tier rescue skipped … relying
+# on reactive overflow recovery», sets the compression info to NOOP, and
+# `shouldStopAfterHardRescue(false, …)` returns false: the oversized prompt goes
+# out. Run r6 put 334,339 tokens on the wire that way against a 262,000 ceiling.
+# `model.sessionTokenLimit` is exact but compares the PREVIOUS response's count,
+# so it cannot stop the turn that balloons. The proxy is the last thing that sees
+# a request before it leaves the box.
+#
+# 0 declares no ceiling and judges nothing, so every existing lane is untouched.
+UPSTREAM_PER_REQUEST_TOKEN_GATE = int(
+    os.environ.get("UPSTREAM_PER_REQUEST_TOKEN_GATE", "0") or 0)
+# CALIBRATED, not guessed: 3.20 characters per token, established on this lane
+# against the provider's own reported prompt_tokens. The estimate divides the
+# WHOLE serialised request — messages AND tool schemas, which were 113,061 of the
+# v40 peak request's characters — so it cannot miss a third of the prompt the way
+# a messages-only estimate would.
+UPSTREAM_CHARS_PER_TOKEN = float(
+    os.environ.get("UPSTREAM_CHARS_PER_TOKEN", "3.20") or 3.20)
 # RIDE OUT A PROVIDER BURST. linkapi's 400s are transient and minute-scale —
 # measured 2026-08-02, and NOT explained by request size or shape (both
 # controlled for, interleaved, 12/12 succeeded at the size and shape that had
@@ -333,6 +357,45 @@ def record(**row):
     with _LOG_LOCK:                       # ThreadingHTTPServer ⇒ concurrent turns
         with open(UPSTREAM_LOG, "a", encoding="utf-8") as fh:
             fh.write(line + "\n")
+
+
+def estimate_prompt_tokens(body):
+    """A DELIBERATELY CONSERVATIVE estimate of what the provider will count.
+
+    The whole serialised request is divided by the calibrated chars-per-token —
+    messages, tool schemas, everything — because the provider counts the whole
+    prompt and a gate that under-counts is not a wall. Returns 0 on an
+    unparseable body, so a malformed request is never refused on a number nobody
+    can defend; the existing paths already judge those.
+    """
+    if not body:
+        return 0
+    try:
+        text = body.decode("utf-8", "replace")
+    except Exception:
+        return 0
+    ratio = UPSTREAM_CHARS_PER_TOKEN if UPSTREAM_CHARS_PER_TOKEN > 0 else 3.20
+    return int(len(text) / ratio)
+
+
+def pre_send_refusal_text(gate, estimated, declared):
+    """The provider's own dialect, on purpose — see the module docstring above.
+
+    qwen only compacts and retries when
+    `getContextLengthExceededInfo(error).isExceeded`, which needs the text to
+    match one of CONTEXT_LENGTH_PATTERNS and NONE of TIMEOUT_PATTERNS. And
+    `parseTokenCounts` recovers the numbers from «maximum context length is N
+    tokens … requested M tokens», feeding them to the reactive compression as
+    limitTokens / actualTokens. A refusal the client cannot classify would end
+    the run, which is worse than the breach it prevents — so the wording is a
+    contract, not prose, and measure/tests/test_pre_send_token_gate.py pins it
+    against the bundle's own regexes.
+    """
+    return ("This model's maximum context length is %d tokens, however you "
+            "requested %d tokens (%d in the messages, %d for the completion). "
+            "Please reduce the length of the messages. "
+            "[proxy pre-send gate: context_length_exceeded]"
+            % (gate, estimated + declared, estimated, declared))
 
 
 class KeyUnavailable(Exception):
@@ -1711,6 +1774,15 @@ class Proxy(BaseHTTPRequestHandler):
         if not isinstance(request_max_tokens, int):
             request_max_tokens = None
 
+        # THE WALL. Before the route is read, before the credential is attached,
+        # before one byte leaves this box.
+        if UPSTREAM_PER_REQUEST_TOKEN_GATE > 0:
+            estimated = estimate_prompt_tokens(body)
+            declared = request_max_tokens or 0
+            if estimated + declared > UPSTREAM_PER_REQUEST_TOKEN_GATE:
+                self._pre_send_refusal(estimated, declared)
+                return
+
         client_headers = {k: v for k, v in self.headers.items()
                           if k.lower() not in _HOP}
         # identity so the body stays scannable; the client gets it un-encoded,
@@ -2056,6 +2128,41 @@ class Proxy(BaseHTTPRequestHandler):
             except OSError:
                 pass
         return outcome
+
+    def _pre_send_refusal(self, estimated, declared):
+        """Refuse locally, in a shape the client can recover from.
+
+        HTTP 400 with the OpenAI `context_length_exceeded` code, because that is
+        what an OpenAI-compatible provider returns for this and therefore what
+        every client already handles. Deliberately NOT 403 (the lane-breach
+        code): a lane breach is a verdict and must end the run, while this is a
+        request the client should shrink and retry — qwen's reactive compression
+        path does exactly that once the error text classifies as an overflow.
+        Deliberately NOT 5xx either: qwen's `defaultShouldRetry` retries every
+        5xx blindly, which would re-send the same oversized prompt.
+        """
+        message = pre_send_refusal_text(UPSTREAM_PER_REQUEST_TOKEN_GATE,
+                                       estimated, declared)
+        # An EVENT row, not a call row: nothing was sent, nothing was billed and
+        # no model answered, so no accounting or identity check may read it as a
+        # call. `returned_model` stays absent for the same reason.
+        record(event="pre_send_refused", schema=1,
+               per_request_token_gate=UPSTREAM_PER_REQUEST_TOKEN_GATE,
+               estimated_prompt_tokens=estimated,
+               request_max_tokens=declared,
+               chars_per_token=UPSTREAM_CHARS_PER_TOKEN,
+               returned_model=None,
+               detail=message)
+        payload = json.dumps({"error": {
+            "message": message,
+            "type": "invalid_request_error",
+            "param": "messages",
+            "code": "context_length_exceeded"}}).encode()
+        self.send_response(400)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(payload)))
+        self.end_headers()
+        self.wfile.write(payload)
 
     def _lane_refusal(self):
         """403, not 503 - a lane breach is a verdict, not a transport hiccup.
