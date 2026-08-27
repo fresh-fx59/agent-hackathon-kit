@@ -47,6 +47,77 @@ elif [ "$ARM" = "v30" ] || [ "$ARM" = "v31" ] || [ "$ARM" = "v32" ] || [ "$ARM" 
 else
   TIMEOUT=2700
 fi
+# ── DECLARED BUDGETS ────────────────────────────────────────────────────────
+# A BUDGET THAT CAN END A PAID RUN IS PART OF THE EXPERIMENT. It is chosen here,
+# passed on the qwen command line, and written into run-inputs.json — never
+# inherited from a tool's default, and never discovered afterwards by reading a
+# vendor bundle. Three runs have now been ended by a limit; on
+# 20260826T224846Z-v39 the limit was invisible in every artifact the run made.
+#
+# MEASURED on that run (r2), attempt 0 — 2,944 s, 153 upstream calls, 42.3 %
+# cache, $0.085443, reaching work/checkpoint.json
+# {"state":"ready_for_synthesis","resolved":262,"total":262} WITHOUT the report:
+#   * 99 top-level assistant + 78 top-level user rows => 177 main-loop turns;
+#   * 78 top-level tool dispatches (50 run_shell_command, 24 read_file,
+#     2 agent, 1 glob, 1 grep_search);
+#   * one `agent` subagent ran 125 assistant turns and terminated on qwen-code
+#     0.22.0's hard-coded FORK_DEFAULT_MAX_TURNS = 200 (chunk-WZDM44SB.js).
+#     That constant has NO flag, NO setting and NO env var, so it cannot be
+#     declared — only known, and kept out of the run's own verdict.
+# qwen's documented default for `model.maxSessionTurns` is -1 (unlimited), so
+# the main session was never capped; sizing below is ~3-5x the measurement
+# because the wall-clock budget is the real backstop. These budgets exist to
+# stop a runaway loop, not to ration a working run.
+MAX_SESSION_TURNS="${SHERLOCK_MAX_SESSION_TURNS-600}"   # 3.4x the 177 measured
+MAX_TOOL_CALLS="${SHERLOCK_MAX_TOOL_CALLS-400}"         # 5.1x the 78 measured
+# Strictly INSIDE $TIMEOUT, so qwen aborts itself with exit 55 and leaves the
+# session on disk instead of being SIGKILLed by `timeout` with nothing to resume.
+MAX_WALL_TIME_S="${SHERLOCK_MAX_WALL_TIME_S-$(( TIMEOUT > 600 ? TIMEOUT - 300 : TIMEOUT ))}"
+# qwen-code 0.22.0: default 50, hard ceiling 500 (workflow-2FCMBTBZ.js).
+WORKFLOW_AGENT_MAX_TURNS="${SHERLOCK_WORKFLOW_AGENT_MAX_TURNS-200}"
+budget_check() {
+  case "$2" in
+    ''|*[!0-9]*) echo "✗ $1 must be a positive integer (got '$2')" >&2; exit 1 ;;
+  esac
+  [ "$2" -gt 0 ] || { echo "✗ $1 must be > 0 (got '$2')" >&2; exit 1; }
+}
+budget_check SHERLOCK_MAX_SESSION_TURNS "$MAX_SESSION_TURNS"
+budget_check SHERLOCK_MAX_TOOL_CALLS "$MAX_TOOL_CALLS"
+budget_check SHERLOCK_MAX_WALL_TIME_S "$MAX_WALL_TIME_S"
+budget_check SHERLOCK_WORKFLOW_AGENT_MAX_TURNS "$WORKFLOW_AGENT_MAX_TURNS"
+export QWEN_CODE_WORKFLOW_AGENT_MAX_TURNS="$WORKFLOW_AGENT_MAX_TURNS"
+
+# CONFIRM THE FLAG AGAINST THE BINARY, NOT THE DOCS. A flag qwen does not accept
+# would kill every future run instantly — worse than the bug this fixes — and
+# `--help` on 0.22.0 does not even list these three, so the help text cannot be
+# the check. yargs runs strict, so an unknown flag is a PARSE error: adding a
+# guaranteed-unknown sentinel makes the probe fail before any model call, and
+# the flag under test is accepted iff it is absent from `Unknown arguments:`.
+# The probe runs with no key and no base URL, so it cannot spend money even if
+# the parse were to succeed.
+# It runs in a THROWAWAY directory, too. The probe still launches the binary, and
+# a binary launched in the repo checkout writes there: the first cut of this left
+# a `work/` tree of stub output inside the working copy and very nearly committed
+# it. A parse-only probe has no business seeing the run's cwd.
+qwen_flag_preflight() {
+  local flag="$1" value="$2" out unknown probe_dir
+  probe_dir="$(mktemp -d)" || return 0
+  out="$(cd "$probe_dir" && env -u OPENAI_API_KEY -u OPENAI_BASE_URL "$QWEN" "$flag" "$value" \
+          --sherlock-flag-probe-sentinel 1 -p x 2>&1 </dev/null || true)"
+  rm -rf "$probe_dir"
+  unknown="$(printf '%s\n' "$out" | grep 'Unknown argument' || true)"
+  if [ -n "$unknown" ] && printf '%s' "$unknown" | grep -q -- "${flag#--}"; then
+    echo "✗ installed qwen does not accept $flag — refusing to launch" >&2
+    printf '  %s\n' "$unknown" >&2
+    exit 1
+  fi
+}
+if [ -x "$QWEN" ] || command -v "$QWEN" >/dev/null 2>&1; then
+  qwen_flag_preflight --max-session-turns "$MAX_SESSION_TURNS"
+  qwen_flag_preflight --max-tool-calls "$MAX_TOOL_CALLS"
+  qwen_flag_preflight --max-wall-time "${MAX_WALL_TIME_S}s"
+fi
+echo "▶ budgets: --max-session-turns $MAX_SESSION_TURNS  --max-wall-time ${MAX_WALL_TIME_S}s  --max-tool-calls $MAX_TOOL_CALLS  QWEN_CODE_WORKFLOW_AGENT_MAX_TURNS=$WORKFLOW_AGENT_MAX_TURNS  (outer timeout ${TIMEOUT}s)"
 RUNS="${BENCH_RUNS:-$HERE/runs}"
 CONTROLLED=0
 if [ -n "${SHERLOCK_RUN_TAG:-}" ] || [ -n "${SHERLOCK_TRACE:-}" ]; then
@@ -172,6 +243,7 @@ save_trace() {
   for partial in "$W"/out-attempt-*.json; do [ -f "$partial" ] && cp "$partial" "$TRACE/$(basename "$partial")"; done
   for partial in "$W"/err-attempt-*.txt "$W"/exit-attempt-*.txt; do [ -f "$partial" ] && cp "$partial" "$TRACE/$(basename "$partial")"; done
   [ -f "$W/attempts.jsonl" ] && cp "$W/attempts.jsonl" "$TRACE/attempts.jsonl"
+  [ -f "$W/classifications.jsonl" ] && cp "$W/classifications.jsonl" "$TRACE/classifications.jsonl"
   [ -f "$W/incomplete.json" ] && cp "$W/incomplete.json" "$TRACE/incomplete.json"
   [ -f "$W/err.txt" ] && cp "$W/err.txt" "$TRACE/err.txt"
   if [ -f "$W/.qwen/settings.json" ]; then
@@ -621,14 +693,29 @@ ARM_COMMIT="$(git -C "$HERE" rev-parse HEAD 2>/dev/null || echo unknown)"
 # NOTE the absence of a dataset field: test_bench_dataset_truth.py guards
 # against this runner writing accepted-ledger fields, and the dataset already
 # lives in status.json. One writer per fact.
-python3 - "$TRACE/run-inputs.json" "$CORPUS_SOURCE" "$RUN_CORPUS" "$PROMPT_SHA" "$ARM_COMMIT" "$ARM" <<'PY'
+# AND THE BUDGETS. A future reader must be able to answer "what limits was this
+# run under?" from the trace alone — `arm_commit` and `prompt_sha256` already
+# make the inputs reproducible, and a cap that can end the run is an input.
+# `fork_subagent_max_turns` is qwen-code 0.22.0's hard-coded
+# FORK_DEFAULT_MAX_TURNS: not ours to choose, still ours to record, because it
+# is what terminated a subagent on run 20260826T224846Z-v39.
+python3 - "$TRACE/run-inputs.json" "$CORPUS_SOURCE" "$RUN_CORPUS" "$PROMPT_SHA" "$ARM_COMMIT" "$ARM" \
+  "$MAX_SESSION_TURNS" "$MAX_WALL_TIME_S" "$MAX_TOOL_CALLS" "$WORKFLOW_AGENT_MAX_TURNS" "$TIMEOUT" <<'PY'
 import json, sys
-target, corpus_source, staged_root, prompt_sha, arm_commit, arm = sys.argv[1:]
+(target, corpus_source, staged_root, prompt_sha, arm_commit, arm,
+ turns, wall_s, tool_calls, workflow_turns, outer_timeout) = sys.argv[1:]
 with open(target, "w", encoding="utf-8") as fh:
     json.dump({"schema": 1, "arm": arm,
                "corpus_source": corpus_source, "staged_root": staged_root,
                "prompt_sha256": prompt_sha, "prompt_file": "prompt-sent.txt",
-               "arm_commit": arm_commit}, fh, ensure_ascii=False, sort_keys=True)
+               "arm_commit": arm_commit,
+               "budgets": {"max_session_turns": int(turns),
+                           "max_wall_time_seconds": int(wall_s),
+                           "max_tool_calls": int(tool_calls),
+                           "workflow_agent_max_turns": int(workflow_turns),
+                           "outer_timeout_seconds": int(outer_timeout),
+                           "fork_subagent_max_turns": 200}},
+              fh, ensure_ascii=False, sort_keys=True)
     fh.write("\n")
 PY
 
@@ -709,7 +796,11 @@ run_qwen() {
   # key via environment, never argv (visible in ps; this box has a guest account)
   ( cd "$W" && OPENAI_API_KEY="$SHERLOCK_API_KEY" OPENAI_BASE_URL="$BASE_URL" \
     timeout "$TIMEOUT" "$QWEN" --auth-type openai --model "$CLIENT_MODEL" \
-      --approval-mode yolo "$@" --output-format json </dev/null \
+      --approval-mode yolo \
+      --max-session-turns "$MAX_SESSION_TURNS" \
+      --max-wall-time "${MAX_WALL_TIME_S}s" \
+      --max-tool-calls "$MAX_TOOL_CALLS" \
+      "$@" --output-format json </dev/null \
   ) >"$W/out.json" 2>"$W/err.txt"
   local rc=$?
   finished="$(date +%s)"
@@ -745,81 +836,22 @@ run_qwen() {
 # machinery rather than a parallel path. The reason is written to a file
 # because this function's stdout is the session id.
 broken_session() {
-  python3 - "$W/out.json" "$TRACE/work/report.md" "$W/.resume-reason" <<'PY'
-import json, os, re, sys
-report_path, reason_path = sys.argv[2], sys.argv[3]
-
-def note(reason):
-    try:
-        with open(reason_path, "w", encoding="utf-8") as fh: fh.write(reason + "\n")
-    except OSError:
-        pass
-
-try:
-    raw = open(sys.argv[1], encoding="utf-8", errors="replace").read()
-except OSError:
-    sys.exit(1)
-try:
-    rows = json.loads(raw)
-except ValueError:
-    # A broken provider can leave Qwen with a partial JSON array. Its system
-    # record already has the saved session id, so resume it instead of discarding
-    # all prior work because the final record is not parseable.
-    match = re.search(r'"session_id"\s*:\s*"([0-9a-f-]{16,})"', raw)
-    if match:
-        note("broken_stream")
-        print(match.group(1))
-        sys.exit(0)
-    sys.exit(1)
-if not isinstance(rows, list):
-    rows = [rows]
-final = next((r for r in rows if isinstance(r, dict) and r.get("type") == "result"), {})
-text = final.get("result") or ""
-broken = (not final or final.get("is_error") or text.lstrip().startswith("[API Error")
-          or ("[API Error" in text and len(text) < 400))
-# A CLEAN STOP THAT DELIVERED NOTHING IS ALSO A REASON TO CONTINUE. Judge it on
-# the artifact and on whether the model actually did anything, never on the
-# prose — a plan announced in the final message reads exactly like a report.
-stats = final.get("stats") if isinstance(final.get("stats"), dict) else {}
-tools = stats.get("tools") if isinstance(stats.get("tools"), dict) else {}
-tool_calls = tools.get("totalCalls")
-try:
-    has_report = os.path.getsize(report_path) > 0
-except OSError:
-    has_report = False
-# WIDENED after v35 r2. The first cut of this only resumed a stall with ZERO
-# tool calls, on the theory that a run which did work and still delivered
-# nothing was failing for a reason a retry would not fix. That theory was
-# wrong, and it excluded the exact shape of the v34 r1 failure: 12 tool calls,
-# every reference file read, and then the report written as chat prose. The
-# session on disk holds ALL of that work, so resuming it is strictly cheaper
-# and strictly more likely to deliver than starting a fresh paid run from
-# nothing — and the attempt count already bounds the downside.
-#
-# So the rule is the artifact, not the effort: NO REPORT ⇒ RESUMABLE. The two
-# shapes stay distinguishable in attempts.jsonl because they need different
-# diagnoses — `stalled_no_tool_calls` means the model never started, which
-# points at the skill's first-turn instruction; `no_deliverable` means it
-# worked and did not write, which points at the write-back step.
-stalled = (not broken) and not has_report
-if not broken and not stalled:
-    sys.exit(1)
-if broken:
-    note("broken_stream")
-else:
-    note("stalled_no_tool_calls" if tool_calls == 0 else "no_deliverable")
-session = final.get("session_id") or next(
-    (r.get("session_id") for r in rows if isinstance(r, dict) and r.get("session_id")), "")
-if session:
-    print(session)
-    sys.exit(0)
-sys.exit(1)
-PY
+  local rc="${1:-0}" out prc
+  out="$(python3 "$HERE/classify-attempt.py" "$W/out.json" "$TRACE/work/report.md" \
+          "$W/.resume-reason" "$rc" "$W/err.txt" "$W/.attempt-signals.json")"
+  prc=$?
+  # EVERY CLASSIFICATION IS KEPT, not just the last one. `.resume-reason` is
+  # overwritten each loop; this file is the audit trail of how each attempt was
+  # judged, and it is what makes "the harness reported the wrong cause"
+  # falsifiable after the fact instead of a matter of memory.
+  [ -f "$W/.attempt-signals.json" ] && cat "$W/.attempt-signals.json" >> "$W/classifications.jsonl"
+  [ -n "$out" ] && printf '%s\n' "$out"
+  return "$prc"
 }
 
 QWEN_RC=0
 if run_qwen 0 -p "$PROMPT"; then QWEN_RC=0; else QWEN_RC=$?; fi
-while RESUME_SESSION="$(broken_session)" \
+while RESUME_SESSION="$(broken_session "$QWEN_RC")" \
   && [ "$RESUME_ATTEMPTS" -lt "$RESUME_MAX_ATTEMPTS" ]; do
   RESUME_ATTEMPTS=$((RESUME_ATTEMPTS + 1))
   ATTEMPT_REASON="$(cat "$W/.resume-reason" 2>/dev/null || echo broken_stream)"
