@@ -254,6 +254,17 @@ def drive(argv, cwd, work, first_prompt, reseed, stage_budget_s, settle_s,
         while True:
             deadline = time.time() + stage_budget_s
             nudges = 0
+            # THE NUDGE'S OWN CLOCK, separate from the ledger's. Measured on the
+            # paid run 20260827T150830Z-v41 and on the free rehearsal before it:
+            # the nudges fired in PAIRS five seconds apart (15:17:14 and
+            # 15:17:19), because typing a nudge does not touch the ledger, so
+            # the very next pass still saw the same quiet time and spent another
+            # nudge on it. A budget of 3 bought 2 real attempts.
+            #
+            # A nudge deserves the same silence before it is judged as the
+            # target did: wait a full idle_nudge_s after sending one before
+            # sending or escalating again.
+            last_nudge = None
             while time.time() < deadline:
                 if not ses.pump(3.0) and not ses.alive():
                     note("DIED", "child exited at stage %s" % seen)
@@ -275,7 +286,11 @@ def drive(argv, cwd, work, first_prompt, reseed, stage_budget_s, settle_s,
                 # behind an hour of silence.
                 if idle_nudge_s > 0:
                     quiet = ledger_quiet_s(ledger_path)
-                    if quiet is not None and quiet >= idle_nudge_s:
+                    since_nudge = (None if last_nudge is None
+                                   else time.time() - last_nudge)
+                    if (quiet is not None and quiet >= idle_nudge_s
+                            and (since_nudge is None
+                                 or since_nudge >= idle_nudge_s)):
                         if nudges >= max_nudges:
                             note("STAGE_STALLED",
                                  "no upstream call for %d s at stage %s after %d "
@@ -285,6 +300,7 @@ def drive(argv, cwd, work, first_prompt, reseed, stage_budget_s, settle_s,
                         nudges += 1
                         note("nudged", "%s (quiet %d s, nudge %d/%d)"
                              % (seen, int(quiet), nudges, max_nudges))
+                        last_nudge = time.time()
                         ses.type(nudge_text, settle=2.0)
             else:
                 note("STAGE_TIMEOUT", "no stage advance in %ds (stage %s)"

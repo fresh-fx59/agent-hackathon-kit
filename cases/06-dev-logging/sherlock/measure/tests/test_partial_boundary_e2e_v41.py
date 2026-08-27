@@ -21,6 +21,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -100,7 +101,7 @@ class BoundarySignal(unittest.TestCase):
 class DriverReactsToEveryBoundary(unittest.TestCase):
     """End to end, through a real pty, against the stand-in."""
 
-    def drive(self, mode, budget=30):
+    def drive(self, mode, budget=30, extra=()):
         d, w = make_work(rows=6)
         env = dict(os.environ, FAKE_WORK=w, FAKE_CHECKPOINT=CHECKPOINT,
                    FAKE_MODE=mode, PYTHONUNBUFFERED="1")
@@ -110,7 +111,8 @@ class DriverReactsToEveryBoundary(unittest.TestCase):
             [sys.executable, DRIVER, "--work", w, "--cwd", d,
              "--prompt", "РАЗБЕРИ ИНЦИДЕНТ", "--transcript", transcript,
              "--events", events, "--stage-budget-s", str(budget),
-             "--settle-s", "0.8", "--", sys.executable, "-u", FAKE],
+             "--settle-s", "0.8"] + list(extra)
+            + ["--", sys.executable, "-u", FAKE],
             capture_output=True, text=True, env=env, timeout=budget * 6)
         rows = [json.loads(l) for l in open(events, encoding="utf-8")] \
             if os.path.exists(events) else []
@@ -133,6 +135,47 @@ class DriverReactsToEveryBoundary(unittest.TestCase):
         # not only at the stage boundaries.
         self.assertGreaterEqual(text.count("Base directory for this skill"), 4,
                                 "one re-invocation per boundary, batch included")
+
+    def test_nudges_are_spaced_and_never_fire_in_pairs(self):
+        """A NUDGE MUST BE GIVEN THE SAME SILENCE THE TARGET WAS.
+
+        Measured on the paid run 20260827T150830Z-v41 and on the free rehearsal
+        before it: the nudges arrived in PAIRS five seconds apart — 15:17:14 and
+        15:17:19, then 14:10:38 and 14:10:44 — because typing a nudge does not
+        touch the upstream ledger. The next pass through the loop therefore read
+        the SAME quiet time and spent a second nudge on it, so `--max-nudges 3`
+        bought only two real attempts and the escalation to STAGE_STALLED came
+        one full interval early.
+
+        The ledger is still the only honest idle signal; the fix is that the
+        nudge now carries its own clock.
+        """
+        # The interval must be well ABOVE the driver's own loop cadence
+        # (pump 3 s + settle 2 s ≈ 5 s), or the loop's own pace hides the bug:
+        # the measured pairs were exactly one cadence apart, 5 s, against a
+        # 300 s interval.
+        idle = 20
+        # The ledger's mtime IS the idle signal, so the test needs one that is
+        # already quiet — a stand-in for a proxy that has stopped being written.
+        fd, ledger = tempfile.mkstemp(suffix=".upstream.jsonl")
+        os.close(fd)
+        p, w, rows, text = self.drive(
+            "stall", budget=120,
+            extra=("--idle-nudge-s", str(idle), "--max-nudges", "3",
+                   "--ledger", ledger))
+        stamps = [r["at"] for r in rows if r["event"] == "nudged"]
+        self.assertTrue(stamps, "the nudge never fired: %s"
+                        % [r["event"] for r in rows])
+
+        def secs(t):
+            return time.mktime(time.strptime(t, "%Y-%m-%dT%H:%M:%SZ"))
+
+        gaps = [secs(b) - secs(a) for a, b in zip(stamps, stamps[1:])]
+        self.assertFalse([g for g in gaps if g < idle],
+                         "nudges fired closer together than the idle interval "
+                         "(%s s): gaps %s" % (idle, gaps))
+        self.assertIn("STAGE_STALLED", [r["event"] for r in rows],
+                      "a dead target must still end the stage")
 
     def test_a_real_stall_is_still_reported(self):
         """The nudge must not become a way to hide a dead session."""

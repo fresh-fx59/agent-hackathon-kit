@@ -55,9 +55,19 @@ TRIAGE = """# Задача: разбор рабочего списка (фаза
 * рабочий список: `{worklist}`
 * правила массовых закрытий: `{rules}`
 * карта корпуса: `{map}`
-* оглавление срезов: `{worklist_index}` — читай СРЕЗЫ `view-<ось>-NN.tsv`,
-  каждый влезает в одно чтение. `worklist.tsv` — леджер для проверок, правки
-  пиши в него, но НЕ читай его целиком.
+* КУРСОР — единственный законный доступ к рабочему списку:
+
+      python3 {tools}/worklist.py next --work {work} --batch 20
+      python3 {tools}/worklist.py verdict --work {work} --from-stdin
+
+  `next` выдаёт партию нерешённых строк БЕЗ колонки `запись`, которую не читает
+  ни один гейт: полный проход по 250 строкам — 39 427 байт в 13 партиях против
+  25 060 байт за ОДНО незаконченное чтение файла. `verdict --from-stdin` пишет
+  ответы обратно (`id<TAB>ячейка` на строку) и отказывается forge-нуть колонку.
+  Оглавление срезов `{worklist_index}` и срезы `view-<ось>-NN.tsv` — только
+  чтобы выбрать ось для `--axis`. Сам `worklist.tsv` — леджер:
+  **НЕ читай его целиком и НЕ правь его руками — обе ошибки уже стоили
+  платного прогона.**
 * инструменты навыка (ЗАПУСКАТЬ, НЕ ЧИТАТЬ): `{tools}`
 
 **НЕ ЧИТАЙ исходники инструментов и НЕ ЧИТАЙ SKILL.md.** Этот бриф — полный
@@ -66,15 +76,18 @@ TRIAGE = """# Задача: разбор рабочего списка (фаза
 дало ничего, чего нет здесь. Нужен формат вывода — он в разделе «Что вернуть».
 Нужно поведение проверки — запусти её и прочитай её же вывод.
 
-**ТВОЙ РЕЗУЛЬТАТ — ФАЙЛ, А НЕ ОТВЕТ.** Пиши в `{worklist}` по мере работы, а не
-одним куском в конце. Если ходы кончаются — запиши то, что уже есть, и верни
+**ТВОЙ РЕЗУЛЬТАТ — ФАЙЛ, А НЕ ОТВЕТ.** Закрывай строки через
+`worklist.py verdict` по мере работы, а не одним куском в конце. Если ходы кончаются — запиши то, что уже есть, и верни
 короткий отчёт. Родитель смотрит на диск, а не на твой статус: на прогоне v36
 ребёнок упал на лимите ходов, вернул пустую строку, и его работа была не видна.
 
 ## Что сделать
 
-1. Каждая строка `{worklist}` начинается со статуса `?`. Замени его на `D`
-   (дефект), `N` (норма) или `X` (данных не хватает) И ЗАПИШИ ФАЙЛ ОБРАТНО.
+1. Бери партию: `worklist.py next --work {work} --batch 20` (или
+   `--axis <ось>`). Каждая строка приходит со статусом `?`. Закрывай её на `D`
+   (дефект), `N` (норма) или `X` (данных не хватает) и отдавай ответы обратно
+   через `worklist.py verdict --work {work} --from-stdin`. Повторяй, пока `next`
+   не вернёт пустую партию. Своих парсеров TSV не пиши — их уже написали.
 2. Ни один вердикт не ставится одной буквой: он обязан принести ссылку
    `путь:строка` с дословной цитатой, либо номер правила `#R<n>` из `{rules}`.
    Правило обязано иметь утверждение и квитанции — иначе строка остаётся `?`.
@@ -239,15 +252,20 @@ say exactly that and stop.
 
 1. Read the brief. Then read the section of the full skill instruction it points
    you at, completely, before you set a single verdict.
-2. Read the SLICES, never the whole worklist. `work/worklist-index.tsv` is the
-   table of contents; each `view-<axis>-NN.tsv` it names fits in one read.
-   `work/worklist.tsv` is the LEDGER: write your verdicts into it, run the gate
-   against it, but do not read it whole - it does not fit, and a truncated read
-   only makes you ask for the next page. For the corpus map, read
+2. Reach the worklist ONLY through the cursor named in your brief:
+   `worklist.py next --work <work> --batch 20` hands you a batch of unresolved
+   rows without the record column no gate reads, and
+   `worklist.py verdict --work <work> --from-stdin` writes your answers back,
+   one `id<TAB>cell` per line. Repeat until `next` returns an empty batch.
+   `work/worklist-index.tsv` and the `view-<axis>-NN.tsv` slices it names exist
+   only to pick an axis for `--axis`; each slice fits in one read.
+   Do NOT read `work/worklist.tsv` whole and do NOT edit it by hand: a paid run
+   closed 0 of 250 rows because its children wrote their own parsers instead. For the corpus map, read
    `work/map-index.tsv` if it exists and `work/map.txt` only for the one file you
    are actually looking at. Every worklist row starts unresolved.
-3. For each row, replace the placeholder with one letter and WRITE THE FILE
-   BACK: `D` for a defect, `N` for normal, `X` for not enough data.
+3. For each row in the batch, answer with one letter - `D` for a defect, `N`
+   for normal, `X` for not enough data - and hand it back through
+   `worklist.py verdict`. The cursor is the write path; nothing else is.
 4. No verdict travels alone. Each carries either a `path:line` reference with a
    verbatim quote, or the number of a bulk rule from the rules file. A bulk rule
    needs a claim and its receipts; without them the row stays unresolved.
@@ -268,7 +286,9 @@ say exactly that and stop.
 * Quote, never paraphrase. A citation that does not match the file byte for byte
   fails the gate.
 * Use the scripts in the brief's tools directory. Do not write your own log
-  parser, do not install anything, do not reach the network.
+  parser or TSV parser, do not install anything, do not reach the network. On a
+  paid run a child spent 167 turns re-deriving what a worklist column meant
+  while `worklist.py next` was sitting in its brief, and closed nothing.
 * A missing log line is not proof that nothing happened. That is an `X`.
 * Do not spawn further subagents, and do not start the report. DRAFT is a
   separate phase with its own worker and its own brief.
