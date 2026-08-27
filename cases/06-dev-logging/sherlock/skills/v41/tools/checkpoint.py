@@ -169,7 +169,7 @@ def read_row(work):
     return row if isinstance(row, dict) else {}
 
 
-def render_handoff(work, done, row):
+def render_handoff(work, done, row, partial=False):
     """The literal block a human copies. Russian: a human reads it.
 
     Every line is load-bearing. The absolute path is here because a cleared
@@ -178,6 +178,34 @@ def render_handoff(work, done, row):
     refused clear looks exactly like a clear that worked.
     """
     stage = row["stage"]
+    if partial:
+        # A BATCH BOUNDARY, NOT A STAGE BOUNDARY. Measured on the paid run
+        # 20260827T104334Z-v40: 13 of 262 worklist rows closed in 35 minutes
+        # while the session grew to a 227,030-token prompt. 262 rows do not close
+        # in one context, so a long stage has to be many bounded sessions - and
+        # the coverage rule («triage EVERY line») is untouched: the stage does not
+        # advance until every row is closed.
+        return "\n".join([
+            "ЧАСТЬ СТУПЕНИ %s ЗАВЕРШЕНА — СТУПЕНЬ ПРОДОЛЖАЕТСЯ." % done,
+            "СОСТОЯНИЕ: %s/checkpoint.json (stage=%s, разобрано %d из %d, "
+            "осталось %d)" % (work, stage, row["resolved"], row["total"],
+                              row["unresolved"]),
+            "",
+            "ДАЛЬШЕ — ВЫПОЛНИ ТРИ ДЕЙСТВИЯ ПО ПОРЯДКУ, НЕ ПРОДОЛЖАЙ В ЭТОЙ "
+            "СЕССИИ:",
+            "  1) /clear",
+            "  2) /sherlock",
+            "  3) вставь одной строкой:",
+            "     ПРОДОЛЖИ РАССЛЕДОВАНИЕ ИЗ %s — СТУПЕНЬ %s" % (work, stage),
+            "",
+            "ПОЧЕМУ: контекст этой сессии уже израсходован на разобранную часть. "
+            "Следующая партия строк должна начаться с чистого контекста — на "
+            "оплаченном прогоне одна сессия дошла до 327 639 токенов при потолке "
+            "262 000.",
+            "/clear стирает загружённый навык, поэтому шаг 2 обязателен.",
+            "/clear ОТКАЖЕТСЯ, пока живёт фоновая задача — фоновых задач тут "
+            "быть не должно.",
+        ]) + "\n"
     lines = [
         "СТУПЕНЬ ЗАВЕРШЕНА: %s" % done,
         "СОСТОЯНИЕ: %s/checkpoint.json (stage=%s, разобрано %d из %d)"
@@ -205,8 +233,14 @@ def render_handoff(work, done, row):
     return "\n".join(lines) + "\n"
 
 
-def handoff(work, done):
-    """Close stage `done`, advance the stage on disk, print the block."""
+#: Stages where a BATCH boundary means something. Only `triage` iterates over a
+#: countable worklist; `draft` and `repair` are single pieces of work, so a
+#: "partial draft" would be a boundary with nothing to measure.
+BATCHED_STAGES = ("triage",)
+
+
+def handoff(work, done, partial=False):
+    """Close stage `done` (or one BATCH of it), and print the block."""
     work = Path(work).resolve(strict=True)
     if done not in STAGES or done == "done":
         raise ValueError("unknown stage %r — stages are %s"
@@ -215,6 +249,19 @@ def handoff(work, done):
     if row["stage"] != done:
         raise ValueError("checkpoint says stage=%s, not %s — finish that stage "
                          "first" % (row["stage"], done))
+    if partial:
+        if done not in BATCHED_STAGES:
+            raise ValueError("--partial only means something in %s: %s is one "
+                             "piece of work, not a countable list"
+                             % (", ".join(BATCHED_STAGES), done))
+        row["stage_partial"] = True
+        row["updated_at"] = datetime.datetime.now(
+            datetime.timezone.utc).isoformat()
+        atomic_text(work / "checkpoint.json",
+                    json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n")
+        block = render_handoff(str(work), done, row, partial=True)
+        atomic_text(work / "handoff.txt", block)
+        return row, block
     if done == "triage" and row["unresolved"]:
         raise ValueError("triage is not finished: %d of %d worklist rows still "
                          "open — close them, then run handoff again"
@@ -233,6 +280,10 @@ def handoff(work, done):
                              "«СИНТЕЗ НЕ ЗАВЕРШЁН» line — synthesis is not done")
     row["stage"] = next_stage(done)
     row["stage_closed"] = done
+    # The stage really ended, so the batch marker is spent. Left explicitly False
+    # rather than deleted: a reader must be able to tell "no partial boundary was
+    # ever taken" from "this key predates the feature".
+    row["stage_partial"] = False
     row["updated_at"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
     atomic_text(work / "checkpoint.json",
                 json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n")
@@ -295,6 +346,10 @@ def main():
     parser.add_argument("command", choices=("init", "handoff", "resume"))
     parser.add_argument("--work", required=True)
     parser.add_argument("--done", help="the stage being closed (handoff only)")
+    parser.add_argument("--partial", action="store_true",
+                        help="close one BATCH of the stage: print the block and "
+                             "reset the session, but do NOT advance the stage "
+                             "(triage only)")
     parser.add_argument("--json", action="store_true",
                         help="print the machine receipt instead of the block")
     args = parser.parse_args()
@@ -305,7 +360,7 @@ def main():
     if args.command == "handoff":
         if not args.done:
             raise SystemExit("handoff needs --done <stage>")
-        row, block = handoff(args.work, args.done)
+        row, block = handoff(args.work, args.done, partial=args.partial)
         print(json.dumps(row, ensure_ascii=False, sort_keys=True) if args.json
               else block, end="" if not args.json else "\n")
         return

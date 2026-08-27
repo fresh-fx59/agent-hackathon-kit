@@ -203,6 +203,17 @@ You do NOT read the corpus yourself: you run `logmap.py`, read `map.txt` and
    **THIS IS THE END OF THE `triage` STAGE.** Run
    `checkpoint.py handoff --work ./work --done triage`, print its block
    verbatim, end the turn. Step 3 belongs to the next session.
+   **A LONG WORKLIST DOES NOT FIT ONE SESSION, AND THAT IS EXPECTED.** MEASURED on
+   a paid run: 13 of 262 rows closed in 35 minutes while the session grew to a
+   227,030-token prompt. So when your context is filling and rows are still open,
+   take a BATCH boundary instead of pushing on:
+
+       python3 <SKILL_BASE_DIR>/tools/checkpoint.py handoff --work ./work --done triage --partial
+
+   It prints the same kind of block, does NOT advance the stage, and records how
+   far this batch got. Print it verbatim and end the turn; the next session
+   continues the same stage from `work/`. The coverage rule is untouched — the
+   stage does not advance until `triagecheck` finds no open row.
 3. **DRAFT** — YOURSELF, in the `draft` session (the one that starts after the
    `triage` handoff). Not delegated: this is one author's job and the
    measurement says so. When the report is written and the marker line deleted,

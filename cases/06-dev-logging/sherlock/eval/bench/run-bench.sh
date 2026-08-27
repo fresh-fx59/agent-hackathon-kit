@@ -1023,6 +1023,9 @@ run_qwen_interactive() {
       --transcript "$W/interactive-transcript.log" \
       --events "$W/interactive-events.jsonl" \
       --stage-budget-s "${SHERLOCK_STAGE_BUDGET_S:-5400}" \
+      --ledger "$TRACE.upstream.jsonl" \
+      --idle-nudge-s "${SHERLOCK_IDLE_NUDGE_S:-0}" \
+      --max-nudges "${SHERLOCK_MAX_NUDGES:-3}" \
       -- "$QWEN" --auth-type openai --model "$CLIENT_MODEL" \
          --approval-mode yolo \
          --max-session-turns "$MAX_SESSION_TURNS" \

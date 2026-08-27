@@ -49,6 +49,31 @@ def strip(text):
     return ANSI.sub("", text)
 
 
+def ledger_quiet_s(ledger_path):
+    """Seconds since the upstream ledger last grew, or None if there is none yet.
+
+    THE ONLY HONEST IDLE SIGNAL AVAILABLE. A TUI always shows its input prompt, so
+    the screen cannot distinguish "waiting for you" from "thinking"; and a stage
+    that has not advanced might simply be a long stage. But the ledger is written
+    by the proxy on every upstream call, so its mtime is the last moment the target
+    actually talked to the provider.
+
+    MEASURED on the paid run 20260827T104334Z-v40: the last call landed at
+    11:18:03 and ended `finish_reason: error`; the session then sat at its prompt
+    until it was stopped at 11:36 — eighteen minutes — and would have burned the
+    whole 5,400-second stage budget before STAGE_TIMEOUT. A human would have typed
+    «продолжай» in ten seconds.
+
+    None means "no ledger": nothing has started, which is not a stall.
+    """
+    if not ledger_path:
+        return None
+    try:
+        return max(0.0, time.time() - os.path.getmtime(ledger_path))
+    except OSError:
+        return None
+
+
 def stage_index(stage):
     """Where a stage sits in the machine, or -1 for "no checkpoint yet".
 
@@ -162,7 +187,8 @@ class Session(object):
 
 
 def drive(argv, cwd, work, first_prompt, reseed, stage_budget_s, settle_s,
-          transcript, skill_command, events_path=None):
+          transcript, skill_command, events_path=None, ledger_path="",
+          idle_nudge_s=0, max_nudges=3, nudge_text="продолжай"):
     ses = Session(argv, cwd, dict(os.environ), transcript)
     events = []
 
@@ -207,6 +233,7 @@ def drive(argv, cwd, work, first_prompt, reseed, stage_budget_s, settle_s,
         note("typed", "the task prompt")
         while True:
             deadline = time.time() + stage_budget_s
+            nudges = 0
             while time.time() < deadline:
                 if not ses.pump(3.0) and not ses.alive():
                     note("DIED", "child exited at stage %s" % seen)
@@ -215,6 +242,23 @@ def drive(argv, cwd, work, first_prompt, reseed, stage_budget_s, settle_s,
                 if stage_index(now) > stage_index(seen):
                     seen = now
                     break
+                # A STALL IS NOT A LONG STAGE, and the ledger can tell them
+                # apart. Bounded on purpose: a target that answers a nudge with
+                # nothing is broken, and nudging it forever would hide that
+                # behind an hour of silence.
+                if idle_nudge_s > 0:
+                    quiet = ledger_quiet_s(ledger_path)
+                    if quiet is not None and quiet >= idle_nudge_s:
+                        if nudges >= max_nudges:
+                            note("STAGE_STALLED",
+                                 "no upstream call for %d s at stage %s after %d "
+                                 "nudge(s) — the target stopped and will not "
+                                 "restart" % (int(quiet), seen, nudges))
+                            return 7, events
+                        nudges += 1
+                        note("nudged", "%s (quiet %d s, nudge %d/%d)"
+                             % (seen, int(quiet), nudges, max_nudges))
+                        ses.type(nudge_text, settle=2.0)
             else:
                 note("STAGE_TIMEOUT", "no stage advance in %ds (stage %s)"
                      % (stage_budget_s, seen))
@@ -279,6 +323,16 @@ def main():
                     default="ПРОДОЛЖИ РАССЛЕДОВАНИЕ ИЗ %(work)s — СТУПЕНЬ %(stage)s")
     ap.add_argument("--skill-command", default="/sherlock")
     ap.add_argument("--stage-budget-s", type=int, default=3600)
+    ap.add_argument("--ledger", default="",
+                    help="the proxy's upstream ledger; its mtime is the only "
+                         "honest signal that the target has stopped talking")
+    ap.add_argument("--idle-nudge-s", type=int, default=0,
+                    help="nudge when the ledger has been quiet this long "
+                         "(0 = never nudge, the old behaviour)")
+    ap.add_argument("--max-nudges", type=int, default=3,
+                    help="after this many unanswered nudges the stage is STALLED")
+    ap.add_argument("--nudge-text", default="продолжай",
+                    help="what a human would type to restart a stopped turn")
     ap.add_argument("--settle-s", type=float, default=6.0)
     ap.add_argument("--transcript", required=True)
     ap.add_argument("--events", default=None, help="write the event log here too")
@@ -299,7 +353,8 @@ def main():
         open(args.events, "w", encoding="utf-8").close()   # fresh log per run
     rc, events = drive(argv, args.cwd, args.work, args.prompt, args.reseed,
                        args.stage_budget_s, args.settle_s, args.transcript,
-                       args.skill_command, args.events)
+                       args.skill_command, args.events, args.ledger,
+                       args.idle_nudge_s, args.max_nudges, args.nudge_text)
     print("rc=%d" % rc)
     return rc
 
