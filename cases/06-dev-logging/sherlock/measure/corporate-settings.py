@@ -119,10 +119,43 @@ def thresholds(window):
     return auto, hard
 
 
-def prove(window, max_tokens, gate):
-    """The worst reachable `prompt + max_tokens`, and why."""
+def prove(window, max_tokens, gate, generation_window_s=None,
+          output_tokens_per_s=122.6, ttft_reserve_s=13.5):
+    """The worst reachable `prompt + max_tokens`, and why.
+
+    `generation_window_s` exists for ONE reason and it is not a bypass. The
+    corporate lane has no generation clock, so 20,000 is right there. The
+    CloseRouter rehearsal lane cuts any generation at 90 seconds — TTFT included
+    — and bills the truncated answer, so on THAT lane a 20,000-token budget
+    (163 s at the measured 122.6 tok/s) guarantees cut turns. The two
+    constraints genuinely conflict, and the conflict is a FACT about the
+    rehearsal provider, not something to be voted on.
+
+    So when a generation window is declared, the budget is DERIVED from it and
+    the consequence is PRINTED rather than hidden: a compaction summary cannot
+    complete on that lane, therefore compaction firing at all is a failure of
+    the staging, not a survivable event. The gate arithmetic is unaffected — a
+    smaller output budget can only lower the worst total.
+    """
     lines = []
     problems = []
+    if generation_window_s:
+        fitting = int((generation_window_s - ttft_reserve_s) * output_tokens_per_s)
+        lines.append("this lane declares a %ss generation window at %s tok/s "
+                     "with %ss reserved for the first token => an output budget "
+                     "of %d fits" % (generation_window_s, output_tokens_per_s,
+                                     ttft_reserve_s, fitting))
+        if max_tokens > fitting:
+            problems.append("max_tokens %d cannot finish inside the lane's %ss "
+                            "generation window (%d fits) — the provider cuts the "
+                            "answer and bills it"
+                            % (max_tokens, generation_window_s, fitting))
+        if max_tokens < SUMMARY_RESERVE:
+            lines.append("CONSEQUENCE, STATED: %d < the %d qwen reserves for a "
+                         "compaction summary, so compaction CANNOT complete on "
+                         "this lane. Compaction firing is therefore a failure of "
+                         "the session staging, not a survivable event — that is "
+                         "exactly how r5 died." % (max_tokens, SUMMARY_RESERVE))
     auto, hard = thresholds(window)
     lines.append("declared window W = %d" % window)
     lines.append("margin(W) = max(10000, 0.05*W) = %d" % margin(window))
@@ -132,7 +165,7 @@ def prove(window, max_tokens, gate):
         problems.append("the declared window %d is itself above the gate %d — a "
                         "prompt that large is refused before any output"
                         % (window, gate))
-    if max_tokens < SUMMARY_RESERVE:
+    if max_tokens < SUMMARY_RESERVE and not generation_window_s:
         problems.append("max_tokens %d is below the %d qwen reserves for a "
                         "compaction summary: the summary is cut at "
                         "finish_reason=length and the session dies with "
@@ -170,6 +203,10 @@ def main():
     ap.add_argument("--max-tokens", type=int, default=MAX_TOKENS)
     ap.add_argument("--bundle", default=None,
                     help="the installed @qwen-code/qwen-code directory")
+    ap.add_argument("--generation-window-s", type=float, default=None,
+                    help="the provider's hard generation clock, if it has one "
+                         "(CloseRouter: 90). Derives the output budget and "
+                         "states the compaction consequence out loud.")
     ap.add_argument("--extra-key", action="append", default=[],
                     help="also require this dotted key (used by the tests)")
     args = ap.parse_args()
@@ -181,7 +218,8 @@ def main():
         return 0
 
     if args.command == "prove":
-        lines, problems = prove(window, args.max_tokens, args.gate)
+        lines, problems = prove(window, args.max_tokens, args.gate,
+                                args.generation_window_s)
         for line in lines:
             print(line)
         for why in problems:

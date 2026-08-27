@@ -45,6 +45,26 @@ arm_ge() {   # arm_ge <arm> <floor> - true when <arm> is v<floor> or newer
 }
 # <<< ARM VERSION GATE <<<
 arm_num "$ARM" >/dev/null   # abort now, not at the first branch
+# >>> INTERACTIVE LANE >>>
+# THE CORPORATE HARNESS RUNS QWEN INTERACTIVELY (operator, 2026-08-27), so the
+# acceptance gate has to run THAT, not `qwen -p` (CLAUDE.md: a gate must run the
+# exact target). Nothing else about the lane changes: the same proxy, the same
+# ledger, the same settings snapshot, the same gates and the same cost
+# accounting — only the way the child is invoked, and who types `/clear`.
+#   SHERLOCK_INTERACTIVE=1  drive a real pty session, staged by the arm
+# Requires v40 or newer: without checkpoint.py's stage machine there is no
+# boundary to drive, and a driver with nothing to wait for would report a
+# STAGE_TIMEOUT on a healthy run.
+INTERACTIVE="${SHERLOCK_INTERACTIVE:-0}"
+case "$INTERACTIVE" in
+  0|1) ;;
+  *) echo "✗ SHERLOCK_INTERACTIVE must be 0 or 1, got '$INTERACTIVE'" >&2; exit 2 ;;
+esac
+if [ "$INTERACTIVE" = "1" ] && ! arm_ge "$ARM" 40; then
+  echo "✗ SHERLOCK_INTERACTIVE=1 needs v40 or newer (the stage machine); got $ARM" >&2
+  exit 2
+fi
+# <<< INTERACTIVE LANE <<<
 CORPUS="${SHERLOCK_CORPUS:-}"
 BASE_URL="${SHERLOCK_BASE_URL:-https://linkapi.ai/v1}"
 # The ALIAS on purpose — do NOT "pin" a dated snapshot here (PR #77 did; it
@@ -956,6 +976,76 @@ run_qwen() {
   return "$rc"
 }
 
+# THE INTERACTIVE ARM OF THE SAME FUNCTION. It keeps every receipt run_qwen
+# writes — attempts.jsonl, the exit file, the state events — because a run that
+# is measured differently cannot be compared with r6. What it does NOT do is
+# resume: interactively the stage loop IS the recovery, and a `--resume` would
+# hand a fresh session someone else's history, which is the very thing being
+# fixed.
+#
+# out.json is synthesised rather than faked. validate-run.py hashes that file and
+# reads one `type: "result"` row from it, so the interactive path writes a real
+# record of what happened — the driver's own event log plus the terminal rc —
+# and leaves `result` EMPTY, because an interactive session has no final
+# assistant message. The deliverable is work/report.md, which is exactly what
+# the gates read. An empty `result` is honest; a copied report would be a forged
+# transcript.
+run_qwen_interactive() {
+  local started rc finished
+  printf '0\n' > "$ATTEMPT_FILE"
+  started="$(date +%s)"
+  state_set --run-tag "$STAMP" --phase QWEN_RUNNING --dataset "$DATASET" --arm "$ARM" \
+    --trace-dir "$TRACE" --attempt 0 --session-id "" \
+    --upstream-log "$TRACE.upstream.jsonl" --inflight-path "$TRACE/upstream-inflight.json"
+  state_event QWEN_RUNNING --run-tag "$STAMP" --phase QWEN_RUNNING --dataset "$DATASET" --arm "$ARM" \
+    --trace-dir "$TRACE" --attempt 0 --session-id "" \
+    --upstream-log "$TRACE.upstream.jsonl" --inflight-path "$TRACE/upstream-inflight.json"
+  state_event ATTEMPT_STARTED --run-tag "$STAMP" --phase QWEN_RUNNING --dataset "$DATASET" --arm "$ARM" \
+    --trace-dir "$TRACE" --attempt 0 --session-id "" --reason interactive \
+    --upstream-log "$TRACE.upstream.jsonl" --inflight-path "$TRACE/upstream-inflight.json"
+  ( cd "$W" && OPENAI_API_KEY="$SHERLOCK_API_KEY" OPENAI_BASE_URL="$BASE_URL" \
+    timeout "$TIMEOUT" python3 "$MEASURE_DIR/interactive-drive.py" \
+      --work "$W/work" --cwd "$W" \
+      --prompt "$PROMPT" \
+      --transcript "$W/interactive-transcript.log" \
+      --events "$W/interactive-events.jsonl" \
+      --stage-budget-s "${SHERLOCK_STAGE_BUDGET_S:-5400}" \
+      -- "$QWEN" --auth-type openai --model "$CLIENT_MODEL" \
+         --approval-mode yolo \
+         --max-session-turns "$MAX_SESSION_TURNS" \
+         --max-tool-calls "$MAX_TOOL_CALLS" \
+  ) >"$W/interactive-driver.log" 2>"$W/err.txt"
+  rc=$?
+  finished="$(date +%s)"
+  python3 - "$W/out.json" "$W/interactive-events.jsonl" "$rc" "$((finished - started))" <<'PY2'
+import json, sys
+out, events, rc, duration = sys.argv[1], sys.argv[2], int(sys.argv[3]), int(sys.argv[4])
+rows = []
+try:
+    with open(events, encoding="utf-8") as fh:
+        rows = [json.loads(line) for line in fh if line.strip()]
+except OSError:
+    pass
+json.dump([{"type": "interactive_events", "events": rows},
+           {"type": "result", "result": "", "is_error": rc != 0,
+            "exit_code": rc, "duration_s": duration,
+            "interactive": True, "stages": [r.get("detail") for r in rows
+                                            if r.get("event") == "stage_advanced"]}],
+          open(out, "w", encoding="utf-8"), ensure_ascii=False)
+PY2
+  cp "$W/out.json" "$W/out-attempt-0.json"
+  cp "$W/err.txt" "$W/err-attempt-0.txt"
+  printf '%s\n' "$rc" > "$W/exit-attempt-0.txt"
+  printf '{"attempt":0,"session_id":"","exit_code":%s,"duration_s":%s,"output_bytes":%s,"stderr_bytes":%s,"interactive":true}\n' \
+    "$rc" "$((finished - started))" "$(wc -c < "$W/out.json")" "$(wc -c < "$W/err.txt")" \
+    >> "$W/attempts.jsonl"
+  state_event ATTEMPT_FINISHED --run-tag "$STAMP" --phase QWEN_RUNNING --dataset "$DATASET" --arm "$ARM" \
+    --trace-dir "$TRACE" --attempt 0 --session-id "" --exit-code "$rc" \
+    --reason interactive --duration-s "$((finished - started))" --upstream-log "$TRACE.upstream.jsonl" \
+    --inflight-path "$TRACE/upstream-inflight.json"
+  return "$rc"
+}
+
 # WHY A CLEAN STOP CAN ALSO NEED A RESUME. v35 r1 on the paid corpus made ONE
 # upstream call: HTTP 200, complete 1,542-event stream, `finish_reason: stop`,
 # `tool_call: false`, 32,896 prompt / 3,521 completion tokens — every one of
@@ -985,6 +1075,9 @@ broken_session() {
 }
 
 QWEN_RC=0
+if [ "$INTERACTIVE" = "1" ]; then
+  if run_qwen_interactive; then QWEN_RC=0; else QWEN_RC=$?; fi
+else
 if run_qwen 0 -p "$PROMPT"; then QWEN_RC=0; else QWEN_RC=$?; fi
 while RESUME_SESSION="$(broken_session "$QWEN_RC")" \
   && [ "$RESUME_ATTEMPTS" -lt "$RESUME_MAX_ATTEMPTS" ]; do
@@ -998,6 +1091,7 @@ while RESUME_SESSION="$(broken_session "$QWEN_RC")" \
   sleep "$BACKOFF"
   if run_qwen "$RESUME_ATTEMPTS" --resume "$RESUME_SESSION" -p "The previous attempt ended without delivering the report. Continue the same investigation from saved state. Do not restart mapping and do not describe what you are about to do: call the tools, write the verdicts back, and write work/report.md. Your final message must be the report itself."; then QWEN_RC=0; else QWEN_RC=$?; fi
 done
+fi   # SHERLOCK_INTERACTIVE
 python3 - "$TRACE/recovery.json" "$RESUME_ATTEMPTS" "$RESUME_SESSION" <<'PY'
 import json, sys
 with open(sys.argv[1], "w", encoding="utf-8") as fh:
