@@ -85,6 +85,22 @@ def main():
     check("the stand-in never answered without a loaded skill",
           "I have no skill loaded" not in text, text[-400:])
 
+    # REGRESSION, caught on the first live rehearsal against real qwen: the arm
+    # creates checkpoint.json partway THROUGH the triage stage, so a driver that
+    # treats any change of the stage string as an advance reads `None -> triage`
+    # as a finished stage and then reports NO_HANDOFF_BLOCK on a healthy run.
+    sys.path.insert(0, MEASURE)
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("idrive", DRIVER)
+    idrive = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(idrive)
+    check("None -> triage is NOT an advance",
+          not (idrive.stage_index("triage") > idrive.stage_index(None)))
+    check("triage -> draft IS an advance",
+          idrive.stage_index("draft") > idrive.stage_index("triage"))
+    check("a stage name the machine does not know cannot look like progress",
+          idrive.stage_index("nonsense") == -1)
+
     p, work, rows, text = scenario("clear_refused")
     check("a refused /clear is reported as CLEAR_REFUSED, not as success",
           p.returncode == 6 and "CLEAR_REFUSED" in [r["event"] for r in rows],

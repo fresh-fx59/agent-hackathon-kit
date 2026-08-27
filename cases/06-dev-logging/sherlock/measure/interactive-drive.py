@@ -49,6 +49,22 @@ def strip(text):
     return ANSI.sub("", text)
 
 
+def stage_index(stage):
+    """Where a stage sits in the machine, or -1 for "no checkpoint yet".
+
+    ORDERING, NOT INEQUALITY. Caught on the first live rehearsal, three minutes
+    in: the arm writes checkpoint.json for the FIRST time partway through the
+    triage stage, so a driver that treats "the stage string changed" as an
+    advance reads `None -> triage` as a completed stage and starts hunting for a
+    handoff block that was never printed. Only a move FORWARD through STAGES is
+    an advance.
+    """
+    try:
+        return STAGES.index(stage)
+    except ValueError:
+        return -1
+
+
 def stage_of(work):
     try:
         row = json.load(open(os.path.join(work, "checkpoint.json"),
@@ -119,7 +135,7 @@ class Session(object):
 
 
 def drive(argv, cwd, work, first_prompt, reseed, stage_budget_s, settle_s,
-          transcript, skill_command):
+          transcript, skill_command, events_path=None):
     ses = Session(argv, cwd, dict(os.environ), transcript)
     events = []
 
@@ -128,6 +144,17 @@ def drive(argv, cwd, work, first_prompt, reseed, stage_budget_s, settle_s,
                "event": kind, "detail": detail}
         events.append(row)
         print(json.dumps(row, ensure_ascii=False), flush=True)
+        # APPENDED AS IT HAPPENS, not written at the end. A run that lasts hours
+        # has to be observable while it is alive: on the first live rehearsal the
+        # event file stayed empty until the driver exited, so the only way to see
+        # where a stage had got to was to read the ANSI transcript.
+        if events_path:
+            try:
+                with open(events_path, "a", encoding="utf-8") as fh:
+                    fh.write(json.dumps(row, ensure_ascii=False) + "\n")
+                    fh.flush()
+            except OSError:
+                pass
 
     try:
         ses.pump(settle_s)                     # let the UI come up
@@ -152,7 +179,7 @@ def drive(argv, cwd, work, first_prompt, reseed, stage_budget_s, settle_s,
                     note("DIED", "child exited at stage %s" % seen)
                     return 3, events
                 now = stage_of(work)
-                if now != seen and now is not None:
+                if stage_index(now) > stage_index(seen):
                     seen = now
                     break
             else:
@@ -210,13 +237,11 @@ def main():
         sys.stderr.write("✗ cannot find the interactive command %r\n" % argv[0])
         return 2
     argv[0] = found
+    if args.events:
+        open(args.events, "w", encoding="utf-8").close()   # fresh log per run
     rc, events = drive(argv, args.cwd, args.work, args.prompt, args.reseed,
                        args.stage_budget_s, args.settle_s, args.transcript,
-                       args.skill_command)
-    if args.events:
-        with open(args.events, "w", encoding="utf-8") as fh:
-            for row in events:
-                fh.write(json.dumps(row, ensure_ascii=False) + "\n")
+                       args.skill_command, args.events)
     print("rc=%d" % rc)
     return rc
 
