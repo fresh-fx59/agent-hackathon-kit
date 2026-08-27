@@ -295,6 +295,13 @@ save_trace() {
     unset LANE_PROXY_PID
   fi
   if [ -f "$W/out.json" ]; then cp "$W/out.json" "$TRACE/out.json" || return 1; fi
+  # THE INTERACTIVE RUN'S OWN EVIDENCE. $W is a mkdtemp that does not survive the
+  # run, and the first free-lane rehearsal lost its transcript that way — the one
+  # artifact that could have said whether the model printed the handoff block.
+  # A diagnosis that lives only in a deleted temp directory is no diagnosis.
+  for f in interactive-transcript.log interactive-events.jsonl interactive-driver.log; do
+    if [ -f "$W/$f" ]; then cp "$W/$f" "$TRACE/$f" || return 1; fi
+  done
   for partial in "$W"/out-attempt-*.json; do [ -f "$partial" ] && cp "$partial" "$TRACE/$(basename "$partial")"; done
   for partial in "$W"/err-attempt-*.txt "$W"/exit-attempt-*.txt; do [ -f "$partial" ] && cp "$partial" "$TRACE/$(basename "$partial")"; done
   [ -f "$W/attempts.jsonl" ] && cp "$W/attempts.jsonl" "$TRACE/attempts.jsonl"

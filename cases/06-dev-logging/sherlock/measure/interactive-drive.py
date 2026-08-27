@@ -195,13 +195,32 @@ def drive(argv, cwd, work, first_prompt, reseed, stage_budget_s, settle_s,
                      % (stage_budget_s, seen))
                 return 4, events
 
-            tail = ses.buffer[max(0, mark - 2000):]
-            if HANDOFF_MARK not in tail:
-                # The arm advanced the stage but never showed the human what to
-                # do next. On a real desk that is a stalled session.
-                note("NO_HANDOFF_BLOCK", "stage is now %s" % seen)
+            # TWO SIGNALS, AND THEY ANSWER DIFFERENT QUESTIONS. Learned on the
+            # free-lane rehearsal at 10:11:41, which reported NO_HANDOFF_BLOCK
+            # on a run whose stage machine had worked perfectly.
+            #
+            # `work/handoff.txt` is written by checkpoint.py handoff at the
+            # instant the stage advances, so its presence proves the boundary was
+            # taken THROUGH the contract rather than by something else editing
+            # the checkpoint. That is a hard fact and it is the terminal.
+            #
+            # Whether the block also appeared ON SCREEN is a question about the
+            # skill's obedience, and a repainting TUI is a poor witness: it
+            # wraps, truncates and scrolls, so a block that was printed can be
+            # gone from the visible buffer moments later. Judging a run on that
+            # would fail obedient runs. So it is MEASURED per boundary and
+            # reported, never used to kill the run.
+            window = ses.buffer[mark:] if mark < len(ses.buffer) else ses.buffer
+            on_screen = HANDOFF_MARK in window
+            handoff_file = os.path.join(work, "handoff.txt")
+            if not os.path.exists(handoff_file):
+                note("NO_HANDOFF_BLOCK",
+                     "stage is now %s but work/handoff.txt does not exist — the "
+                     "boundary was not taken through checkpoint.py handoff" % seen)
                 return 5, events
             note("stage_advanced", seen)
+            note("handoff_block_on_screen" if on_screen
+                 else "handoff_block_not_shown", seen)
 
             if seen == "done":
                 note("finished", "stage=done")

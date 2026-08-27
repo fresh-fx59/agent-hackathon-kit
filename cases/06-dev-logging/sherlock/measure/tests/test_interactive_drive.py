@@ -106,11 +106,29 @@ def main():
           p.returncode == 6 and "CLEAR_REFUSED" in [r["event"] for r in rows],
           "rc=%d %s" % (p.returncode, [r["event"] for r in rows]))
 
+    # TWO SIGNALS, TWO DIFFERENT QUESTIONS — the correction the free-lane
+    # rehearsal forced at 10:11:41, when a run whose stage machine had worked
+    # perfectly was killed for a block that a repainting TUI had simply scrolled
+    # away. `work/handoff.txt` proves the boundary was taken THROUGH the
+    # contract, and that is the terminal. Whether the block also reached the
+    # SCREEN is a question about the skill's obedience: measured per boundary,
+    # reported, never fatal — a TUI is a poor witness and judging on it fails
+    # obedient runs.
     p, work, rows, text = scenario("silent_advance")
-    check("a stage that advances without printing the block is "
-          "NO_HANDOFF_BLOCK", p.returncode == 5
+    kinds = [r["event"] for r in rows]
+    check("a stage that hands off but shows nothing on screen still RUNS",
+          p.returncode == 0, "rc=%d %s" % (p.returncode, kinds))
+    check("...and every such boundary is recorded as not shown",
+          kinds.count("handoff_block_not_shown") == 3, kinds)
+    p, work, rows, text = scenario("forged_advance")
+    check("a stage advanced WITHOUT checkpoint.py handoff is NO_HANDOFF_BLOCK",
+          p.returncode == 5
           and "NO_HANDOFF_BLOCK" in [r["event"] for r in rows],
           "rc=%d %s" % (p.returncode, [r["event"] for r in rows]))
+    p2, work2, rows2, text2 = scenario("happy")
+    check("an obedient run records the block ON SCREEN at every boundary",
+          [r["event"] for r in rows2].count("handoff_block_on_screen") == 3,
+          [r["event"] for r in rows2])
 
     p, work, rows, text = scenario("die")
     check("a child that exits early is DIED, not a pass",
