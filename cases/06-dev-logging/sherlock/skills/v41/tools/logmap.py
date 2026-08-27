@@ -4263,6 +4263,47 @@ MAP_LEGEND = [
 ]
 
 
+def write_map_index(out_dir, reports):
+    """`map-index.tsv` — one line per file, and the reason the map stops being read.
+
+    MEASURED on the paid run 20260827T104334Z-v40: `map.txt` came out at 125,882
+    bytes over 143 per-file blocks, of which 31,199 (24.8 %) are material the
+    triage step never acts on - axis value-distributions 18,692 B, rejected
+    numeric-slot diagnostics 9,825 B, rare-value listings 2,682 B. The arm
+    paginated that file at six offsets, each landing on the 25,000-character
+    truncation cap, and every page stayed in history for the rest of the session.
+
+    What a triage row actually needs about a file is five short fields. They are
+    here, and the header says where the detail lives, so the map becomes something
+    you consult about ONE file instead of something you read. `map.txt` itself is
+    unchanged: the draft stage and a human still get the whole thing.
+    """
+    head = [
+        "# путь\tбайт\tстрок\tзаписей\tкадрирование\tрод\tформ\tокно",
+        "# ЧИТАЙ ЭТОТ ИНДЕКС, а не map.txt. За подробностями по ОДНОМУ файлу "
+        "(оси, редкие значения, часы) открой map.txt и найди его блок.",
+        "# «род» — есть ли у файла ось времени: поток или состояние. «окно» — "
+        "первая→последняя отметка времени, «НЕТ» если часов нет.",
+    ]
+    rows = []
+    for r in reports:
+        window = "НЕТ"
+        if getattr(r, "ts_lo", None) is not None and getattr(r, "ts_hi", None) is not None:
+            window = "%s→%s" % (hhmmss(r.ts_lo), hhmmss(r.ts_hi))
+        rows.append("\t".join([
+            r.rel,
+            str(getattr(r, "bytes", 0)),
+            str(getattr(r, "lines", 0)),
+            str(getattr(r, "records", 0)),
+            str(getattr(r, "framing", "")),
+            AXIS_RU.get(getattr(r, "axis", ""), str(getattr(r, "axis", ""))),
+            str(getattr(r, "distinct", 0)),
+            window,
+        ]))
+    _write_text_atomic(out_dir, "map-index.tsv",
+                       "\n".join(head + rows) + "\n")
+
+
 def file_block(r, trunc):
     """One file's page of the map — the block v16 wrote inline, extracted so the
     budget can decide whether this file gets it or its one-line form."""
@@ -4788,6 +4829,9 @@ def main():
         body = render_map(reports, rows, trunc, rate_rows, args, args.corpus,
                           hosts)
     _write_text_atomic(args.out, "map.txt", "\n".join(body) + "\n")
+    # The index is written from the SAME report objects the map is rendered from,
+    # so the two can never disagree about a file.
+    write_map_index(args.out, reports)
     if hosts:
         marker_hosts = [{"name": h["name"], "worklist": h["path"],
                          "map": h.get("map", "")} for h in hosts]

@@ -167,14 +167,32 @@ You do NOT read the corpus yourself: you run `logmap.py`, read `map.txt` and
 
        python3 <SKILL_BASE_DIR>/tools/logmap.py <LOG_DIR> --out ./work
 
-   Then read `work/map.txt`, `work/worklist.tsv`, `work/axis3.tsv`. If
+   Then read **`work/map-index.tsv`** — one line per corpus file — and
+   `work/axis3.tsv`. **Do NOT read `work/map.txt` or `work/worklist.tsv` whole.**
+   MEASURED on a paid run: `map.txt` was 124,726 bytes and its index is 14,626 for
+   the same 143 files (8.5× smaller), and 24.8 % of the map is derivation debug a
+   triage row never acts on. Open `map.txt` for the block of ONE file when you
+   need its axes or its rare values, never as a document to read through. If
    `work/hosts.tsv` exists, work from the files `work/map-<хост>.txt` and
    `work/worklist-<хост>.tsv`.
 2. **TRIAGE** — via the `sherlock-triage` subagent from `work/brief-triage.md`
    (or yourself, if there is no `agent`).
-   Triage EVERY line of the worklist and write the verdicts back into
-   `work/worklist.tsv` or into each `work/worklist-<хост>.tsv`. Record bulk
-   closures in `work/rules.tsv`. Check:
+   Triage EVERY line of the worklist — that requirement does not move — but read
+   the worklist through the **CURSOR**, never as a file:
+
+       python3 <SKILL_BASE_DIR>/tools/worklist.py next --work ./work --batch 20
+       python3 <SKILL_BASE_DIR>/tools/worklist.py next --work ./work --batch 20 --axis rare
+       python3 <SKILL_BASE_DIR>/tools/worklist.py verdict --work ./work --from-stdin
+       python3 <SKILL_BASE_DIR>/tools/worklist.py status --work ./work
+
+   `next` hands you unresolved rows with the five columns the gates read and
+   WITHOUT the record excerpt, because no gate reads that column: MEASURED, it is
+   313 of the 440.9 characters of an average row, 71 % of the file. `--axis` groups
+   a class so a bulk rule can still be recognised. `verdict --from-stdin` takes
+   `id<TAB>cell` lines and writes them back atomically. A full pass over 250 rows
+   costs **39,427 bytes in 13 batches**; ONE truncated `read_file` of the same
+   worklist cost 25,060 and did not finish it. Record bulk closures in
+   `work/rules.tsv`. Check:
 
        python3 <SKILL_BASE_DIR>/tools/triagecheck.py --worklist ./work/worklist.tsv --rules ./work/rules.tsv --corpus <LOG_DIR>
 
