@@ -67,6 +67,14 @@ def main(argv=None):
     parser.add_argument("--no-cache-guard", action="store_true")
     parser.add_argument("--cache-min-rate", type=float, default=DEFAULT_CACHE_MIN_RATE)
     parser.add_argument("--cache-min-calls", type=int, default=DEFAULT_CACHE_MIN_CALLS)
+    parser.add_argument("--per-request-token-gate", type=int, default=0,
+                        help="THE CORPORATE PER-REQUEST CEILING, in tokens "
+                             "(262000). Every call must satisfy prompt_tokens + "
+                             "request_max_tokens <= this. 0 declares no ceiling "
+                             "and judges nothing, so existing lanes are "
+                             "untouched; a NEGATIVE value is a typo and aborts, "
+                             "because a ceiling that silently reads as 'off' is "
+                             "the dead-gate shape this file exists to prevent.")
     parser.add_argument("--summary-json", default="",
                         help="write the call/discard accounting here. The "
                              "discarded wrong-model attempts are real money; a "
@@ -74,6 +82,9 @@ def main(argv=None):
                              "calls must be visible in the run's artifacts, not "
                              "only in a bill.")
     args = parser.parse_args(argv)
+    if args.per_request_token_gate < 0:
+        parser.error("--per-request-token-gate must be 0 (no ceiling) or "
+                     "positive; %d is a typo" % args.per_request_token_gate)
 
     summary = {}
     breach = audit_ledger(args.ledger, expected_identity=args.expected,
@@ -83,7 +94,8 @@ def main(argv=None):
                           min_calls=args.cache_min_calls,
                           abort_path=args.abort, summary=summary,
                           advances_path=args.advances,
-                          generation_window_s=args.generation_window_s)
+                          generation_window_s=args.generation_window_s,
+                          per_request_token_gate=args.per_request_token_gate)
     if args.summary_json and summary:
         try:
             with open(args.summary_json, "w", encoding="utf-8") as target:

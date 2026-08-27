@@ -56,6 +56,12 @@ arm_num "$ARM" >/dev/null   # abort now, not at the first branch
 # boundary to drive, and a driver with nothing to wait for would report a
 # STAGE_TIMEOUT on a healthy run.
 INTERACTIVE="${SHERLOCK_INTERACTIVE:-0}"
+# 0 = this lane declares no per-request ceiling (every lane before the corporate
+# one). A negative value aborts in lane-audit.py rather than reading as "off".
+PER_REQUEST_TOKEN_GATE="${SHERLOCK_PER_REQUEST_TOKEN_GATE:-0}"
+case "$PER_REQUEST_TOKEN_GATE" in
+  ''|*[!0-9]*) echo "✗ SHERLOCK_PER_REQUEST_TOKEN_GATE must be a non-negative integer, got '$PER_REQUEST_TOKEN_GATE'" >&2; exit 2 ;;
+esac
 case "$INTERACTIVE" in
   0|1) ;;
   *) echo "✗ SHERLOCK_INTERACTIVE must be 0 or 1, got '$INTERACTIVE'" >&2; exit 2 ;;
@@ -1127,6 +1133,13 @@ if [ -n "${LANE_PROXY_PID_WAS:-}" ] || [ -n "${LANE_PROXY_PID:-}" ] || [ -f "${L
   LANE_AUDIT_ARGS=(--ledger "$TRACE.upstream.jsonl"
                    --abort "${LANE_ABORT_PATH:-}"
                    --expected "$EXPECTED_RETURNED_IDENTITY"
+                   # THE CORPORATE PER-REQUEST CEILING, empirically. `prove` in
+                   # measure/corporate-settings.py shows it holds arithmetically
+                   # BEFORE launch; this reads the wire AFTER, because a settings
+                   # file that was overridden, ignored or misspelled looks exactly
+                   # like one that worked. r6 is the case: three green gates, a
+                   # real report, and 63 of 190 rows over 262,000.
+                   --per-request-token-gate "$PER_REQUEST_TOKEN_GATE"
                    # Discarded wrong-model attempts are billed. The count has
                    # to land in an artifact, or a provider that starts
                    # substituting on half its calls just triples the bill in

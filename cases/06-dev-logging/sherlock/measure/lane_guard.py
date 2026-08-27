@@ -1053,11 +1053,59 @@ def account_ledger(ledger_path, summary, identity_check=True,
     summary["incomplete_reason"] = ""
 
 
+def per_request_token_breach(rows, gate):
+    """THE EMPIRICAL HALF OF THE CORPORATE PROOF GATE.
+
+    The ceiling is per REQUEST: `prompt_tokens + request_max_tokens <= gate`. Run
+    r6 is why this exists — three green gates, a real 481-line report, and 63 of
+    its 190 rows over 262,000 with a peak prompt of 327,639. Nothing in the
+    harness noticed, because nothing was looking.
+
+    THE DECLARED BUDGET, NEVER THE COMPLETION RETURNED. A prompt of 250,000 with
+    max_tokens 20,000 is an illegal request even if the model answers in twelve
+    tokens: the ceiling applies to what the request ASKS FOR, which is what the
+    provider must be able to hold.
+
+    A ROW THAT CANNOT BE JUDGED IS A BREACH, not a pass — the same rule as
+    EXPECTED_IDENTITY_UNKNOWN. A missing prompt count or a missing declared
+    budget means this run has no proof it stayed under the ceiling.
+
+    A discarded substitution is skipped: not one byte of it reached the arm, so
+    it is not one of the run's requests (it is still billed, and still counted in
+    the accounting).
+    """
+    for index, row in enumerate(rows, 1):
+        if isinstance(row.get("event"), str) and row["event"]:
+            continue                       # a proxy event is not a call
+        if row.get("discarded_substitution") is True:
+            continue
+        usage = row.get("usage")
+        prompt = usage.get("prompt_tokens") if isinstance(usage, dict) else None
+        declared = row.get("request_max_tokens")
+        if not isinstance(prompt, int) or isinstance(prompt, bool):
+            return "PER_REQUEST_TOKEN_GATE_UNMEASURED", (
+                "row %d carries no prompt token count, so this run has no proof "
+                "it stayed under the %d-token per-request ceiling — unmeasured "
+                "is not clean" % (index, gate))
+        if not isinstance(declared, int) or isinstance(declared, bool):
+            return "PER_REQUEST_TOKEN_GATE_UNMEASURED", (
+                "row %d declares no output budget (request_max_tokens), so "
+                "prompt + budget cannot be checked against the %d-token ceiling"
+                % (index, gate))
+        total = prompt + declared
+        if total > gate:
+            return "PER_REQUEST_TOKEN_GATE_BREACHED", (
+                "row %d asked for %d prompt + %d declared output = %d tokens, "
+                "over the %d-token per-request ceiling this lane committed to"
+                % (index, prompt, declared, total, gate))
+    return None
+
+
 def audit_ledger(ledger_path, expected_identity="", cache_guard=True,
                  min_rate=DEFAULT_CACHE_MIN_RATE,
                  min_calls=DEFAULT_CACHE_MIN_CALLS, abort_path="",
                  identity_check=True, summary=None, advances_path="",
-                 generation_window_s=0):
+                 generation_window_s=0, per_request_token_gate=0):
     """Judge a finished run's upstream ledger. Returns (reason, detail) or None.
 
     FAIL-CLOSED, deliberately and in every direction. A ledger that is absent,
@@ -1128,8 +1176,22 @@ def audit_ledger(ledger_path, expected_identity="", cache_guard=True,
     verdict = _ledger_verdict(ledger_path, expected_identity, cache_guard,
                               min_rate, min_calls, identity_check, summary,
                               advances_path)
+    # THE PER-REQUEST CEILING IS CHECKED LAST AND SEPARATELY, on purpose. It is
+    # a fact about the REQUESTS a lane sent, not about which model answered, so
+    # it must not be able to mask an identity or transport verdict — those say
+    # the run measured the wrong thing, which outranks "the run measured the
+    # right thing illegally". It reads the same rows; if they cannot be read,
+    # _ledger_verdict has already said so.
+    if verdict is None and per_request_token_gate:
+        try:
+            rows = list(_rows(ledger_path))
+        except (OSError, ValueError, TypeError):
+            rows = []
+        verdict = per_request_token_breach(rows, per_request_token_gate)
     if summary is not None and verdict:
         summary["ledger_verdict"] = verdict[0]
+    if summary is not None and per_request_token_gate:
+        summary["per_request_token_gate"] = per_request_token_gate
     return abort_verdict or verdict
 
 

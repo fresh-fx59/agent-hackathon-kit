@@ -59,6 +59,14 @@ def stage_index(stage):
     handoff block that was never printed. Only a move FORWARD through STAGES is
     an advance.
     """
+    if stage is None:
+        # NO CHECKPOINT YET *IS* the triage stage — the skill says so: "if it
+        # fails because there is no checkpoint, this is a new investigation: the
+        # stage is triage". Mapping absence to -1 instead is what made the first
+        # live rehearsal report NO_HANDOFF_BLOCK at 10:05:30, because the arm
+        # creates checkpoint.json partway through triage and `0 > -1` read that
+        # as a completed stage. The baseline is the stage the run STARTS in.
+        return STAGES.index("triage")
     try:
         return STAGES.index(stage)
     except ValueError:
