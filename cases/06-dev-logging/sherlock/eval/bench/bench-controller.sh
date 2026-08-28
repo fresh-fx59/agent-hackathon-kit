@@ -51,6 +51,14 @@ TARGET_ENV_ALLOW = {
     # exactly the launcher it was written for.
     "SHERLOCK_GENERATION_WINDOW_S", "SHERLOCK_OUTPUT_TOKENS_PER_S",
     "SHERLOCK_TTFT_RESERVE_S",
+    # THE ONLY HONEST WAY PAST A CONSTRAINT CONFLICT (fix 7), and it was left
+    # off this list. corporate-settings.py check-budget accepts a max_tokens
+    # below qwen's 20,000-token compaction reserve on exactly one ground — a
+    # model.sessionTokenLimit that ends the session before auto-compaction can
+    # fire — and run-bench.sh writes that same number into the target's
+    # settings.json. Scrubbed here, the escape could never be taken from a paid
+    # launcher, so every lane with a 90 s generation clock was unrunnable.
+    "SHERLOCK_SESSION_TOKEN_LIMIT",
     "SHERLOCK_MAX_RETRIES", "SHERLOCK_MODEL", "SHERLOCK_PROMPT_FILE",
     "SHERLOCK_REQUEST_TIMEOUT_MS", "SHERLOCK_RESUME_BACKOFF_S", "SHERLOCK_SEED_WORK",
     "SHERLOCK_RESUME_MAX_ATTEMPTS", "SHERLOCK_TIMEOUT", "SHERLOCK_UPSTREAM_LOG",
