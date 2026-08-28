@@ -20,6 +20,8 @@
   machine-qualified reference, and the `logmap.py` split flags.
 - **Перепись изменений состояния** — что `statecheck.py` считает изменением
   состояния и как закрывается группа.
+- **`reportcheck.py` — контракт заказчика** — метки, инвентарь, раздел о
+  нехватке данных и ВЕРДИКТ последним; профиль требований — это данные.
 - **Бюджет: почему одна широкая команда убивает прогон** — измеренные числа.
 - **Почему фазы идут в субагентах** — размер тела навыка в каждом запросе.
 
@@ -476,6 +478,78 @@ else.
 
 This is exactly the check that was missing: a report can fail it over a finding
 it **did not make**.
+
+## `reportcheck.py` — контракт заказчика
+
+    python3 <SKILL_BASE_DIR>/tools/reportcheck.py work/report.md
+    python3 <SKILL_BASE_DIR>/tools/reportcheck.py work/report.md --contract <профиль.json>
+    python3 <SKILL_BASE_DIR>/tools/reportcheck.py work/report.md --json
+
+The three gates above all grade the SKILL'S own format — `Н-n` blocks, `улики:`
+lines, the coverage table, the census of state changes. **None of them has ever
+read the CUSTOMER'S requirements**, and those are not in the skill: they arrive
+in the prompt. Measured, and this is why the tool exists: the paid run
+`20260827T173511Z-v41` exited 0 on `citecheck`, `triagecheck` and `statecheck`
+and was called accepted. The independent review then found the delivered report
+broke **five** written requirements from the operator's own prompt — no
+`PROVEN`/`REPORTED`/`INFERENCE` labels, no inventory of addresses/names/paths/
+hashes with the source of each, no section for what the logs LACK, `ВЕРДИКТ`
+placed FIRST instead of last, and a verdict of «компрометация» beside an
+admission that owner-versus-attacker was undetermined. Three green gates, zero of
+the five checked.
+
+`reportcheck` blocks on each violation **separately**, by name, with a count:
+
+| дефект | что значит |
+| --- | --- |
+| `assertion_unlabelled` | утверждение со ссылкой `файл:строка` без метки `PROVEN`/`REPORTED`/`INFERENCE` |
+| `label_unknown` | метка вне этих трёх |
+| `inventory_missing` | нет раздела-инвентаря адресов, имён, путей и хешей |
+| `inventory_unsourced` | запись инвентаря без источника `файл:строка` |
+| `missing_data_section_absent` | нет отдельного раздела о том, чего в логах не хватает |
+| `verdict_section_absent` | нет раздела `ВЕРДИКТ` |
+| `verdict_not_last` | раздел `ВЕРДИКТ` не последний в отчёте |
+| `verdict_not_one_of_three` | вердикт не равен ровно одному из «скомпрометирована», «атаковали, но не доказано», «чисто» |
+| `verdict_uncited` | в разделе `ВЕРДИКТ` нет ни одной ссылки `файл:строка` |
+
+An **assertion** is the unit a human labels: one bullet, one table row, one
+paragraph — and only one that carries a `файл:строка` reference. Prose that
+claims nothing checkable is not dragged into the gate. The inventory, the
+missing-data section, the coverage table, the record window and the verdict
+itself are exempt from the label rule (`labels.exempt_roles` in the profile):
+their entries are sourced, not labelled.
+
+### Почему требования — это данные, а не текст внутри проверяльщика
+
+The skill's format is a constant, so `citecheck` hardcodes it, and that is right.
+The operator's requirements are **not** a constant: they are one customer's
+order, in that customer's prompt. The next customer asks for other labels, other
+mandatory sections, another verdict vocabulary. If those lived as literals inside
+the gate, serving a second customer would mean editing the gate — and every edit
+puts the first customer's sealed, paid run at risk of quietly changing meaning.
+
+So the requirements are a declarative **profile** on disk and the tool is only
+the engine that reads one:
+
+    <SKILL_BASE_DIR>/reference/report-contract.corporate.json
+
+`--contract` selects it; the corporate profile is the default. Copy it, edit it,
+point the flag at the copy — a new customer gets a **new profile, never a new
+gate**.
+
+### Отказ, а не пропуск
+
+Fail-closed by construction: a report that cannot be read, an empty report, a
+profile that will not parse or that lacks the keys the engine needs — all exit
+**2**. Exit 0 stopped meaning «проверено» exactly once, in the v41 run, and must
+never mean it again. `stopcheck` runs this gate beside `triagecheck` and
+`citecheck`, so delivery is blocked on it whether or not the model remembered.
+
+**Scope: structure only.** It answers «имеет ли отчёт заказанную форму?», not
+«следует ли вердикт из находок?». The latter is a separate, semantic gate step,
+and the seam is already cut for it: `CHECKS` in `reportcheck.py` is a registry of
+per-defect functions over one parsed section model, and a verdict-support check
+plugs in as one more entry beside `verdict_not_one_of_three`.
 
 ## Бюджет: почему одна широкая команда убивает прогон
 

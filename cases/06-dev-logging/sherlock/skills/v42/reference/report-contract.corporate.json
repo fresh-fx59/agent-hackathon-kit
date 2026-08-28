@@ -1,0 +1,68 @@
+{
+  "version": 1,
+  "name": "corporate-forensics-2026-08",
+  "why": "Требования заказчика из промпта прогона 20260827T173511Z-v41: метки PROVEN/REPORTED/INFERENCE на каждом утверждении со ссылкой, отдельный инвентарь адресов/имён/путей/хешей с источником каждой записи, отдельный раздел о нехватке данных, и раздел ВЕРДИКТ последним, ровно с одним из трёх слов и со ссылками на строки.",
+
+  "citation": "([^\\s`'\"(),;\\[\\]<>]+?):(\\d+)",
+
+  "labels": {
+    "allowed": ["PROVEN", "REPORTED", "INFERENCE"],
+    "candidate": "(?<![0-9A-Za-z_])\\[?([A-Z][A-Z_]{3,})\\]?(?![0-9A-Za-z_])",
+    "ignore": ["UTC", "HTTP", "HTTPS", "JSON", "JSONL", "EVTX", "PCAP",
+               "NTLM", "KERBEROS", "POWERSHELL", "WMIC", "TSV", "CSV",
+               "SHA1", "SHA256", "MD5", "NULL", "TODO", "NOTE",
+               "WARN", "INFO", "ERROR", "DEBUG", "TRACE", "FATAL",
+               "LOGON", "LOGOFF", "SYSTEM", "SECURITY", "NETWORK",
+               "TIME", "TRUE", "FALSE", "NONE", "TYPE", "NAME", "PATH",
+               "USER", "HOST", "FILE", "LINE", "DATA", "EVENT"],
+    "exempt_roles": ["inventory", "missing_data", "coverage", "window", "verdict"]
+  },
+
+  "sections": [
+    {
+      "role": "verdict",
+      "title": "^\\s*ВЕРДИКТ\\b",
+      "absent_defect": "verdict_section_absent",
+      "must_be_last": true,
+      "not_last_defect": "verdict_not_last",
+      "require_citation": true,
+      "uncited_defect": "verdict_uncited",
+      "one_of": ["скомпрометирована", "атаковали, но не доказано", "чисто"],
+      "one_of_defect": "verdict_not_one_of_three"
+    },
+    {
+      "role": "inventory",
+      "title": "(инвентар|перечень\\s+(адрес|наблюдаем)|адреса,\\s*имена|наблюдаемые\\s+величины)",
+      "absent_defect": "inventory_missing",
+      "entries_require_citation": true,
+      "unsourced_defect": "inventory_unsourced"
+    },
+    {
+      "role": "missing_data",
+      "title": "(не\\s*хватает|нехват|чего\\s+нет\\s+в\\s+логах|пробелы\\s+в\\s+данных)",
+      "absent_defect": "missing_data_section_absent"
+    },
+    {
+      "role": "coverage",
+      "title": "^\\s*Покрытие\\b",
+      "optional": true
+    },
+    {
+      "role": "window",
+      "title": "^\\s*Окно\\s+записей\\b",
+      "optional": true
+    }
+  ],
+
+  "defects": {
+    "assertion_unlabelled": "утверждение со ссылкой файл:строка без метки PROVEN/REPORTED/INFERENCE",
+    "label_unknown": "метка вне трёх разрешённых",
+    "inventory_missing": "нет раздела-инвентаря адресов, имён, путей и хешей",
+    "inventory_unsourced": "запись инвентаря без источника файл:строка",
+    "missing_data_section_absent": "нет отдельного раздела о том, чего в логах не хватает",
+    "verdict_section_absent": "нет раздела ВЕРДИКТ",
+    "verdict_not_last": "раздел ВЕРДИКТ не последний",
+    "verdict_not_one_of_three": "вердикт не равен ровно одному из трёх допустимых",
+    "verdict_uncited": "вердикт без ссылок на строки"
+  }
+}

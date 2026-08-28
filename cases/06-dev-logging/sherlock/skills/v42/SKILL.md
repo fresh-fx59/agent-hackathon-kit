@@ -484,11 +484,32 @@ paraphrased field name fails a gate that is checking for a byte-exact string.
    it can never freeze at a stale count beside a `checkpoint.json` that already
    says `ready_for_synthesis` (that pair, 13 из 262 against 262/262, is the v38
    failure this item exists to stop);
-9. **the report text is not yet entirely inside your final message.**
+9. `reportcheck` exited with a non-zero code — the report does not have the
+   shape the OPERATOR ordered. The other gates grade the skill's own format;
+   this one grades the customer's contract, which arrives in the prompt and had
+   never been checked before v42. It blocks separately on each of:
+   `assertion_unlabelled` (a claim with a `файл:строка` reference and no
+   `PROVEN`/`REPORTED`/`INFERENCE` label), `label_unknown` (a label outside
+   those three), `inventory_missing` (no section listing the addresses, names,
+   paths and hashes met), `inventory_unsourced` (an inventory entry without its
+   `файл:строка` origin), `missing_data_section_absent` (no separate section for
+   what the logs LACK), `verdict_section_absent`, `verdict_not_last` (the
+   `ВЕРДИКТ` section is not the final section), `verdict_not_one_of_three` (the
+   verdict is not exactly one of «скомпрометирована», «атаковали, но не
+   доказано», «чисто») and `verdict_uncited` («вердикт без ссылок на строки не
+   принимается»);
+   — this is the v41 regression: the paid run 20260827T173511Z-v41 broke five
+   written requirements, and all three gates still said «сдано»;
+10. the requirements you were given differ from the shipped profile and you did
+   NOT point `reportcheck --contract` at a profile that matches them. The
+   contract is DATA (`reference/report-contract.corporate.json`): a customer
+   asking for other labels, other sections or another verdict vocabulary gets a
+   new profile file, never a hand-waved exception;
+11. **the report text is not yet entirely inside your final message.**
    If you deliver an abridgement rather than the draft verbatim, it must pass
    `citecheck … --delivered <файл поставки>` with a zero return.
 
-Items 1–8 print numbers, not self-assessment. Only the last act — pasting the
+Items 1–10 print numbers, not self-assessment. Only the last act — pasting the
 text into the message — is unverifiable, which is exactly why it gets forgotten: a
 green `citecheck` feels like the finish line though it only permits delivery.
 While the report lives only in a file, zero has been done. "There is enough
@@ -563,7 +584,11 @@ action afterwards. Step 1 — `reference/tools.md`. Step 2, before a bulk closur
 — `reference/bulk-closure.md`. Step 3, immediately before the draft, and again on
 an `ambiguous` or `binary-file` verdict — `reference/report-format.md`. Only if
 sources lie next to the logs — `reference/code-and-spec.md`. Read it once; do not
-re-read one instead of running the gate.
+re-read one instead of running the gate. The OPERATOR's own report contract —
+`reference/report-format.md` §«Контракт заказчика», and the machine-readable
+profile the gate reads is `reference/report-contract.corporate.json`: it is data,
+so a customer with other requirements gets a copy of that file, never an edited
+gate.
 
 ## Example requests
 

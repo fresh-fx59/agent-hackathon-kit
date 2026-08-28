@@ -173,3 +173,40 @@ named in the report, as a finding or as an explicit `норма` with a quote. Y
 MUST read `<SKILL_BASE_DIR>/reference/tools.md` §"Перепись изменений состояния"
 to know what it counts as a state change and how a group is closed.
 
+
+### The operator's contract — `reportcheck`
+
+`citecheck`, `triagecheck` and `statecheck` all grade the SKILL'S format. None of
+them has ever read the CUSTOMER'S requirements, because those do not live in the
+skill — they arrive in the prompt. That gap is what made the paid run
+`20260827T173511Z-v41` a false positive: three green gates, and a delivered
+report that broke five explicit written requirements. The fourth check closes it:
+
+    python3 <SKILL_BASE_DIR>/tools/reportcheck.py work/report.md
+
+**NEVER TYPE THE LABELS, THE INVENTORY OR THE ВЕРДИКТ BY HAND AND HOPE** — same
+discipline as `cite.py` and `covermap.py`: run the gate, read the count, fix what
+it names. It blocks, each under its own name and count, on
+`assertion_unlabelled`, `label_unknown`, `inventory_missing`,
+`inventory_unsourced`, `missing_data_section_absent`, `verdict_section_absent`,
+`verdict_not_last`, `verdict_not_one_of_three` and `verdict_uncited`.
+
+**Exit criterion:** it exits zero. It is fail-closed — an unreadable report or an
+unparseable profile is exit 2, a refusal, never a pass.
+
+The requirements are DATA, not prose inside the checker: the shipped profile is
+`<SKILL_BASE_DIR>/reference/report-contract.corporate.json`, and it is the
+default. If THIS operator asked for something else — other labels, other
+mandatory sections, another verdict vocabulary — copy the profile, edit it, and
+point the gate at the copy:
+
+    python3 <SKILL_BASE_DIR>/tools/reportcheck.py work/report.md --contract work/report-contract.json
+
+A different customer gets a new profile, never a hand-waved exception and never
+an edit to the gate. You MUST read
+`<SKILL_BASE_DIR>/reference/report-format.md` §«Контракт заказчика» before
+writing the draft, so the report conforms as it is written rather than being
+blocked afterwards.
+
+`stopcheck` runs this gate too, beside `triagecheck` and `citecheck`: delivery is
+blocked on it, so skipping it only postpones the same refusal.

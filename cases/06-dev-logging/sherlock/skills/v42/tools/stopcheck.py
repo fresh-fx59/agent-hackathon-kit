@@ -637,7 +637,14 @@ def check_children(corpus, out_dir, report, lists, root, workspace, deadline):
     check_deadline(deadline)
     triage = tool_path(root, "triagecheck.py")
     cite = tool_path(root, "citecheck.py")
-    if not triage or not cite:
+    # v42: stopcheck IS the delivery blocker — it is the only thing that runs a
+    # gate whether or not the model remembered to. The 20260827T173511Z-v41 run
+    # proves that a gate the stop hook does not run is a gate a run can walk
+    # past: citecheck and triagecheck were green and the operator's contract was
+    # never checked at all. So reportcheck joins them here, and its absence is
+    # "tools missing", not a silent skip.
+    report_gate = tool_path(root, "reportcheck.py")
+    if not triage or not cite or not report_gate:
         return "Sherlock: tools missing or unsafe; reinstall the v30 skill or run checks manually."
     rules_path = os.path.join(out_dir, "rules.tsv")
     if os.path.lexists(rules_path):
@@ -661,6 +668,14 @@ def check_children(corpus, out_dir, report, lists, root, workspace, deadline):
         if r.returncode != 0:
             return ("Sherlock: citecheck failed for %s; fix citations/ledger, rerun citecheck, then deliver work/report.md."
                     % rel(ledger, workspace))
+        check_deadline(deadline)
+        r = run_child([sys.executable, report_gate, report], deadline)
+        if r.returncode != 0:
+            return ("Sherlock: reportcheck failed for %s; the report does not meet "
+                    "the operator's contract (labels, inventory, missing-data "
+                    "section, ВЕРДИКТ last and one of three, cited). Fix the "
+                    "report, rerun reportcheck, then deliver work/report.md."
+                    % rel(report, workspace))
         check_deadline(deadline)
         return None
     except DeadlineExceeded:
