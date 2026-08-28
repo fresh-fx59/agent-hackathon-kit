@@ -78,6 +78,36 @@ the aggregate you paste must be the one your sentence is actually about. And a
 predicate broad enough to match every record that merely HAS the field is
 `too-broad` — «сколько записей имеют это поле» is not a census.
 
+**THE SENTENCE AND THE PREDICATE MUST DESCRIBE THE SAME POPULATION.** A number
+can be exact and still answer a different question than the words beside it. The
+delivered run `20260827T173511Z-v41` wrote «зафиксировано 33 456 неудачных
+входов (4625) от 94 внешних адресов по 1975 словарным именам учётных записей»
+over three predicates that filtered on nothing but `EventID=4625`. All three
+recomputed exactly; all three counted the **whole** 4625 population, one local
+record included (`IpAddress` «-»). The external figures were 33 455 / 93 / 1 974.
+Every headline number in that report was wrong by one row, and no gate saw it.
+
+So: **if the sentence narrows the population — «внешних», «публичных»,
+«извне», «удалённых» — the predicate must narrow it too.** The existing language
+already says it; nothing new is needed:
+
+    count(Event.System.EventID=4625, Event.EventData.IpAddress!=-)
+    distinct(Event.EventData.IpAddress, Event.System.EventID=4625, Event.EventData.IpAddress!=-)
+    distinct(Event.EventData.TargetUserName, Event.System.EventID=4625, Event.EventData.IpAddress!=-)
+
+`citecheck` finds the sentence that states the number, reads it for a narrowing
+word, and asks the corpus whether the predicate's population still contains the
+records that word excludes. If it does, the aggregate is
+`agg_population_narrower_than_predicate` and blocks — and **the refusal prints
+the honest predicate and its number**, so paste that one instead. Beware the
+opposite escape: **do not delete the number.** v37 measured what that costs — a
+report that dropped a census kept 4 of 93 source addresses. Narrow the predicate,
+or drop the narrowing word from the sentence; never drop the fact. How the corpus
+spells «no address» (`-`, `127.0.0.1`, `::1`, `localhost`) and which words count
+as narrowing are DATA, in
+`<SKILL_BASE_DIR>/reference/population-scope.json` — a new corpus gets a new
+profile, never a hand-waved exception.
+
 Measured: the run that passed all three gates named **4** attacker IPs of 93, and never stated that `0xc0000064` (нет такой учётки) fired 25355 times against `0xc000006a` (учётка есть, пароль неверный) 8098 — the difference between noise and a target list. It did not fail to cite that; nothing told it the form existed. Full grammar and every refusal: `reference/report-format.md`.
 
 Then run the report through the check — this is **one** call:

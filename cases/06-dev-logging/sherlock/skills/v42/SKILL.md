@@ -572,6 +572,13 @@ MUST read `<SKILL_BASE_DIR>/reference/tools.md` §"Бюджет: почему о
 - **Never type a number either.** Every count, share and «сколько всего» in the
   report comes from `cite.py --aggregate` and is pasted verbatim, command and
   all. No aggregate, no number — and no deleting the claim to dodge the gate.
+- **Never let the sentence be narrower than the predicate.** «от 94 внешних
+  адресов» over a predicate that counts local records too is
+  `agg_population_narrower_than_predicate` and blocks: the v41 headline was
+  33 456 / 94 / 1975 where the external truth was 33 455 / 93 / 1 974, one local
+  row (`IpAddress` «-») inside all three populations. Narrow the predicate —
+  the refusal prints the honest one — or drop the narrowing word. Never drop
+  the number (§7, `reference/report-format.md`).
 - **Never invent a LINK between entities.** Two real pieces of evidence joined by
   a non-existent edge are invented evidence. If you have not seen the line where
   both entities stand together, write «связь не подтверждена корпусом».

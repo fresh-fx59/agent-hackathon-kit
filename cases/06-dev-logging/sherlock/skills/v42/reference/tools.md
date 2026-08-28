@@ -533,6 +533,16 @@ the engine that reads one:
 
     <SKILL_BASE_DIR>/reference/report-contract.corporate.json
 
+The same reasoning gave the population-scope guard its own profile:
+
+    <SKILL_BASE_DIR>/reference/population-scope.json
+
+It holds the words that NARROW a population in the report's language
+(«внешн», «публичн», «извне», «удал[её]нн») and the spellings this corpus uses
+for «no address» (`-`, `127.0.0.1`, `::1`, `localhost`, `fe80:`). `citecheck
+--scope-profile` selects it. Neither list is a property of the engine: the
+language belongs to the customer, the spellings to the corpus.
+
 `--contract` selects it; the corporate profile is the default. Copy it, edit it,
 point the flag at the copy — a new customer gets a **new profile, never a new
 gate**.

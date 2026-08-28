@@ -522,7 +522,8 @@ VERDICTS = ("ok", "unverifiable", "no-quote", "wrong-content", "out-of-range",
             "missing-file", "binary-file", "ambiguous")
 
 
-def check(report, root, min_overlap=0.34, min_tokens=3, require_quote=False):
+def check(report, root, min_overlap=0.34, min_tokens=3, require_quote=False,
+          scope_profile=None):
     by_rel, by_base = index_corpus(root)
     raw_cites = extract(report)
 
@@ -625,7 +626,8 @@ def check(report, root, min_overlap=0.34, min_tokens=3, require_quote=False):
                                if results else None)
     # Aggregate citations are graded by the same call, against the same index,
     # so a report can never be checked for one form and not the other.
-    aggregates = aggregates_check(report, root, by_rel, by_base)
+    aggregates = aggregates_check(report, root, by_rel, by_base,
+                                  scope_profile=scope_profile)
     summary["агрегатов"] = aggregates["total"]
     summary["агрегат-плохих"] = aggregates["blocking"]
     return {"corpus": os.path.abspath(root), "citations": results,
@@ -3480,6 +3482,13 @@ def render_report_evidence(e):
 #   count-mismatch   the recomputed count differs from the claimed one
 #   command-mismatch the pasted command is not the rendering of the predicate
 #   unreadable       the file could not be read / the evaluation raised
+#   agg_population_narrower_than_predicate
+#                    the sentence that states this number scopes the population
+#                    with a word the predicate does not enforce — «внешних
+#                    адресов» over a population that includes local ones
+#   population-scope-unreadable
+#                    the scope profile is missing or unusable, so the sentence
+#                    could not be compared with the predicate at all
 # Anything that is not `ok` is blocking. There is no "probably fine".
 
 MAX_AGG_LINES = 5000000
@@ -3531,9 +3540,15 @@ AGG_ORDERED_VALUE_RE = re.compile(
 # real corpus. Two characters is not a cure for that class — the population
 # guard below is — but it removes the cheapest instance of it.
 AGG_MIN_CONTAINS = 2
+SCOPE_VERDICT = "agg_population_narrower_than_predicate"
+SCOPE_UNREADABLE = "population-scope-unreadable"
 AGG_VERDICTS = ("ok", "malformed", "missing-file", "ambiguous", "binary-file",
                 "not-tabular", "unknown-field", "zero-match", "too-broad",
-                "count-mismatch", "command-mismatch", "unreadable")
+                "count-mismatch", "command-mismatch", "unreadable",
+                # fix #4: the prose scoped the population and the predicate
+                # did not. See «THE PROSE MUST NOT SCOPE THE POPULATION MORE
+                # NARROWLY THAN THE PREDICATE DOES» below.
+                SCOPE_VERDICT, SCOPE_UNREADABLE)
 
 _MISSING = object()
 
@@ -3875,6 +3890,337 @@ def agg_evaluate(abspath, pred):
     return "ok", actual, ""
 
 
+# --------------------------------------------------------------------------
+# fix #4: THE PROSE MUST NOT SCOPE THE POPULATION MORE NARROWLY THAN THE
+# PREDICATE DOES
+# --------------------------------------------------------------------------
+# WHY THIS LIVES IN citecheck AND NOT IN reportcheck. `reportcheck` owns the
+# CUSTOMER'S contract — shape, labels, sections, and whether the verdict follows
+# from the findings. It never opens the corpus and has no business doing so.
+# This defect cannot be graded without the corpus: the only honest way to answer
+# «does this predicate include local records?» is to look at the records the
+# predicate actually matches. citecheck already owns aggregate grading, already
+# RE-RUNS every predicate, already holds the corpus index, and already carries
+# two guards of exactly this class — `AGG_MIN_CONTAINS` and `too-broad`, whose
+# own comment says outright that «two characters is not a cure for that class —
+# the population guard below is». This IS that guard. Building it beside them,
+# in a tool with no corpus, would have meant a second parser for the predicate
+# language and a second definition of what a population is; there is one of each.
+#
+# WHAT IT CATCHES. The delivered report of run 20260827T173511Z-v41 said
+# «зафиксировано 33 456 неудачных входов (4625) от 94 внешних адресов по 1975
+# словарным именам», backed by three predicates over ALL of EventID 4625. Every
+# number recomputed exactly; every number answered a DIFFERENT question than the
+# sentence beside it, because one local row (Security.jsonl:13497, IpAddress
+# «-») was inside all three populations. The true external figures were
+# 33 455 / 93 / 1 974. Arithmetic was never the defect. SCOPE was.
+#
+# HOW. The link between prose and predicate is the NUMBER, not proximity: find
+# the sentence that states the aggregate's own count (digit groups tolerated —
+# «33 456», «33,456», «33456»), and read that sentence for a scope word. Then
+# ask the corpus whether the predicate's matched population contains records the
+# scope word excludes. If it does, refuse and PRINT THE HONEST PREDICATE with
+# its recomputed number. That last part is not politeness: v37 measured what a
+# refusal that only says «wrong» buys — the model deletes the number (93 sources
+# became 4), and deleting a number instead of citing it is the regression this
+# project already has a name for (`reference/draft-and-verify.md` §7).
+#
+# WHY THE VOCABULARY IS DATA (reference/population-scope.json). The scope words
+# are the report's LANGUAGE («внешн», «публичн», «извне») and the local-address
+# spellings are a property of the CORPUS («-» here, `127.0.0.1` / `::1` /
+# `localhost` / `fe80::` next door). Neither is a property of the engine, and
+# the next corpus or the next customer changes both. Same reasoning, same shape
+# and same directory as the contract profile of fixes 2 and 3: a new corpus gets
+# a new profile, never a new gate. Nothing below contains a Russian word or an
+# address literal.
+#
+# FAIL CLOSED. A missing, unparseable or key-short profile makes every aggregate
+# `population-scope-unreadable`, blocking — a gate with no locality data has not
+# checked locality, and «exit 0» must never mean «I could not look».
+
+SCOPE_PROFILE_FILE = "population-scope.json"
+SCOPE_REQUIRED = ("classes", "sentence_split", "digit_group_separators")
+SCOPE_CLASS_REQUIRED = ("name", "defect", "prose", "fields", "local_values",
+                        "local_prefixes", "exclude_op")
+class ScopeError(Exception):
+    """The scope profile cannot be used to grade. Refuse, never pass."""
+
+
+def scope_profile_path(reference_dir=None):
+    if reference_dir is None:
+        reference_dir = os.path.join(TOOLS_DIR, "..", "reference")
+    return os.path.abspath(os.path.normpath(
+        os.path.join(reference_dir, SCOPE_PROFILE_FILE)))
+
+
+def load_scope_profile(path=None):
+    """reference/population-scope.json -> compiled profile. Fails closed."""
+    path = path or scope_profile_path()
+    if not os.path.isfile(path):
+        raise ScopeError("нет файла профиля популяций: %s" % path)
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            data = json.load(fh)
+    except (OSError, ValueError) as e:
+        raise ScopeError("профиль популяций не разбирается: %s: %s" % (path, e))
+    if not isinstance(data, dict):
+        raise ScopeError("профиль популяций не объект: %s" % path)
+    for k in SCOPE_REQUIRED:
+        if k not in data:
+            raise ScopeError("в профиле популяций нет ключа %r: %s" % (k, path))
+    if not isinstance(data["classes"], list) or not data["classes"]:
+        raise ScopeError("classes должен быть непустым списком: %s" % path)
+    try:
+        data["_split_re"] = re.compile(data["sentence_split"])
+    except re.error as e:
+        raise ScopeError("плохое sentence_split в %s: %s" % (path, e))
+    for cls in data["classes"]:
+        if not isinstance(cls, dict):
+            raise ScopeError("класс не объект: %s" % path)
+        for k in SCOPE_CLASS_REQUIRED:
+            if k not in cls:
+                raise ScopeError("в классе %r нет ключа %r: %s"
+                                 % (cls.get("name"), k, path))
+        if not cls["prose"] or not cls["fields"]:
+            raise ScopeError("класс %r без словаря prose/fields: %s"
+                             % (cls["name"], path))
+        if not cls["local_values"] and not cls["local_prefixes"]:
+            raise ScopeError("класс %r не объявил ни одного локального "
+                             "написания адреса: %s" % (cls["name"], path))
+        if cls["exclude_op"] not in AGG_OPS:
+            raise ScopeError("класс %r: exclude_op %r вне языка предикатов: %s"
+                             % (cls["name"], cls["exclude_op"], path))
+        try:
+            cls["_prose_re"] = [re.compile(w, re.IGNORECASE)
+                               for w in cls["prose"]]
+        except re.error as e:
+            raise ScopeError("плохое слово-сужение в классе %r в %s: %s"
+                             % (cls["name"], path, e))
+    data["_path"] = path
+    return data
+
+
+def scope_number_re(n, separators):
+    """A regex for `n` as PROSE writes it: 33456, «33 456», «33,456», «33 456»."""
+    digits = str(int(n))
+    sep = "[%s]?" % re.escape(separators) if separators else ""
+    head = len(digits) % 3 or 3
+    parts = [digits[:head]] + [digits[i:i + 3]
+                               for i in range(head, len(digits), 3)]
+    return re.compile(r"(?<![0-9])" + sep.join(re.escape(p) for p in parts)
+                      + r"(?![0-9])")
+
+
+def scope_sentences(report, structural=None):
+    """-> [(report_line, sentence)] over PROSE only.
+
+    Aggregate lines are removed first: the aggregate itself states the number
+    («= 33456»), so leaving it in would make every aggregate its own carrying
+    sentence and the scope word could never be located.
+    """
+    lines = report.splitlines()
+    structural = structural if structural is not None else structural_mask(lines)
+    out = []
+    for i, line in enumerate(lines, 1):
+        if not structural[i - 1] or AGG_LINE_RE.match(line):
+            continue
+        out.append((i, line))
+    return out
+
+
+def scope_claim_sentences(report, count, profile, structural=None):
+    """Every prose sentence that states `count`. -> [(report_line, sentence)]."""
+    num = scope_number_re(count, profile["digit_group_separators"])
+    hits = []
+    for lineno, line in scope_sentences(report, structural):
+        for s in profile["_split_re"].split(line):
+            if s and num.search(s):
+                hits.append((lineno, s.strip()))
+    return hits
+
+
+def scope_words_in(sentence, cls):
+    return [w.pattern for w, m in ((w, w.search(sentence))
+                                   for w in cls["_prose_re"]) if m]
+
+
+def _scope_is_local(value, cls):
+    if value is None:
+        return True                       # no address at all is not «external»
+    v = value.strip()
+    if v in cls["local_values"] or v == "":
+        return True
+    return any(v.startswith(p) for p in cls["local_prefixes"])
+
+
+def agg_locality_scan(abspath, pred, cls):
+    """One pass over the matched population, split by address locality.
+
+    -> {"field", "matched", "local", "local_values", "honest"} or None when the
+    population carries no address field at all (then this class does not apply).
+
+    It re-implements the match loop rather than calling `agg_evaluate`, on
+    purpose: `agg_evaluate` is the FROZEN grader for a paid, sealed run and its
+    semantics must not shift under this fix. The primitives are shared
+    (`opener`, `_agg_get`, `_agg_str`, `_agg_cmp`) and so is the absence rule —
+    a record whose filter field is missing does not match — so the population
+    split here is the split of the population that grader counted. `matched`
+    here is that population's size, reported to the human; the number the
+    report must print is `honest`, and that one is re-derived by `agg_evaluate`
+    itself in `scope_suggestion` before it is ever printed as a citation.
+    """
+    if pred["mode"] != "json":
+        return None                       # `line` pseudo-field: no address
+    field = None
+    present = 0       # matched records where the address field is actually there
+    matched = 0
+    local = 0
+    local_values = {}
+    values = {}
+    op = opener(abspath)
+    with op(abspath, "rt", encoding="utf-8", errors="replace") as fh:
+        for raw in fh:
+            line = raw.strip()
+            if not line:
+                continue
+            try:
+                rec = json.loads(line)
+            except ValueError:
+                continue
+            ok = True
+            for f, o, v in pred["filters"]:
+                sv = _agg_str(_agg_get(rec, f))
+                if sv is None or not _agg_cmp(sv, o, v):
+                    ok = False
+                    break
+            if not ok:
+                continue
+            # The address field is named by the FIRST matched record that
+            # carries one, and then never renamed: one population, one field.
+            # A matched record that lacks it is not silently dropped — it has
+            # no address, which is exactly what «external» excludes.
+            if field is None:
+                for cand in cls["fields"]:
+                    if _agg_get(rec, cand) is not _MISSING:
+                        field = cand
+                        break
+            raw_addr = _MISSING if field is None else _agg_get(rec, field)
+            if raw_addr is not _MISSING:
+                present += 1
+            addr = _agg_str(raw_addr)
+            matched += 1
+            is_local = _scope_is_local(addr, cls)
+            if is_local:
+                local += 1
+                key = "" if addr is None else addr
+                local_values[key] = local_values.get(key, 0) + 1
+                continue
+            if pred["field"]:
+                fv = _agg_str(_agg_get(rec, pred["field"]))
+                if fv is None or fv == "":
+                    continue
+                values[fv] = values.get(fv, 0) + 1
+    # No matched record carries any address the profile knows about: this is
+    # not an address-bearing population, and this class has nothing to say
+    # about it. Silence here is not a pass for the report — it is a pass for
+    # THIS class, which is the honest answer.
+    if field is None or present == 0:
+        return None
+    if pred["kind"] == "count":
+        honest = matched - local
+    elif pred["kind"] == "distinct":
+        honest = len(values)
+    else:
+        honest = sum(1 for v in values.values() if v > pred["threshold"])
+    return {"field": field, "matched": matched, "local": local,
+            "local_values": sorted(local_values), "honest": honest}
+
+
+def scope_honest_predicate(pred, field, values, cls):
+    """The predicate the report SHOULD have cited. Same closed language.
+
+    Only NON-EMPTY local spellings become filters: `Event.EventData.IpAddress!=`
+    is not a sentence in this language. It costs nothing — a record whose field
+    is ABSENT never satisfies `!=` (see the operator table above), so one such
+    filter drops the address-less records too. -> predicate text, or None when
+    the locality was spelled only as absence and no filter can express it.
+    """
+    extra = ["%s%s%s" % (field, cls["exclude_op"], v)
+             for v in values if v]
+    if not extra:
+        return None
+    args = []
+    if pred["kind"] == "distinct":
+        args = [pred["field"]]
+    elif pred["kind"] == "distinct_over":
+        args = [pred["field"], str(pred["threshold"])]
+    args += ["%s%s%s" % (f, o, v) for f, o, v in pred["filters"]] + extra
+    return "%s(%s)" % (pred["kind"], ", ".join(args))
+
+
+def scope_suggestion(abspath, rel, pred, field, values, cls):
+    """-> (predicate_text or None, count or None, citation or None).
+
+    The suggested citation is EVALUATED, not assumed: the gate re-grades what
+    it prints, so printing a number this gate would then refuse would be worse
+    than printing none.
+    """
+    text = scope_honest_predicate(pred, field, values, cls)
+    if not text:
+        return None, None, None
+    try:
+        hpred = agg_parse_predicate(text)
+    except AggError:
+        return text, None, None
+    verdict, actual, _detail = agg_evaluate(abspath, hpred)
+    if verdict != "ok" or actual is None:
+        return text, None, None
+    return text, actual, agg_render_citation(rel, hpred, actual)
+
+
+def agg_scope_check(abspath, rel, pred, count, report, profile, structural=None):
+    """-> (verdict, detail, suggest). `("ok", "", None)` when the prose agrees.
+
+    Blocks only when BOTH halves are true: a prose sentence states this very
+    number AND scopes it with a word from the profile, and the matched
+    population really does contain records that word excludes. A gate that
+    fires on one half alone fires on honest reports, and a gate that fires on
+    honest reports gets switched off.
+    """
+    for lineno, sentence in scope_claim_sentences(report, count, profile,
+                                                  structural):
+        for cls in profile["classes"]:
+            words = scope_words_in(sentence, cls)
+            if not words:
+                continue
+            scan = agg_locality_scan(abspath, pred, cls)
+            if not scan or not scan["local"]:
+                continue
+            text, actual, citation = scope_suggestion(
+                abspath, rel, pred, scan["field"], scan["local_values"], cls)
+            honest = actual if actual is not None else scan["honest"]
+            detail = (
+                "проза в строке %d сужает популяцию («%s»), предикат — нет: "
+                "в популяции %d записей, из них %d локальных (%s по полю %s), "
+                "поэтому заявленные %d отвечают на другой вопрос."
+                % (lineno, "», «".join(words), scan["matched"], scan["local"],
+                   ", ".join("«%s»" % (v or "поля нет")
+                             for v in scan["local_values"]),
+                   scan["field"], count))
+            if text:
+                # NAME THE HONEST PREDICATE. A refusal that only says «wrong»
+                # is answered by deleting the number (v37: 93 sources became
+                # 4). The way out must be printed, not guessed.
+                detail += (" Честный предикат: %s = %s"
+                           % (text, honest if honest is not None else "?"))
+            else:
+                detail += (" Локальные записи здесь — это отсутствующее поле; "
+                           "фильтром их не выразить, сузь популяцию иначе "
+                           "или убери слово-сужение из фразы.")
+            return SCOPE_VERDICT, detail, citation
+    return "ok", "", None
+
+
 def agg_extract(report, structural=None):
     """-> [{lineno, body, ...}] every `агрегат:` line outside code fences."""
     lines = report.splitlines()
@@ -3889,10 +4235,21 @@ def agg_extract(report, structural=None):
     return out
 
 
-def aggregates_check(report, root, by_rel=None, by_base=None):
+def aggregates_check(report, root, by_rel=None, by_base=None,
+                     scope_profile=None):
     """Grade every aggregate citation in the report. Never runs a command."""
     if by_rel is None:
         by_rel, by_base = index_corpus(root)
+    # fix #4. The scope profile is loaded ONCE, before any grading, and a
+    # profile that cannot be loaded refuses every aggregate: a gate that cannot
+    # check the population has not checked it.
+    scope_error = None
+    profile = None
+    try:
+        profile = load_scope_profile(scope_profile)
+    except ScopeError as e:
+        scope_error = str(e)
+    structural = structural_mask(report.splitlines())
     items = []
     for raw in agg_extract(report):
         item = {"report_line": raw["report_line"], "raw": raw["body"],
@@ -3956,6 +4313,22 @@ def aggregates_check(report, root, by_rel=None, by_base=None):
                         suggest=agg_render_citation(rel, pred, actual))
             items.append(item)
             continue
+        # fix #4. The number is right. Is it the number the SENTENCE claims?
+        if scope_error is not None:
+            item.update(verdict=SCOPE_UNREADABLE, detail=scope_error)
+            items.append(item)
+            continue
+        try:
+            sv, sdetail, ssuggest = agg_scope_check(
+                by_rel[rel], rel, pred, actual, report, profile, structural)
+        except Exception as e:                            # fail closed
+            item.update(verdict=SCOPE_UNREADABLE,
+                        detail="проверка популяции упала: %s" % e)
+            items.append(item)
+            continue
+        if sv != "ok":
+            item.update(verdict=sv, detail=sdetail, suggest=ssuggest,
+                        defect=SCOPE_VERDICT)
         items.append(item)
     blocking = sum(1 for i in items if i["verdict"] != "ok")
     return {"items": items, "total": len(items),
@@ -4349,6 +4722,13 @@ def main():
                     help="текст, который ты СДАЁШЬ. Проверяется тем же кодом по "
                          "тому же корпусу, и его ссылки обязаны быть "
                          "подмножеством проверенных")
+    # fix #4. The scope profile is data like the report contract is: another
+    # corpus spells «no address» differently, and another customer writes the
+    # report in another language. A new corpus gets a new profile, never a new
+    # gate — and a profile that cannot be read refuses, never passes.
+    ap.add_argument("--scope-profile", metavar="population-scope.json",
+                    help="профиль сужающих слов и локальных адресов "
+                         "(по умолчанию reference/population-scope.json)")
     ap.add_argument("--json", action="store_true")
     # fix #8. The account scan is linear in accounts x corpus bytes and had no
     # bound at all; ait-lds-v2 is 15 GB. The budget is a real knob so the limit
@@ -4367,7 +4747,7 @@ def main():
             else open(args.report, encoding="utf-8", errors="replace").read())
 
     d = check(text, args.corpus, args.min_overlap, args.min_tokens,
-              args.require_quote)
+              args.require_quote, args.scope_profile)
     if args.ledger and os.path.exists(args.ledger):
         d["flagged"] = flagged_lines(args.ledger)
     d["outcomes"] = outcomes_of(text)
@@ -4379,7 +4759,7 @@ def main():
             sys.exit("нет такого файла: %s" % args.delivered)
         handed = open(args.delivered, encoding="utf-8", errors="replace").read()
         dd = check(handed, args.corpus, args.min_overlap, args.min_tokens,
-                   args.require_quote)
+                   args.require_quote, args.scope_profile)
         dd["flagged"] = d.get("flagged") or {}
         dd["path"] = args.delivered
         dd["outcomes"] = outcomes_of(handed)
