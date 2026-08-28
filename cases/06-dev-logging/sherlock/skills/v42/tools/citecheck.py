@@ -1676,13 +1676,50 @@ def enum_match_scores(table, field, text):
     return out
 
 
+# --------------------------------------------------------------------------
+# fix 5 (v42): A HEX ENUM IS AN ENUM
+# --------------------------------------------------------------------------
+# The logon Status/SubStatus codes Windows writes are hex STRINGS
+# (`"Status":"0xc000006d"`), and every recogniser above read decimal digits
+# only. That is why the whole decode discipline never engaged on the field
+# where the v41 report made the v37 mistake again. The hex-ness is a property
+# of the (field, value) PAIR and it is declared in the TABLE — a row whose
+# value is written `0x…` marks that field as hex-spelled, and the engine
+# carries no hex literal of its own. Decimal fields keep matching decimal
+# tokens only and hex fields hex tokens only: coupling the value FORM to the
+# field is what stops «код 3» in prose from being read as a status code.
+def _enum_parse_table_value(raw):
+    """`12` or `0x1a` -> (int, is_hex). Raises ValueError, never guesses."""
+    s = str(raw).strip().lower()
+    if s.startswith("0x"):
+        return int(s, 16), True
+    return int(s, 10), False
+
+
+def _enum_val(raw):
+    return _enum_parse_table_value(raw)[0]
+
+
+def enum_hex_fields(table):
+    return {f for (f, _v), e in table.items() if e.get("hex")}
+
+
+def enum_value_text(table, field, value):
+    """The spelling the REPORT must use for this value: `2` or `0xc000006d`."""
+    e = table.get((field, value))
+    if e and e.get("hex"):
+        return "0x%08x" % value if value > 0xffff else "0x%x" % value
+    return str(value)
+
+
 def _enum_build(rows):
     t = {}
     for field, value, canon, aliases in rows:
-        key = (field.lower(), int(value))
+        ival, is_hex = _enum_parse_table_value(value)
+        key = (field.lower(), ival)
         accepted = set([_enum_norm(canon)] + [_enum_norm(a) for a in aliases])
         accepted.discard("")
-        t[key] = {"canonical": canon, "accepted": accepted,
+        t[key] = {"canonical": canon, "accepted": accepted, "hex": is_hex,
                   "stem_sets": [_enum_stem_set(a) for a in accepted]}
     return t
 
@@ -1729,11 +1766,23 @@ ENUM_FIELD_NAMES = {
     "profiles": ["профили", "профиль"],
     "origin": ["происхождение", "источник правила"],
     "logontype": ["тип входа", "logon type"],
+    # fix 5 (v42). The outer code and the code that carries the REASON. The
+    # inflected spellings are listed because the claim recogniser anchors on the
+    # field name and then a value: the real v41 sentence says «отклонены с кодом
+    # 0xc000006d», and «кодом» is the word that was on the page.
+    "status": ["статус", "статуса", "статусом", "статусе", "код", "кода",
+               "кодом", "коде", "код статуса", "код ошибки", "ntstatus"],
+    "substatus": ["sub status", "подстатус", "подстатуса", "подстатусом",
+                  "подстатусе", "субстатус", "уточняющий код",
+                  "уточняющего кода", "дополнительный код"],
 }
 
 # `"Field":12` — JSON, as it appears inside a verbatim quote.
 ENUM_JSON_PAIR_RE = re.compile(
     r'"([A-Za-z_][A-Za-z0-9_]{0,31})"\s*:\s*(\d{1,10})\b')
+#: fix 5 (v42): `"Status":"0xc000006d"` — Windows writes these as hex STRINGS.
+ENUM_JSON_HEX_PAIR_RE = re.compile(
+    r'"([A-Za-z_][A-Za-z0-9_]{0,31})"\s*:\s*"(0[xX][0-9a-fA-F]{1,8})"')
 
 
 def _enum_field_alternation(fields):
@@ -1759,9 +1808,13 @@ def _enum_field_alternation(fields):
 _ENUM_VALUES = r'(\d{1,10}(?:\s*/\s*\d{1,10}){0,4})(?!\d)(?!\.\d)'
 #: fix #9: «протокол 3proxy» is a product name, not `протокол 3`
 _ENUM_VALUE_END = r'(?![A-Za-z\u0400-\u04ff])'
+#: fix 5 (v42): the same run, spelled in hex — `0xc000006d`, «0xc000006d/0xc0000064»
+_ENUM_HEX_VALUES = (r'(0[xX][0-9a-fA-F]{1,8}'
+                    r'(?:\s*/\s*0[xX][0-9a-fA-F]{1,8}){0,4})(?![0-9a-fA-F])')
+_ENUM_HEX_VALUE_END = r'(?![A-Za-z_\u0400-\u04ff])'
 
 
-def _enum_prose_re(fields):
+def _enum_prose_re(fields, values=_ENUM_VALUES, value_end=_ENUM_VALUE_END):
     """`Action=2`, `Action 2`, «действие 2/3» — every way prose states the pair.
 
     The `2/3` form is deliberate: merging two different values into one slash
@@ -1772,7 +1825,7 @@ def _enum_prose_re(fields):
         return None
     return re.compile(
         r'(?<![A-Za-z0-9_\u0400-\u04ff])(%s)\s*[:=]?\s*' % alt
-        + _ENUM_VALUES + _ENUM_VALUE_END, re.IGNORECASE)
+        + values + value_end, re.IGNORECASE)
 
 
 ENUM_NAME_TO_FIELD = {}
@@ -1786,7 +1839,7 @@ for _f, _al in ENUM_FIELD_NAMES.items():
 # the FIELD NAME, the EXACT value, and a parenthesised decode. Widening the
 # separator can only ever find MORE decode tokens, and every token found is
 # still validated against the table — so it cannot weaken the gate.
-def _enum_decode_re(fields):
+def _enum_decode_re(fields, values=_ENUM_VALUES, value_end=_ENUM_VALUE_END):
     """`Field N (расшифровка)` in every spelling of the field name.
 
     fix #2: built from the SAME alternation as the claim recogniser, so a
@@ -1799,7 +1852,7 @@ def _enum_decode_re(fields):
         return None
     return re.compile(
         r'(?<![A-Za-z0-9_\u0400-\u04ff])(%s)\s*[:=]?\s*' % alt
-        + _ENUM_VALUES + _ENUM_VALUE_END
+        + values + value_end
         # A DECODE IS A SHORT NOUN PHRASE, not the next sentence. Measured on
         # the real v37 report: «LogonType 10/3 (их нет - все 4624 в Security.jsonl
         # это LogonType 5 службы и 3xLogonType 2)» is an aside, and reading it as
@@ -1845,7 +1898,7 @@ def load_enum_extensions(path):
                              "text": "плохое имя поля %r" % field})
             continue
         try:
-            ival = int(value)
+            ival, _is_hex = _enum_parse_table_value(value)
         except (TypeError, ValueError):
             problems.append({"kind": "table_malformed", "path": path, "line": n,
                              "text": "значение не целое: %r" % value})
@@ -1867,7 +1920,9 @@ def load_enum_extensions(path):
                                      % (field, ival, seen[key])})
             continue
         seen[key] = n
-        rows.append((field, ival, decode,
+        # the RAW spelling travels, not `ival`: `0x…` is how the table declares
+        # that this field is written in hex, and `_enum_build` reads it back.
+        rows.append((field, value.strip(), decode,
                      [a for a in (aliases or "").split("|") if a.strip()]))
         if len(rows) > ENUM_TABLE_MAX_ROWS:
             problems.append({"kind": "table_too_large", "path": path, "line": n,
@@ -1898,7 +1953,7 @@ def enum_table(reference_dir=None):
                                                    ENUM_BUILTIN_SHA256[:16])})
     table = dict(ENUM_BUILTIN)
     for field, value, decode, aliases in rows:
-        key = (field.lower(), int(value))
+        key = (field.lower(), _enum_val(value))
         entry = _enum_build([(field, value, decode, aliases)])[key]
         if key in ENUM_BUILTIN:
             # THE LOCK. Without it the cheapest path to green is one TSV line.
@@ -1922,8 +1977,17 @@ def enum_decode_check(report, blocks, structural=None, reference_dir=None):
     structural = structural if structural is not None else structural_mask(lines)
     table, problems = enum_table(reference_dir)
     fields = enum_known_fields(table)
-    prose_re = _enum_prose_re(fields)
-    decode_re = _enum_decode_re(fields)
+    hex_fields = enum_hex_fields(table)
+    dec_fields = fields - hex_fields
+    # fix 5 (v42). ONE loop, two spellings of a value, each bound to the fields
+    # that actually use it. A decimal field can never swallow `0xc000006d` and a
+    # hex field can never swallow «код 3».
+    prose_res = [_enum_prose_re(dec_fields),
+                 _enum_prose_re(hex_fields, _ENUM_HEX_VALUES,
+                                _ENUM_HEX_VALUE_END)]
+    decode_res = [_enum_decode_re(dec_fields),
+                  _enum_decode_re(hex_fields, _ENUM_HEX_VALUES,
+                                  _ENUM_HEX_VALUE_END)]
     items = []
     for label, lo, hi in blocks:
         pairs, decodes = {}, {}
@@ -1933,17 +1997,25 @@ def enum_decode_check(report, blocks, structural=None, reference_dir=None):
             raw = lines[i - 1]
             for m in ENUM_JSON_PAIR_RE.finditer(raw):
                 f = m.group(1).lower()
-                if f in fields:
+                if f in dec_fields:
                     pairs.setdefault((f, int(m.group(2))), i)
-            if prose_re is not None:
+            for m in ENUM_JSON_HEX_PAIR_RE.finditer(raw):
+                f = m.group(1).lower()
+                if f in hex_fields:
+                    pairs.setdefault((f, _enum_val(m.group(2))), i)
+            for prose_re in prose_res:
+                if prose_re is None:
+                    continue
                 for m in prose_re.finditer(raw):
                     f = ENUM_NAME_TO_FIELD.get(m.group(1).lower(),
                                                m.group(1).lower())
                     if f not in fields:
                         continue
                     for part in m.group(2).split("/"):
-                        pairs.setdefault((f, int(part.strip())), i)
-            if decode_re is not None:
+                        pairs.setdefault((f, _enum_val(part)), i)
+            for decode_re in decode_res:
+                if decode_re is None:
+                    continue
                 for m in decode_re.finditer(raw):
                     f = ENUM_NAME_TO_FIELD.get(m.group(1).lower(),
                                                m.group(1).lower())
@@ -1951,26 +2023,29 @@ def enum_decode_check(report, blocks, structural=None, reference_dir=None):
                         continue
                     txt = _enum_norm(m.group(3))
                     for part in m.group(2).split("/"):
-                        decodes.setdefault((f, int(part.strip())), []).append(
+                        decodes.setdefault((f, _enum_val(part)), []).append(
                             (i, txt))
         for (f, v), line_no in sorted(pairs.items()):
             entry = table.get((f, v))
+            disp = enum_value_text(table, f, v)
             if entry is None:
                 items.append({"block": label, "line": line_no, "field": f,
-                              "value": v, "kind": "unknown_value", "text": None,
+                              "value": v, "display": disp,
+                              "kind": "unknown_value", "text": None,
                               "expected": None})
                 continue
             got = decodes.get((f, v)) or []
             if not got:
                 items.append({"block": label, "line": line_no, "field": f,
-                              "value": v, "kind": "missing_decode", "text": None,
+                              "value": v, "display": disp,
+                              "kind": "missing_decode", "text": None,
                               "expected": entry["canonical"]})
                 continue
             for dline, text in got:
                 scores = enum_match_scores(table, f, text)
                 if not scores:
                     items.append({"block": label, "line": dline, "field": f,
-                                  "value": v, "text": text,
+                                  "value": v, "display": disp, "text": text,
                                   "expected": entry["canonical"],
                                   "kind": "unknown_decode", "means": None})
                     continue
@@ -1979,9 +2054,10 @@ def enum_decode_check(report, blocks, structural=None, reference_dir=None):
                 if v in winners:
                     continue        # the author named THIS value, inflection and all
                 items.append({"block": label, "line": dline, "field": f,
-                              "value": v, "text": text,
-                              "expected": entry["canonical"],
-                              "kind": "wrong_decode", "means": winners[0]})
+                              "value": v, "display": disp, "text": text,
+                              "expected": entry["canonical"], "kind":
+                              "wrong_decode",
+                              "means": enum_value_text(table, f, winners[0])})
     # fix #1 (structural half). NAMED COUNTERS, then one `sum()`. A term added
     # later cannot be forgotten out of the total, and `enum_counter_keys()` lets a
     # single test insist that every name is exercised by an exit-code test.
@@ -2003,6 +2079,8 @@ def render_enum_decode(e):
         out.append("  ✗ таблица %s: %s — %s"
                    % (p.get("path") or table_path, p["kind"], p.get("text")))
     for it in e["items"]:
+        it = dict(it)
+        it["value"] = it.get("display") or it["value"]
         if it["kind"] == "missing_decode":
             out.append("  ✗ %s стр.%d: %s=%s процитировано без расшифровки — "
                        "напиши «%s=%s (%s)»"
@@ -2025,6 +2103,397 @@ def render_enum_decode(e):
                        "field/value/decode/aliases/source)"
                        % (it["block"], it["line"], it["field"], it["value"],
                           table_path))
+    return "\n".join(out)
+
+
+# ==========================================================================
+# fix 5 (v42) — THE OUTER CODE IS NOT THE REASON
+# ==========================================================================
+# MEASURED, paid run 20260827T173511Z-v41, delivered report, finding Н-1:
+#
+#   «отказы имеют статус 0xc000006d — словарные имена не подходят к
+#    существующим учёткам»
+#
+# and that clause is how the report argued the brute force never touched a real
+# account. `Status=0xc000006d` is STATUS_LOGON_FAILURE: the deliberately
+# uninformative OUTER code Windows shows for any failed logon. The reason lives
+# in `SubStatus`, and in that very corpus it says the opposite:
+#
+#   Status     0xc000006d = 33453,  0xc000006e = 3
+#   SubStatus  0xc0000064 = 25355 (нет такой учётной записи)
+#              0xc000006a =  8098 (НЕВЕРНЫЙ ПАРОЛЬ — имя существует)
+#              0xc0000072 =     3 (учётная запись отключена)
+#   TargetUserName = АДМИНИСТРАТОР: 8027 events, ALL of them 0xc000006a
+#
+# 8 098 attempts hit accounts that EXIST. Every gate passed, because neither
+# `Status` nor `SubStatus` was in the enum table at all, so the decode
+# discipline of fix 6a never engaged on the field that carried the error. The
+# table half of this fix closes that hole; this half is the semantics.
+#
+# --- DESIGN DECISION 1: prose is linked to evidence BY THE VALUE -----------
+# Same principle as fix #4, different field. The gate does NOT read "the
+# sentence next to the quote". It reads the OUTER VALUE the sentence itself
+# names (`0xc000006d`), then selects exactly the corpus records carrying that
+# value and tallies their inner field. Proximity would make the check depend on
+# layout; the value makes it depend on the corpus.
+#
+# --- DESIGN DECISION 2: why this is not a one-sentence gate ----------------
+# Three separate reasons, and the test suite pins each:
+#   1. The CLAIM side is a vocabulary of REASON CLASSES in the profile, not a
+#      sentence: any Russian phrasing that says «such names do not exist» maps
+#      to the class `no-such-user`, and the paraphrase test uses wording that
+#      shares no substring with the delivered sentence.
+#   2. The EVIDENCE side is arithmetic over the corpus, not a string: the gate
+#      fires when the records that carry the value the sentence named do not
+#      unanimously support the claimed class — whatever the sentence looked
+#      like. The same code refuses «all of these are wrong passwords» when the
+#      corpus says 25 355 of them are nonexistent users.
+#   3. Both halves must hold, and a HEDGE disarms it. «имя пользователя или
+#      пароль неверны» IS what 0xc000006d means, and a sentence that says so
+#      claims nothing about the reason. A gate that fires on the honest reading
+#      of the outer code fires on everything, and gets switched off.
+# A sentence that cites `SubStatus` itself is never graded here either: it is
+# no longer resting on the outer code, which is the whole defect.
+#
+# --- DESIGN DECISION 3: the refusal names the honest evidence -------------
+# v37 measured what a refusal that only says «wrong» buys: the model DELETES
+# the claim (93 sources became 4). So the message prints the full SubStatus
+# breakdown WITH the decode from the enum table, and an aggregate citation per
+# value, already re-evaluated by `agg_evaluate` so the number printed is a
+# number this gate would accept. Deleting the sentence is not the way out;
+# citing the breakdown is.
+#
+# FAIL CLOSED. A missing or unparseable profile, an unreadable corpus file, an
+# exhausted scan budget or more distinct subjects than the profile admits are
+# each blocking on their own. «Exit 0» must never mean «I could not look».
+
+REASON_PROFILE_FILE = "logon-failure-reason.json"
+REASON_DEFECT = "enum_outer_status_read_as_reason"
+REASON_UNREADABLE = "logon-reason-profile-unreadable"
+REASON_REQUIRED = ("sentence_split", "hedges", "outer_field", "inner_field",
+                   "inner_enum_field", "subject_fields", "outer_values",
+                   "scan_max_bytes", "scan_max_files", "max_subjects",
+                   "min_subject_len", "reasons")
+REASON_CLASS_REQUIRED = ("name", "values", "prose")
+#: how many values of the inner field one refusal will spell out
+REASON_MAX_BREAKDOWN = 8
+
+
+class ReasonError(Exception):
+    """The reason profile cannot be used to grade. Refuse, never pass."""
+
+
+def reason_profile_path(reference_dir=None):
+    if reference_dir is None:
+        reference_dir = os.path.join(TOOLS_DIR, "..", "reference")
+    return os.path.abspath(os.path.normpath(
+        os.path.join(reference_dir, REASON_PROFILE_FILE)))
+
+
+def load_reason_profile(path=None, reference_dir=None):
+    """reference/logon-failure-reason.json -> compiled profile. Fails closed."""
+    path = path or reason_profile_path(reference_dir)
+    if not os.path.isfile(path):
+        raise ReasonError("нет файла профиля причин отказа: %s" % path)
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            data = json.load(fh)
+    except (OSError, ValueError) as e:
+        raise ReasonError("профиль причин отказа не разбирается: %s: %s"
+                          % (path, e))
+    if not isinstance(data, dict):
+        raise ReasonError("профиль причин отказа не объект: %s" % path)
+    for k in REASON_REQUIRED:
+        if k not in data:
+            raise ReasonError("в профиле причин отказа нет ключа %r: %s"
+                              % (k, path))
+    if not isinstance(data["reasons"], list) or not data["reasons"]:
+        raise ReasonError("reasons должен быть непустым списком: %s" % path)
+    if not data["outer_values"] or not data["subject_fields"]:
+        raise ReasonError("профиль без outer_values или subject_fields: %s"
+                          % path)
+    try:
+        data["_split_re"] = re.compile(data["sentence_split"])
+        data["_hedge_re"] = [re.compile(w, re.IGNORECASE)
+                             for w in data["hedges"]]
+    except re.error as e:
+        raise ReasonError("плохое регулярное выражение в %s: %s" % (path, e))
+    data["_outer"] = [str(v).strip().lower() for v in data["outer_values"]]
+    for cls in data["reasons"]:
+        if not isinstance(cls, dict):
+            raise ReasonError("класс причины не объект: %s" % path)
+        for k in REASON_CLASS_REQUIRED:
+            if k not in cls:
+                raise ReasonError("в классе %r нет ключа %r: %s"
+                                  % (cls.get("name"), k, path))
+        if not cls["values"] or not cls["prose"]:
+            raise ReasonError("класс %r без значений или без словаря: %s"
+                              % (cls["name"], path))
+        cls["_values"] = set(str(v).strip().lower() for v in cls["values"])
+        try:
+            cls["_prose_re"] = [re.compile(w, re.IGNORECASE)
+                                for w in cls["prose"]]
+        except re.error as e:
+            raise ReasonError("плохое слово-причина в классе %r в %s: %s"
+                              % (cls["name"], path, e))
+    for k in ("scan_max_bytes", "scan_max_files", "max_subjects",
+              "min_subject_len"):
+        if not isinstance(data[k], int) or data[k] < 1:
+            raise ReasonError("ключ %r должен быть целым > 0: %s" % (k, path))
+    data["_path"] = path
+    return data
+
+
+def _reason_str(rec, field):
+    v = _agg_str(_agg_get(rec, field))
+    return None if v is None else v.strip().lower()
+
+
+def logon_reason_scan(root, profile):
+    """One pass over the corpus. -> (stats, problems).
+
+    stats[rel][outer_value] = {"inner": {value_or_"": n},
+                               "subjects": {SUBJECT: {value_or_"": n}}}
+    `""` is «the record carries no inner field», counted rather than dropped:
+    a population where the reason is simply absent must be visible, not silent.
+    """
+    stats, problems = {}, []
+    if not root or not os.path.isdir(root):
+        return stats, [{"kind": "scan_error", "path": root or "",
+                        "text": "корпус недоступен"}]
+    budget = {"bytes": 0, "files": 0}
+    subjects_seen = 0
+    for dirpath, _dirs, files in sorted(os.walk(root)):
+        for fn in sorted(files):
+            full = os.path.join(dirpath, fn)
+            rel = os.path.relpath(full, root)
+            if budget["files"] >= profile["scan_max_files"] \
+                    or budget["bytes"] >= profile["scan_max_bytes"]:
+                problems.append({
+                    "kind": "scan_truncated", "path": rel,
+                    "text": "бюджет сканирования исчерпан: %d файлов / %d байт"
+                            % (budget["files"], budget["bytes"])})
+                return stats, problems
+            budget["files"] += 1
+            try:
+                budget["bytes"] += os.path.getsize(full)
+            except OSError:
+                pass
+            try:
+                with open(full, "rb") as _probe:
+                    _probe.read(1)
+                if looks_binary(full):
+                    continue
+                with opener(full)(full, "rt", encoding="utf-8",
+                                  errors="replace") as fh:
+                    for raw in fh:
+                        line = raw.strip()
+                        if not line or line[0] != "{":
+                            continue
+                        try:
+                            rec = json.loads(line)
+                        except ValueError:
+                            continue
+                        outer = _reason_str(rec, profile["outer_field"])
+                        if outer is None or outer not in profile["_outer"]:
+                            continue
+                        inner = _reason_str(rec, profile["inner_field"]) or ""
+                        bucket = stats.setdefault(rel, {}).setdefault(
+                            outer, {"inner": {}, "subjects": {}})
+                        bucket["inner"][inner] = bucket["inner"].get(inner, 0) + 1
+                        for sf in profile["subject_fields"]:
+                            sv = _agg_str(_agg_get(rec, sf))
+                            if sv is None or not sv.strip():
+                                continue
+                            key = sv.strip().upper()
+                            subs = bucket["subjects"]
+                            if key not in subs:
+                                subjects_seen += 1
+                                if subjects_seen > profile["max_subjects"]:
+                                    problems.append({
+                                        "kind": "too_many_subjects",
+                                        "path": rel,
+                                        "text": "разных значений %s больше %d "
+                                                "— сузь корпус" % (
+                                                    sf,
+                                                    profile["max_subjects"])})
+                                    return stats, problems
+                                subs[key] = {}
+                            subs[key][inner] = subs[key].get(inner, 0) + 1
+            except Exception as e:                       # fail closed
+                problems.append({"kind": "scan_error", "path": rel,
+                                 "text": "%s: %s" % (type(e).__name__, e)})
+    return stats, problems
+
+
+def logon_reason_claims(report, blocks, profile, structural=None):
+    """-> [{block, line, sentence, outer, reason}] — every REASON claim that
+    rests on an outer code and nothing else."""
+    lines = report.splitlines()
+    structural = structural if structural is not None else structural_mask(lines)
+    inner_name = str(profile["inner_enum_field"]).lower()
+    inner_field_tail = str(profile["inner_field"]).split(".")[-1].lower()
+    out = []
+    for label, lo, hi in blocks:
+        for i in range(max(1, lo), min(hi, len(lines)) + 1):
+            if not structural[i - 1]:
+                continue
+            for sent in profile["_split_re"].split(lines[i - 1]):
+                if not sent or not sent.strip():
+                    continue
+                low = sent.lower()
+                outer = [v for v in profile["_outer"] if v in low]
+                if not outer:
+                    continue
+                # RESTING ON THE OUTER CODE is the defect. A sentence that
+                # names the inner field, or any inner value, is already citing
+                # the answer and is not graded here.
+                if inner_name in low or inner_field_tail in low:
+                    continue
+                if any(v in low for cls in profile["reasons"]
+                       for v in cls["_values"]):
+                    continue
+                if any(h.search(sent) for h in profile["_hedge_re"]):
+                    continue
+                for cls in profile["reasons"]:
+                    if not any(w.search(sent) for w in cls["_prose_re"]):
+                        continue
+                    for v in outer:
+                        out.append({"block": label, "line": i,
+                                    "sentence": sent.strip()[:300],
+                                    "outer": v, "reason": cls})
+    return out
+
+
+def reason_citation(abspath, rel, profile, outer, inner, subject=None):
+    """The aggregate citation the report SHOULD carry for this bucket.
+
+    Evaluated, never assumed: `agg_evaluate` re-grades what this prints, so a
+    number this gate would itself refuse is never printed as a citation."""
+    args = ["%s=%s" % (profile["inner_field"], inner),
+            "%s=%s" % (profile["outer_field"], outer)]
+    if subject:
+        args.append("%s=%s" % (profile["subject_fields"][0], subject))
+    text = "count(%s)" % ", ".join(args)
+    try:
+        pred = agg_parse_predicate(text)
+    except AggError:
+        return text, None
+    try:
+        verdict, actual, _d = agg_evaluate(abspath, pred)
+    except Exception:
+        return text, None
+    if verdict != "ok" or actual is None:
+        return text, None
+    return text, agg_render_citation(rel, pred, actual)
+
+
+def logon_reason_check(report, blocks, corpus=None, structural=None,
+                       profile_path=None, reference_dir=None):
+    """A claim about WHY a logon failed may not rest on the outer status code
+    when the same records carry the inner one. -> the usual counted dict."""
+    items, problems = [], []
+    profile = None
+    try:
+        profile = load_reason_profile(profile_path, reference_dir)
+    except ReasonError as e:
+        problems.append({"kind": REASON_UNREADABLE, "path": profile_path or "",
+                         "text": str(e)})
+    claims = []
+    if profile is not None:
+        claims = logon_reason_claims(report, blocks, profile, structural)
+    stats = {}
+    if claims:
+        # The corpus is opened ONLY when a claim of this shape exists. An
+        # honest report costs one regex pass and no I/O.
+        stats, scan_problems = logon_reason_scan(corpus, profile)
+        problems.extend(scan_problems)
+    table = {}
+    if claims:
+        table, _tp = enum_table(reference_dir)     # decodes for the breakdown
+    for claim in claims:
+        cls = claim["reason"]
+        for rel in sorted(stats):
+            bucket = stats[rel].get(claim["outer"])
+            if not bucket:
+                continue
+            subject = None
+            up = claim["sentence"].upper()
+            for name in sorted(bucket["subjects"]):
+                if len(name) >= profile["min_subject_len"] and name in up:
+                    subject = name
+                    break
+            counts = bucket["subjects"][subject] if subject else bucket["inner"]
+            present = dict((v, n) for v, n in counts.items() if v)
+            total = sum(present.values())
+            if not total:
+                continue         # no inner field here: this gate says nothing
+            support = sum(n for v, n in present.items() if v in cls["_values"])
+            if support == total:
+                continue         # the corpus says exactly what the sentence says
+            abspath = os.path.join(corpus, rel) if corpus else rel
+            breakdown = []
+            for v, n in sorted(present.items(), key=lambda kv: -kv[1])[
+                    :REASON_MAX_BREAKDOWN]:
+                try:
+                    ival = _enum_val(v)
+                except ValueError:
+                    ival = None
+                entry = table.get((str(profile["inner_enum_field"]).lower(),
+                                   ival)) if ival is not None else None
+                _text, cite = reason_citation(abspath, rel, profile,
+                                              claim["outer"], v, subject)
+                breakdown.append({"value": v, "count": n,
+                                  "decode": entry["canonical"] if entry else None,
+                                  "citation": cite})
+            items.append({"block": claim["block"], "line": claim["line"],
+                          "sentence": claim["sentence"], "outer": claim["outer"],
+                          "reason": cls["name"], "path": rel,
+                          "subject": subject, "total": total,
+                          "support": support, "breakdown": breakdown,
+                          "kind": REASON_DEFECT})
+            break                # one file, one refusal: say it once
+    counters = {"items": len(items), "profile_problems": len(problems)}
+    return {"items": items, "problems": problems, "counters": counters,
+            "blocking": sum(counters.values()),
+            "claims": len(claims),
+            "profile_path": (profile or {}).get("_path")
+                            or reason_profile_path(reference_dir)}
+
+
+def reason_counter_keys():
+    """Every named term of logon_reason_check()'s blocking sum — the same
+    anti-amnesia device fix #1 built for the two checks above."""
+    return frozenset(logon_reason_check("", [], None)["counters"])
+
+
+def render_logon_reason(r):
+    if not r:
+        return ""
+    if not r["blocking"]:
+        return ""
+    out = ["ПРИЧИНА ОТКАЗА ВХОДА (fix 5): %d блокирующих, утверждений разобрано "
+           "%d" % (r["blocking"], r.get("claims") or 0)]
+    for p in r["problems"]:
+        out.append("  ✗ профиль %s: %s — %s"
+                   % (p.get("path") or r.get("profile_path"), p["kind"],
+                      p.get("text")))
+    for it in r["items"]:
+        who = (" для «%s»" % it["subject"]) if it["subject"] else ""
+        out.append("  ✗ %s стр.%d: «%s» — это утверждение о ПРИЧИНЕ отказа, а "
+                   "опирается на внешний код %s. Причину несёт другое поле: в "
+                   "%s%s из %d записей с этим кодом заявленному подходят только "
+                   "%d."
+                   % (it["block"], it["line"], it["sentence"], it["outer"],
+                      it["path"], who, it["total"], it["support"]))
+        for b in it["breakdown"]:
+            out.append("      %s%s — %d" % (
+                b["value"],
+                (" (%s)" % b["decode"]) if b["decode"] else "", b["count"]))
+            if b["citation"]:
+                out.append("      %s" % b["citation"])
+        out.append("      не удаляй утверждение — перепиши его по этой разбивке "
+                   "и процитируй её агрегатами выше.")
     return "\n".join(out)
 
 
@@ -3177,6 +3646,9 @@ def report_evidence(report, checked=None):
                   + [(cid, lo, hi) for cid, lo, hi in blocks])
     enums = enum_decode_check(report, arg_blocks, structural)
     ownership = ownership_check(report, arg_blocks, corpus, structural)
+    # fix 5 (v42). Same blocks, same corpus, same single `blocking` sum — the
+    # outer status code may not stand in for the reason.
+    logon_reason = logon_reason_check(report, arg_blocks, corpus, structural)
 
     # v38 rollover. `cited` = every corpus file a FINDING leans on; those
     # channels owe a window even when they are contiguous, because "no such
@@ -3191,6 +3663,7 @@ def report_evidence(report, checked=None):
 
     blocking = (len(attr_missing) + len(attr_invalid) + len(finding_dupes)
                 + enums["blocking"] + ownership["blocking"]
+                + logon_reason["blocking"]
                 + (1 if rejected_missing_section else 0)
                 + (1 if rejected_empty_section else 0)
                 + len(cand_dupes)
@@ -3266,6 +3739,7 @@ def report_evidence(report, checked=None):
                      "content_claim_in_no_address": [r["report_line"] for r in cov_smuggled],
                      "malformed": [r["report_line"] for r in cov_malformed]},
         "enum_decode": enums,
+        "logon_reason": logon_reason,
         "ownership": ownership,
         "rollover": rollover,
         "blocking": blocking,
@@ -3277,6 +3751,7 @@ def render_report_evidence(e):
         return ""
     out = ["ОТЧЁТНЫЕ НАБЛЮДЕНИЯ v26: %d блокирующих дефектов" % e["blocking"]]
     for _sub in (render_enum_decode(e.get("enum_decode")),
+                 render_logon_reason(e.get("logon_reason")),
                  render_ownership(e.get("ownership"))):
         if _sub:
             out.append(_sub)

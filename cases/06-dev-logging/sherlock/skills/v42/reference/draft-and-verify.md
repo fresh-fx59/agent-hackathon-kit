@@ -108,6 +108,34 @@ as narrowing are DATA, in
 `<SKILL_BASE_DIR>/reference/population-scope.json` — a new corpus gets a new
 profile, never a hand-waved exception.
 
+**THE OUTER STATUS CODE IS NOT THE REASON.** The same run wrote «отказы имеют
+статус 0xc000006d — словарные имена не подходят к существующим учёткам», and
+that clause is how it argued the brute force never touched a real account.
+`Status=0xc000006d` is `STATUS_LOGON_FAILURE`: the deliberately uninformative
+OUTER code Windows shows for any failed logon. The reason lives in `SubStatus`,
+and in that corpus it says the opposite — 25 355 `0xc0000064` (no such user),
+**8 098 `0xc000006a` (wrong password against an account that EXISTS)**, 3
+`0xc0000072` (disabled). All 8 027 tries against `АДМИНИСТРАТОР` were wrong
+passwords against a real, enabled account.
+
+So: **a claim about WHY a logon failed must rest on `SubStatus`, never on
+`Status` alone.** `citecheck` reads the code out of your sentence, selects the
+records carrying exactly that code, tallies their `SubStatus`, and blocks with
+`enum_outer_status_read_as_reason` when they do not unanimously support what you
+wrote. **The refusal prints the full breakdown and a ready aggregate per value:**
+
+    count(Event.EventData.SubStatus=0xc0000064, Event.EventData.Status=0xc000006d)
+
+Paste those and rewrite the sentence — **do not delete it.** Deleting the claim
+instead of citing it correctly is the v37 regression this project already has a
+name for. Saying what the outer code honestly means («имя пользователя или
+пароль неверны», «код не уточняет причину») does not block; nor does a sentence
+that already cites `SubStatus`. Both halves are DATA: the reason vocabulary in
+`<SKILL_BASE_DIR>/reference/logon-failure-reason.json`, the code decodes in
+`reference/enum-tables.tsv`. And every `Status`/`SubStatus` you name inside a
+`### Н-n` / `### К-n` block needs its decode like any other enum:
+`Status=0xc000006d (общий отказ входа)`.
+
 Measured: the run that passed all three gates named **4** attacker IPs of 93, and never stated that `0xc0000064` (нет такой учётки) fired 25355 times against `0xc000006a` (учётка есть, пароль неверный) 8098 — the difference between noise and a target list. It did not fail to cite that; nothing told it the form existed. Full grammar and every refusal: `reference/report-format.md`.
 
 Then run the report through the check — this is **one** call:

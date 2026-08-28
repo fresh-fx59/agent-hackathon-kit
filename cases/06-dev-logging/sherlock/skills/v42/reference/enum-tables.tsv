@@ -19,6 +19,17 @@
 # таблице? Гейт даст enum_unknown_value и заблокирует. Это НЕ повод убрать
 # цитату: добавь строку сюда с источником.
 #
+# ЗНАЧЕНИЕ МОЖНО ПИСАТЬ В HEX. Строка со значением вида `0x…` объявляет, что
+# это поле читается в шестнадцатеричном виде — так, как его пишет сам Windows
+# (`"Status":"0xc000006d"`). Десятичное поле никогда не поймает hex-токен, и
+# наоборот: форма значения привязана к полю, а не к движку.
+#
+# РАСШИФРОВКА — ЕЩЁ НЕ ПРИЧИНА. Знать, что `Status=0xc000006d` — это «общий
+# отказ входа», мало: этот код НАРОЧНО не называет причину, её несёт
+# `SubStatus`. Утверждение о причине, опёртое на внешний код, ловит отдельный
+# гейт (`enum_outer_status_read_as_reason`), а его словарь лежит в
+# `reference/logon-failure-reason.json`.
+#
 # ЧЕГО ЗДЕСЬ СОЗНАТЕЛЬНО НЕТ. EventID, Level, Keywords, Task, Opcode, Version.
 # EventID — это идентификатор внутри провайдера, а не закрытое перечисление:
 # таблица под него была бы бесконечной, а гейт срабатывал бы на каждой цитате.
@@ -42,3 +53,50 @@ Protocol	50	esp		https://www.iana.org/assignments/protocol-numbers/protocol-numb
 Protocol	51	ah		https://www.iana.org/assignments/protocol-numbers/protocol-numbers.xhtml
 Protocol	89	ospf		https://www.iana.org/assignments/protocol-numbers/protocol-numbers.xhtml
 Protocol	132	sctp		https://www.iana.org/assignments/protocol-numbers/protocol-numbers.xhtml
+
+# --- fix 5 (v42): ПОЧЕМУ ВХОД НЕ УДАЛСЯ -----------------------------------
+# Отчёт прогона 20260827T173511Z-v41 написал «отказы имеют статус 0xc000006d
+# — словарные имена не подходят к существующим учёткам». 0xc000006d
+# (STATUS_LOGON_FAILURE) — внешний код, который Windows показывает НАРОЧНО
+# неинформативным: причина лежит в SubStatus. В том корпусе SubStatus говорит
+# обратное: 25 355 «нет такой учётной записи», 8 098 «неверный пароль» (имя
+# СУЩЕСТВУЕТ), 3 «учётная запись отключена». Ни Status, ни SubStatus не было в
+# таблице вообще — поэтому дисциплина расшифровки на них не сработала.
+# Значения написаны в hex, как их пишет сам Windows; hex-написание в таблице и
+# означает, что поле читается в hex.
+# Источники: страница события 4625 (таблица Status/Sub Status) и MS-ERREF
+# NTSTATUS. Ни одна строка ниже не переопределяет встроенную таблицу —
+# встроенная не знает полей status/substatus совсем.
+
+# --- Status ---
+Status	0xc000005e	нет доступных серверов входа	status_no_logon_servers|нет серверов входа	https://learn.microsoft.com/windows/security/threat-protection/auditing/event-4625
+Status	0xc0000064	нет такой учётной записи	status_no_such_user|такой учётной записи нет|учётной записи не существует|несуществующее имя	https://learn.microsoft.com/windows/security/threat-protection/auditing/event-4625
+Status	0xc000006a	неверный пароль	status_wrong_password|пароль неверен|неправильный пароль	https://learn.microsoft.com/windows/security/threat-protection/auditing/event-4625
+Status	0xc000006d	общий отказ входа	status_logon_failure|неверное имя или пароль|отказ входа без причины|причина не указана	https://learn.microsoft.com/windows/security/threat-protection/auditing/event-4625
+Status	0xc000006e	ограничение учётной записи	status_account_restriction|ограничения учётной записи	https://learn.microsoft.com/openspecs/windows_protocols/ms-erref/596a1078-e883-4972-9bbc-49e60bebca55
+Status	0xc000006f	вход вне разрешённых часов	status_invalid_logon_hours|вне разрешённых часов	https://learn.microsoft.com/windows/security/threat-protection/auditing/event-4625
+Status	0xc0000070	вход с недопустимой рабочей станции	status_invalid_workstation|недопустимая рабочая станция	https://learn.microsoft.com/windows/security/threat-protection/auditing/event-4625
+Status	0xc0000071	срок действия пароля истёк	status_password_expired|пароль просрочен	https://learn.microsoft.com/openspecs/windows_protocols/ms-erref/596a1078-e883-4972-9bbc-49e60bebca55
+Status	0xc0000072	учётная запись отключена	status_account_disabled|учётная запись выключена	https://learn.microsoft.com/windows/security/threat-protection/auditing/event-4625
+Status	0xc0000133	расхождение часов с контроллером домена	status_time_difference_at_dc|рассинхронизация времени	https://learn.microsoft.com/openspecs/windows_protocols/ms-erref/596a1078-e883-4972-9bbc-49e60bebca55
+Status	0xc000015b	запрошенный тип входа не разрешён	status_logon_type_not_granted|тип входа не разрешён	https://learn.microsoft.com/windows/security/threat-protection/auditing/event-4625
+Status	0xc0000193	срок действия учётной записи истёк	status_account_expired|учётная запись просрочена	https://learn.microsoft.com/windows/security/threat-protection/auditing/event-4625
+Status	0xc0000224	требуется смена пароля	status_password_must_change|нужно сменить пароль	https://learn.microsoft.com/openspecs/windows_protocols/ms-erref/596a1078-e883-4972-9bbc-49e60bebca55
+Status	0xc0000234	учётная запись заблокирована	status_account_locked_out|блокировка учётной записи	https://learn.microsoft.com/openspecs/windows_protocols/ms-erref/596a1078-e883-4972-9bbc-49e60bebca55
+
+# --- SubStatus ---
+SubStatus	0xc000005e	нет доступных серверов входа	status_no_logon_servers|нет серверов входа	https://learn.microsoft.com/windows/security/threat-protection/auditing/event-4625
+SubStatus	0xc0000064	нет такой учётной записи	status_no_such_user|такой учётной записи нет|учётной записи не существует|несуществующее имя	https://learn.microsoft.com/windows/security/threat-protection/auditing/event-4625
+SubStatus	0xc000006a	неверный пароль	status_wrong_password|пароль неверен|неправильный пароль	https://learn.microsoft.com/windows/security/threat-protection/auditing/event-4625
+SubStatus	0xc000006d	общий отказ входа	status_logon_failure|неверное имя или пароль|отказ входа без причины|причина не указана	https://learn.microsoft.com/windows/security/threat-protection/auditing/event-4625
+SubStatus	0xc000006e	ограничение учётной записи	status_account_restriction|ограничения учётной записи	https://learn.microsoft.com/openspecs/windows_protocols/ms-erref/596a1078-e883-4972-9bbc-49e60bebca55
+SubStatus	0xc000006f	вход вне разрешённых часов	status_invalid_logon_hours|вне разрешённых часов	https://learn.microsoft.com/windows/security/threat-protection/auditing/event-4625
+SubStatus	0xc0000070	вход с недопустимой рабочей станции	status_invalid_workstation|недопустимая рабочая станция	https://learn.microsoft.com/windows/security/threat-protection/auditing/event-4625
+SubStatus	0xc0000071	срок действия пароля истёк	status_password_expired|пароль просрочен	https://learn.microsoft.com/openspecs/windows_protocols/ms-erref/596a1078-e883-4972-9bbc-49e60bebca55
+SubStatus	0xc0000072	учётная запись отключена	status_account_disabled|учётная запись выключена	https://learn.microsoft.com/windows/security/threat-protection/auditing/event-4625
+SubStatus	0xc0000133	расхождение часов с контроллером домена	status_time_difference_at_dc|рассинхронизация времени	https://learn.microsoft.com/openspecs/windows_protocols/ms-erref/596a1078-e883-4972-9bbc-49e60bebca55
+SubStatus	0xc000015b	запрошенный тип входа не разрешён	status_logon_type_not_granted|тип входа не разрешён	https://learn.microsoft.com/windows/security/threat-protection/auditing/event-4625
+SubStatus	0xc0000193	срок действия учётной записи истёк	status_account_expired|учётная запись просрочена	https://learn.microsoft.com/windows/security/threat-protection/auditing/event-4625
+SubStatus	0xc0000224	требуется смена пароля	status_password_must_change|нужно сменить пароль	https://learn.microsoft.com/openspecs/windows_protocols/ms-erref/596a1078-e883-4972-9bbc-49e60bebca55
+SubStatus	0xc0000234	учётная запись заблокирована	status_account_locked_out|блокировка учётной записи	https://learn.microsoft.com/openspecs/windows_protocols/ms-erref/596a1078-e883-4972-9bbc-49e60bebca55
+
