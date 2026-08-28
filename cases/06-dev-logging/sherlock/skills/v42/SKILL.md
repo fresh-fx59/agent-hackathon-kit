@@ -196,6 +196,28 @@ You do NOT read the corpus yourself: you run `logmap.py`, read `map.txt` and
        python3 <SKILL_BASE_DIR>/tools/worklist.py next --work ./work --batch 20 --axis rare
        python3 <SKILL_BASE_DIR>/tools/worklist.py verdict --work ./work --from-stdin
        python3 <SKILL_BASE_DIR>/tools/worklist.py status --work ./work
+       python3 <SKILL_BASE_DIR>/tools/worklist.py verify --work ./work
+
+   **THE CURSOR IS THE ONLY WRITE PATH, AND NOW IT IS ENFORCED, NOT ASKED FOR.**
+   The cursor keeps an append-only witness beside the ledger —
+   `work/worklist.provenance.jsonl`, one chained entry per write, each signed with
+   a key only the cursor writes. `triagecheck` replays that chain against the file
+   and BLOCKS on `ledger_write_off_cursor`, naming every row whose verdict the
+   cursor never wrote. Do not edit `work/worklist.tsv` with a file-editing tool:
+   on the paid run `20260827T173511Z-v41` row `g228` was edited that way and no
+   gate could see it. If it happens anyway, **do not delete the row and do not
+   erase the verdict** — the triage is already done. Feed the same text through
+   the cursor, verbatim, and the defect clears:
+
+       python3 <SKILL_BASE_DIR>/tools/worklist.py verdict --work ./work --from-stdin <<'EOF'
+       g228	N Application.jsonl:6 «…» n=16 фон
+       EOF
+
+   `verify` prints that command with the cell already filled in. If the witness
+   itself is gone (a journal lost in a handoff, not a bypass) `worklist.py reseal
+   --work ./work --reason '<что случилось>'` rebuilds the baseline; it REFUSES
+   while the journal is intact, and every reseal stays printed in the delivered
+   work directory.
 
    `next` hands you unresolved rows with the five columns the gates read and
    WITHOUT the record excerpt, because no gate reads that column: MEASURED, it is
@@ -467,6 +489,13 @@ paraphrased field name fails a gate that is checking for a byte-exact string.
 4. `triagecheck` exited with a non-zero code — part of the list is closed
    without support, a declared rule is short of receipts, a rule has no claim, or
    a rule's claim does not hold on the lines it closed;
+   — or `ledger_write_off_cursor`: a named row carries a verdict that never went
+   through `worklist.py verdict`, so none of the cursor's own refusals ever looked
+   at it. Re-send that cell through the cursor; **deleting the row is the v37
+   regression, not a fix**;
+   — or `ledger_witness_broken`: the witness beside the ledger is missing,
+   truncated, unchained or unsigned, so who wrote the verdicts cannot be checked
+   at all. A witness that cannot be read is a refusal, never a pass;
 5. `statecheck --report` exited with a non-zero code — there is a state change in
    the corpus about which the report said nothing: neither as a finding nor as
    `норма`;

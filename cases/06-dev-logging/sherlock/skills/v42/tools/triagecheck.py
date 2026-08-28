@@ -101,6 +101,42 @@ def _load_citecheck():
     return mod
 
 
+# The witness of the write path (v42 fix 8) lives in worklist.py, because the
+# CURSOR is the only thing that can testify about its own writes. Imported, never
+# re-implemented: the chain format has exactly one owner, and the day a second
+# reader drifts from it the gate grades a format nobody produces.
+def _load_worklist():
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                        "worklist.py")
+    spec = importlib.util.spec_from_file_location("worklist_for_triage", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def audit_witness(worklist_path):
+    """Fail-closed wrapper: a witness we cannot even ask about is BROKEN.
+
+    WHY HERE and not in `citecheck --ledger` or `stopcheck`. This gate already owns
+    the question «ЧЕМ закрыты строки» — it is the tool that refuses a verdict with
+    no support. «Кто написал этот вердикт» is the same question one step earlier:
+    a cell that never went through the cursor was never subjected to the cursor's
+    own refusals (unknown id, placeholder, a tab that forges a column), so its
+    support was never checked by anything. `citecheck --ledger` grades citations
+    and counts unresolved rows, and would have to grow a second reader of a format
+    it does not own; `stopcheck` runs this gate and therefore inherits the block
+    for free, which is exactly how fixes 2-5 landed.
+    """
+    try:
+        wl = _load_worklist()
+        return wl.audit(worklist_path)
+    except Exception as exc:                       # noqa: BLE001 — fail closed
+        return {"ledger": os.path.abspath(worklist_path), "journal": "?",
+                "state": "broken", "entries": 0, "resealed": [],
+                "off_cursor": [], "fix": [],
+                "broken": ["свидетеля не удалось опросить: %s" % exc]}
+
+
 def _load_checkpoint():
     path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                         "checkpoint.py")
@@ -937,6 +973,8 @@ def analyse(worklist_path, rules_path, corpus):
         r["квитанций не подтвердилось"] = len(
             [k for k in bad_receipts if k.startswith("rcpt:%s:" % r["id"])])
 
+    witness = audit_witness(worklist_path)
+
     unevaluable = len([r for r in out_rules if r["проблемы"]])
     invalid_receipts = len([p for p in receipt_problems
                             if p["kind"] in ("unknown-rule", "unknown-row",
@@ -965,6 +1003,13 @@ def analyse(worklist_path, rules_path, corpus):
         "неразобранных строк": max(0, len(rows) - (
             buckets["поимённо"] + buckets["по правилу"] + buckets["без опоры"])),
         "пустой рабочий список": 1 if not rows else 0,
+        # v42 fix 8. The paid run 20260827T173511Z-v41 had ledger row g228
+        # written by a file-editing tool after SKILL.md said «read the worklist
+        # through the CURSOR, never as a file», and no gate could see it: both
+        # readers read the resulting file, and two files with the same bytes
+        # grade the same whoever wrote them.
+        "вердиктов не через курсор": len(witness.get("off_cursor") or []),
+        "свидетель курсора сломан": 1 if witness["state"] == "broken" else 0,
     }
     closed = buckets["поимённо"] + buckets["по правилу"] + buckets["без опоры"]
     widest = max(out_rules, key=lambda r: r["покрытие"]) if out_rules else None
@@ -980,6 +1025,7 @@ def analyse(worklist_path, rules_path, corpus):
         "receipt_problems": receipt_problems,
         "duplicate_receipts": duplicate_receipts,
         "duplicate_rows": duplicate_rows,
+        "witness": witness,
         "widest": None if not widest else {
             "id": widest["id"], "покрытие": widest["покрытие"],
             "доля": (round(100.0 * widest["покрытие"] / closed, 1)
@@ -993,6 +1039,7 @@ def analyse(worklist_path, rules_path, corpus):
             "дубликатов квитанций", "дубликатов строк рабочего списка",
             "строк вне своего правила", "ссылок в вердиктах не подтвердилось",
             "мусорных строк rules.tsv", "неразобранных строк",
+            "вердиктов не через курсор", "свидетель курсора сломан",
             "пустой рабочий список")),
     }
 
@@ -1126,6 +1173,14 @@ def render(d):
             out.append("     %s" % k)
     for j in d["junk"]:
         out.append("  ✗ rules.tsv:%s — %s" % (j["строка"], j["что"]))
+    w = d.get("witness")
+    if w and (w["state"] != "ok" or w.get("resealed")):
+        out.append("")
+        try:
+            out.append(_load_worklist().render_audit(w))
+        except Exception as exc:                   # noqa: BLE001 — fail closed
+            out.append("СВИДЕТЕЛЬ КУРСОРА: не удалось напечатать (%s), "
+                       "состояние: %s" % (exc, w["state"]))
     out.append("")
     if d["blocking"]:
         out.append("ИТОГ: НЕ ЗАКОНЧЕНО — %d" % d["blocking"])
@@ -1144,6 +1199,14 @@ def render(d):
         if d["totals"].get("неразобранных строк"):
             out.append("  %d строк рабочего списка не закрыты ничем."
                        % d["totals"]["неразобранных строк"])
+        if d["totals"].get("вердиктов не через курсор"):
+            out.append("  %d вердикт(ов) написаны в обход курсора. Строку не "
+                       "удаляй: пропусти тот же текст через `worklist.py "
+                       "verdict --from-stdin` (команда напечатана выше)."
+                       % d["totals"]["вердиктов не через курсор"])
+        if d["totals"].get("свидетель курсора сломан"):
+            out.append("  свидетель курсора сломан: происхождение вердиктов "
+                       "проверить нечем, а это отказ, а не пропуск.")
         if d["buckets"]["без опоры"]:
             out.append("  %d строк закрыто без единой опоры. Либо у строки своя "
                        "ссылка `путь:N` с цитатой, либо она под правилом "
