@@ -44,15 +44,15 @@ this file is only the engine that reads one. A new customer gets a new profile,
 never a new gate. `--contract` selects it; the corporate profile is the default
 because that is the contract this kit is sold against today.
 
-SCOPE — STRUCTURE ONLY. This gate answers «имеет ли отчёт форму, которую
-заказчик заказал?». It deliberately does NOT answer «следует ли выбранный
-вердикт из находок?» — that is a semantic question about the body of the report,
-it needs the findings and their outcomes, and it lands as a separate gate step.
-The seam is prepared here on purpose: `check()` builds the parsed section model
-and dispatches over a registry of per-defect functions, so the verdict-support
-check plugs in as one more entry beside `verdict_not_one_of_three`, reading the
-same `sections` model and the same `contract["sections"]` verdict entry (add a
-`"support"` key there). Nothing else has to move.
+SCOPE — STRUCTURE, AND SINCE FIX 3 THE VERDICT'S SUPPORT. The original gate
+answered only «имеет ли отчёт форму, которую заказчик заказал?». That left the
+worst half of the delivered defect standing: «компрометация» was not merely the
+wrong WORD, it was a word the report's own body refuted two sentences later. So
+`check_verdict_support` now also answers «следует ли выбранный вердикт из
+находок?», reading the same `sections` model and the `support` key of the
+contract's verdict section: the outcome→verdict binding, the attribution
+vocabulary and the admission vocabularies are all data in the profile, and this
+file stays free of any one customer's Russian prose.
 
 FAIL-CLOSED. A report that cannot be read, and a contract that cannot be parsed
 or does not carry the keys the engine needs, are REFUSALS (exit 2), never
@@ -117,7 +117,91 @@ def load_contract(path):
     except re.error as exc:
         raise ContractError("плохое регулярное выражение в контракте %s: %s"
                             % (path, exc))
+    for sec in data["sections"]:
+        if sec.get("one_of"):
+            compile_support(sec, path)
     return data
+
+
+# --------------------------------------------------------------------------
+# contract: the verdict-support binding (fix 3)
+
+SUPPORT_REQUIRED = ("outcome_line", "outcome_head", "outcome_rank", "implies",
+                    "attribution_line", "attribution_head",
+                    "attribution_established", "stranger_verdict",
+                    "admission", "defects")
+SUPPORT_DEFECT_KEYS = ("unsupported", "contradicts", "stranger", "unreadable")
+ADMISSION_GROUPS = ("owner", "stranger", "undetermined")
+NO_OUTCOMES_POLICIES = ("skip", "refuse")
+
+
+def compile_support(spec, path):
+    """Validate and compile the `support` block of a verdict section spec.
+
+    A section that declares a closed verdict vocabulary (`one_of`) MUST also
+    declare how that vocabulary is earned. Without the binding the gate could
+    only grade the word and never the reasoning — which is precisely how
+    20260827T173511Z-v41 passed. So a missing or thin `support` is a
+    ContractError, i.e. exit 2, i.e. a refusal: a gate that cannot grade the
+    semantics must not report that it did.
+    """
+    sup = spec.get("support")
+    if not isinstance(sup, dict):
+        raise ContractError(
+            "раздел %r несёт one_of, но не несёт support: %s — сопоставить "
+            "вердикт с исходами нечем" % (spec.get("role"), path))
+    for key in SUPPORT_REQUIRED:
+        if not sup.get(key):
+            raise ContractError("в support нет ключа %r: %s" % (key, path))
+    for key in SUPPORT_DEFECT_KEYS:
+        if not sup["defects"].get(key):
+            raise ContractError("в support.defects нет ключа %r: %s"
+                                % (key, path))
+    rank = sup["outcome_rank"]
+    if not isinstance(rank, list) or len(set(rank)) != len(rank):
+        raise ContractError("support.outcome_rank должен быть списком без "
+                            "повторов: %s" % path)
+    implies = sup["implies"]
+    if not isinstance(implies, dict) or set(implies) != set(rank):
+        raise ContractError("support.implies должен покрывать ровно исходы из "
+                            "outcome_rank: %s" % path)
+    unknown = [v for v in implies.values() if v not in spec["one_of"]]
+    if unknown:
+        raise ContractError("support.implies указывает на вердикт вне one_of: "
+                            "%s: %s" % (", ".join(unknown), path))
+    if sup["stranger_verdict"] not in spec["one_of"]:
+        raise ContractError("support.stranger_verdict вне one_of: %s" % path)
+    down = sup.get("unattributed_strongest_counts_as")
+    if down is not None:
+        if down not in rank or rank.index(down) >= len(rank) - 1:
+            raise ContractError(
+                "support.unattributed_strongest_counts_as должен быть исходом "
+                "слабее сильнейшего: %s" % path)
+    policy = sup.get("when_no_outcomes", "skip")
+    if policy not in NO_OUTCOMES_POLICIES:
+        raise ContractError("support.when_no_outcomes должен быть одним из %s: %s"
+                            % ("/".join(NO_OUTCOMES_POLICIES), path))
+    sup["_no_outcomes"] = policy
+    adm = sup["admission"]
+    if not isinstance(adm, dict):
+        raise ContractError("support.admission не объект: %s" % path)
+    for grp in ADMISSION_GROUPS:
+        if not adm.get(grp) or not isinstance(adm[grp], list):
+            raise ContractError("в support.admission нет непустого списка %r: %s"
+                                % (grp, path))
+    try:
+        sup["_outcome_line_re"] = re.compile(sup["outcome_line"], re.IGNORECASE)
+        sup["_outcome_head_re"] = re.compile(sup["outcome_head"], re.IGNORECASE)
+        sup["_attr_line_re"] = re.compile(sup["attribution_line"], re.IGNORECASE)
+        sup["_attr_head_re"] = re.compile(sup["attribution_head"], re.IGNORECASE)
+        sup["_sentence_re"] = re.compile(sup.get("sentence_split") or r"[.!?;\n]+")
+        sup["_admission_res"] = {
+            grp: [re.compile(p, re.IGNORECASE) for p in adm[grp]]
+            for grp in ADMISSION_GROUPS}
+    except re.error as exc:
+        raise ContractError("плохое регулярное выражение в support контракта "
+                            "%s: %s" % (path, exc))
+    return sup
 
 
 # --------------------------------------------------------------------------
@@ -350,6 +434,234 @@ def check_one_of(sections, contract):
     return bad
 
 
+# --------------------------------------------------------------------------
+# verdict support: does the chosen word FOLLOW from the report? (fix 3)
+
+FENCE_RE = re.compile(r"^\s*(?:```|~~~)")
+
+
+def _norm(s):
+    return re.sub(r"\s+", " ", s or "").strip().lower()
+
+
+def _verdict_spec(contract):
+    for spec in contract["sections"]:
+        if spec.get("one_of") and spec.get("support"):
+            return spec
+    return None
+
+
+def _stated_verdict(sections, spec):
+    """-> the single verdict word the section states, or None.
+
+    None means «check_one_of already blocks this report»: zero or several words.
+    The support checks stay silent there instead of piling a second, derived
+    complaint on top of an unreadable verdict.
+    """
+    for sec in sections:
+        if sec["role"] != spec["role"]:
+            continue
+        low = sec["body"].lower()
+        hit = [v for v in spec["one_of"] if v.lower() in low]
+        if len(hit) == 1:
+            return hit[0], sec
+        return None, sec
+    return None, None
+
+
+def read_outcomes(sections, spec):
+    """-> (blocks, unreadable) over every section that is not the verdict.
+
+    blocks: [{where, outcome, attribution, attribution_bad}] — one per section
+    that carries a well-formed `исход:` line.
+    unreadable: [(where, detail)] — an `исход:` head that is not a legal line,
+    or two legal lines in one block. Both mean the report is not machine
+    readable at the field the verdict is graded against, and that is a defect,
+    never a pass: see the class comment in citecheck's OUTCOME_ORDER.
+    """
+    sup = spec["support"]
+    out, unreadable = [], []
+    for sec in sections:
+        if sec["role"] == spec["role"]:
+            continue
+        where = sec["title"] or "(преамбула)"
+        valid, invalid, attrs, attr_bad, inside = [], [], [], [], False
+        for raw in sec["lines"]:
+            if FENCE_RE.match(raw):
+                inside = not inside
+                continue
+            if inside:
+                continue
+            m = sup["_outcome_line_re"].match(raw)
+            if m:
+                valid.append(_norm(m.group(1)))
+            elif sup["_outcome_head_re"].match(raw):
+                invalid.append(raw.strip())
+            a = sup["_attr_line_re"].match(raw)
+            if a:
+                attrs.append(_norm(a.group(1)))
+            elif sup["_attr_head_re"].match(raw):
+                attr_bad.append(raw.strip())
+        if invalid:
+            unreadable.append((where, "строка исхода не по образцу: %s"
+                                      % invalid[0][:110]))
+            continue
+        if len(valid) > 1:
+            unreadable.append((where, "несколько строк исхода: %s"
+                                      % ", ".join(valid)))
+            continue
+        if not valid:
+            continue
+        if valid[0] not in sup["implies"]:
+            unreadable.append((where, "исход вне словаря: %s" % valid[0]))
+            continue
+        out.append({
+            "where": where,
+            "outcome": valid[0],
+            "attribution": attrs[0] if len(attrs) == 1 else None,
+            "attribution_bad": (attr_bad[0] if attr_bad
+                                else ("несколько строк атрибуции"
+                                      if len(attrs) > 1 else None)),
+        })
+    return out, unreadable
+
+
+def admissions(text, spec):
+    """-> list of sentences in which the report itself says «actor unknown».
+
+    HOW THIS AVOIDS BEING A ONE-SENTENCE GATE. The naive version of this check
+    greps for the sentence that burned us — «кто именно действовал под учёткой
+    root (владелец или атакующий) — по корпусу не определяется» — and passes
+    every rewording of the same admission. That is theatre: the gate would be
+    green on the second report and the operator would find the same defect by
+    hand again.
+
+    So the detector is a CONJUNCTION OF THREE VOCABULARIES inside one sentence,
+    all three declared in the profile: a word for the legitimate owner, a word
+    for an outsider, and a word for «not determined». An admission that the
+    actor behind the access is undetermined has to carry all three meanings —
+    it names the two candidates and says they cannot be separated — no matter
+    which words it picks. «по журналам нельзя различить, работал ли хозяин или
+    посторонний» trips it exactly like the delivered sentence does, and neither
+    wording appears anywhere in this file or in the profile.
+    """
+    sup = spec["support"]
+    res = sup["_admission_res"]
+    found = []
+    for sentence in sup["_sentence_re"].split(text):
+        s = sentence.strip()
+        if not s:
+            continue
+        if all(any(r.search(s) for r in res[grp]) for grp in ADMISSION_GROUPS):
+            found.append(_norm(s))
+    return found
+
+
+def _effective(block, sup, rank):
+    """The outcome a block CONTRIBUTES to the verdict, which is not always the
+    outcome it states.
+
+    The strongest outcome earns the strongest verdict only when the report can
+    say WHO. «Скомпрометирована» is a claim about a stranger, so an
+    `исход: успех` the report cannot attribute («атрибуция: не установлена»)
+    supports one step less — `support.unattributed_strongest_counts_as`. That is
+    exactly the delivered report's case: two successes, both unattributed, and
+    the honest answer «атаковали, но не доказано». Profiles that do not declare
+    the key keep the plain mapping.
+    """
+    down = sup.get("unattributed_strongest_counts_as")
+    if not down or block["outcome"] != rank[-1]:
+        return block["outcome"]
+    if block["attribution"] == _norm(sup["attribution_established"]):
+        return block["outcome"]
+    return down
+
+
+def check_verdict_support(sections, contract):
+    """The chosen verdict must FOLLOW from the findings, not merely be legal.
+
+    Three defects, each with its own name, all bound by the profile:
+
+      * `verdict_unsupported_by_outcomes` — the strongest `исход:` among the
+        findings maps, under `support.implies`, to a different verdict than the
+        one stated. Strongest is decided by `support.outcome_rank`.
+      * `verdict_contradicts_report` — the stranger verdict is stated while the
+        report itself admits the actor is undetermined (see `admissions`).
+      * `verdict_success_not_attributed_to_stranger` — the stranger verdict
+        rests on an `исход: успех` block whose `атрибуция:` is not
+        «установлена». «Скомпрометирована» means proof that an OUTSIDER got
+        access; a successful login the report cannot pin on anyone is not that
+        proof, and the account's own owner logging in is not a compromise.
+
+    Fail-closed: an `исход:` head that is not a legal line, two of them in one
+    block, or a value outside the vocabulary is `verdict_outcomes_unreadable`,
+    not a pass. A report with NO outcome lines at all is handled by
+    `support.when_no_outcomes`; the corporate profile sets `skip`, because
+    findings with no `исход:` line are citecheck's ledger condition
+    («находок без строки «исход»») and stopcheck runs that gate on the same
+    report — two gates blocking the same defect would only double the noise.
+    """
+    spec = _verdict_spec(contract)
+    if spec is None:
+        return []
+    sup = spec["support"]
+    names = sup["defects"]
+    stated, vsec = _stated_verdict(sections, spec)
+    if vsec is None:
+        return []  # verdict_section_absent already fires
+    where = vsec["title"] or "ВЕРДИКТ"
+    bad = []
+    blocks_, unreadable = read_outcomes(sections, spec)
+    for w, detail in unreadable:
+        bad.append({"defect": names["unreadable"], "where": w, "detail": detail})
+    if not blocks_ and not unreadable and sup["_no_outcomes"] == "refuse":
+        bad.append({"defect": names["unreadable"], "where": where,
+                    "detail": "в отчёте нет ни одной строки «исход:» — "
+                              "сопоставлять вердикт не с чем"})
+    if stated is None:
+        return bad
+    rank = sup["outcome_rank"]
+
+    if blocks_ and not unreadable:
+        top = max(blocks_, key=lambda b: rank.index(_effective(b, sup, rank)))
+        eff = _effective(top, sup, rank)
+        implied = sup["implies"][eff]
+        if _norm(implied) != _norm(stated):
+            note = ("" if eff == top["outcome"]
+                    else " (исход «%s» без установленной атрибуции считается "
+                         "как «%s»)" % (top["outcome"], eff))
+            bad.append({"defect": names["unsupported"], "where": where,
+                        "detail": "сильнейший исход «%s» (%s) требует «%s», "
+                                  "а сказано «%s»%s"
+                                  % (eff, top["where"], implied, stated, note)})
+
+    if _norm(stated) == _norm(sup["stranger_verdict"]):
+        text = "\n".join(s["body"] for s in sections)
+        for sentence in admissions(text, spec)[:3]:
+            bad.append({"defect": names["contradicts"], "where": where,
+                        "detail": "отчёт сам признаёт: «%s»" % sentence[:160]})
+        established = _norm(sup["attribution_established"])
+        strongest = rank[-1]
+        for b in blocks_:
+            if b["outcome"] != strongest:
+                continue
+            if b["attribution_bad"]:
+                bad.append({"defect": names["stranger"], "where": b["where"],
+                            "detail": "исход «%s», атрибуция не по образцу: %s"
+                                      % (strongest, b["attribution_bad"][:110])})
+            elif b["attribution"] is None:
+                bad.append({"defect": names["stranger"], "where": b["where"],
+                            "detail": "исход «%s» без строки «атрибуция:» — "
+                                      "постороннего никто не назвал" % strongest})
+            elif b["attribution"] != established:
+                bad.append({"defect": names["stranger"], "where": b["where"],
+                            "detail": "исход «%s», атрибуция «%s» — «%s» "
+                                      "требует доказанного постороннего"
+                                      % (strongest, b["attribution"],
+                                         sup["stranger_verdict"])})
+    return bad
+
+
 # The registry fix 3 plugs into: one more entry, same signature, same model.
 CHECKS = (
     check_section_presence,
@@ -357,6 +669,7 @@ CHECKS = (
     check_section_citations,
     check_section_entries,
     check_one_of,
+    check_verdict_support,
     check_labels,
 )
 

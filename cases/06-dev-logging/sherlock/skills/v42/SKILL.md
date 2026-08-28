@@ -498,8 +498,24 @@ paraphrased field name fails a gate that is checking for a byte-exact string.
    verdict is not exactly one of «скомпрометирована», «атаковали, но не
    доказано», «чисто») and `verdict_uncited` («вердикт без ссылок на строки не
    принимается»);
+   — and, since fix 3, on whether the chosen word FOLLOWS from the findings:
+   `verdict_unsupported_by_outcomes` (the strongest `исход:` among the blocks
+   maps to a different verdict than the one stated — хоть один `успех` с
+   установленной атрибуцией ⇒ «скомпрометирована»; иначе есть `попытка` ⇒
+   «атаковали, но не доказано»; все `норма` ⇒ «чисто»),
+   `verdict_success_not_attributed_to_stranger` (an `исход: успех` whose
+   `атрибуция:` is not «установлена» cannot carry «скомпрометирована», which
+   claims proof that a STRANGER got access — an unattributed success supports
+   only «атаковали, но не доказано»), `verdict_contradicts_report` (the report
+   states «скомпрометирована» while itself admitting somewhere that owner and
+   outsider cannot be told apart) and `verdict_outcomes_unreadable` (an
+   `исход:` line that is not one of the three words, or two of them in one
+   block — a gate that cannot read the field refuses instead of passing);
    — this is the v41 regression: the paid run 20260827T173511Z-v41 broke five
-   written requirements, and all three gates still said «сдано»;
+   written requirements, and all three gates still said «сдано». Its ВЕРДИКТ
+   was wrong twice over: the word was outside the three AND the same paragraph
+   admitted «кто именно действовал под учёткой root (владелец или атакующий) —
+   по корпусу не определяется», which is «атаковали, но не доказано»;
 10. the requirements you were given differ from the shipped profile and you did
    NOT point `reportcheck --contract` at a profile that matches them. The
    contract is DATA (`reference/report-contract.corporate.json`): a customer

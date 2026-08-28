@@ -309,6 +309,13 @@ class ContractIsData(unittest.TestCase):
             for sec in spec["sections"]:
                 if sec["role"] == "verdict":
                     sec["one_of"] = ["CLEAN", "BREACHED"]
+                    # The verdict vocabulary and the outcome→verdict binding are
+                    # one contract: swapping the words means swapping the map
+                    # too, and the engine refuses a profile where they disagree.
+                    sec["support"]["implies"] = {"норма": "CLEAN",
+                                                 "попытка": "CLEAN",
+                                                 "успех": "BREACHED"}
+                    sec["support"]["stranger_verdict"] = "BREACHED"
             spec["labels"]["allowed"] = ["FACT", "GUESS"]
             spec["labels"]["ignore"] = spec["labels"]["ignore"] + ["CLEAN",
                                                                    "BREACHED"]
