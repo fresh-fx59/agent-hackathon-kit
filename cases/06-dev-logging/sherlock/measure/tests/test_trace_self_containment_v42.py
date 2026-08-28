@@ -23,6 +23,17 @@ no access to the original corpus":
   4. `.sherlock/active.json` said `"active": true` and pointed `skill_root` at
      the LIVE `skills/v41` checkout and `corpus` outside the trace. A replay
      resolving tools that way re-validates today's code, not the run.
+  5. `gate-tools/` was sealed with `cp -a`, so the live tree's `__pycache__`
+     travelled with it, and each `.pyc` embeds `co_filename` — an absolute path
+     into `.../skills/v42/tools/`. Harmless at replay time (CPython prefers the
+     `.py` next to it, and the replay runs with the checkout deleted) and that
+     is exactly why it survived review: a sealed grader must contain NO path
+     into the tree that produced it, whether or not anything follows it.
+
+`TestNoBytecodeInTheSealedGrader` is the fix-5 guard. Note what it must NOT
+forbid: `arm-integrity.json` names the shipped arm it compared the model's copy
+against. That path is provenance — the whole point of the file — so the scan is
+scoped to the grader the replay executes, `gate-tools/` and `reference/`.
 
 The load-bearing test is `TestReplayReproducesTheRecordedVerdict`: it seals a
 synthetic run inside a throwaway mini-checkout, DELETES that checkout's skill
@@ -549,7 +560,115 @@ class TestTraceIsInert(TraceCase):
 
 
 # ---------------------------------------------------------------------------
-# 5. THE POINT: DOES A REPLAY REPRODUCE THE RECORDED VERDICT?
+# 5. NO BYTECODE, AND NO PATH INTO THE LIVE CHECKOUT
+# ---------------------------------------------------------------------------
+class TestNoBytecodeInTheSealedGrader(TraceCase):
+    """`cp -a` copied `gate-tools/__pycache__/*.pyc` out of the live tree."""
+
+    def test_no_sealed_path_contains_pycache(self):
+        offenders = [str(p.relative_to(self.trace))
+                     for base in ("gate-tools", "reference")
+                     for p in (self.trace / base).rglob("*")
+                     if "__pycache__" in p.parts
+                     or p.suffix in (".pyc", ".pyo")]
+        self.assertEqual(offenders, [], "bytecode embeds co_filename, an "
+                                        "absolute path into the live checkout")
+
+    def test_nothing_in_the_sealed_grader_mentions_the_live_checkout(self):
+        """Bytes, not names: a `.pyc` hides the path from `ls` but not `grep`.
+        The scan is over raw bytes so a compiled or minified carrier counts."""
+        live = str(self.sealed.skills.resolve()).encode()
+        hits = []
+        for base in ("gate-tools", "reference"):
+            for path in (self.trace / base).rglob("*"):
+                if path.is_file() and live in path.read_bytes():
+                    hits.append(str(path.relative_to(self.trace)))
+        self.assertEqual(hits, [], "the sealed grader points back into %s" % live)
+
+    def test_the_audit_rejects_bytecode_someone_puts_back(self):
+        """The exclusion is one half; the audit refusing it is the half that
+        survives the next person reaching for `cp -a`."""
+        with tempfile.TemporaryDirectory() as raw:
+            copy = Path(raw) / "trace"
+            shutil.copytree(self.trace, copy, symlinks=True)
+            cache = copy / "gate-tools" / "__pycache__"
+            cache.mkdir()
+            (cache / "citecheck.cpython-311.pyc").write_bytes(b"\x00stub")
+            problems = SEAL.audit(str(copy))
+            self.assertTrue(any("bytecode" in p for p in problems), problems)
+            done = seal("audit", "--trace", str(copy))
+            self.assertEqual(done.returncode, 1, done.stdout)
+
+    def test_arm_integrity_may_still_name_the_shipped_arm(self):
+        """The counter-test. arm-integrity.json records WHICH arm the model's
+        copy was compared against; that reference is provenance by design and a
+        rule against live paths must not swallow it."""
+        integrity = self.trace / "arm-integrity.json"
+        if not integrity.is_file():
+            self.skipTest("this run recorded no arm-integrity.json")
+        row = json.loads(integrity.read_text(encoding="utf-8"))
+        self.assertIn(str(self.sealed.skills / ARM), json.dumps(row),
+                      "arm-integrity.json is expected to name the shipped arm")
+        self.assertEqual(SEAL.audit(str(self.trace)), [],
+                         "and the audit must still pass with it there")
+
+
+class TestSealerExcludesBytecodeAtTheSource(unittest.TestCase):
+    def test_the_tools_subcommand_leaves_pycache_behind(self):
+        with tempfile.TemporaryDirectory() as raw:
+            tools = Path(raw) / "skill" / "tools"
+            (tools / "__pycache__").mkdir(parents=True)
+            (tools / "citecheck.py").write_text("x = 1\n", encoding="utf-8")
+            (tools / "__pycache__" / "citecheck.cpython-311.pyc").write_bytes(
+                b"\x00/live/checkout/tools/citecheck.py")
+            nested = tools / "helpers"
+            (nested / "__pycache__").mkdir(parents=True)
+            (nested / "util.py").write_text("y = 2\n", encoding="utf-8")
+            (nested / "__pycache__" / "util.pyc").write_bytes(b"\x00stub")
+            trace = Path(raw) / "trace"
+            trace.mkdir()
+            done = seal("tools", "--trace", str(trace), "--arm-tools", str(tools))
+            self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
+            sealed = trace / "gate-tools"
+            self.assertTrue((sealed / "citecheck.py").is_file())
+            self.assertTrue((sealed / "helpers" / "util.py").is_file())
+            self.assertEqual([str(p) for p in sealed.rglob("__pycache__")], [])
+            self.assertEqual([str(p) for p in sealed.rglob("*.pyc")], [])
+
+    def test_the_reference_copy_leaves_pycache_behind_too(self):
+        with tempfile.TemporaryDirectory() as raw:
+            skill = Path(raw) / "skill"
+            (skill / "tools").mkdir(parents=True)
+            (skill / "tools" / "citecheck.py").write_text(
+                "import os\n"
+                "TOOLS_DIR = os.path.dirname(os.path.abspath(__file__))\n"
+                "ENUM_TABLE_FILE = 'enum-tables.tsv'\n"
+                "R = os.path.join(TOOLS_DIR, '..', 'reference')\n"
+                "P = os.path.join(R, ENUM_TABLE_FILE)\n", encoding="utf-8")
+            reference = skill / "reference"
+            (reference / "__pycache__").mkdir(parents=True)
+            (reference / "enum-tables.tsv").write_text("a\tb\n", encoding="utf-8")
+            (reference / "__pycache__" / "gen.pyc").write_bytes(b"\x00stub")
+            trace = Path(raw) / "trace"
+            trace.mkdir()
+            done = seal("grader", "--trace", str(trace),
+                        "--arm-tools", str(skill / "tools"))
+            self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
+            self.assertTrue((trace / "reference" / "enum-tables.tsv").is_file())
+            self.assertEqual(
+                [str(p) for p in (trace / "reference").rglob("*.pyc")], [])
+            # the receipt counts the files that travelled, not the ones skipped
+            self.assertIn("sealed 1 grader reference file", done.stdout)
+
+    def test_the_runner_no_longer_seals_the_tools_with_cp_a(self):
+        source = RUNNER.read_text(encoding="utf-8")
+        self.assertNotIn('cp -a "$ARM_TOOLS" "$TRACE/gate-tools"', source,
+                         "cp -a is what dragged __pycache__ into the trace")
+        self.assertIn('seal-trace.py" tools --trace "$TRACE"', source)
+
+
+# ---------------------------------------------------------------------------
+# 6. THE POINT: DOES A REPLAY REPRODUCE THE RECORDED VERDICT?
 # ---------------------------------------------------------------------------
 class TestReplayReproducesTheRecordedVerdict(unittest.TestCase):
     def test_replay_without_the_live_skill_tree_matches_gates_json(self):

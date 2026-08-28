@@ -478,7 +478,11 @@ PY
   fi
   ARM_TOOLS="$(dirname "$(ls "$W"/.qwen/skills/*/tools/citecheck.py 2>/dev/null | head -1)" 2>/dev/null)"
   if [ -n "$ARM_TOOLS" ] && [ -d "$ARM_TOOLS" ]; then
-    cp -a "$ARM_TOOLS" "$TRACE/gate-tools" 2>/dev/null \
+    # NOT `cp -a`: that copied the live tree's `__pycache__` too, and a `.pyc`
+    # embeds `co_filename` — an absolute path into the running checkout. Inert
+    # in practice, but a sealed grader must contain no path into the tree it
+    # came from; the sealer excludes bytecode and the audit below fails on it.
+    python3 "$HERE/seal-trace.py" tools --trace "$TRACE" --arm-tools "$ARM_TOOLS" \
       || echo "  ⚠ could not persist the gate tools" >&2
   fi
   if [ -d "$W/corpus" ] && [ -s "$W/work/report.md" ]; then

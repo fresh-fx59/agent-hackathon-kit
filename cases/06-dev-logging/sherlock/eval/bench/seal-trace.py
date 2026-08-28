@@ -19,9 +19,19 @@ evidence directory quietly dependent on the machine that produced it:
      the LIVE `skills/v41` checkout and `corpus` at a directory outside the
      trace. A replay resolving tools through that path re-validates TODAY'S
      code, which is the one thing a replay must never do.
+  5. `gate-tools/__pycache__/*.pyc` was copied straight out of the live tree,
+     and a `.pyc` embeds `co_filename` — an absolute path into
+     `/home/claude-developer/.../skills/v42/tools/reportcheck.py`. It is inert
+     in practice (CPython resolves the `.py` beside it, and the replay demonstrably
+     runs with the checkout deleted), but a SEALED grader that contains a path
+     into the live tree is exactly the class of defect this file exists to
+     prevent, and a reader cannot tell an inert path from a live one. Bytecode
+     is a build artefact of the source we already sealed: it never travels.
 
 Subcommands:
 
+  tools   --trace T --arm-tools DIR   copy the grader's SCRIPTS into the trace,
+                                      leaving bytecode behind.
   grader  --trace T --arm-tools DIR   copy the grader's reference DATA next to
                                       the sealed scripts, then audit it.
   inert   --trace T                   make the trace inert: no `active: true`,
@@ -53,6 +63,52 @@ import tempfile
 REFERENCE_DIR = "reference"
 GATE_TOOLS_DIR = "gate-tools"
 STAGED_CORPUS = "staged-corpus"
+
+# Bytecode is derived from the source we seal anyway, so it carries no evidence
+# a replay needs — only `co_filename`, an absolute path into the machine that
+# compiled it. `ignore_patterns` is applied to every directory copytree walks,
+# so this covers nested packages too.
+BYTECODE_IGNORE = shutil.ignore_patterns("__pycache__", "*.pyc", "*.pyo")
+
+
+def is_bytecode(relative):
+    """True for a path the sealer deliberately leaves behind."""
+    parts = relative.replace(os.sep, "/").split("/")
+    return ("__pycache__" in parts
+            or parts[-1].endswith(".pyc") or parts[-1].endswith(".pyo"))
+
+
+def copy_tree_without_bytecode(source, target, what):
+    """copytree + a per-file receipt. The receipt is the point: `cp -a` gave no
+    signal at all when it copied something it should not have."""
+    if not os.path.isdir(source):
+        die("%s directory not found: %s" % (what, source))
+    if os.path.exists(target):
+        shutil.rmtree(target)
+    try:
+        shutil.copytree(source, target, symlinks=False, ignore=BYTECODE_IGNORE)
+    except (OSError, shutil.Error) as exc:
+        die("could not copy the grader %s: %s" % (what, exc))
+    copied = 0
+    for root, _dirs, files in os.walk(source):
+        for name in files:
+            src = os.path.join(root, name)
+            rel = os.path.relpath(src, source)
+            if is_bytecode(rel):
+                continue
+            dst = os.path.join(target, rel)
+            if not os.path.isfile(dst):
+                die("%s file was not copied: %s" % (what, rel))
+            if sha256(src) != sha256(dst):
+                die("%s file copied wrong: %s" % (what, rel))
+            copied += 1
+    # And prove the exclusion actually held, rather than trusting the pattern.
+    for root, _dirs, files in os.walk(target):
+        for name in files:
+            rel = os.path.relpath(os.path.join(root, name), target)
+            if is_bytecode(rel):
+                die("bytecode reached the sealed %s: %s" % (what, rel))
+    return copied
 
 
 def die(message):
@@ -198,29 +254,25 @@ def derive_required(tools):
 # grader: copy the DATA, then prove the copy is complete.
 # ---------------------------------------------------------------------------
 def copy_reference(source, target):
-    if not os.path.isdir(source):
-        die("grader reference directory not found: %s" % source)
-    if os.path.exists(target):
-        shutil.rmtree(target)
-    try:
-        shutil.copytree(source, target, symlinks=False,
-                        ignore=shutil.ignore_patterns("__pycache__"))
-    except (OSError, shutil.Error) as exc:
-        die("could not copy the grader reference data: %s" % exc)
-    copied = 0
-    for root, _dirs, files in os.walk(source):
-        for name in files:
-            src = os.path.join(root, name)
-            rel = os.path.relpath(src, source)
-            dst = os.path.join(target, rel)
-            if not os.path.isfile(dst):
-                die("reference file was not copied: %s" % rel)
-            if sha256(src) != sha256(dst):
-                die("reference file copied wrong: %s" % rel)
-            copied += 1
+    copied = copy_tree_without_bytecode(source, target, "reference")
     if not copied:
         die("grader reference directory is empty: %s" % source)
     return copied
+
+
+def cmd_tools(args):
+    """Seal the grader's SCRIPTS. This replaces `cp -a`, which copied the live
+    tree's `__pycache__` along with it (defect 5)."""
+    trace = os.path.abspath(args.trace)
+    tools = os.path.abspath(args.arm_tools)
+    if not os.path.isdir(trace):
+        die("trace directory not found: %s" % trace)
+    copied = copy_tree_without_bytecode(tools, os.path.join(trace, GATE_TOOLS_DIR),
+                                        "tools")
+    if not copied:
+        die("grader tools directory is empty: %s" % tools)
+    print("  sealed %d grader tool file(s) into %s/" % (copied, GATE_TOOLS_DIR))
+    return 0
 
 
 def cmd_grader(args):
@@ -388,6 +440,21 @@ def audit(trace):
         if not os.path.isfile(os.path.join(sealed, path)):
             problems.append("gate(s) %s read %s/%s, which the sealer did not copy"
                             % (",".join(sorted(readers)), REFERENCE_DIR, path))
+    # DEFECT 5. Bytecode in the sealed grader embeds `co_filename`, an absolute
+    # path into the checkout that compiled it. Only the two directories the
+    # sealer itself writes are audited: `work/` and `qwen-home/` belong to the
+    # model, and failing a run over what it left there would be a different rule.
+    for directory in (GATE_TOOLS_DIR, REFERENCE_DIR):
+        base = os.path.join(trace, directory)
+        if not os.path.isdir(base):
+            continue
+        for root, _dirs, files in os.walk(base):
+            for name in files:
+                rel = os.path.relpath(os.path.join(root, name), base)
+                if is_bytecode(rel):
+                    problems.append(
+                        "bytecode in the sealed grader carries a path into the "
+                        "live checkout: %s/%s" % (directory, rel))
     if graded and not os.path.isdir(os.path.join(trace, STAGED_CORPUS)):
         problems.append("gates.json exists but %s/ was not sealed" % STAGED_CORPUS)
     for name in ("upstream-inflight.json", "upstream-inflight.json.lock"):
@@ -431,6 +498,10 @@ def cmd_audit(args):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
+    zero = sub.add_parser("tools")
+    zero.add_argument("--trace", required=True)
+    zero.add_argument("--arm-tools", required=True)
+    zero.set_defaults(handler=cmd_tools)
     one = sub.add_parser("grader")
     one.add_argument("--trace", required=True)
     one.add_argument("--arm-tools", required=True)
