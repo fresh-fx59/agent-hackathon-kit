@@ -111,15 +111,23 @@ written to `corpus/_ingest-manifest.tsv`, and the command exits non-zero. Pass
 An empty channel is not an error — Windows ships dozens that never recorded
 anything, and they appear in the manifest as «пустой канал».
 
-**One dependency, and only for `.evtx`.** The tool needs a converter. Either:
+**`.evtx` needs a converter — and on Windows you already have one.**
 
-```
-pip install python-evtx xmltodict        # pure python, works anywhere
-```
+- **Windows: nothing to install.** `Get-WinEvent` ships with the OS and is used
+  automatically. (Written from the documented interface; we have no Windows box
+  to prove it on, so if it fails the tool says which command failed and falls
+  through to the options below rather than losing the channel.)
+- **Anywhere else, one command:**
 
-or the `evtx_dump` binary (`cargo install evtx`, `brew install evtx`). If
-neither is present the manifest says so and names both — it does not pretend the
-channel was empty.
+      python3 .qwen/skills/log-rca/tools/ingest.py <INPUT> --out ./corpus --install-converter
+
+  which runs `pip install --user python-evtx xmltodict` first. It is a flag and
+  not automatic on purpose: installing software on a corporate machine is the
+  owner's decision, so the tool offers the cure and a human takes it.
+- **Or the binary:** `cargo install evtx` / `brew install evtx`.
+
+If no converter works, the manifest names the file and every cure — it never
+pretends the channel was empty.
 
 Sanity check:
 

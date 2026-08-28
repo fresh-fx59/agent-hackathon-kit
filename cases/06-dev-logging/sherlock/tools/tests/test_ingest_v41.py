@@ -152,5 +152,44 @@ class Evtx(unittest.TestCase):
         self.assertNotIn('"-f", dest', src)
 
 
+class GettingTheConverter(unittest.TestCase):
+    """An agent must not install software because it met a file it cannot read.
+
+    On a corporate host that is a policy decision, and often a blocked one. So
+    the cure is OFFERED, never taken: the failure names the flag, and the flag
+    is passed by a human. The one exception needs no permission at all —
+    Windows already ships `Get-WinEvent`, on the very machine that wrote these
+    logs.
+    """
+
+    def test_the_failure_names_every_cure_including_the_flag(self):
+        src = open(INGEST, encoding="utf-8").read()
+        self.assertIn("--install-converter", src)
+        self.assertIn("Get-WinEvent", src)
+        self.assertIn("cargo install evtx", src)
+
+    def test_installing_is_opt_in_and_never_implicit(self):
+        """`install_converter()` may be reachable ONLY from the flag."""
+        src = open(INGEST, encoding="utf-8").read()
+        calls = [l.strip() for l in src.splitlines()
+                 if "install_converter()" in l and "def " not in l]
+        self.assertEqual(len(calls), 1, calls)
+        i = src.index(calls[0])
+        guard = src[max(0, i - 200):i]
+        self.assertIn("a.install_converter", guard,
+                      "the only call must sit under the flag")
+
+    def test_the_windows_path_is_tried_before_the_ones_needing_an_install(self):
+        src = open(INGEST, encoding="utf-8").read()
+        self.assertLess(src.index("powershell_evtx(src, dest)"),
+                        src.index("for candidate in EVTX_BINARIES"))
+
+    def test_the_unverified_windows_path_says_so(self):
+        """We have no Windows box. A path we have not run must be labelled, and
+        must fall through to the next converter rather than end the file."""
+        src = open(INGEST, encoding="utf-8").read()
+        self.assertIn("NOT VERIFIED ON WINDOWS", src)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

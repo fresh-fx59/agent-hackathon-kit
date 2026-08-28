@@ -142,6 +142,50 @@ def extract(src, dest):
 EVTX_BINARIES = ("evtx_dump", "/opt/homebrew/bin/evtx_dump",
                  "/usr/local/bin/evtx_dump")
 
+# Windows already ships a reader. `Get-WinEvent` is part of the OS, so on the
+# machine that PRODUCED these logs there is nothing to install and nothing to
+# ask a security team for — which is the whole difficulty with the other two
+# converters on a locked-down corporate host.
+#
+# NOT VERIFIED ON WINDOWS BY US: this repository has no Windows box. It is
+# tried first on win32 and, if it fails, its error is named and the next
+# converter is tried — so an untested path can cost a moment, never a channel.
+POWERSHELL_EVTX = (
+    "$ErrorActionPreference='Stop';"
+    "Get-WinEvent -Path '%(src)s' -Oldest |"
+    " ForEach-Object { $_ | ConvertTo-Json -Compress -Depth 8 } |"
+    " Set-Content -LiteralPath '%(dest)s' -Encoding utf8"
+)
+
+
+def powershell_evtx(src, dest):
+    exe = shutil.which("powershell") or shutil.which("pwsh")
+    if not exe:
+        return None
+    done = subprocess.run(
+        [exe, "-NoProfile", "-NonInteractive", "-Command",
+         POWERSHELL_EVTX % {"src": src, "dest": dest}],
+        capture_output=True)
+    if done.returncode == 0 and os.path.exists(dest):
+        return "Get-WinEvent"
+    tail = done.stderr.decode("utf-8", "replace").strip().splitlines()
+    raise ValueError("%s: %s" % (exe, tail[-1] if tail else "no output"))
+
+
+def install_converter():
+    """Fetch the pure-python converter. ONLY on an explicit --install-converter.
+
+    An agent must not install software on someone's machine because it found a
+    file it could not read. On a corporate host that is a policy decision and
+    often a blocked one, so this stays behind a flag the human passes, and the
+    failure message names the flag rather than reaching for it.
+    """
+    done = subprocess.run(
+        [sys.executable, "-m", "pip", "install", "--user",
+         "python-evtx", "xmltodict"], capture_output=True)
+    tail = done.stderr.decode("utf-8", "replace").strip().splitlines()
+    return done.returncode == 0, (tail[-1] if tail else "")
+
 
 def evtx_to_jsonl(src, dest):
     """Windows event logs are binary; nothing downstream can read one.
@@ -159,6 +203,13 @@ def evtx_to_jsonl(src, dest):
     corporate box where a Rust binary is not.
     """
     errors = []
+    if sys.platform == "win32":
+        try:
+            how = powershell_evtx(src, dest)
+            if how:
+                return how
+        except ValueError as exc:
+            errors.append(str(exc))
     for candidate in EVTX_BINARIES:
         exe = shutil.which(candidate) if os.sep not in candidate else (
             candidate if os.path.exists(candidate) else None)
@@ -181,9 +232,11 @@ def evtx_to_jsonl(src, dest):
         import xmltodict                               # its usual companion
     except ImportError:
         raise ValueError(
-            "no working EVTX converter — install ONE of: the evtx_dump binary "
-            "(cargo install evtx / brew install evtx), or the python packages "
-            "`python-evtx` and `xmltodict` (pip install python-evtx xmltodict)"
+            "no working EVTX converter — either re-run this command with "
+            "--install-converter (pip install --user python-evtx xmltodict), "
+            "or install the evtx_dump binary (cargo install evtx / brew "
+            "install evtx). On Windows no install is needed: Get-WinEvent is "
+            "used automatically"
             + (("; tried " + "; ".join(errors)) if errors else ""))
     with evtx.Evtx(src) as log, open(dest, "w", encoding="utf-8") as out:
         for record in log.records():
@@ -313,10 +366,21 @@ def main():
     ap.add_argument("inputs", nargs="+",
                     help="files, directories or archives, in any mix")
     ap.add_argument("--out", required=True, help="the corpus directory to write")
+    ap.add_argument("--install-converter", action="store_true",
+                    help="before starting, pip install --user python-evtx and "
+                         "xmltodict. Off by default: installing software is the "
+                         "machine owner's decision, not this tool's")
     ap.add_argument("--keep-going", action="store_true",
                     help="exit 0 even when some input could not be ingested "
                          "(the manifest still names every one)")
     a = ap.parse_args()
+
+    if a.install_converter:
+        ok, why = install_converter()
+        print(("✓ EVTX converter installed" if ok
+               else "✗ could not install the EVTX converter: %s" % why))
+        if not ok:
+            return 1
 
     os.makedirs(a.out, exist_ok=True)
     result = Result()
