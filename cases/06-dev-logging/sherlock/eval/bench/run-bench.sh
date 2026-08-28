@@ -457,7 +457,12 @@ PY
   # gate runs. Silent tolerance here would make every other check in this file
   # decorative.
   ARM_INTACT=1
-  ARM_SNAPSHOT="$(ls -d "$W"/.qwen/skills/*/ 2>/dev/null | head -1)"
+  # `|| true` is load-bearing: this function runs under `set -e` with `pipefail`
+  # (line 14), and with no match `ls -d` exits 2, which pipefail hands to the
+  # assignment and `set -e` turns into "abandon the whole finalisation". That is
+  # how this check first shipped, and it silently cost three artifacts — the
+  # lane verdict, gates.json and replay.sh — on every arm=none run.
+  ARM_SNAPSHOT="$(ls -d "$W"/.qwen/skills/*/ 2>/dev/null | head -1 || true)"
   if [ "$ARM" != "none" ] && [ -n "$ARM_SNAPSHOT" ] && [ -d "$SKILLS/$ARM" ]; then
     if ! python3 "$HERE/arm-integrity.py" --shipped "$SKILLS/$ARM" \
            --snapshot "$ARM_SNAPSHOT" --out "$TRACE/arm-integrity.json" \
