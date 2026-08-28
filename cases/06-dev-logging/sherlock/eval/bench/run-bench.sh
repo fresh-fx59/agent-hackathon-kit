@@ -446,6 +446,31 @@ PY
   # verdict from a later one. The arm snapshots its skill at run start, so this
   # copy is the exact grader — and the digests above plus these tools make a
   # trace self-contained for re-validation.
+  # AND THE GRADER MUST NOT BE THE MODEL'S OWN. The paragraph above says the
+  # run-start snapshot "is the exact grader". The model has write access to $W.
+  # On 20260828T170343Z-v42 it used it: stalled in `repair` on the free lane, at
+  # 17:44 it edited .qwen/skills/log-rca/tools/stopcheck.py — the Stop hook that
+  # exists to block it from finishing on a failing gate — and py_compile'd «the
+  # fixed stopcheck.py». Nothing looked. gates.json, the sealed gate-tools/ and
+  # replay.sh would every one have come from a grader the model wrote.
+  # Compare, keep what it wrote, then put the shipped arm back — before a single
+  # gate runs. Silent tolerance here would make every other check in this file
+  # decorative.
+  ARM_INTACT=1
+  ARM_SNAPSHOT="$(ls -d "$W"/.qwen/skills/*/ 2>/dev/null | head -1)"
+  if [ "$ARM" != "none" ] && [ -n "$ARM_SNAPSHOT" ] && [ -d "$SKILLS/$ARM" ]; then
+    if ! python3 "$HERE/arm-integrity.py" --shipped "$SKILLS/$ARM" \
+           --snapshot "$ARM_SNAPSHOT" --out "$TRACE/arm-integrity.json" \
+           --evidence "$TRACE/arm-modified-by-model"; then
+      ARM_INTACT=0
+      echo "  ⚠ the model modified its own skill copy — $TRACE/arm-integrity.json" >&2
+      echo "    its version is kept in $TRACE/arm-modified-by-model; restoring the shipped arm" >&2
+      if ! (rm -rf "$ARM_SNAPSHOT" && mkdir -p "$ARM_SNAPSHOT" \
+              && cp -r "$SKILLS/$ARM/." "$ARM_SNAPSHOT"); then
+        echo "  ⚠ could not restore the shipped arm — the gates below are NOT trustworthy" >&2
+      fi
+    fi
+  fi
   ARM_TOOLS="$(dirname "$(ls "$W"/.qwen/skills/*/tools/citecheck.py 2>/dev/null | head -1)" 2>/dev/null)"
   if [ -n "$ARM_TOOLS" ] && [ -d "$ARM_TOOLS" ]; then
     cp -a "$ARM_TOOLS" "$TRACE/gate-tools" 2>/dev/null \
@@ -454,9 +479,9 @@ PY
   if [ -d "$W/corpus" ] && [ -s "$W/work/report.md" ]; then
     GATE_TOOLS="$ARM_TOOLS"
     if [ -n "$GATE_TOOLS" ] && [ -d "$GATE_TOOLS" ]; then
-      python3 - "$TRACE/gates.json" "$GATE_TOOLS" "$W" <<'PY' || echo "  ⚠ gate recording failed" >&2
+      python3 - "$TRACE/gates.json" "$GATE_TOOLS" "$W" "$ARM_INTACT" <<'PY' || echo "  ⚠ gate recording failed" >&2
 import hashlib, json, os, subprocess, sys
-target, tools, workspace = sys.argv[1:]
+target, tools, workspace, arm_intact = sys.argv[1:]
 def sha(path):
     try:
         with open(path, "rb") as fh: return hashlib.sha256(fh.read()).hexdigest()
@@ -477,7 +502,13 @@ gates = {
     # A gate the harness does not run cannot be an audit of the harness.
     "reportcheck": ["reportcheck.py", "work/report.md", "--json"],
 }
-out = {"schema": 1, "verdict": "clean", "gates": {}}
+out = {"schema": 1, "verdict": "clean", "gates": {},
+       "arm_intact": arm_intact == "1"}
+# A run in which the model rewrote one of its own gates is not a clean run, no
+# matter what the restored gates then say. Record it as blocking here so the
+# verdict cannot be read without it.
+if not out["arm_intact"]:
+    out["verdict"] = "blocking"
 for name, argv in gates.items():
     script = os.path.join(tools, argv[0])
     command = ["python3", script] + argv[1:]
