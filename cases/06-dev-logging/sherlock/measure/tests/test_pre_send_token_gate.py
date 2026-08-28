@@ -166,9 +166,13 @@ class PreSendGate(base.ProxyCase):
     def test_the_default_divisor_is_at_or_below_the_measured_minimum(self):
         """THE SAFETY DIRECTION, pinned against real data rather than taste.
 
-        `request_bytes / usage.prompt_tokens` measured over 316 real calls of two
-        paid runs: min 3.441 (run 20260827T045553Z-v39, n=190), min 3.526 (run
-        20260827T104334Z-v40, n=126), median 3.586 / 3.792, max ~4.17.
+        UPDATED BY FIX 6 (v42). The old bound here was 3.441 — a BYTE ratio
+        (`request_bytes / usage.prompt_tokens`), while the estimator divides
+        CHARACTERS. Replaying the complete ledger of run 20260827T173511Z-v41 (337
+        answered calls) showed the character ratio bottoming out at 3.2898, so the
+        shipped 3.40 under-estimated 42 of 337 calls, worst deficit 6,434 tokens.
+        The divisor is now 3.10 and this test pins it at or below the observed
+        CHARACTER minimum.
 
         A divisor at or BELOW the observed minimum over-estimates the token count,
         so the wall can refuse a legal request but cannot pass an illegal one. A
@@ -178,14 +182,14 @@ class PreSendGate(base.ProxyCase):
         """
         import re
         src = open(base.PROXY, encoding="utf-8").read()
-        m = re.search(r'UPSTREAM_CHARS_PER_TOKEN\s*=\s*float\(\s*\n?\s*'
+        m = re.search(r'UPSTREAM_CHARS_PER_TOKEN\s*=\s*_calibrated_chars_per_token\(\s*\n?\s*'
                       r'os\.environ\.get\("UPSTREAM_CHARS_PER_TOKEN",\s*'
                       r'"([0-9.]+)"', src)
         self.assertIsNotNone(m, "the default divisor is not where it was")
         self.assertLessEqual(
-            float(m.group(1)), 3.441,
-            "a divisor above the measured minimum ratio (3.441) under-estimates "
-            "the prompt, which turns this wall into a suggestion")
+            float(m.group(1)), 3.2898,
+            "a divisor above the measured minimum character ratio (3.2898) "
+            "under-estimates the prompt, which turns this wall into a suggestion")
 
     def test_the_estimate_is_conservative_not_optimistic(self):
         """A gate that under-counts is not a wall.

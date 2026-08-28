@@ -1,0 +1,2368 @@
+{
+ "source_run": "20260827T173511Z-v41",
+ "source_path": "/home/claude-developer/hack/sherlock-winevtx-runs-v41-cr-i-r1/20260827T173511Z-v41.upstream.jsonl",
+ "ledger_rows": 341,
+ "answered_calls": 337,
+ "note": "Distilled from the run ledger: one record per ANSWERED call. request_chars is reconstructed as round(estimated_prompt_tokens * 3.40), the divisor the proxy ran with (recorded in the row as chars_per_token on gate rows); verified exact against the captured body of the peak call bf1ee18eb50f4a3b9999047f03309f73.req.json.gz (760553 chars, reconstruction 760553). The full 430 KB ledger is NOT vendored; these triples are all the estimator claim needs.",
+ "calls": [
+  {
+   "request_chars": 186796,
+   "request_bytes": 191106,
+   "estimated_at_340": 54940,
+   "actual_prompt_tokens": 45634,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 187704,
+   "request_bytes": 192016,
+   "estimated_at_340": 55207,
+   "actual_prompt_tokens": 45868,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 189564,
+   "request_bytes": 193889,
+   "estimated_at_340": 55754,
+   "actual_prompt_tokens": 46430,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 194602,
+   "request_bytes": 200404,
+   "estimated_at_340": 57236,
+   "actual_prompt_tokens": 48160,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 219171,
+   "request_bytes": 226985,
+   "estimated_at_340": 64462,
+   "actual_prompt_tokens": 57609,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 222618,
+   "request_bytes": 230448,
+   "estimated_at_340": 65476,
+   "actual_prompt_tokens": 58718,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 232798,
+   "request_bytes": 240818,
+   "estimated_at_340": 68470,
+   "actual_prompt_tokens": 61292,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 240404,
+   "request_bytes": 250957,
+   "estimated_at_340": 70707,
+   "actual_prompt_tokens": 63585,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 259420,
+   "request_bytes": 272726,
+   "estimated_at_340": 76300,
+   "actual_prompt_tokens": 69975,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 105832,
+   "request_bytes": 106539,
+   "estimated_at_340": 31127,
+   "actual_prompt_tokens": 25921,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 109803,
+   "request_bytes": 112329,
+   "estimated_at_340": 32295,
+   "actual_prompt_tokens": 27324,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 115015,
+   "request_bytes": 118009,
+   "estimated_at_340": 33828,
+   "actual_prompt_tokens": 29119,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 117494,
+   "request_bytes": 120487,
+   "estimated_at_340": 34557,
+   "actual_prompt_tokens": 29932,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 121740,
+   "request_bytes": 124819,
+   "estimated_at_340": 35806,
+   "actual_prompt_tokens": 31489,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 124437,
+   "request_bytes": 127542,
+   "estimated_at_340": 36599,
+   "actual_prompt_tokens": 32415,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 127007,
+   "request_bytes": 130565,
+   "estimated_at_340": 37355,
+   "actual_prompt_tokens": 33181,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 132002,
+   "request_bytes": 136130,
+   "estimated_at_340": 38824,
+   "actual_prompt_tokens": 34516,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 134827,
+   "request_bytes": 139551,
+   "estimated_at_340": 39655,
+   "actual_prompt_tokens": 35375,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 173250,
+   "request_bytes": 180956,
+   "estimated_at_340": 50956,
+   "actual_prompt_tokens": 49043,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 182893,
+   "request_bytes": 190784,
+   "estimated_at_340": 53792,
+   "actual_prompt_tokens": 51816,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 186405,
+   "request_bytes": 194406,
+   "estimated_at_340": 54825,
+   "actual_prompt_tokens": 52788,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 187823,
+   "request_bytes": 196121,
+   "estimated_at_340": 55242,
+   "actual_prompt_tokens": 53263,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 191080,
+   "request_bytes": 199775,
+   "estimated_at_340": 56200,
+   "actual_prompt_tokens": 54144,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 191454,
+   "request_bytes": 200151,
+   "estimated_at_340": 56310,
+   "actual_prompt_tokens": 54221,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 191988,
+   "request_bytes": 200705,
+   "estimated_at_340": 56467,
+   "actual_prompt_tokens": 54366,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 193763,
+   "request_bytes": 203018,
+   "estimated_at_340": 56989,
+   "actual_prompt_tokens": 54983,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 229503,
+   "request_bytes": 241686,
+   "estimated_at_340": 67501,
+   "actual_prompt_tokens": 66701,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 250267,
+   "request_bytes": 263543,
+   "estimated_at_340": 73608,
+   "actual_prompt_tokens": 73602,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 288123,
+   "request_bytes": 303971,
+   "estimated_at_340": 84742,
+   "actual_prompt_tokens": 86215,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 301563,
+   "request_bytes": 319268,
+   "estimated_at_340": 88695,
+   "actual_prompt_tokens": 90904,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 313024,
+   "request_bytes": 331765,
+   "estimated_at_340": 92066,
+   "actual_prompt_tokens": 95150,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 326614,
+   "request_bytes": 345911,
+   "estimated_at_340": 96063,
+   "actual_prompt_tokens": 98918,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 327345,
+   "request_bytes": 346650,
+   "estimated_at_340": 96278,
+   "actual_prompt_tokens": 99114,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 329865,
+   "request_bytes": 349796,
+   "estimated_at_340": 97019,
+   "actual_prompt_tokens": 99983,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 345654,
+   "request_bytes": 366935,
+   "estimated_at_340": 101663,
+   "actual_prompt_tokens": 104642,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 359281,
+   "request_bytes": 381561,
+   "estimated_at_340": 105671,
+   "actual_prompt_tokens": 108702,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 361573,
+   "request_bytes": 384492,
+   "estimated_at_340": 106345,
+   "actual_prompt_tokens": 109510,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 382327,
+   "request_bytes": 406410,
+   "estimated_at_340": 112449,
+   "actual_prompt_tokens": 115612,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 384914,
+   "request_bytes": 409868,
+   "estimated_at_340": 113210,
+   "actual_prompt_tokens": 116497,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 260991,
+   "request_bytes": 274421,
+   "estimated_at_340": 76762,
+   "actual_prompt_tokens": 70388,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 263619,
+   "request_bytes": 277048,
+   "estimated_at_340": 77535,
+   "actual_prompt_tokens": 71329,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 103231,
+   "request_bytes": 104020,
+   "estimated_at_340": 30362,
+   "actual_prompt_tokens": 25201,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 107202,
+   "request_bytes": 109810,
+   "estimated_at_340": 31530,
+   "actual_prompt_tokens": 26604,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 112288,
+   "request_bytes": 115345,
+   "estimated_at_340": 33026,
+   "actual_prompt_tokens": 28363,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 141715,
+   "request_bytes": 151104,
+   "estimated_at_340": 41681,
+   "actual_prompt_tokens": 38611,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 144983,
+   "request_bytes": 154409,
+   "estimated_at_340": 42642,
+   "actual_prompt_tokens": 39569,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 149396,
+   "request_bytes": 158915,
+   "estimated_at_340": 43940,
+   "actual_prompt_tokens": 40960,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 156597,
+   "request_bytes": 166729,
+   "estimated_at_340": 46058,
+   "actual_prompt_tokens": 43334,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 160885,
+   "request_bytes": 172075,
+   "estimated_at_340": 47319,
+   "actual_prompt_tokens": 44701,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 174260,
+   "request_bytes": 187076,
+   "estimated_at_340": 51253,
+   "actual_prompt_tokens": 48745,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 189774,
+   "request_bytes": 203310,
+   "estimated_at_340": 55816,
+   "actual_prompt_tokens": 53429,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 195809,
+   "request_bytes": 209691,
+   "estimated_at_340": 57591,
+   "actual_prompt_tokens": 55193,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 205000,
+   "request_bytes": 219267,
+   "estimated_at_340": 60294,
+   "actual_prompt_tokens": 57805,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 209355,
+   "request_bytes": 224528,
+   "estimated_at_340": 61575,
+   "actual_prompt_tokens": 59237,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 219654,
+   "request_bytes": 235658,
+   "estimated_at_340": 64604,
+   "actual_prompt_tokens": 62197,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 221772,
+   "request_bytes": 238278,
+   "estimated_at_340": 65227,
+   "actual_prompt_tokens": 62926,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 225814,
+   "request_bytes": 243616,
+   "estimated_at_340": 66416,
+   "actual_prompt_tokens": 64457,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 231006,
+   "request_bytes": 249626,
+   "estimated_at_340": 67943,
+   "actual_prompt_tokens": 66106,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 239935,
+   "request_bytes": 259682,
+   "estimated_at_340": 70569,
+   "actual_prompt_tokens": 68773,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 243838,
+   "request_bytes": 264321,
+   "estimated_at_340": 71717,
+   "actual_prompt_tokens": 70045,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 250002,
+   "request_bytes": 271510,
+   "estimated_at_340": 73530,
+   "actual_prompt_tokens": 72029,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 253511,
+   "request_bytes": 275444,
+   "estimated_at_340": 74562,
+   "actual_prompt_tokens": 73059,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 261419,
+   "request_bytes": 284291,
+   "estimated_at_340": 76888,
+   "actual_prompt_tokens": 75477,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 266077,
+   "request_bytes": 289142,
+   "estimated_at_340": 78258,
+   "actual_prompt_tokens": 77137,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 272704,
+   "request_bytes": 296371,
+   "estimated_at_340": 80207,
+   "actual_prompt_tokens": 79222,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 278661,
+   "request_bytes": 302627,
+   "estimated_at_340": 81959,
+   "actual_prompt_tokens": 81051,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 281962,
+   "request_bytes": 306552,
+   "estimated_at_340": 82930,
+   "actual_prompt_tokens": 82111,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 286858,
+   "request_bytes": 311698,
+   "estimated_at_340": 84370,
+   "actual_prompt_tokens": 83856,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 301495,
+   "request_bytes": 327754,
+   "estimated_at_340": 88675,
+   "actual_prompt_tokens": 88315,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 313157,
+   "request_bytes": 340294,
+   "estimated_at_340": 92105,
+   "actual_prompt_tokens": 92130,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 322381,
+   "request_bytes": 349989,
+   "estimated_at_340": 94818,
+   "actual_prompt_tokens": 94780,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 326665,
+   "request_bytes": 354452,
+   "estimated_at_340": 96078,
+   "actual_prompt_tokens": 96041,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 336420,
+   "request_bytes": 364576,
+   "estimated_at_340": 98947,
+   "actual_prompt_tokens": 98719,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 340384,
+   "request_bytes": 368798,
+   "estimated_at_340": 100113,
+   "actual_prompt_tokens": 99903,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 342353,
+   "request_bytes": 371067,
+   "estimated_at_340": 100692,
+   "actual_prompt_tokens": 100529,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 347732,
+   "request_bytes": 376536,
+   "estimated_at_340": 102274,
+   "actual_prompt_tokens": 102036,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 356918,
+   "request_bytes": 385723,
+   "estimated_at_340": 104976,
+   "actual_prompt_tokens": 104916,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 375384,
+   "request_bytes": 404985,
+   "estimated_at_340": 110407,
+   "actual_prompt_tokens": 110149,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 378267,
+   "request_bytes": 408003,
+   "estimated_at_340": 111255,
+   "actual_prompt_tokens": 110898,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 390633,
+   "request_bytes": 420371,
+   "estimated_at_340": 114892,
+   "actual_prompt_tokens": 114512,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 266155,
+   "request_bytes": 279831,
+   "estimated_at_340": 78281,
+   "actual_prompt_tokens": 72004,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 106043,
+   "request_bytes": 106901,
+   "estimated_at_340": 31189,
+   "actual_prompt_tokens": 25980,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 110027,
+   "request_bytes": 112705,
+   "estimated_at_340": 32361,
+   "actual_prompt_tokens": 27385,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 115243,
+   "request_bytes": 118439,
+   "estimated_at_340": 33895,
+   "actual_prompt_tokens": 29169,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 122165,
+   "request_bytes": 126093,
+   "estimated_at_340": 35931,
+   "actual_prompt_tokens": 31320,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 145432,
+   "request_bytes": 151028,
+   "estimated_at_340": 42774,
+   "actual_prompt_tokens": 39173,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 146914,
+   "request_bytes": 152577,
+   "estimated_at_340": 43210,
+   "actual_prompt_tokens": 39561,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 148124,
+   "request_bytes": 154010,
+   "estimated_at_340": 43566,
+   "actual_prompt_tokens": 39921,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 151446,
+   "request_bytes": 157491,
+   "estimated_at_340": 44543,
+   "actual_prompt_tokens": 41188,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 155516,
+   "request_bytes": 162109,
+   "estimated_at_340": 45740,
+   "actual_prompt_tokens": 42358,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 158647,
+   "request_bytes": 165550,
+   "estimated_at_340": 46661,
+   "actual_prompt_tokens": 43311,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 161544,
+   "request_bytes": 168601,
+   "estimated_at_340": 47513,
+   "actual_prompt_tokens": 44231,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 179166,
+   "request_bytes": 186508,
+   "estimated_at_340": 52696,
+   "actual_prompt_tokens": 48952,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 207060,
+   "request_bytes": 214629,
+   "estimated_at_340": 60900,
+   "actual_prompt_tokens": 56929,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 222010,
+   "request_bytes": 229755,
+   "estimated_at_340": 65297,
+   "actual_prompt_tokens": 61441,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 234964,
+   "request_bytes": 242872,
+   "estimated_at_340": 69107,
+   "actual_prompt_tokens": 65161,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 236416,
+   "request_bytes": 244679,
+   "estimated_at_340": 69534,
+   "actual_prompt_tokens": 65653,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 240094,
+   "request_bytes": 248608,
+   "estimated_at_340": 70616,
+   "actual_prompt_tokens": 66896,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 262252,
+   "request_bytes": 270789,
+   "estimated_at_340": 77133,
+   "actual_prompt_tokens": 73560,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 272806,
+   "request_bytes": 281446,
+   "estimated_at_340": 80237,
+   "actual_prompt_tokens": 76664,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 276845,
+   "request_bytes": 285501,
+   "estimated_at_340": 81425,
+   "actual_prompt_tokens": 77822,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 281275,
+   "request_bytes": 289966,
+   "estimated_at_340": 82728,
+   "actual_prompt_tokens": 79164,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 290652,
+   "request_bytes": 299444,
+   "estimated_at_340": 85486,
+   "actual_prompt_tokens": 82041,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 294593,
+   "request_bytes": 303692,
+   "estimated_at_340": 86645,
+   "actual_prompt_tokens": 83365,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 315061,
+   "request_bytes": 324184,
+   "estimated_at_340": 92665,
+   "actual_prompt_tokens": 89354,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 327784,
+   "request_bytes": 337110,
+   "estimated_at_340": 96407,
+   "actual_prompt_tokens": 93166,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 341765,
+   "request_bytes": 351952,
+   "estimated_at_340": 100519,
+   "actual_prompt_tokens": 97418,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 348857,
+   "request_bytes": 359143,
+   "estimated_at_340": 102605,
+   "actual_prompt_tokens": 99394,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 353855,
+   "request_bytes": 364186,
+   "estimated_at_340": 104075,
+   "actual_prompt_tokens": 100830,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 358061,
+   "request_bytes": 368801,
+   "estimated_at_340": 105312,
+   "actual_prompt_tokens": 102328,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 378260,
+   "request_bytes": 389034,
+   "estimated_at_340": 111253,
+   "actual_prompt_tokens": 108225,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 269178,
+   "request_bytes": 283077,
+   "estimated_at_340": 79170,
+   "actual_prompt_tokens": 72766,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 274564,
+   "request_bytes": 288463,
+   "estimated_at_340": 80754,
+   "actual_prompt_tokens": 74427,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 276301,
+   "request_bytes": 290201,
+   "estimated_at_340": 81265,
+   "actual_prompt_tokens": 74918,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 277464,
+   "request_bytes": 291410,
+   "estimated_at_340": 81607,
+   "actual_prompt_tokens": 75202,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 106233,
+   "request_bytes": 107241,
+   "estimated_at_340": 31245,
+   "actual_prompt_tokens": 26049,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 110204,
+   "request_bytes": 113031,
+   "estimated_at_340": 32413,
+   "actual_prompt_tokens": 27452,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 115529,
+   "request_bytes": 118837,
+   "estimated_at_340": 33979,
+   "actual_prompt_tokens": 29323,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 117647,
+   "request_bytes": 121247,
+   "estimated_at_340": 34602,
+   "actual_prompt_tokens": 29987,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 121961,
+   "request_bytes": 125596,
+   "estimated_at_340": 35871,
+   "actual_prompt_tokens": 31189,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 140124,
+   "request_bytes": 145196,
+   "estimated_at_340": 41213,
+   "actual_prompt_tokens": 37767,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 167355,
+   "request_bytes": 172427,
+   "estimated_at_340": 49222,
+   "actual_prompt_tokens": 45773,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 220439,
+   "request_bytes": 226063,
+   "estimated_at_340": 64835,
+   "actual_prompt_tokens": 61351,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 241135,
+   "request_bytes": 247422,
+   "estimated_at_340": 70922,
+   "actual_prompt_tokens": 67226,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 252168,
+   "request_bytes": 258594,
+   "estimated_at_340": 74167,
+   "actual_prompt_tokens": 70202,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 295766,
+   "request_bytes": 304292,
+   "estimated_at_340": 86990,
+   "actual_prompt_tokens": 83422,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 298398,
+   "request_bytes": 307059,
+   "estimated_at_340": 87764,
+   "actual_prompt_tokens": 84109,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 300730,
+   "request_bytes": 309452,
+   "estimated_at_340": 88450,
+   "actual_prompt_tokens": 84761,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 302495,
+   "request_bytes": 311514,
+   "estimated_at_340": 88969,
+   "actual_prompt_tokens": 85325,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 310386,
+   "request_bytes": 319905,
+   "estimated_at_340": 91290,
+   "actual_prompt_tokens": 87545,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 324479,
+   "request_bytes": 334334,
+   "estimated_at_340": 95435,
+   "actual_prompt_tokens": 91657,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 328556,
+   "request_bytes": 338712,
+   "estimated_at_340": 96634,
+   "actual_prompt_tokens": 93039,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 346688,
+   "request_bytes": 356860,
+   "estimated_at_340": 101967,
+   "actual_prompt_tokens": 98397,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 384149,
+   "request_bytes": 394432,
+   "estimated_at_340": 112985,
+   "actual_prompt_tokens": 109748,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 393689,
+   "request_bytes": 404023,
+   "estimated_at_340": 115791,
+   "actual_prompt_tokens": 112591,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 402485,
+   "request_bytes": 412925,
+   "estimated_at_340": 118378,
+   "actual_prompt_tokens": 115316,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 406433,
+   "request_bytes": 417142,
+   "estimated_at_340": 119539,
+   "actual_prompt_tokens": 116645,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 423660,
+   "request_bytes": 434370,
+   "estimated_at_340": 124606,
+   "actual_prompt_tokens": 121707,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 434588,
+   "request_bytes": 445418,
+   "estimated_at_340": 127820,
+   "actual_prompt_tokens": 125042,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 441752,
+   "request_bytes": 452609,
+   "estimated_at_340": 129927,
+   "actual_prompt_tokens": 127288,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 445628,
+   "request_bytes": 456807,
+   "estimated_at_340": 131067,
+   "actual_prompt_tokens": 128612,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 462366,
+   "request_bytes": 473546,
+   "estimated_at_340": 135990,
+   "actual_prompt_tokens": 133626,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 470788,
+   "request_bytes": 482052,
+   "estimated_at_340": 138467,
+   "actual_prompt_tokens": 136191,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 475099,
+   "request_bytes": 486689,
+   "estimated_at_340": 139735,
+   "actual_prompt_tokens": 137462,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 484741,
+   "request_bytes": 496385,
+   "estimated_at_340": 142571,
+   "actual_prompt_tokens": 140389,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 278960,
+   "request_bytes": 293292,
+   "estimated_at_340": 82047,
+   "actual_prompt_tokens": 75614,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 279820,
+   "request_bytes": 294150,
+   "estimated_at_340": 82300,
+   "actual_prompt_tokens": 75896,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 106233,
+   "request_bytes": 107241,
+   "estimated_at_340": 31245,
+   "actual_prompt_tokens": 26049,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 110204,
+   "request_bytes": 113031,
+   "estimated_at_340": 32413,
+   "actual_prompt_tokens": 27452,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 114964,
+   "request_bytes": 118163,
+   "estimated_at_340": 33813,
+   "actual_prompt_tokens": 29022,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 119816,
+   "request_bytes": 123492,
+   "estimated_at_340": 35240,
+   "actual_prompt_tokens": 30511,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 125144,
+   "request_bytes": 128832,
+   "estimated_at_340": 36807,
+   "actual_prompt_tokens": 32055,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 130186,
+   "request_bytes": 134309,
+   "estimated_at_340": 38290,
+   "actual_prompt_tokens": 33480,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 135313,
+   "request_bytes": 139886,
+   "estimated_at_340": 39798,
+   "actual_prompt_tokens": 34955,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 142086,
+   "request_bytes": 146667,
+   "estimated_at_340": 41790,
+   "actual_prompt_tokens": 36842,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 147897,
+   "request_bytes": 152870,
+   "estimated_at_340": 43499,
+   "actual_prompt_tokens": 38425,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 150586,
+   "request_bytes": 155968,
+   "estimated_at_340": 44290,
+   "actual_prompt_tokens": 39305,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 154975,
+   "request_bytes": 160529,
+   "estimated_at_340": 45581,
+   "actual_prompt_tokens": 40631,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 162404,
+   "request_bytes": 168476,
+   "estimated_at_340": 47766,
+   "actual_prompt_tokens": 42662,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 172968,
+   "request_bytes": 179052,
+   "estimated_at_340": 50873,
+   "actual_prompt_tokens": 46070,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 181424,
+   "request_bytes": 187570,
+   "estimated_at_340": 53360,
+   "actual_prompt_tokens": 48567,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 187884,
+   "request_bytes": 194047,
+   "estimated_at_340": 55260,
+   "actual_prompt_tokens": 50478,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 197278,
+   "request_bytes": 203466,
+   "estimated_at_340": 58023,
+   "actual_prompt_tokens": 53241,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 214727,
+   "request_bytes": 221217,
+   "estimated_at_340": 63155,
+   "actual_prompt_tokens": 58312,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 219018,
+   "request_bytes": 225878,
+   "estimated_at_340": 64417,
+   "actual_prompt_tokens": 59795,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 227844,
+   "request_bytes": 234706,
+   "estimated_at_340": 67013,
+   "actual_prompt_tokens": 62397,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 236912,
+   "request_bytes": 243853,
+   "estimated_at_340": 69680,
+   "actual_prompt_tokens": 65089,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 245847,
+   "request_bytes": 252845,
+   "estimated_at_340": 72308,
+   "actual_prompt_tokens": 67743,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 251518,
+   "request_bytes": 258582,
+   "estimated_at_340": 73976,
+   "actual_prompt_tokens": 69378,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 256989,
+   "request_bytes": 264090,
+   "estimated_at_340": 75585,
+   "actual_prompt_tokens": 71000,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 262660,
+   "request_bytes": 270322,
+   "estimated_at_340": 77253,
+   "actual_prompt_tokens": 72996,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 272221,
+   "request_bytes": 279886,
+   "estimated_at_340": 80065,
+   "actual_prompt_tokens": 75865,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 281795,
+   "request_bytes": 289495,
+   "estimated_at_340": 82881,
+   "actual_prompt_tokens": 78682,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 296885,
+   "request_bytes": 304610,
+   "estimated_at_340": 87319,
+   "actual_prompt_tokens": 83555,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 304919,
+   "request_bytes": 312659,
+   "estimated_at_340": 89682,
+   "actual_prompt_tokens": 85907,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 308370,
+   "request_bytes": 316343,
+   "estimated_at_340": 90697,
+   "actual_prompt_tokens": 87157,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 318288,
+   "request_bytes": 326315,
+   "estimated_at_340": 93614,
+   "actual_prompt_tokens": 90103,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 280935,
+   "request_bytes": 295626,
+   "estimated_at_340": 82628,
+   "actual_prompt_tokens": 76223,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 281792,
+   "request_bytes": 296484,
+   "estimated_at_340": 82880,
+   "actual_prompt_tokens": 76505,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 106270,
+   "request_bytes": 107294,
+   "estimated_at_340": 31256,
+   "actual_prompt_tokens": 26061,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 110242,
+   "request_bytes": 113084,
+   "estimated_at_340": 32424,
+   "actual_prompt_tokens": 27464,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 127718,
+   "request_bytes": 132023,
+   "estimated_at_340": 37564,
+   "actual_prompt_tokens": 33942,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 131206,
+   "request_bytes": 135742,
+   "estimated_at_340": 38590,
+   "actual_prompt_tokens": 35195,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 160395,
+   "request_bytes": 166631,
+   "estimated_at_340": 47175,
+   "actual_prompt_tokens": 44176,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 171686,
+   "request_bytes": 178260,
+   "estimated_at_340": 50496,
+   "actual_prompt_tokens": 47493,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 186623,
+   "request_bytes": 193484,
+   "estimated_at_340": 54889,
+   "actual_prompt_tokens": 51726,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 197125,
+   "request_bytes": 204016,
+   "estimated_at_340": 57978,
+   "actual_prompt_tokens": 54778,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 226994,
+   "request_bytes": 235821,
+   "estimated_at_340": 66763,
+   "actual_prompt_tokens": 63754,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 261406,
+   "request_bytes": 272354,
+   "estimated_at_340": 76884,
+   "actual_prompt_tokens": 74499,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 263898,
+   "request_bytes": 275273,
+   "estimated_at_340": 77617,
+   "actual_prompt_tokens": 75221,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 269579,
+   "request_bytes": 281501,
+   "estimated_at_340": 79288,
+   "actual_prompt_tokens": 76883,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 273326,
+   "request_bytes": 285367,
+   "estimated_at_340": 80390,
+   "actual_prompt_tokens": 77975,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 278593,
+   "request_bytes": 290655,
+   "estimated_at_340": 81939,
+   "actual_prompt_tokens": 79459,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 289442,
+   "request_bytes": 301902,
+   "estimated_at_340": 85130,
+   "actual_prompt_tokens": 82727,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 320844,
+   "request_bytes": 333617,
+   "estimated_at_340": 94366,
+   "actual_prompt_tokens": 91597,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 328834,
+   "request_bytes": 341806,
+   "estimated_at_340": 96716,
+   "actual_prompt_tokens": 93723,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 330361,
+   "request_bytes": 343674,
+   "estimated_at_340": 97165,
+   "actual_prompt_tokens": 94239,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 332731,
+   "request_bytes": 346057,
+   "estimated_at_340": 97862,
+   "actual_prompt_tokens": 94912,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 349948,
+   "request_bytes": 364279,
+   "estimated_at_340": 102926,
+   "actual_prompt_tokens": 99800,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 352818,
+   "request_bytes": 367268,
+   "estimated_at_340": 103770,
+   "actual_prompt_tokens": 100783,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 367360,
+   "request_bytes": 381899,
+   "estimated_at_340": 108047,
+   "actual_prompt_tokens": 105107,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 391779,
+   "request_bytes": 406714,
+   "estimated_at_340": 115229,
+   "actual_prompt_tokens": 112498,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 410492,
+   "request_bytes": 427184,
+   "estimated_at_340": 120733,
+   "actual_prompt_tokens": 119055,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 428114,
+   "request_bytes": 444902,
+   "estimated_at_340": 125916,
+   "actual_prompt_tokens": 124280,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 439392,
+   "request_bytes": 456275,
+   "estimated_at_340": 129233,
+   "actual_prompt_tokens": 127526,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 446750,
+   "request_bytes": 463667,
+   "estimated_at_340": 131397,
+   "actual_prompt_tokens": 129599,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 456300,
+   "request_bytes": 473372,
+   "estimated_at_340": 134206,
+   "actual_prompt_tokens": 132448,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 458099,
+   "request_bytes": 475199,
+   "estimated_at_340": 134735,
+   "actual_prompt_tokens": 132970,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 470604,
+   "request_bytes": 487723,
+   "estimated_at_340": 138413,
+   "actual_prompt_tokens": 137010,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 282911,
+   "request_bytes": 297977,
+   "estimated_at_340": 83209,
+   "actual_prompt_tokens": 76836,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 284665,
+   "request_bytes": 300037,
+   "estimated_at_340": 83725,
+   "actual_prompt_tokens": 77475,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 285960,
+   "request_bytes": 301342,
+   "estimated_at_340": 84106,
+   "actual_prompt_tokens": 77852,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 288558,
+   "request_bytes": 303954,
+   "estimated_at_340": 84870,
+   "actual_prompt_tokens": 78607,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 292723,
+   "request_bytes": 308514,
+   "estimated_at_340": 86095,
+   "actual_prompt_tokens": 79767,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 294630,
+   "request_bytes": 310423,
+   "estimated_at_340": 86656,
+   "actual_prompt_tokens": 80310,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 297561,
+   "request_bytes": 313578,
+   "estimated_at_340": 87518,
+   "actual_prompt_tokens": 81049,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 299839,
+   "request_bytes": 316236,
+   "estimated_at_340": 88188,
+   "actual_prompt_tokens": 81812,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 302998,
+   "request_bytes": 319438,
+   "estimated_at_340": 89117,
+   "actual_prompt_tokens": 82627,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 308098,
+   "request_bytes": 324776,
+   "estimated_at_340": 90617,
+   "actual_prompt_tokens": 84016,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 311076,
+   "request_bytes": 327916,
+   "estimated_at_340": 91493,
+   "actual_prompt_tokens": 84887,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 312807,
+   "request_bytes": 329695,
+   "estimated_at_340": 92002,
+   "actual_prompt_tokens": 85382,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 316139,
+   "request_bytes": 333159,
+   "estimated_at_340": 92982,
+   "actual_prompt_tokens": 86450,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 319386,
+   "request_bytes": 336444,
+   "estimated_at_340": 93937,
+   "actual_prompt_tokens": 87404,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 320814,
+   "request_bytes": 338235,
+   "estimated_at_340": 94357,
+   "actual_prompt_tokens": 87894,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 183974,
+   "request_bytes": 186563,
+   "estimated_at_340": 54110,
+   "actual_prompt_tokens": 44736,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 186446,
+   "request_bytes": 189123,
+   "estimated_at_340": 54837,
+   "actual_prompt_tokens": 45432,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 190839,
+   "request_bytes": 193580,
+   "estimated_at_340": 56129,
+   "actual_prompt_tokens": 46980,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 231057,
+   "request_bytes": 248026,
+   "estimated_at_340": 67958,
+   "actual_prompt_tokens": 59079,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 258386,
+   "request_bytes": 277957,
+   "estimated_at_340": 75996,
+   "actual_prompt_tokens": 69377,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 276658,
+   "request_bytes": 296526,
+   "estimated_at_340": 81370,
+   "actual_prompt_tokens": 74956,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 277987,
+   "request_bytes": 297861,
+   "estimated_at_340": 81761,
+   "actual_prompt_tokens": 75381,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 280354,
+   "request_bytes": 300309,
+   "estimated_at_340": 82457,
+   "actual_prompt_tokens": 76073,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 285175,
+   "request_bytes": 305945,
+   "estimated_at_340": 83875,
+   "actual_prompt_tokens": 77586,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 292210,
+   "request_bytes": 313540,
+   "estimated_at_340": 85944,
+   "actual_prompt_tokens": 79891,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 300060,
+   "request_bytes": 321679,
+   "estimated_at_340": 88253,
+   "actual_prompt_tokens": 82345,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 326682,
+   "request_bytes": 349707,
+   "estimated_at_340": 96083,
+   "actual_prompt_tokens": 92100,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 333394,
+   "request_bytes": 356670,
+   "estimated_at_340": 98057,
+   "actual_prompt_tokens": 94078,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 336933,
+   "request_bytes": 360314,
+   "estimated_at_340": 99098,
+   "actual_prompt_tokens": 95252,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 375666,
+   "request_bytes": 400169,
+   "estimated_at_340": 110490,
+   "actual_prompt_tokens": 106552,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 389266,
+   "request_bytes": 414486,
+   "estimated_at_340": 114490,
+   "actual_prompt_tokens": 111002,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 411380,
+   "request_bytes": 437371,
+   "estimated_at_340": 120994,
+   "actual_prompt_tokens": 117841,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 433381,
+   "request_bytes": 459692,
+   "estimated_at_340": 127465,
+   "actual_prompt_tokens": 124357,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 444669,
+   "request_bytes": 471347,
+   "estimated_at_340": 130785,
+   "actual_prompt_tokens": 128259,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 457674,
+   "request_bytes": 484445,
+   "estimated_at_340": 134610,
+   "actual_prompt_tokens": 132154,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 474786,
+   "request_bytes": 502145,
+   "estimated_at_340": 139643,
+   "actual_prompt_tokens": 137547,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 504733,
+   "request_bytes": 532478,
+   "estimated_at_340": 148451,
+   "actual_prompt_tokens": 150796,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 524610,
+   "request_bytes": 553038,
+   "estimated_at_340": 154297,
+   "actual_prompt_tokens": 157188,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 542470,
+   "request_bytes": 571972,
+   "estimated_at_340": 159550,
+   "actual_prompt_tokens": 162604,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 564978,
+   "request_bytes": 596706,
+   "estimated_at_340": 166170,
+   "actual_prompt_tokens": 169523,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 567569,
+   "request_bytes": 599482,
+   "estimated_at_340": 166932,
+   "actual_prompt_tokens": 170288,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 582672,
+   "request_bytes": 616563,
+   "estimated_at_340": 171374,
+   "actual_prompt_tokens": 174887,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 590563,
+   "request_bytes": 625097,
+   "estimated_at_340": 173695,
+   "actual_prompt_tokens": 177407,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 601154,
+   "request_bytes": 636394,
+   "estimated_at_340": 176810,
+   "actual_prompt_tokens": 180572,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 608114,
+   "request_bytes": 643723,
+   "estimated_at_340": 178857,
+   "actual_prompt_tokens": 182659,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 611459,
+   "request_bytes": 647197,
+   "estimated_at_340": 179841,
+   "actual_prompt_tokens": 183677,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 615553,
+   "request_bytes": 651382,
+   "estimated_at_340": 181045,
+   "actual_prompt_tokens": 184969,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 619606,
+   "request_bytes": 655576,
+   "estimated_at_340": 182237,
+   "actual_prompt_tokens": 186247,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 624631,
+   "request_bytes": 660732,
+   "estimated_at_340": 183715,
+   "actual_prompt_tokens": 187825,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 624631,
+   "request_bytes": 660732,
+   "estimated_at_340": 183715,
+   "actual_prompt_tokens": 187825,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 647034,
+   "request_bytes": 688458,
+   "estimated_at_340": 190304,
+   "actual_prompt_tokens": 194713,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 652191,
+   "request_bytes": 693631,
+   "estimated_at_340": 191821,
+   "actual_prompt_tokens": 196173,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 656605,
+   "request_bytes": 698130,
+   "estimated_at_340": 193119,
+   "actual_prompt_tokens": 197896,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 662548,
+   "request_bytes": 704537,
+   "estimated_at_340": 194867,
+   "actual_prompt_tokens": 199671,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 666108,
+   "request_bytes": 708234,
+   "estimated_at_340": 195914,
+   "actual_prompt_tokens": 200762,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 670844,
+   "request_bytes": 713241,
+   "estimated_at_340": 197307,
+   "actual_prompt_tokens": 202171,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 673639,
+   "request_bytes": 716069,
+   "estimated_at_340": 198129,
+   "actual_prompt_tokens": 202983,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 694392,
+   "request_bytes": 739984,
+   "estimated_at_340": 204233,
+   "actual_prompt_tokens": 209558,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 705752,
+   "request_bytes": 753137,
+   "estimated_at_340": 207574,
+   "actual_prompt_tokens": 213080,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 710556,
+   "request_bytes": 758281,
+   "estimated_at_340": 208987,
+   "actual_prompt_tokens": 214507,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 723483,
+   "request_bytes": 771835,
+   "estimated_at_340": 212789,
+   "actual_prompt_tokens": 218784,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 728464,
+   "request_bytes": 777000,
+   "estimated_at_340": 214254,
+   "actual_prompt_tokens": 220208,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 748258,
+   "request_bytes": 802369,
+   "estimated_at_340": 220076,
+   "actual_prompt_tokens": 226116,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 612313,
+   "request_bytes": 666224,
+   "estimated_at_340": 180092,
+   "actual_prompt_tokens": 132185,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 744450,
+   "request_bytes": 798555,
+   "estimated_at_340": 218956,
+   "actual_prompt_tokens": 225366,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 750040,
+   "request_bytes": 804902,
+   "estimated_at_340": 220600,
+   "actual_prompt_tokens": 141586,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 614091,
+   "request_bytes": 668757,
+   "estimated_at_340": 180615,
+   "actual_prompt_tokens": 132611,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 746232,
+   "request_bytes": 801088,
+   "estimated_at_340": 219480,
+   "actual_prompt_tokens": 225914,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 760553,
+   "request_bytes": 819822,
+   "estimated_at_340": 223692,
+   "actual_prompt_tokens": 229978,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 624604,
+   "request_bytes": 683677,
+   "estimated_at_340": 183707,
+   "actual_prompt_tokens": 135910,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 169191,
+   "request_bytes": 182589,
+   "estimated_at_340": 49762,
+   "actual_prompt_tokens": 42805,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 186014,
+   "request_bytes": 200506,
+   "estimated_at_340": 54710,
+   "actual_prompt_tokens": 47115,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 187058,
+   "request_bytes": 201772,
+   "estimated_at_340": 55017,
+   "actual_prompt_tokens": 47403,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 189207,
+   "request_bytes": 204719,
+   "estimated_at_340": 55649,
+   "actual_prompt_tokens": 47998,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 217688,
+   "request_bytes": 234794,
+   "estimated_at_340": 64026,
+   "actual_prompt_tokens": 55892,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 219137,
+   "request_bytes": 236387,
+   "estimated_at_340": 64452,
+   "actual_prompt_tokens": 56322,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 258060,
+   "request_bytes": 289344,
+   "estimated_at_340": 75900,
+   "actual_prompt_tokens": 68069,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 276474,
+   "request_bytes": 308994,
+   "estimated_at_340": 81316,
+   "actual_prompt_tokens": 73857,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 277760,
+   "request_bytes": 310374,
+   "estimated_at_340": 81694,
+   "actual_prompt_tokens": 74275,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 282805,
+   "request_bytes": 315793,
+   "estimated_at_340": 83178,
+   "actual_prompt_tokens": 75737,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 287123,
+   "request_bytes": 321292,
+   "estimated_at_340": 84448,
+   "actual_prompt_tokens": 77134,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 292386,
+   "request_bytes": 328625,
+   "estimated_at_340": 85996,
+   "actual_prompt_tokens": 78929,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 319998,
+   "request_bytes": 356510,
+   "estimated_at_340": 94117,
+   "actual_prompt_tokens": 86575,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 348558,
+   "request_bytes": 396816,
+   "estimated_at_340": 102517,
+   "actual_prompt_tokens": 96238,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 372130,
+   "request_bytes": 433503,
+   "estimated_at_340": 109450,
+   "actual_prompt_tokens": 104877,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 410366,
+   "request_bytes": 482042,
+   "estimated_at_340": 120696,
+   "actual_prompt_tokens": 116994,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 422827,
+   "request_bytes": 497530,
+   "estimated_at_340": 124361,
+   "actual_prompt_tokens": 120914,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 427883,
+   "request_bytes": 503748,
+   "estimated_at_340": 125848,
+   "actual_prompt_tokens": 122565,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 438063,
+   "request_bytes": 518676,
+   "estimated_at_340": 128842,
+   "actual_prompt_tokens": 126031,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 445818,
+   "request_bytes": 529868,
+   "estimated_at_340": 131123,
+   "actual_prompt_tokens": 128534,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 447685,
+   "request_bytes": 532496,
+   "estimated_at_340": 131672,
+   "actual_prompt_tokens": 129109,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 450527,
+   "request_bytes": 536809,
+   "estimated_at_340": 132508,
+   "actual_prompt_tokens": 130018,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 455416,
+   "request_bytes": 542664,
+   "estimated_at_340": 133946,
+   "actual_prompt_tokens": 131567,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 457701,
+   "request_bytes": 545248,
+   "estimated_at_340": 134618,
+   "actual_prompt_tokens": 132259,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 460530,
+   "request_bytes": 548302,
+   "estimated_at_340": 135450,
+   "actual_prompt_tokens": 133092,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 465718,
+   "request_bytes": 554121,
+   "estimated_at_340": 136976,
+   "actual_prompt_tokens": 134707,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 468792,
+   "request_bytes": 557499,
+   "estimated_at_340": 137880,
+   "actual_prompt_tokens": 135786,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 470312,
+   "request_bytes": 559386,
+   "estimated_at_340": 138327,
+   "actual_prompt_tokens": 136296,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 500011,
+   "request_bytes": 589186,
+   "estimated_at_340": 147062,
+   "actual_prompt_tokens": 143378,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 502809,
+   "request_bytes": 592049,
+   "estimated_at_340": 147885,
+   "actual_prompt_tokens": 144249,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 506355,
+   "request_bytes": 595681,
+   "estimated_at_340": 148928,
+   "actual_prompt_tokens": 145172,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 513601,
+   "request_bytes": 602969,
+   "estimated_at_340": 151059,
+   "actual_prompt_tokens": 146862,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 519449,
+   "request_bytes": 608890,
+   "estimated_at_340": 152779,
+   "actual_prompt_tokens": 148692,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 523688,
+   "request_bytes": 613989,
+   "estimated_at_340": 154026,
+   "actual_prompt_tokens": 149980,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 530781,
+   "request_bytes": 621299,
+   "estimated_at_340": 156112,
+   "actual_prompt_tokens": 151768,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 541321,
+   "request_bytes": 632220,
+   "estimated_at_340": 159212,
+   "actual_prompt_tokens": 154487,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 547312,
+   "request_bytes": 638684,
+   "estimated_at_340": 160974,
+   "actual_prompt_tokens": 156165,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 552918,
+   "request_bytes": 644818,
+   "estimated_at_340": 162623,
+   "actual_prompt_tokens": 157704,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 557002,
+   "request_bytes": 649285,
+   "estimated_at_340": 163824,
+   "actual_prompt_tokens": 158801,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 558409,
+   "request_bytes": 651281,
+   "estimated_at_340": 164238,
+   "actual_prompt_tokens": 159259,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 560895,
+   "request_bytes": 654038,
+   "estimated_at_340": 164969,
+   "actual_prompt_tokens": 160086,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 567429,
+   "request_bytes": 661177,
+   "estimated_at_340": 166891,
+   "actual_prompt_tokens": 161844,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 183974,
+   "request_bytes": 186563,
+   "estimated_at_340": 54110,
+   "actual_prompt_tokens": 44736,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 185392,
+   "request_bytes": 188061,
+   "estimated_at_340": 54527,
+   "actual_prompt_tokens": 45140,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 188268,
+   "request_bytes": 190940,
+   "estimated_at_340": 55373,
+   "actual_prompt_tokens": 46131,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 190322,
+   "request_bytes": 193357,
+   "estimated_at_340": 55977,
+   "actual_prompt_tokens": 46813,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 192936,
+   "request_bytes": 196256,
+   "estimated_at_340": 56746,
+   "actual_prompt_tokens": 47599,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 199838,
+   "request_bytes": 203492,
+   "estimated_at_340": 58776,
+   "actual_prompt_tokens": 49585,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 227844,
+   "request_bytes": 231743,
+   "estimated_at_340": 67013,
+   "actual_prompt_tokens": 57332,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 236460,
+   "request_bytes": 240426,
+   "estimated_at_340": 69547,
+   "actual_prompt_tokens": 59672,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 237728,
+   "request_bytes": 241857,
+   "estimated_at_340": 69920,
+   "actual_prompt_tokens": 60123,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 240955,
+   "request_bytes": 245229,
+   "estimated_at_340": 70869,
+   "actual_prompt_tokens": 61186,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 245096,
+   "request_bytes": 249577,
+   "estimated_at_340": 72087,
+   "actual_prompt_tokens": 62289,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 261443,
+   "request_bytes": 271314,
+   "estimated_at_340": 76895,
+   "actual_prompt_tokens": 67582,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 279956,
+   "request_bytes": 292711,
+   "estimated_at_340": 82340,
+   "actual_prompt_tokens": 73536,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 281126,
+   "request_bytes": 293884,
+   "estimated_at_340": 82684,
+   "actual_prompt_tokens": 73817,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 281833,
+   "request_bytes": 294594,
+   "estimated_at_340": 82892,
+   "actual_prompt_tokens": 73989,
+   "request_max_tokens": 6700
+  },
+  {
+   "request_chars": 283781,
+   "request_bytes": 296549,
+   "estimated_at_340": 83465,
+   "actual_prompt_tokens": 74494,
+   "request_max_tokens": 6700
+  }
+ ]
+}

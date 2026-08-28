@@ -95,31 +95,82 @@ UPSTREAM_MODEL = os.environ.get("UPSTREAM_MODEL", "")
 # 0 declares no ceiling and judges nothing, so every existing lane is untouched.
 UPSTREAM_PER_REQUEST_TOKEN_GATE = int(
     os.environ.get("UPSTREAM_PER_REQUEST_TOKEN_GATE", "0") or 0)
-# MEASURED ACROSS 316 REAL CALLS, and the direction of the error is the whole
-# point. `request_bytes / usage.prompt_tokens` over both paid runs:
+# RECALIBRATED 2026-08-28 AGAINST A COMPLETE PAID RUN, because the previous
+# calibration measured the WRONG RATIO and the wall leaked.
 #
-#   run 20260827T104334Z-v40  n=126  min 3.526  median 3.792  max 4.168
-#   run 20260827T045553Z-v39  n=190  min 3.441  median 3.586  max 4.176
+# The estimator divides CHARACTERS (`body.decode("utf-8", "replace")`), but 3.40
+# was derived from `request_bytes / usage.prompt_tokens`. On this Cyrillic-heavy
+# corpus bytes run ~8 % above characters, so a byte-calibrated divisor is far too
+# high for a character-fed estimator. Result, replaying the complete ledger of run
+# 20260827T173511Z-v41 (341 rows, 337 ANSWERED calls — every answered call, not a
+# sample):
 #
-# So the true ratio never fell below 3.441. A DIVISOR BELOW THE OBSERVED MINIMUM
-# over-estimates the token count, which is the safe direction for a wall: it can
-# refuse a legal request but it cannot pass an illegal one. 3.40 sits just under
-# that minimum, so the worst-case over-estimate is 3.441/3.40 = 1.2 % and the
-# typical one is about 11 % — and an over-estimate is RECOVERABLE, because the
-# refusal is shaped so qwen compacts and retries (see pre_send_refusal_text),
-# while a breach is not recoverable at all.
+#   under-estimates at 3.40 ............ 42 of 337 (12.5 %)
+#   worst deficit ...................... 6,434 tokens (est 219,480, actual 225,914)
+#   implied TRUE chars/token ........... min 3.2898  p1 3.3019  median 3.5480  max 5.2974
+#   (byte ratio, for contrast ......... min 3.4868  median 3.7932 — a different number)
 #
-# THE COST IS STATED, NOT HIDDEN: at an 11 % over-estimate a genuinely legal
-# request of ~235,000 tokens can be refused at a 262,000 gate. That is one
-# compaction, not a lost run. Every call row records `estimated_prompt_tokens`
-# beside the provider's own count, so this constant can be re-derived from any
-# future run instead of being argued about.
+# The run stayed under its 262,000 gate only because its peak prompt+budget was
+# 236,678: luck, not the wall.
+#
+# THE SHAPE OF THE ANSWER IS STILL A SINGLE DIVISOR, deliberately. A per-script
+# ratio was considered and rejected: the observed spread (3.29 → 5.30) is not
+# explained by script alone — tool schemas are ASCII and tokenize DENSELY, so the
+# cheap "Cyrillic is worse" split would have to be calibrated per mixture and would
+# add a second thing to get wrong. Counting bytes instead of characters was also
+# rejected: it is the ratio that just failed, and it makes the divisor depend on the
+# encoding rather than on the text. One number, below the measured floor, is the
+# shape a wall wants.
+#
+# THE MARGIN. 3.10 = 3.2898 / 1.061, i.e. 5.8 % below the observed minimum. The
+# margin is sized so a corpus a little denser than anything measured is still
+# over-estimated, and it is bounded on the other side by usefulness: replayed over
+# the same 337 calls at 3.10 the peak `estimate + max_tokens` is 252,039, still
+# under the 262,000 gate, so this divisor would NOT have spuriously refused a
+# single call of the run it was calibrated on. Cost: the median over-estimate rises
+# to 14.5 %, and an over-estimate is RECOVERABLE (the refusal is shaped so qwen
+# compacts and retries — see pre_send_refusal_text) while a breach is not.
+#
+# WHAT COULD STILL DEFEAT IT: any input that tokenizes denser than 3.10 characters
+# per token — long runs of emoji, CJK, base64/hex blobs, or a provider swapping
+# tokenizers. A ratio is a model of somebody else's tokenizer and can never be
+# proven safe for unseen text; every call row records `estimated_prompt_tokens`
+# beside the provider's own count, so the next run re-derives this number instead of
+# arguing about it (measure/tests/test_conservative_estimator_v42.py replays it).
 #
 # The estimate divides the WHOLE serialised request — messages AND tool schemas,
 # which were 113,061 of the v40 peak request's characters — so it cannot miss a
 # third of the prompt the way a messages-only estimate would.
-UPSTREAM_CHARS_PER_TOKEN = float(
-    os.environ.get("UPSTREAM_CHARS_PER_TOKEN", "3.40") or 3.40)
+UPSTREAM_CHARS_PER_TOKEN_CALIBRATED = 3.10
+# The observed floor the calibration is anchored to. An operator may make the
+# estimate MORE conservative (a smaller divisor); a LARGER one is an unsafe knob,
+# so it is clamped, loudly, rather than honoured — a wall an env var can open is
+# not a wall.
+UPSTREAM_CHARS_PER_TOKEN_OBSERVED_MIN = 3.2898
+
+
+def _calibrated_chars_per_token(raw, warn=sys.stderr):
+    """Clamp the divisor to the calibrated ceiling. Louder than it is clever."""
+    try:
+        value = float(raw) if str(raw).strip() else UPSTREAM_CHARS_PER_TOKEN_CALIBRATED
+    except (TypeError, ValueError):
+        value = 0.0
+    if value <= 0:
+        value = UPSTREAM_CHARS_PER_TOKEN_CALIBRATED
+    if value > UPSTREAM_CHARS_PER_TOKEN_CALIBRATED:
+        print("upstream-log-proxy: REFUSING UPSTREAM_CHARS_PER_TOKEN=%s — above the "
+              "calibrated safe ceiling %.2f (observed minimum %.4f over 337 answered "
+              "calls of run 20260827T173511Z-v41); clamped to %.2f."
+              % (raw, UPSTREAM_CHARS_PER_TOKEN_CALIBRATED,
+                 UPSTREAM_CHARS_PER_TOKEN_OBSERVED_MIN,
+                 UPSTREAM_CHARS_PER_TOKEN_CALIBRATED),
+              file=warn, flush=True)
+        value = UPSTREAM_CHARS_PER_TOKEN_CALIBRATED
+    return value
+
+
+UPSTREAM_CHARS_PER_TOKEN = _calibrated_chars_per_token(
+    os.environ.get("UPSTREAM_CHARS_PER_TOKEN", "3.10"))
 # RIDE OUT A PROVIDER BURST. linkapi's 400s are transient and minute-scale —
 # measured 2026-08-02, and NOT explained by request size or shape (both
 # controlled for, interleaved, 12/12 succeeded at the size and shape that had
@@ -385,6 +436,22 @@ def estimate_prompt_tokens(body):
     prompt and a gate that under-counts is not a wall. Returns 0 on an
     unparseable body, so a malformed request is never refused on a number nobody
     can defend; the existing paths already judge those.
+
+    CALIBRATED ON A COMPLETE POPULATION, NOT A SAMPLE: run 20260827T173511Z-v41,
+    341 ledger rows, all 337 ANSWERED calls, comparing this function's output
+    against the provider's own `usage.prompt_tokens`. The previous divisor (3.40,
+    itself derived from BYTES while this function counts CHARACTERS) under-counted
+    42 of those 337 calls, worst deficit 6,434 tokens. The implied true ratio
+    bottoms out at 3.2898 chars/token; the divisor is 3.10, 5.8 % below that floor,
+    and at 3.10 the same 337 calls yield ZERO under-estimates (minimum surplus
+    5,825 tokens) while still peaking at 252,039 estimate+budget under a 262,000
+    gate. Re-checkable: every row records `estimated_prompt_tokens` beside
+    `usage.prompt_tokens`, and the distilled triples are replayed by
+    measure/tests/test_conservative_estimator_v42.py against
+    measure/tests/fixtures/v41-prompt-token-calibration.json.
+
+    STILL DEFEATABLE by text that tokenizes denser than 3.10 chars/token — emoji,
+    CJK, base64/hex blobs, or a provider tokenizer change. See the constant above.
     """
     if not body:
         return 0
@@ -392,7 +459,8 @@ def estimate_prompt_tokens(body):
         text = body.decode("utf-8", "replace")
     except Exception:
         return 0
-    ratio = UPSTREAM_CHARS_PER_TOKEN if UPSTREAM_CHARS_PER_TOKEN > 0 else 3.20
+    ratio = (UPSTREAM_CHARS_PER_TOKEN if UPSTREAM_CHARS_PER_TOKEN > 0
+             else UPSTREAM_CHARS_PER_TOKEN_CALIBRATED)
     return int(len(text) / ratio)
 
 
