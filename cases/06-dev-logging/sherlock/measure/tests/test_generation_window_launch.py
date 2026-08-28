@@ -31,13 +31,23 @@ and REFUSES when they cannot both hold, so the four cases below that launched a
 
 Their intent is unchanged and still worth pinning: a budget that fits must still
 launch, an unset budget on a windowed lane must still be DERIVED and not fall
-back to 32,768, and the window must still be recorded beside fix 8's budgets. So
-each of them now declares the escape the refusal itself names — a
-`model.sessionTokenLimit` low enough that the session ends before qwen can ever
-fire auto-compaction, which makes the reserve a constraint on a code path that
-cannot execute. Nothing here is weakened: the refusal is asserted directly in
-test_the_conflict_still_refuses_a_budget_below_the_reserve, and every launching
-case asserts that NEITHER refusal appeared.
+back to 32,768, and the window must still be recorded beside fix 8's budgets.
+
+REVISED 2026-08-28, BECAUSE A PAID RUN FALSIFIED HOW THEY WERE KEPT ALIVE.
+Those cases were rewritten to declare fix 7's named escape — a
+`model.sessionTokenLimit` low enough that `limit + max_tokens` could not reach
+the auto-compaction threshold — and to assert it launched. Run
+20260828T204908Z-v42 declared exactly that (216,000 against an auto threshold of
+222,700, on max_tokens 6,700) and its ledger recorded prompts of 226,997 and
+226,247 with the compaction cut at 6,700 anyway: `sessionTokenLimit` bounds the
+PREVIOUS measured prompt, and tool RESULTS grow the next one with nothing
+bounding them. The escape is removed from the code, so these cases keep their
+intent the honest way instead — on a lane whose generation window CAN carry the
+20,000-token reserve, which is one of the two remedies the refusal now names.
+Nothing here is weakened: the refusal is asserted directly in
+test_the_conflict_still_refuses_a_budget_below_the_reserve, the falsified escape
+has its own regression in TheFalsifiedEscapeIsNoLongerALaunchTicket, and every
+launching case asserts that NEITHER refusal appeared.
 """
 import importlib.util
 import os
@@ -71,19 +81,27 @@ FITTING = fitting_max_output_tokens(90, 122.6, 35)                  # 6743
 DEFAULT_CONTEXT_WINDOW = 200000
 
 
-def unreachable_compaction_limit(max_tokens, window=DEFAULT_CONTEXT_WINDOW):
-    """The largest model.sessionTokenLimit that makes compaction UNREACHABLE.
+#: A generation window that CAN carry the compaction reserve. 20,000 tokens at
+#: 122.6 tok/s is 163.1 s of generation; plus the 35 s first-token reserve that
+#: is 198.1 s, so 220 s fits with room. This is one of the two remedies the
+#: refusal names, and it is how every launching case below now satisfies BOTH
+#: constraints — honestly, rather than by an escape that does not hold.
+WIDE_WINDOW_S = "220"
+WIDE_FITTING = fitting_max_output_tokens(220, 122.6, 35)            # 22681
 
-    FIX 7'S OWN NAMED ESCAPE, computed rather than pasted. `sessionTokenLimit`
-    refuses the next turn once the provider's reported prompt_tokens passes it,
-    so the largest prompt still sendable is `limit + max_tokens`; if that cannot
-    reach qwen's auto-compaction threshold, the session ends before a compaction
-    summary is ever requested and the 20,000-token reserve constrains a code
-    path that cannot execute. One token higher and fix 7 refuses again — which
-    test_the_escape_is_a_boundary_not_a_switch asserts.
-    """
-    auto, _hard = corporate_settings.thresholds(window)
-    return int(auto) - max_tokens
+#: THE FALSIFIED ESCAPE, kept as data so the regression below can reproduce the
+#: paid run's exact shape. Fix 7 computed the largest "safe" sessionTokenLimit as
+#: `auto(window) - max_tokens`; run 20260828T204908Z-v42 declared it and
+#: compaction fired and was clipped anyway.
+#: The run declared SHERLOCK_CONTEXT_WINDOW=262000 (its qwen-settings-pre.json
+#: carries model.generationConfig.contextWindowSize = 262000), NOT run-bench's
+#: 200,000 default, so the threshold it computed against is thresholds(262000).
+PAID_CONTEXT_WINDOW = 262000
+PAID_MAX_TOKENS = 6700
+PAID_SESSION_LIMIT = (int(corporate_settings.thresholds(PAID_CONTEXT_WINDOW)[0])
+                      - PAID_MAX_TOKENS)                            # 216000
+
+
 # The stub qwen writes this, so the rig's run "delivers" and does not spend 45 s
 # on resume attempts. The exit code of a stubbed run is NOT the subject here
 # (the lane audit correctly calls a stub run's absent ledger a breach); what
@@ -133,21 +151,22 @@ class TheRunnerRefusesAnImpossibleOutputBudget(Rig, unittest.TestCase):
         self.assertIn(str(FITTING), p.stderr)
 
     def test_a_budget_that_fits_launches(self):
-        """CHANGED BY FIX 7 — the rule is the same, "fits" is not.
+        """CHANGED BY FIX 7, AND AGAIN BY ITS FALSIFICATION — same rule, and
+        "fits" now means what it says.
 
-        This used to be `max_tokens 6700` on a 90 s lane with nothing else
-        declared, and it asserted that it launched. That is the v41
-        configuration: 6,700 fits the clock and is BELOW qwen's 20,000-token
-        compaction reserve, so the run clipped four of its own summaries. Fix 7
-        refuses it, so the assertion "it launches" now belongs to a budget that
-        fits BOTH constraints — here by the escape the refusal itself names.
+        This was originally `max_tokens 6700` on a 90 s lane with nothing else
+        declared. That is the v41 configuration: 6,700 fits the clock and is
+        BELOW qwen's 20,000-token compaction reserve, so the run clipped four of
+        its own summaries. Fix 7 refused it and this case was rewritten to
+        launch via fix 7's escape, which run 20260828T204908Z-v42 then falsified.
+        A budget that fits BOTH constraints therefore needs a lane whose clock
+        can carry the reserve, and that is what it now asserts.
         """
-        self.launched({"SHERLOCK_GENERATION_WINDOW_S": CR_WINDOW_S,
+        self.launched({"SHERLOCK_GENERATION_WINDOW_S": WIDE_WINDOW_S,
                        "SHERLOCK_OUTPUT_TOKENS_PER_S": CR_TOKENS_PER_S,
-                       "SHERLOCK_MAX_OUTPUT_TOKENS": "6700",
-                       "SHERLOCK_SESSION_TOKEN_LIMIT":
-                           str(unreachable_compaction_limit(6700))})
-        self.assertEqual(self.inputs()["generation_window"]["max_output_tokens"], 6700)
+                       "SHERLOCK_MAX_OUTPUT_TOKENS": "20000"})
+        self.assertEqual(self.inputs()["generation_window"]["max_output_tokens"],
+                         20000)
 
     def test_the_conflict_still_refuses_a_budget_below_the_reserve(self):
         """THE OTHER HALF OF THE CASE ABOVE, so "fits" cannot drift back.
@@ -164,25 +183,33 @@ class TheRunnerRefusesAnImpossibleOutputBudget(Rig, unittest.TestCase):
         self.assertEqual(argv, [], "qwen was launched anyway")
         self.assertIn(CONFLICT, p.stderr, p.stderr[-2000:])
 
-    def test_the_escape_is_a_boundary_not_a_switch(self):
-        """One token above the boundary and compaction is reachable again.
+    def test_the_falsified_escape_no_longer_buys_a_launch(self):
+        """THE REGRESSION PAID RUN 20260828T204908Z-v42 EARNED, AT LAUNCH LEVEL.
 
-        The escape is a FACT about the settings, not a waiver, so it must fail
-        the moment the settings stop making compaction unreachable. Declaring
-        one token more than `unreachable_compaction_limit` puts the largest
-        sendable prompt back over qwen's auto-compaction threshold.
+        This case used to be test_the_escape_is_a_boundary_not_a_switch, which
+        asserted that one token ABOVE the boundary refused — treating everything
+        at or below it as a launch ticket. The whole boundary is now a refusal.
+        The exact paid configuration is asserted first, then the boundary either
+        side of it, so no tighter constant can quietly reopen the door.
         """
-        argv, p = self.go(dict(DELIVERS,
-                               SHERLOCK_GENERATION_WINDOW_S=CR_WINDOW_S,
-                               SHERLOCK_OUTPUT_TOKENS_PER_S=CR_TOKENS_PER_S,
-                               SHERLOCK_MAX_OUTPUT_TOKENS="6700",
-                               SHERLOCK_SESSION_TOKEN_LIMIT=str(
-                                   unreachable_compaction_limit(6700) + 1)))
-        self.assertNotEqual(p.returncode, 0,
-                            "a session limit that does not stop compaction "
-                            "was accepted as though it did")
-        self.assertEqual(argv, [])
-        self.assertIn(CONFLICT, p.stderr, p.stderr[-2000:])
+        for limit in (str(PAID_SESSION_LIMIT - 1), str(PAID_SESSION_LIMIT),
+                      str(PAID_SESSION_LIMIT + 1)):
+            with self.subTest(limit=limit):
+                argv, p = self.go(dict(
+                    DELIVERS,
+                    SHERLOCK_GENERATION_WINDOW_S=CR_WINDOW_S,
+                    SHERLOCK_OUTPUT_TOKENS_PER_S=CR_TOKENS_PER_S,
+                    SHERLOCK_CONTEXT_WINDOW=str(PAID_CONTEXT_WINDOW),
+                    SHERLOCK_MAX_OUTPUT_TOKENS=str(PAID_MAX_TOKENS),
+                    SHERLOCK_SESSION_TOKEN_LIMIT=limit))
+                self.assertNotEqual(
+                    p.returncode, 0,
+                    "sessionTokenLimit %s launched a sub-reserve budget" % limit)
+                self.assertEqual(argv, [], "qwen was launched anyway")
+                self.assertIn(CONFLICT, p.stderr, p.stderr[-2000:])
+                # The sentence the operator trusted must not be printable.
+                self.assertNotIn("Compaction is unreachable",
+                                 p.stdout + p.stderr)
 
     def test_an_undeclared_window_skips_the_check_entirely(self):
         """THE linkapi GUARANTEE. 32,768 output tokens with no declared window
@@ -202,32 +229,31 @@ class TheRunnerRefusesAnImpossibleOutputBudget(Rig, unittest.TestCase):
     def test_a_declared_window_derives_the_default_budget(self):
         """Unset, on a lane WITH a window, must not fall back to 32,768.
 
-        CHANGED BY FIX 7: only the environment. The derived default on this lane
-        is 6,743, which is below the 20,000-token compaction reserve, so the
-        launch is now refused unless the settings make compaction unreachable.
-        The assertion — that the budget is DERIVED from the window and is not
-        32,768 — is exactly the one this case always made.
+        CHANGED BY FIX 7 AND ITS FALSIFICATION: only the lane. The derived
+        default on a 90 s lane is 6,743, below the 20,000-token compaction
+        reserve, so that launch is refused outright and there is no longer any
+        escape from it. The derivation itself is what this case has always
+        asserted, so it is asserted on a lane where a derived budget is legal.
         """
-        self.launched({"SHERLOCK_GENERATION_WINDOW_S": CR_WINDOW_S,
-                       "SHERLOCK_OUTPUT_TOKENS_PER_S": CR_TOKENS_PER_S,
-                       "SHERLOCK_SESSION_TOKEN_LIMIT":
-                           str(unreachable_compaction_limit(FITTING))})
+        self.launched({"SHERLOCK_GENERATION_WINDOW_S": WIDE_WINDOW_S,
+                       "SHERLOCK_OUTPUT_TOKENS_PER_S": CR_TOKENS_PER_S})
         window = self.inputs()["generation_window"]
-        self.assertEqual(window["max_output_tokens"], FITTING)
-        self.assertEqual(window["fitting_max_output_tokens"], FITTING)
+        self.assertEqual(window["max_output_tokens"], WIDE_FITTING)
+        self.assertEqual(window["fitting_max_output_tokens"], WIDE_FITTING)
         self.assertNotEqual(window["max_output_tokens"], 32768)
 
     def test_the_window_is_recorded_beside_the_fix_8_budgets(self):
-        """CHANGED BY FIX 7: the session limit is declared so the run reaches
-        the point where it writes run-inputs.json at all (this case used to
-        ERROR with FileNotFoundError, because the launch was refused before the
-        trace was written). The recorded shape asserted here is unchanged, plus
-        the new output_budget object that must carry the same number."""
-        limit = unreachable_compaction_limit(6700)
+        """CHANGED BY FIX 7 (a launch had to be possible at all, or this case
+        ERRORs with FileNotFoundError before it can assert anything) and again
+        by its falsification: the launch is now made legal by the lane's clock
+        rather than by a session limit that does not hold. The limit is still
+        declared, in its one sound role — the gate backstop — and must still be
+        recorded. The recorded shape asserted here is otherwise unchanged."""
+        limit = 230000
         self.go(dict(DELIVERS,
-                     SHERLOCK_GENERATION_WINDOW_S=CR_WINDOW_S,
+                     SHERLOCK_GENERATION_WINDOW_S=WIDE_WINDOW_S,
                      SHERLOCK_OUTPUT_TOKENS_PER_S=CR_TOKENS_PER_S,
-                     SHERLOCK_MAX_OUTPUT_TOKENS="6700",
+                     SHERLOCK_MAX_OUTPUT_TOKENS="20000",
                      SHERLOCK_SESSION_TOKEN_LIMIT=str(limit)))
         inputs = self.inputs()
         self.assertIsInstance(inputs.get("budgets"), dict,
@@ -237,17 +263,17 @@ class TheRunnerRefusesAnImpossibleOutputBudget(Rig, unittest.TestCase):
                          {"generation_window_seconds", "output_tokens_per_second",
                           "ttft_reserve_seconds", "max_output_tokens",
                           "fitting_max_output_tokens"})
-        self.assertEqual(window["generation_window_seconds"], 90)
+        self.assertEqual(window["generation_window_seconds"], 220)
         self.assertEqual(window["output_tokens_per_second"], 122.6)
         self.assertEqual(window["ttft_reserve_seconds"], 35)
-        self.assertEqual(window["max_output_tokens"], 6700)
-        self.assertEqual(window["fitting_max_output_tokens"], FITTING)
-        # Fix 7's second constraint, recorded beside the first: the escape that
-        # let this launch must be legible in the run's own artefacts, or the
-        # ground for accepting a sub-reserve budget is unrecoverable later.
+        self.assertEqual(window["max_output_tokens"], 20000)
+        self.assertEqual(window["fitting_max_output_tokens"], WIDE_FITTING)
+        # Fix 7's second constraint, recorded beside the first: which two
+        # constraints were judged, and on what numbers, must be legible in the
+        # run's own artefacts and not only in a terminal somebody closed.
         budget = inputs["output_budget"]
         self.assertEqual(budget["session_token_limit"], limit)
-        self.assertEqual(budget["max_output_tokens"], 6700)
+        self.assertEqual(budget["max_output_tokens"], 20000)
         self.assertEqual(budget["compaction_summary_reserve"],
                          corporate_settings.SUMMARY_RESERVE)
 
@@ -277,13 +303,12 @@ class TheRunnerRefusesAnImpossibleOutputBudget(Rig, unittest.TestCase):
         lane_guard.py, not carry its own literals."""
         from lane_guard import (GENERATION_WINDOW_TOKENS_PER_S,
                                 GENERATION_WINDOW_TTFT_RESERVE_S)
-        # CHANGED BY FIX 7: the session limit only. The derived budget on this
-        # lane is 6,743, below the compaction reserve, so without the escape the
+        # CHANGED BY FIX 7 AND ITS FALSIFICATION: the lane only. The derived
+        # budget on a 90 s lane is 6,743, below the compaction reserve, so the
         # run is refused and never writes run-inputs.json — which is how this
-        # case failed after fix 7 (FileNotFoundError, not an assertion).
-        self.go(dict(DELIVERS, SHERLOCK_GENERATION_WINDOW_S=CR_WINDOW_S,
-                     SHERLOCK_SESSION_TOKEN_LIMIT=str(
-                         unreachable_compaction_limit(FITTING))))
+        # case failed after fix 7 (FileNotFoundError, not an assertion). The
+        # subject here is where 122.6 and 35 come from, and that is unchanged.
+        self.go(dict(DELIVERS, SHERLOCK_GENERATION_WINDOW_S=WIDE_WINDOW_S))
         window = self.inputs()["generation_window"]
         self.assertEqual(window["output_tokens_per_second"],
                          GENERATION_WINDOW_TOKENS_PER_S)
@@ -329,12 +354,15 @@ class ThePaidLauncherAllowsTheNewVariablesThrough(unittest.TestCase):
         start = text.index("TARGET_ENV_ALLOW")
         allow = text[start:text.index("}", start)]
         for var in ("SHERLOCK_GENERATION_WINDOW_S", "SHERLOCK_OUTPUT_TOKENS_PER_S",
-                    # ADDED IN FIX 7'S REPAIR. Fix 7 made this variable the ONLY
-                    # honest way past a constraint conflict, and left it off the
-                    # allowlist — so on the paid launcher it was scrubbed, the
-                    # escape could never be taken, and every lane with a 90 s
-                    # clock was simply unrunnable. Exactly the defect this class
-                    # was written to catch, one fix later.
+                    # ADDED IN FIX 7'S REPAIR, KEPT FOR A DIFFERENT REASON.
+                    # Fix 7 added it as the escape from a constraint conflict;
+                    # that escape was falsified by run 20260828T204908Z-v42 and
+                    # is gone. The variable stays because it writes
+                    # `model.sessionTokenLimit`, the only exact client-side
+                    # check qwen has against the 262,000 request gate, and
+                    # `prove` refuses a corporate profile that declares none.
+                    # Scrubbed here, that backstop could never be declared from
+                    # a paid launcher at all.
                     "SHERLOCK_SESSION_TOKEN_LIMIT"):
             self.assertIn(var, allow, "%s is scrubbed by the paid launcher" % var)
 

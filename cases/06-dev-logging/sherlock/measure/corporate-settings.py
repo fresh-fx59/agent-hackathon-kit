@@ -69,6 +69,8 @@ MAX_TOKENS = SUMMARY_RESERVE   # so a compaction summary can finish
 #: is a real number, not an estimate — and it is one turn late by construction,
 #: so it stops steady growth and cannot stop a single turn that balloons on its
 #: own tool output. Hence the content caps below matter as much as this does.
+#: That sentence is also why fix 7's compaction escape was unsound; see the
+#: WITHDRAWN block above `budget_conflict`.
 SESSION_TOKEN_LIMIT = 230000
 
 #: WITHDRAWN, 2026-08-27, and the operator's instinct is what sent me to check.
@@ -223,24 +225,38 @@ def window_for_reserve(tokens_per_s=OUTPUT_TOKENS_PER_S,
     return SUMMARY_RESERVE / float(tokens_per_s) + float(ttft_reserve_s)
 
 
-def compaction_reachable(window, max_tokens, session_token_limit):
-    """Can this session ever ASK for a compaction summary?
-
-    qwen fires auto-compaction at `auto` (see `thresholds`). `sessionTokenLimit`
-    refuses the next turn once the provider's OWN reported prompt_tokens passes
-    it, so the largest prompt that can still be sent is
-    `session_token_limit + max_tokens` — one whole output budget on top of the
-    last measured prompt. If that total cannot reach `auto`, the session ends
-    before compaction is ever requested, and a budget below the reserve is then
-    a fact about a code path that cannot execute rather than a suppressed check.
-
-    THIS IS THE ONLY RESOLUTION THAT IS NOT A SUPPRESSION, and it is a property
-    of the settings, not a preference. No declared limit means reachable.
-    """
-    auto, _hard = thresholds(window)
-    if not session_token_limit:
-        return True
-    return session_token_limit + max_tokens > auto
+#: WITHDRAWN, 2026-08-28, FALSIFIED BY A PAID RUN. `compaction_reachable()` used
+#: to live here, and fix 7's refusal advertised it: declare a
+#: `model.sessionTokenLimit` low enough that `limit + max_tokens` cannot reach
+#: the auto-compaction threshold, and a budget below SUMMARY_RESERVE was then
+#: said to constrain a code path that cannot execute.
+#:
+#: THE PREMISE IS FALSE, and the falsification is on disk. Run
+#: 20260828T204908Z-v42 (CloseRouter/deepseek-v4-flash-0731, $0.136612) declared
+#: sessionTokenLimit 216000 against max_tokens 6700 on the 262,000-token window
+#: it declared, whose auto threshold is 222,700. `check-budget` printed
+#: "Compaction is unreachable on these settings" into output-budget-proof.txt,
+#: and `prove` exited 0. The run's own ledger
+#: then recorded prompts of 226,997 and 226,247 tokens, compaction fired, and
+#: both were cut at exactly 6,700 completion tokens.
+#:
+#: WHY, in one sentence: `sessionTokenLimit` bounds the PREVIOUS measured
+#: prompt, and the growth from one turn to the next is not bounded by
+#: `max_tokens` at all — tool RESULTS, the file contents the model reads, are
+#: appended to the context and no output budget bounds them. In that run 25 of
+#: its 231 turn-to-turn transitions grew by more than max_tokens and the largest
+#: grew by 91,566 — 13.7x the output budget. So `limit + max_tokens` is not an
+#: upper bound on the next prompt, and it never was: SESSION_TOKEN_LIMIT's own
+#: docstring above says so ("one turn late by construction ... cannot stop a
+#: single turn that balloons on its own tool output"). The escape contradicted a
+#: fact stated 150 lines above it.
+#:
+#: There is no sound replacement, because there is nothing in this system that
+#: bounds the next prompt: the corpus files are the input, reading them is the
+#: workload, and no client-side key caps how much a turn may append. A tighter
+#: number would be the same unsound proof with a smaller constant. So a lane
+#: whose generation window cannot carry SUMMARY_RESERVE simply cannot run this
+#: workload, and `budget_conflict` now says exactly that with no escape.
 
 
 def budget_conflict(window, max_tokens, gate=GATE, generation_window_s=None,
@@ -264,9 +280,13 @@ def budget_conflict(window, max_tokens, gate=GATE, generation_window_s=None,
                     COMPRESSION_FAILED_EMPTY_SUMMARY (r5).
 
     6,743 < 20,000, so no number satisfies both. The harness took 6,700 and
-    launched. THAT is the bug, and it is not fixed by choosing the other number:
-    the honest outcome is that this lane cannot safely run this workload, unless
-    the settings make compaction genuinely unreachable.
+    launched. THAT is the bug, and it is not fixed by choosing the other number,
+    nor by any settings key: the honest outcome is that this lane cannot safely
+    run this workload, and there is no escape. Fix 7 offered one — a
+    `model.sessionTokenLimit` that supposedly ends the session before compaction
+    can fire — and paid run 20260828T204908Z-v42 falsified it on the wire. See
+    the WITHDRAWN block above `budget_conflict` for the evidence and for why no
+    tighter number would be sound either.
     """
     lines = []
     problems = []
@@ -292,37 +312,31 @@ def budget_conflict(window, max_tokens, gate=GATE, generation_window_s=None,
             "%gs generation window (%d fits) — the provider cuts the answer and "
             "bills it" % (max_tokens, generation_window_s, fitting))
     if max_tokens < SUMMARY_RESERVE:
-        auto, _hard = thresholds(window)
         needed_window = window_for_reserve(tokens_per_s, ttft_reserve_s)
-        largest = (session_token_limit + max_tokens) if session_token_limit else 0
-        if not compaction_reachable(window, max_tokens, session_token_limit):
-            lines.append(
-                "RESOLVED, NOT SUPPRESSED: max_tokens %d is below the %d "
-                "compaction reserve, but model.sessionTokenLimit %d ends the "
-                "session first — the largest prompt that can still be sent is "
-                "%d + %d = %d, and qwen only fires auto-compaction at %d. "
-                "Compaction is unreachable on these settings, so the reserve is "
-                "never asked for. This is a fact about the configuration, not a "
-                "waived check: raise the limit above %d and this refuses again."
-                % (max_tokens, SUMMARY_RESERVE, session_token_limit,
-                   session_token_limit, max_tokens, largest, int(auto),
-                   int(auto) - max_tokens))
-        elif generation_window_s:
+        if generation_window_s:
             problems.append(
                 "%s — CONSTRAINT 1 allows at most %d output tokens on a %gs "
                 "window, CONSTRAINT 2 needs %d, and %d < %d, so NO max_tokens "
-                "satisfies both. Carrying the reserve would need a %ds window at "
-                "%g tok/s; this lane declares %g. The harness took the smaller "
-                "number silently once (run 20260827T173511Z-v41, max_tokens "
-                "6700) and clipped four of its own compaction and state-snapshot "
-                "summaries. Either run this workload on a lane without a %gs "
-                "clock, or declare a model.sessionTokenLimit of at most %d so "
-                "the session ends before compaction can fire."
+                "satisfies both. THIS LANE CANNOT SAFELY RUN THIS WORKLOAD. The "
+                "harness took the smaller number silently once (run "
+                "20260827T173511Z-v41, max_tokens 6700) and clipped four of its "
+                "own compaction and state-snapshot summaries. THE ONLY REMEDIES "
+                "ARE THE TWO THAT CHANGE THE CLOCK: run this workload on a lane "
+                "with no generation-window clock, or on a lane whose window is "
+                "at least %ds at %g tok/s (%.1f s of generation + %gs reserved "
+                "for the first token). There is NO settings key that resolves "
+                "this: a model.sessionTokenLimit said to end the session before "
+                "compaction can fire was tried and FALSIFIED by paid run "
+                "20260828T204908Z-v42 — it declared 216000 against an auto "
+                "threshold of 222700, and the ledger recorded prompts of 226997 "
+                "and 226247 with compaction cut at 6700 anyway, because "
+                "sessionTokenLimit bounds the PREVIOUS prompt and tool results "
+                "grow the next one without any output-budget bound (25 of that "
+                "run's 231 transitions grew by more than max_tokens; the largest "
+                "by 91566)."
                 % (CONFLICT, fitting, generation_window_s, SUMMARY_RESERVE,
-                   fitting, SUMMARY_RESERVE, int(window_for_reserve(
-                       tokens_per_s, ttft_reserve_s)), tokens_per_s,
-                   generation_window_s, generation_window_s,
-                   int(auto) - max_tokens))
+                   fitting, SUMMARY_RESERVE, int(needed_window), tokens_per_s,
+                   SUMMARY_RESERVE / float(tokens_per_s), ttft_reserve_s))
             lines.append("a %ds window would be needed to carry the %d-token "
                          "reserve (%.1f s of generation + %gs first-token "
                          "reserve)"
@@ -334,9 +348,11 @@ def budget_conflict(window, max_tokens, gate=GATE, generation_window_s=None,
                 "max_tokens %d is below the %d qwen reserves for a compaction "
                 "summary: the summary is cut at finish_reason=length and the "
                 "session dies with COMPRESSION_FAILED_EMPTY_SUMMARY (measured, "
-                "r5). Declare a model.sessionTokenLimit of at most %d if this "
-                "session genuinely never compacts."
-                % (max_tokens, SUMMARY_RESERVE, int(auto) - max_tokens))
+                "r5). This lane declares no generation clock, so nothing stops "
+                "you raising max_tokens to %d — do that. No model.sessionTokenLimit "
+                "resolves this; that escape was falsified by paid run "
+                "20260828T204908Z-v42."
+                % (max_tokens, SUMMARY_RESERVE, SUMMARY_RESERVE))
     if session_token_limit and session_token_limit + max_tokens > gate:
         problems.append(
             "model.sessionTokenLimit %d plus the output budget %d exceeds the "
@@ -359,11 +375,13 @@ def prove(window, max_tokens, gate, generation_window_s=None,
     constraints genuinely conflict, and the conflict is a FACT about the
     rehearsal provider, not something to be voted on.
 
-    So when a generation window is declared, the budget is DERIVED from it and
-    the consequence is PRINTED rather than hidden: a compaction summary cannot
-    complete on that lane, therefore compaction firing at all is a failure of
-    the staging, not a survivable event. The gate arithmetic is unaffected — a
-    smaller output budget can only lower the worst total.
+    So when a generation window is declared, the budget is DERIVED from it, and
+    if that derived budget is below SUMMARY_RESERVE the profile is REFUSED with
+    no escape: a compaction summary cannot complete on that lane, compaction
+    cannot be made unreachable by any client-side key (falsified 2026-08-28,
+    run 20260828T204908Z-v42), and so the lane cannot run this workload. The
+    gate arithmetic is unaffected — a smaller output budget can only lower the
+    worst total.
     """
     # THE FIX-7 REGRESSION, NAMED. This used to be two separate checks: a
     # `if generation_window_s:` branch that printed the compaction consequence
@@ -447,7 +465,9 @@ def main():
     ap.add_argument("--session-token-limit", type=int, default=SESSION_TOKEN_LIMIT,
                     help="model.sessionTokenLimit; 0 declares none, and `prove` "
                          "then REFUSES the profile, because without it nothing "
-                         "precisely enforces the ceiling")
+                         "precisely enforces the ceiling. It bounds steady "
+                         "growth against the gate and NOTHING ELSE — it is not "
+                         "and never was a way past the compaction reserve")
     ap.add_argument("--generation-window-s", type=float, default=None,
                     help="the provider's hard generation clock, if it has one "
                          "(CloseRouter: 90). Derives the output budget and "

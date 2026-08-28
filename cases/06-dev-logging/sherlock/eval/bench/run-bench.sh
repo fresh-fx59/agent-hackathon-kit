@@ -840,11 +840,26 @@ fi
 # so is the correct outcome — a run that "delivers" by clipping its own state
 # snapshots is worse than one that refuses to start.
 #
-# The one non-refusal is a FACT about the settings, not a waiver: a
-# model.sessionTokenLimit low enough that the session ends before qwen can ever
-# fire auto-compaction. That is why SHERLOCK_SESSION_TOKEN_LIMIT reaches the
-# target's settings.json below — an escape whose premise is never written into
-# the settings the target reads would be a bypass.
+# THERE IS NO ESCAPE, AND THE ONE FIX 7 OFFERED COST A PAID RUN. Fix 7 allowed
+# exactly one non-refusal: a model.sessionTokenLimit low enough that
+# `limit + max_tokens` could not reach qwen's auto-compaction threshold. Run
+# 20260828T204908Z-v42 took it — sessionTokenLimit 216000, max_tokens 6700,
+# auto 222700, "Compaction is unreachable on these settings" written into
+# output-budget-proof.txt — and its ledger then recorded prompts of 226,997 and
+# 226,247 with the compaction cut at 6,700 anyway. sessionTokenLimit bounds the
+# PREVIOUS measured prompt; tool RESULTS grow the next one and no output budget
+# bounds them (25 of that run's 231 transitions grew by more than max_tokens,
+# the largest by 91,566). The escape is removed, not retuned: no smaller number
+# is any sounder. The remedies are a lane without a generation-window clock, or
+# a longer window.
+#
+# SHERLOCK_SESSION_TOKEN_LIMIT STAYS, in its only sound role. It writes
+# `model.sessionTokenLimit`, which is the ONLY exact client-side check qwen has
+# against the 262,000 request gate (`hard` is a nudge — after three failed
+# hard-tier rescues the oversized prompt is sent anyway), and `prove` REFUSES a
+# corporate profile that declares none. It bounds steady growth against the
+# gate. It has never bounded a single ballooning turn, and it no longer claims
+# to.
 SESSION_TOKEN_LIMIT="${SHERLOCK_SESSION_TOKEN_LIMIT:-0}"
 case "$SESSION_TOKEN_LIMIT" in *[!0-9]*|'') echo "✗ invalid SHERLOCK_SESSION_TOKEN_LIMIT" >&2; exit 1 ;; esac
 BUDGET_GATE_ARGS="--window $([ "$CTX_WINDOW" != "0" ] && echo "$CTX_WINDOW" || echo 262000) --max-tokens $MAX_OUT --session-token-limit $SESSION_TOKEN_LIMIT --output-tokens-per-s $OUTPUT_TOKENS_PER_S --ttft-reserve-s $TTFT_RESERVE_S"
@@ -873,11 +888,11 @@ if [ "$BUDGET_RC" != "0" ]; then
   echo "✗ refusing to launch: the output budget constraints cannot all hold — resolve them, do not pick one" >&2
   exit 1
 fi
-# THE ESCAPE, MADE REAL IN THE SETTINGS THE TARGET READS. `check-budget` will
-# accept a budget below the compaction reserve on exactly one ground — that
-# model.sessionTokenLimit ends the session before compaction can fire. That
-# ground is a lie unless the key is actually there, so the same variable feeds
-# both the check and the file, and 0 writes nothing at all.
+# THE GATE BACKSTOP, MADE REAL IN THE SETTINGS THE TARGET READS. This is the
+# only exact client-side ceiling check qwen has, so the same variable feeds both
+# `check-budget`'s arithmetic and the file the target reads, and 0 writes
+# nothing at all. It is NOT a licence for a budget below the compaction
+# reserve — `check-budget` no longer accepts one on any ground.
 STL_JSON=''
 if [ "$SESSION_TOKEN_LIMIT" != "0" ]; then
   STL_JSON=", \"sessionTokenLimit\": $SESSION_TOKEN_LIMIT"

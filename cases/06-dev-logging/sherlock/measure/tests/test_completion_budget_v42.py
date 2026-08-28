@@ -58,7 +58,17 @@ from lane_guard import (COMPACTION_OUTPUT_CLIPPED, COMPACTION_SUMMARY_RESERVE,
                         fitting_max_output_tokens, last_message_text)
 from test_declared_budgets import Rig                              # noqa: E402
 
+import importlib.util                                          # noqa: E402
+
 SETTINGS = os.path.join(MEASURE, "corporate-settings.py")
+# The hyphen in the filename is why this is an importlib load and not an
+# import. It is loaded so the regressions below can assert against the target's
+# OWN constants — and against the ABSENCE of the withdrawn escape — rather than
+# a second copy of either.
+_SPEC = importlib.util.spec_from_file_location("corporate_settings", SETTINGS)
+corporate_settings = importlib.util.module_from_spec(_SPEC)
+_SPEC.loader.exec_module(corporate_settings)
+CONFLICT = corporate_settings.CONFLICT
 FIXTURE = os.path.join(HERE, "fixtures", "v41-length-stops.json")
 GATE = 262000
 CR_WINDOW_S = "90"          # CloseRouter's own upstream generation timeout
@@ -92,14 +102,23 @@ class TheConflictBlocksInsteadOfChoosingTheSmallerNumber(unittest.TestCase):
         for number in ("6743", "20000", "90"):
             self.assertIn(number, out, "the refusal never names %s" % number)
 
-    def test_the_refusal_names_both_ways_out(self):
+    def test_the_refusal_names_the_two_remedies_THAT_WORK(self):
+        """CHANGED 2026-08-28. This used to require the refusal to name a
+        `model.sessionTokenLimit` as "the other resolution". It is not one, and
+        recommending it cost paid run 20260828T204908Z-v42. The refusal must now
+        name only the two remedies that change the clock, and must not carry any
+        promise that compaction can be made unreachable."""
         _rc, out, _err = settings(["check-budget", "--window", str(GATE),
                                    "--max-tokens", "6700",
                                    "--generation-window-s", CR_WINDOW_S,
                                    "--session-token-limit", "0"])
         self.assertIn("198", out, "the refusal never says how long a window fits")
-        self.assertIn("sessionTokenLimit", out,
-                      "the refusal never names the other resolution")
+        self.assertIn("no generation-window clock", out,
+                      "the refusal never names the clock-free lane")
+        for promise in ("RESOLVED, NOT SUPPRESSED", "Compaction is unreachable",
+                        "unreachable on these settings"):
+            self.assertNotIn(promise, out,
+                             "the refusal still promises %r" % promise)
 
     def test_prove_itself_no_longer_passes_the_v41_configuration(self):
         """THE REGRESSION THAT SHIPPED. Declaring a window used to disarm the
@@ -130,26 +149,27 @@ class TheConflictBlocksInsteadOfChoosingTheSmallerNumber(unittest.TestCase):
         self.assertNotEqual(rc, 0, out)
         self.assertIn("cannot finish inside", out)
 
-    def test_an_unreachable_compaction_resolves_the_conflict_by_fact(self):
-        """The ONLY non-refusal, and it is a property of the settings.
+    def test_no_session_limit_buys_a_budget_below_the_reserve(self):
+        """INVERTED 2026-08-28 — this case used to assert the escape WORKED.
 
-        auto-compaction fires at 222,700 on a 262,000 window; a session limit of
-        200,000 plus one whole 6,700-token budget is 206,700, so the session
-        ends before qwen can compact and the reserve is never asked for."""
-        rc, out, _err = settings(["check-budget", "--window", str(GATE),
-                                  "--max-tokens", "6700",
-                                  "--generation-window-s", CR_WINDOW_S,
-                                  "--session-token-limit", "200000"])
-        self.assertEqual(rc, 0, out)
-        self.assertIn("RESOLVED, NOT SUPPRESSED", out)
-
-    def test_a_session_limit_that_does_not_actually_prevent_compaction_fails(self):
-        """216,001 + 6,700 is over the 222,700 auto threshold: still reachable."""
-        rc, out, _err = settings(["check-budget", "--window", str(GATE),
-                                  "--max-tokens", "6700",
-                                  "--generation-window-s", CR_WINDOW_S,
-                                  "--session-token-limit", "216001"])
-        self.assertNotEqual(rc, 0, out)
+        It asserted that a session limit whose `limit + max_tokens` cannot reach
+        the auto-compaction threshold resolves the conflict "by fact". Paid run
+        20260828T204908Z-v42 falsified that premise on the wire, so the same
+        inputs must now REFUSE. Every limit is tried: below the old boundary, at
+        it, and above it — the escape is gone, not merely retuned to a tighter
+        number."""
+        for limit in ("1", "100000", "200000", "216000", "216001", "230000"):
+            with self.subTest(limit=limit):
+                rc, out, _err = settings(["check-budget", "--window", str(GATE),
+                                          "--max-tokens", "6700",
+                                          "--generation-window-s", CR_WINDOW_S,
+                                          "--session-token-limit", limit])
+                self.assertNotEqual(
+                    rc, 0,
+                    "sessionTokenLimit %s bought a sub-reserve budget:\n%s"
+                    % (limit, out))
+                self.assertNotIn("RESOLVED, NOT SUPPRESSED", out)
+                self.assertNotIn("Compaction is unreachable", out)
 
     def test_the_262000_arithmetic_proof_still_holds(self):
         """FIX 4's ceiling is what makes any of this enforceable. Re-run whole."""
@@ -192,30 +212,35 @@ class TheLauncherRefusesTheConflictBeforeSpendingMoney(Rig, unittest.TestCase):
         self.assertNotIn(self.REFUSAL, p.stderr)
         self.assertTrue(argv, p.stderr[-2000:])
 
-    def test_the_session_limit_that_resolves_the_conflict_REACHES_the_target(self):
-        """OTHERWISE THE ESCAPE IS A BYPASS. The conflict check accepts a budget
-        below the compaction reserve on one ground — that
-        model.sessionTokenLimit ends the session before qwen can compact. That
-        ground is a lie unless the key is actually written into the settings
-        the target reads, so the launch and the settings must carry the same
-        number from the same variable."""
+    def test_the_session_limit_still_REACHES_the_target_as_the_gate_backstop(self):
+        """SHERLOCK_SESSION_TOKEN_LIMIT KEEPS ITS ONE SOUND JOB.
+
+        CHANGED 2026-08-28: this case used to prove the variable delivered fix
+        7's compaction escape into the settings, on a 90 s lane at max_tokens
+        6,700 — the configuration paid run 20260828T204908Z-v42 shipped and
+        falsified. The variable is NOT removed, because
+        `model.sessionTokenLimit` is the only exact client-side check qwen has
+        against the 262,000 request gate (`prove` refuses a corporate profile
+        that declares none). So the plumbing must still work — on a lane where
+        the budget is legal — and the number must still be the same one in the
+        check, in the settings the target reads, and in the trace."""
         argv, p = self.go(dict(DELIVERS,
-                               SHERLOCK_GENERATION_WINDOW_S=CR_WINDOW_S,
+                               SHERLOCK_GENERATION_WINDOW_S=WIDE_WINDOW_S,
                                SHERLOCK_OUTPUT_TOKENS_PER_S=CR_TOKENS_PER_S,
-                               SHERLOCK_MAX_OUTPUT_TOKENS="6700",
+                               SHERLOCK_MAX_OUTPUT_TOKENS="20000",
                                SHERLOCK_CONTEXT_WINDOW="262000",
-                               SHERLOCK_SESSION_TOKEN_LIMIT="200000"))
+                               SHERLOCK_SESSION_TOKEN_LIMIT="230000"))
         self.assertNotIn(self.REFUSAL, p.stderr, p.stderr[-1500:])
         self.assertTrue(argv, "qwen was never launched:\n%s" % p.stderr[-2000:])
         sealed = os.path.join(self.trace(), "qwen-settings-pre.json")
         with open(sealed, encoding="utf-8") as fh:
             settings = json.load(fh)
-        self.assertEqual(settings["model"]["sessionTokenLimit"], 200000)
+        self.assertEqual(settings["model"]["sessionTokenLimit"], 230000)
         self.assertEqual(
             settings["model"]["generationConfig"]["samplingParams"]["max_tokens"],
-            6700)
+            20000)
         self.assertEqual(self.inputs()["output_budget"]["session_token_limit"],
-                         200000)
+                         230000)
 
     def test_no_session_limit_leaves_the_settings_exactly_as_they_were(self):
         self.go(dict(DELIVERS, SHERLOCK_MAX_OUTPUT_TOKENS="32768"))
@@ -461,6 +486,96 @@ class TheProxyNamesTheClipWhileTheRunIsAlive(proxybase.ProxyCase):
         row = self.lines(1)[-1]
         self.assertNotIn("completion_clipped", row)
         self.assertNotIn("clipped_request_class", row)
+
+
+
+#: THE REAL SHAPE OF PAID RUN 20260828T204908Z-v42. Measured, not invented:
+#: CloseRouter/deepseek-v4-flash-0731, the full 143-file corpus, $0.136612.
+#: The lane declared a 90 s generation window and max_tokens 6,700, and took
+#: fix 7's escape with model.sessionTokenLimit 216,000 — computed as the
+#: auto-compaction threshold 222,700 minus max_tokens 6,700, on the
+#: 262,000-token context window the run declared (qwen-settings-pre.json:
+#: model.generationConfig.contextWindowSize = 262000). The key was verified
+#: present in that file before any generation, corporate-settings.py printed
+#: "Compaction is unreachable on these settings", and `prove` exited 0.
+PAID_WINDOW = 262000
+PAID_MAX_TOKENS = 6700
+PAID_SESSION_LIMIT = 216000
+#: ...and these prompts arrived anyway, from the run's own
+#: upstream-completed.jsonl. The first two are the compaction and the following
+#: work turn, both cut at exactly 6,700 completion tokens; the third is the
+#: largest prompt the run ever sent.
+PAID_PROMPTS_OVER_THE_THRESHOLD = (226997, 226247, 229712)
+
+
+class TheFalsifiedEscapeCannotLaunchAgain(unittest.TestCase):
+    """THE REGRESSION PAID RUN 20260828T204908Z-v42 EARNED.
+
+    Fix 7 licensed a budget below the compaction reserve whenever
+    `sessionTokenLimit + max_tokens` could not reach qwen's auto-compaction
+    threshold. That is not a bound on the next prompt. `sessionTokenLimit` is
+    checked against the PREVIOUS response's reported prompt_tokens, and the
+    growth from one turn to the next is tool RESULTS — the log files the model
+    reads — which no output budget bounds. In that run 25 of 231 turn-to-turn
+    transitions grew by more than max_tokens and the largest grew by 91,566,
+    13.7x the output budget.
+    """
+
+    def test_the_escape_arithmetic_was_never_a_bound_on_the_next_prompt(self):
+        """The premise, checked against the wire before the code that used it."""
+        auto, _hard = corporate_settings.thresholds(PAID_WINDOW)
+        self.assertEqual(int(auto), 222700, "the threshold this run computed")
+        promised_ceiling = PAID_SESSION_LIMIT + PAID_MAX_TOKENS
+        self.assertEqual(promised_ceiling, 222700,
+                         "the largest prompt fix 7 said could still be sent")
+        for prompt in PAID_PROMPTS_OVER_THE_THRESHOLD:
+            self.assertGreater(prompt, promised_ceiling,
+                               "a prompt fix 7's arithmetic said was impossible")
+            self.assertGreater(prompt, int(auto),
+                               "compaction could not have fired on this prompt")
+
+    def test_the_exact_paid_configuration_is_refused(self):
+        rc, out, _err = settings(["check-budget", "--window", str(PAID_WINDOW),
+                                  "--max-tokens", str(PAID_MAX_TOKENS),
+                                  "--generation-window-s", CR_WINDOW_S,
+                                  "--session-token-limit",
+                                  str(PAID_SESSION_LIMIT)])
+        self.assertNotEqual(rc, 0,
+                            "the configuration that cost $0.136612 launched "
+                            "again:\n" + out)
+        self.assertIn(CONFLICT, out)
+
+    def test_it_prints_no_promise_that_compaction_is_unreachable(self):
+        """A refusal is not enough: the run's own proof artefact carried the
+        sentence "Compaction is unreachable on these settings", and that
+        sentence is what the operator trusted."""
+        _rc, out, err = settings(["check-budget", "--window", str(PAID_WINDOW),
+                                  "--max-tokens", str(PAID_MAX_TOKENS),
+                                  "--generation-window-s", CR_WINDOW_S,
+                                  "--session-token-limit",
+                                  str(PAID_SESSION_LIMIT)])
+        text = out + err
+        for promise in ("Compaction is unreachable", "RESOLVED, NOT SUPPRESSED",
+                        "never asked for", "cannot execute"):
+            self.assertNotIn(promise, text,
+                             "the refusal still promises %r" % promise)
+
+    def test_prove_refuses_the_same_configuration(self):
+        rc, out, _err = settings(["prove", "--gate", str(GATE),
+                                  "--window", str(PAID_WINDOW),
+                                  "--max-tokens", str(PAID_MAX_TOKENS),
+                                  "--generation-window-s", CR_WINDOW_S,
+                                  "--session-token-limit",
+                                  str(PAID_SESSION_LIMIT)])
+        self.assertNotEqual(rc, 0, "prove still passes it:\n" + out)
+        self.assertNotIn("Compaction is unreachable", out)
+
+    def test_the_licence_is_gone_from_the_code_not_just_from_its_output(self):
+        """`compaction_reachable()` was the licence. A refusal that happens to
+        print the right thing while the function survives is one caller away
+        from the same paid run."""
+        self.assertFalse(hasattr(corporate_settings, "compaction_reachable"),
+                         "the falsified escape is still callable")
 
 
 if __name__ == "__main__":
