@@ -49,6 +49,126 @@ def strip(text):
     return ANSI.sub("", text)
 
 
+class MarkWatch(object):
+    """A LATCH, NOT A WINDOW: «has this mark EVER appeared» in O(1) memory.
+
+    WHY THIS REPLACED THE BUFFERS. The driver used to ask a ring buffer a
+    question about the past — `HANDOFF_MARK in ses.stage_buffer`, with the buffer
+    trimmed to its last 4 MB once it passed 8 MB — and when the trim had fired it
+    answered `handoff_block_unknown`. The paid run 20260827T173511Z-v41 came back
+    «unknown» on two of its three boundaries, so the one measurement that exists
+    to observe the skill's obedience stopped answering exactly where it mattered.
+
+    A latch cannot have that failure mode. Text is scanned as it arrives and the
+    fact is kept forever; the only state carried between chunks is the last
+    len(mark)-1 characters, so a mark split across two reads is still found and
+    the memory is a constant regardless of how many megabytes flow through.
+
+    A bounded number of match CONTEXTS is kept as well — not to gate anything,
+    but so the event log can quote what was on screen, and so a block that names
+    a DIFFERENT stage can be told apart from this stage's own (see
+    `hit_names_stage`; the real run's last boundary reported
+    `handoff_block_on_screen` on a mark left over from the stage before it).
+    """
+    MAX_HITS = 32
+    CONTEXT = 160
+
+    def __init__(self, mark):
+        self.mark = mark
+        self.overlap = max(0, len(mark) - 1)
+        self.reset()
+
+    def reset(self):
+        self._tail = ""
+        self._want = 0        # chars still needed to finish the last context
+        self.hits = []
+        self.count = 0
+        self.chars = 0        # how much text flowed through, for the record
+
+    @property
+    def seen(self):
+        return self.count > 0
+
+    def feed(self, text):
+        self.chars += len(text)
+        if self._want and self.hits:
+            take = text[:self._want]
+            self.hits[-1] += take
+            self._want -= len(take)
+        hay = self._tail + text
+        at = 0
+        while True:
+            i = hay.find(self.mark, at)
+            if i < 0:
+                break
+            self.count += 1
+            if len(self.hits) < self.MAX_HITS:
+                ctx = hay[i:i + self.CONTEXT]
+                self.hits.append(ctx)
+                self._want = self.CONTEXT - len(ctx)
+            at = i + 1
+        self._tail = hay[-self.overlap:] if self.overlap else ""
+
+
+def hit_names_stage(context, completed):
+    """Does this on-screen block belong to the stage that just closed?
+
+    The block prints the stage it CLOSED — «СТУПЕНЬ ЗАВЕРШЕНА: triage» is what
+    appears at the triage→draft boundary — so the name to look for is the stage
+    the arm finished, not the one it moved to. MEASURED on
+    20260827T173511Z-v41: the draft block was still being repainted 135 KB after
+    `/clear` had been typed, i.e. inside the NEXT stage's window, and the driver
+    counted it as the next boundary's receipt. Tolerant on purpose: a wrapped or
+    truncated context names no stage at all, and that still counts — the point
+    is to reject a block that provably belongs to someone else.
+    """
+    if completed and completed in context:
+        return True
+    for other in STAGES:
+        if other != completed and other in context:
+            return False
+    return True
+
+
+def scan_transcript(path, start, mark=HANDOFF_MARK, chunk=1 << 20):
+    """A SECOND WITNESS, read off the disk instead of held in RAM.
+
+    The transcript is the raw pty bytes and it is never trimmed (112 MB on the
+    paid run), so it can answer the same question exactly — and a streamed scan
+    from the stage's own start offset costs one 1 MB block of memory, not the
+    file. It is complementary rather than redundant: the latch sees text with the
+    ANSI escapes removed, this sees the bytes as they arrived, and a mark that
+    one of them loses to a repaint or a split escape the other still finds.
+    """
+    hits = []
+    needle = mark.encode("utf-8")
+    over = max(0, len(needle) - 1)
+    try:
+        fh = open(path, "rb")
+    except (OSError, IOError):
+        return hits
+    with fh:
+        try:
+            fh.seek(max(0, int(start or 0)))
+        except (OSError, IOError):
+            return hits
+        carry = b""
+        while True:
+            blk = fh.read(chunk)
+            if not blk:
+                break
+            hay = carry + blk
+            at = 0
+            while len(hits) < MarkWatch.MAX_HITS:
+                i = hay.find(needle, at)
+                if i < 0:
+                    break
+                hits.append(strip(hay[i:i + 400].decode("utf-8", "replace")))
+                at = i + 1
+            carry = hay[-over:] if over else b""
+    return hits
+
+
 def ledger_quiet_s(ledger_path):
     """Seconds since the upstream ledger last grew, or None if there is none yet.
 
@@ -133,21 +253,27 @@ class Session(object):
             os.chdir(cwd)
             os.execvpe(argv[0], argv, env)
             os._exit(127)
+        self.transcript_path = transcript
         self.transcript = open(transcript, "wb")
-        self.buffer = ""
-        # A SECOND, PER-STAGE ACCUMULATOR — and it exists because of a measured
-        # mistake. `self.buffer` is trimmed to its last 200,000 characters once
-        # it passes 400,000, which silently invalidates any index taken into it:
-        # the free rehearsal recorded `handoff_block_not_shown` for a boundary
-        # where the model HAD printed the block (428 partial repaints of
-        # «СТУПЕНЬ ЗАВЕРШЕНА» are in that transcript). A stage's own output is
-        # kept whole here, and if it ever has to be trimmed the driver says
-        # `unknown` instead of claiming the block was absent.
-        self.stage_buffer = ""
-        self.stage_truncated = False
+        # NO SCREEN BUFFER AT ALL — and that is the fix, not an omission.
+        # Every question this driver asks of the screen is «did this string ever
+        # appear», and a latch answers that in constant memory and without ever
+        # being wrong about the past. The accumulators that used to answer it
+        # (a 400 KB tail for the /clear refusal, an 8 MB per-stage ring for the
+        # handoff block) could both be asked about text they had already dropped;
+        # the ring's version of «I dropped it» was the `handoff_block_unknown`
+        # event that two of three boundaries of the paid run came back with.
+        # The full text still exists: it is the transcript on disk.
+        self.handoff = MarkWatch(HANDOFF_MARK)
+        self.refusal = MarkWatch(CLEAR_REFUSAL)
+        self.watches = (self.handoff, self.refusal)
+        # Where this stage's output starts in the transcript, so the second
+        # witness reads THIS stage and not the whole run.
+        self.stage_offset = 0
+        self.stage_bytes = 0
 
     def pump(self, seconds):
-        """Read for `seconds`, appending to the transcript and the buffer."""
+        """Read for `seconds`, appending to the transcript and feeding the latches."""
         deadline = time.time() + seconds
         while time.time() < deadline:
             try:
@@ -166,19 +292,26 @@ class Session(object):
                 return False
             self.transcript.write(chunk)
             self.transcript.flush()
+            self.stage_bytes += len(chunk)
             text = strip(chunk.decode("utf-8", "replace"))
-            self.buffer += text
-            if len(self.buffer) > 400000:      # keep the tail, bound the RAM
-                self.buffer = self.buffer[-200000:]
-            self.stage_buffer += text
-            if len(self.stage_buffer) > 8000000:
-                self.stage_buffer = self.stage_buffer[-4000000:]
-                self.stage_truncated = True
+            for watch in self.watches:
+                watch.feed(text)
         return True
 
     def stage_reset(self):
-        self.stage_buffer = ""
-        self.stage_truncated = False
+        """Start a fresh stage: forget the latch, and remember where we are.
+
+        Called AFTER the boundary has been judged, so the offset it records is
+        the first byte of the next stage's output — which is what keeps a block
+        printed late by the previous stage from being read as this one's receipt.
+        """
+        self.handoff.reset()
+        self.stage_bytes = 0
+        try:
+            self.transcript.flush()
+            self.stage_offset = self.transcript.tell()
+        except (OSError, IOError, ValueError):
+            self.stage_offset = 0
 
     def type(self, text, settle=1.5):
         """Type a line the way a human does: the text, then Enter."""
@@ -207,7 +340,8 @@ class Session(object):
 
 def drive(argv, cwd, work, first_prompt, reseed, stage_budget_s, settle_s,
           transcript, skill_command, events_path=None, ledger_path="",
-          idle_nudge_s=0, max_nudges=3, nudge_text="продолжай"):
+          idle_nudge_s=0, max_nudges=3, nudge_text="продолжай",
+          handoff_grace_s=8.0):
     ses = Session(argv, cwd, dict(os.environ), transcript)
     events = []
 
@@ -240,7 +374,7 @@ def drive(argv, cwd, work, first_prompt, reseed, stage_budget_s, settle_s,
         # STAGE_TIMEOUT on a healthy run.
         seen = stage_of(work)
         seen_boundary = boundary_of(work)
-        # THE STAGE ACCUMULATOR IS RESET BEFORE TYPING, NEVER AT THE TOP OF THE
+        # THE LATCH IS RESET BEFORE TYPING, NEVER AT THE TOP OF THE
         # WAIT LOOP. A fast target answers during the settle that follows the
         # reseed line, so a reset at the top of the next iteration WIPES the
         # block it is about to look for — measured on the stand-in, where the
@@ -254,6 +388,7 @@ def drive(argv, cwd, work, first_prompt, reseed, stage_budget_s, settle_s,
         while True:
             deadline = time.time() + stage_budget_s
             nudges = 0
+            completed = seen
             # THE NUDGE'S OWN CLOCK, separate from the ledger's. Measured on the
             # paid run 20260827T150830Z-v41 and on the free rehearsal before it:
             # the nudges fired in PAIRS five seconds apart (15:17:14 and
@@ -277,6 +412,9 @@ def drive(argv, cwd, work, first_prompt, reseed, stage_budget_s, settle_s,
                 if (stage_index(now) > stage_index(seen)
                         or now_boundary > seen_boundary):
                     partial = (stage_index(now) <= stage_index(seen))
+                    # The block names the stage that CLOSED, which for a full
+                    # advance is the one we were on, not the one we move to.
+                    completed = seen
                     seen = now if now is not None else seen
                     seen_boundary = now_boundary
                     break
@@ -322,7 +460,36 @@ def drive(argv, cwd, work, first_prompt, reseed, stage_budget_s, settle_s,
             # gone from the visible buffer moments later. Judging a run on that
             # would fail obedient runs. So it is MEASURED per boundary and
             # reported, never used to kill the run.
-            on_screen = HANDOFF_MARK in ses.stage_buffer
+            # AND THE BLOCK ARRIVES AFTER THE DISK DOES — so ask a moment
+            # later. `checkpoint.py handoff` writes handoff.txt and advances
+            # the stage as a TOOL CALL; the arm then prints the block as its
+            # closing message. MEASURED on 20260827T173511Z-v41: the driver
+            # typed `/clear` at transcript byte 65,480,805 and the first
+            # «СТУПЕНЬ ЗАВЕРШЕНА» of that boundary appeared at 65,611,697 —
+            # 131 KB, and several seconds, LATER. The screen was judged before
+            # the screen had spoken. The grace is bounded and exits the instant
+            # the latch fires, so an obedient target costs nothing.
+            grace_end = time.time() + max(0.0, handoff_grace_s)
+            while not ses.handoff.seen and time.time() < grace_end:
+                if not ses.pump(0.5) and not ses.alive():
+                    break
+            # NEVER «UNKNOWN» — two independent witnesses, both exact.
+            live = [h for h in ses.handoff.hits
+                    if hit_names_stage(h, completed)]
+            # The disk is only consulted when the latch came up empty: a loud
+            # stage means re-reading tens of megabytes, and there is nothing to
+            # settle once the live witness has already answered yes.
+            disk = [] if live else [
+                h for h in scan_transcript(ses.transcript_path,
+                                           ses.stage_offset)
+                if hit_names_stage(h, completed)]
+            # More marks than kept contexts: we cannot attribute them, but we
+            # DID see them, and «saw it» is the honest answer.
+            overflow = ses.handoff.count > len(ses.handoff.hits)
+            witness = ("latch" if live
+                       else "transcript" if disk
+                       else "latch (unattributed)" if overflow else "")
+            on_screen = bool(live or disk or overflow)
             handoff_file = os.path.join(work, "handoff.txt")
             if not os.path.exists(handoff_file):
                 note("NO_HANDOFF_BLOCK",
@@ -330,22 +497,27 @@ def drive(argv, cwd, work, first_prompt, reseed, stage_budget_s, settle_s,
                      "boundary was not taken through checkpoint.py handoff" % seen)
                 return 5, events
             note("batch_boundary" if partial else "stage_advanced", seen)
+            volume = "%s — closed %s, %d B on screen, %d mark(s)" % (
+                seen, completed, ses.stage_bytes, ses.handoff.count)
             if on_screen:
-                note("handoff_block_on_screen", seen)
-            elif ses.stage_truncated:
-                note("handoff_block_unknown",
-                     "%s — this stage printed more than 8 MB, so the driver "
-                     "cannot say whether the block was shown" % seen)
+                note("handoff_block_on_screen", "%s, witness %s"
+                     % (volume, witness))
             else:
-                note("handoff_block_not_shown", seen)
+                note("handoff_block_not_shown", volume)
 
             if seen == "done" and not partial:
                 note("finished", "stage=done")
                 return 0, events
 
             ses.stage_reset()
+            # THE REFUSAL GETS A LATCH TOO — it used to be read out of the last
+            # 4,000 characters of a buffer that trims itself, so a refusal
+            # followed by one repaint of a wide TUI could scroll out of the
+            # question before it was asked. Reset here, so only THIS `/clear`
+            # can answer for itself.
+            ses.refusal.reset()
             ses.type("/clear", settle=settle_s)
-            if CLEAR_REFUSAL in ses.buffer[-4000:]:
+            if ses.refusal.seen:
                 note("CLEAR_REFUSED", "a background task was still alive")
                 return 6, events
             ses.type(skill_command, settle=settle_s)
@@ -377,6 +549,10 @@ def main():
     ap.add_argument("--nudge-text", default="продолжай",
                     help="what a human would type to restart a stopped turn")
     ap.add_argument("--settle-s", type=float, default=6.0)
+    ap.add_argument("--handoff-grace-s", type=float, default=8.0,
+                    help="after the checkpoint advances, wait up to this long "
+                         "for the handoff block to finish printing before "
+                         "judging whether it was shown (0 = judge instantly)")
     ap.add_argument("--transcript", required=True)
     ap.add_argument("--events", default=None, help="write the event log here too")
     ap.add_argument("command", nargs=argparse.REMAINDER,
@@ -397,7 +573,8 @@ def main():
     rc, events = drive(argv, args.cwd, args.work, args.prompt, args.reseed,
                        args.stage_budget_s, args.settle_s, args.transcript,
                        args.skill_command, args.events, args.ledger,
-                       args.idle_nudge_s, args.max_nudges, args.nudge_text)
+                       args.idle_nudge_s, args.max_nudges, args.nudge_text,
+                       args.handoff_grace_s)
     print("rc=%d" % rc)
     return rc
 

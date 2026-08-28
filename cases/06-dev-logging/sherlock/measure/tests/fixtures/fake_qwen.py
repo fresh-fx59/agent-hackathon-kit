@@ -15,11 +15,25 @@ import sys
 WORK = os.environ["FAKE_WORK"]
 CHECKPOINT = os.environ.get("FAKE_CHECKPOINT")     # checkpoint.py to call
 MODE = os.environ.get("FAKE_MODE", "happy")
+# How much chatter the flood modes print before they hand off. The driver used
+# to keep an 8 MB per-stage ring buffer, so «more than 8 MB» is the shape that
+# made it answer `handoff_block_unknown` on the paid run.
+FLOOD_MB = float(os.environ.get("FAKE_FLOOD_MB", "9"))
 loaded = False
 
 def say(text):
     sys.stdout.write(text + "\n")
     sys.stdout.flush()
+
+def flood(megabytes=None):
+    """Print megabytes of plausible TUI chatter, the way a working stage does."""
+    mb = FLOOD_MB if megabytes is None else megabytes
+    line = (u"\x1b[2K\rЧитаю Security.evtx: " + u"событие " * 12) + u"\n"
+    per = len(line.encode("utf-8"))
+    for _ in range(int(mb * 1024 * 1024 / per) + 1):
+        sys.stdout.write(line)
+    sys.stdout.flush()
+
 
 def stage():
     try:
@@ -95,6 +109,35 @@ while True:
                               WORK, "--done", st], capture_output=True,
                              text=True)
         say(out.stdout or ("handoff failed: " + out.stderr))
+        continue
+    if MODE in ("flood", "flood_silent", "flood_late"):
+        # A LOUD STAGE. Print far more than any ring buffer would keep, then
+        # take the boundary — and, depending on the mode, print the block
+        # straight away, never, or a beat AFTER the checkpoint advanced (which
+        # is what the real target did: the tool call lands on disk first and the
+        # closing message is printed after it).
+        st = stage()
+        flood()
+        if st == "draft":
+            open(os.path.join(WORK, "report.md"), "w", encoding="utf-8").write(
+                "# Отчёт Sherlock\n\n## Находки\n\n### Н-1 fake\n")
+        if st == "triage":
+            rows = open(os.path.join(WORK, "worklist.tsv"),
+                        encoding="utf-8").read()
+            open(os.path.join(WORK, "worklist.tsv"), "w",
+                 encoding="utf-8").write(
+                rows.replace("\t?", "\tN a.log:1 «q» n=1 фон"))
+        out = subprocess.run([sys.executable, CHECKPOINT, "handoff", "--work",
+                              WORK, "--done", st], capture_output=True,
+                             text=True)
+        block = out.stdout or ("handoff failed: " + out.stderr)
+        if MODE == "flood_silent":
+            say("...done, and I printed megabytes but never the block.")
+            continue
+        if MODE == "flood_late":
+            import time as _time
+            _time.sleep(float(os.environ.get("FAKE_LATE_S", "2.0")))
+        say(block)
         continue
     if MODE == "stall":
         # Working, talkative, and never finishing a stage — the shape of a run
