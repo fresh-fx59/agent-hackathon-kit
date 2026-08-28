@@ -163,28 +163,17 @@ inline while `agent` exists and works is a violated instruction, not a choice.
 You do NOT read the corpus yourself: you run `logmap.py`, read `map.txt` and
 `checkpoint.json`, hand out the phases and check their numbers.
 
-0. **INGEST — only if the input is not already a directory of text logs.**
-   An archive, or `.evtx` files, or a mix: normalise it ONCE, and point every
-   later command at the directory this writes.
+0. **INGEST — skip only if the input is ALREADY text logs in a directory.**
+   An archive, `.evtx`, or a mix: normalise once, then point every later
+   command at the directory it writes.
 
        python3 <SKILL_BASE_DIR>/tools/ingest.py <WHAT THE USER GAVE YOU> --out ./corpus
 
-   It unpacks `.zip/.tar/.tar.gz/.tar.bz2/.tar.xz/.7z` (bounded: entry count,
-   uncompressed size, no path traversal, no symlink entries), converts `.evtx`
-   to JSONL, copies text and `.gz` through, and skips `__MACOSX` sidecars. It
-   **fails loudly rather than losing input**: anything it could not read is
-   printed and written to `corpus/_ingest-manifest.tsv`, and the exit code is
-   non-zero unless you pass `--keep-going`. MEASURED on a real 6 MB
-   `winevt.zip`: 296 entries → **143 channels in 3.4 s**, 50 of them empty
-   (recorded as «пустой канал», which is a fact, not a failure), one NTFS
-   `$I30` artefact correctly refused.
-
-   If `.evtx` files are skipped for want of a converter, the message names the
-   two cures — the `evtx_dump` binary, or `pip install python-evtx xmltodict`.
-   **Say that to the user and stop; do not analyse a corpus you know is
-   incomplete.**
-
-   If the input is already a directory of text or JSONL logs, skip this step.
+   It unpacks archives, converts `.evtx` to JSONL, and **never loses input
+   quietly**: anything unreadable is printed and listed in
+   `corpus/_ingest-manifest.tsv`, exit non-zero. An empty channel is «пустой
+   канал», a fact, not a failure. See `reference/tools.md`. **On any skip, say
+   so and STOP: never analyse a corpus you know is incomplete.**
 
 1. **MAP** — as your very first action run:
 

@@ -657,3 +657,26 @@ launched one grew by 1,570 bytes for ALL of its work. Therefore:
 `subprocess`, ни `eval`, и тест это проверяет.
 
 Грамматика, предикаты и все причины отказа: `reference/report-format.md`.
+
+## ingest.py — archives and `.evtx` into a corpus
+
+    python3 <SKILL_BASE_DIR>/tools/ingest.py <INPUT>... --out ./corpus
+
+Takes files, directories and archives in any mix. Unpacks `.zip`, `.tar`,
+`.tar.gz`, `.tar.bz2`, `.tar.xz`, `.7z` with the entry-count, uncompressed-size,
+path-traversal and symlink guards recovered from the retired logalyzer ingest;
+converts `.evtx` to JSONL; copies text and `.gz` through; ignores `__MACOSX`
+sidecars. Nested archives up to three deep.
+
+MEASURED on a real 6 MB `winevt.zip`: 296 entries → **143 channels in 3.4 s**,
+50 of them empty, one NTFS `$I30` artefact correctly refused.
+
+Every input is accounted for in `corpus/_ingest-manifest.tsv`
+(`источник · результат · как · заметка`). Skips are printed AND fail the run;
+`--keep-going` only after a human has read the list.
+
+`.evtx` needs a converter — the `evtx_dump` binary, or
+`pip install python-evtx xmltodict`. Candidates are tried in order and proven by
+their OUTPUT, never by `which`: a broken shim on PATH can shadow a working
+binary. When none works, the skip names both cures; it never reports the channel
+as empty.
