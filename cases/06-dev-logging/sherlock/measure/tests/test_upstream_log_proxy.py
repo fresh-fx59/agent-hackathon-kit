@@ -84,6 +84,21 @@ class Stub(BaseHTTPRequestHandler):
             self.send_header("Content-Length", str(len(payload)))
             self.end_headers()
             self.wfile.write(payload)
+        elif mode == "json_length":
+            # THE v41 SHAPE: a real HTTP 200 answer that the requested budget
+            # cut. finish_reason "length" is the provider's own word for it.
+            payload = json.dumps({
+                "model": "DeepSeek-V4-Flash",
+                "choices": [{"finish_reason": "length",
+                             "message": {"role": "assistant",
+                                         "content": "a summary that stops mid-"}}],
+                "usage": {"prompt_tokens": 187825, "completion_tokens": 6700},
+            }).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
         elif mode == "sse":
             self.send_response(200)
             self.send_header("Content-Type", "text/event-stream")

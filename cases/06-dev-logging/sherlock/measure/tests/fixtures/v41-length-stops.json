@@ -1,0 +1,129 @@
+{
+ "_source": "run 20260827T173511Z-v41, ledger 20260827T173511Z-v41.upstream.jsonl (341 rows, 430 KB) plus the six matching request bodies from 20260827T173511Z-v41.upstream.bodies/. DISTILLED, not vendored: only the six finish_reason=length rows survive, each carrying its ledger position, the provider's own usage, and the first 240 characters of the request's LAST message - which is the only part the classifier reads. The full ledger and bodies stay on the box as evidence.",
+ "_finish_reasons": {
+  "tool_calls": 327,
+  "error": 2,
+  "stop": 3,
+  "None": 3,
+  "length": 6
+ },
+ "_ledger_rows": 341,
+ "_expected": {
+  "length_stop_calls": 6,
+  "clipped_compaction_calls": 4,
+  "compaction": 2,
+  "state_snapshot": 2,
+  "work": 2
+ },
+ "_why_it_matters": "The four compaction/state_snapshot rows are qwen summarising its own state so the next turns have a memory at all. Every one of the six was cut at exactly 6700 completion tokens - the requested budget - and every one is an HTTP 200 carrying a real answer and finish_reason=length, NOT the gateway error chunk the lane's 90 s clock produces (row 274 ran 94,927 ms and still returned a full 6,700-token completion). The provider's clock did not cut them: the harness's own budget did.",
+ "rows": [
+  {
+   "ledger_row": 260,
+   "ts": "2026-08-27T18:44:25Z",
+   "finish_reason": "length",
+   "status": 200,
+   "duration_ms": 69596,
+   "tool_call": false,
+   "request_max_tokens": 6700,
+   "usage": {
+    "prompt_tokens": 187825,
+    "completion_tokens": 6700
+   },
+   "messages": 82,
+   "tool_schemas": 67,
+   "last_message_role": "tool",
+   "last_message_head": "Command: cd /tmp/bench-SXHmEj/corpus && python3 -c \"\nimport json\nprint('=== Windows-PowerShell: времена EventID 400')\nfor i,line in enumerate(open('rendered/Windows-PowerShell.jsonl'),1):\n    r=json.loads(line); sys=r['Event']['System']\n   ",
+   "expected_class": "work"
+  },
+  {
+   "ledger_row": 261,
+   "ts": "2026-08-27T18:45:31Z",
+   "finish_reason": "length",
+   "status": 200,
+   "duration_ms": 63564,
+   "tool_call": true,
+   "request_max_tokens": 6700,
+   "usage": {
+    "prompt_tokens": 187825,
+    "completion_tokens": 6700
+   },
+   "messages": 82,
+   "tool_schemas": 67,
+   "last_message_role": "tool",
+   "last_message_head": "Command: cd /tmp/bench-SXHmEj/corpus && python3 -c \"\nimport json\nprint('=== Windows-PowerShell: времена EventID 400')\nfor i,line in enumerate(open('rendered/Windows-PowerShell.jsonl'),1):\n    r=json.loads(line); sys=r['Event']['System']\n   ",
+   "expected_class": "work"
+  },
+  {
+   "ledger_row": 274,
+   "ts": "2026-08-27T18:51:51Z",
+   "finish_reason": "length",
+   "status": 200,
+   "duration_ms": 94927,
+   "tool_call": false,
+   "request_max_tokens": 6700,
+   "usage": {
+    "prompt_tokens": 226116,
+    "completion_tokens": 6700
+   },
+   "messages": 109,
+   "tool_schemas": 67,
+   "last_message_role": "user",
+   "last_message_head": "You are the component that summarizes a conversation when its context window is about to overflow. The summary you produce will become the agent's ONLY memory of everything that happened before this point. The agent will resume its work bas",
+   "expected_class": "compaction"
+  },
+  {
+   "ledger_row": 275,
+   "ts": "2026-08-27T18:52:46Z",
+   "finish_reason": "length",
+   "status": 200,
+   "duration_ms": 53854,
+   "tool_call": false,
+   "request_max_tokens": 6700,
+   "usage": {
+    "prompt_tokens": 132185,
+    "completion_tokens": 6700
+   },
+   "messages": 109,
+   "tool_schemas": 0,
+   "last_message_role": "user",
+   "last_message_head": "First, reason in your <analysis> block. Then, produce the <state_snapshot> XML.",
+   "expected_class": "state_snapshot"
+  },
+  {
+   "ledger_row": 278,
+   "ts": "2026-08-27T18:54:26Z",
+   "finish_reason": "length",
+   "status": 200,
+   "duration_ms": 62795,
+   "tool_call": false,
+   "request_max_tokens": 6700,
+   "usage": {
+    "prompt_tokens": 132611,
+    "completion_tokens": 6700
+   },
+   "messages": 111,
+   "tool_schemas": 0,
+   "last_message_role": "user",
+   "last_message_head": "First, reason in your <analysis> block. Then, produce the <state_snapshot> XML.",
+   "expected_class": "state_snapshot"
+  },
+  {
+   "ledger_row": 280,
+   "ts": "2026-08-27T18:55:36Z",
+   "finish_reason": "length",
+   "status": 200,
+   "duration_ms": 50347,
+   "tool_call": false,
+   "request_max_tokens": 6700,
+   "usage": {
+    "prompt_tokens": 229978,
+    "completion_tokens": 6700
+   },
+   "messages": 113,
+   "tool_schemas": 67,
+   "last_message_role": "user",
+   "last_message_head": "You are the component that summarizes a conversation when its context window is about to overflow. The summary you produce will become the agent's ONLY memory of everything that happened before this point. The agent will resume its work bas",
+   "expected_class": "compaction"
+  }
+ ]
+}

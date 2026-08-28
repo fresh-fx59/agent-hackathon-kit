@@ -191,8 +191,163 @@ def thresholds(window):
     return auto, hard
 
 
+#: The measured generation-only throughput of the CloseRouter rehearsal lane
+#: (r3's 142 good calls: 142,661 completion tokens in 1,164,091 ms of
+#: generation). Restated from measure/lane_guard.py so this CLI can be run on
+#: its own; the launcher passes lane_guard's value explicitly.
+OUTPUT_TOKENS_PER_S = 122.6
+#: The largest TTFT this project has ever recorded (the v38 run). NOT the 6.4 s
+#: average — the average is not what kills a run.
+TTFT_RESERVE_S = 35
+
+#: THE REFUSAL THE LAUNCHER GREPS FOR. A constraint conflict must never be
+#: resolved by silently taking the smaller number, which is exactly what
+#: produced run 20260827T173511Z-v41.
+CONFLICT = "the generation window and the compaction reserve disagree"
+
+
+def fitting_output_tokens(generation_window_s, tokens_per_s=OUTPUT_TOKENS_PER_S,
+                          ttft_reserve_s=TTFT_RESERVE_S):
+    """The largest output budget a lane with this clock can actually deliver."""
+    if not generation_window_s:
+        return 0
+    usable = float(generation_window_s) - float(ttft_reserve_s)
+    if usable <= 0:
+        return 0
+    return int(usable * float(tokens_per_s))
+
+
+def window_for_reserve(tokens_per_s=OUTPUT_TOKENS_PER_S,
+                       ttft_reserve_s=TTFT_RESERVE_S):
+    """The generation window a full compaction summary would need, in seconds."""
+    return SUMMARY_RESERVE / float(tokens_per_s) + float(ttft_reserve_s)
+
+
+def compaction_reachable(window, max_tokens, session_token_limit):
+    """Can this session ever ASK for a compaction summary?
+
+    qwen fires auto-compaction at `auto` (see `thresholds`). `sessionTokenLimit`
+    refuses the next turn once the provider's OWN reported prompt_tokens passes
+    it, so the largest prompt that can still be sent is
+    `session_token_limit + max_tokens` — one whole output budget on top of the
+    last measured prompt. If that total cannot reach `auto`, the session ends
+    before compaction is ever requested, and a budget below the reserve is then
+    a fact about a code path that cannot execute rather than a suppressed check.
+
+    THIS IS THE ONLY RESOLUTION THAT IS NOT A SUPPRESSION, and it is a property
+    of the settings, not a preference. No declared limit means reachable.
+    """
+    auto, _hard = thresholds(window)
+    if not session_token_limit:
+        return True
+    return session_token_limit + max_tokens > auto
+
+
+def budget_conflict(window, max_tokens, gate=GATE, generation_window_s=None,
+                    tokens_per_s=OUTPUT_TOKENS_PER_S,
+                    ttft_reserve_s=TTFT_RESERVE_S,
+                    session_token_limit=SESSION_TOKEN_LIMIT):
+    """The two output-budget constraints, judged TOGETHER. (lines, problems).
+
+    THE DEFECT THIS EXISTS TO STOP. Run 20260827T173511Z-v41 had exactly two
+    constraints on `max_tokens` and they disagreed:
+
+      CONSTRAINT 1  the provider's generation clock. CloseRouter cuts any
+                    generation at 90 s, TTFT included, and bills the truncated
+                    answer — its own `upstream_timeout` payload at 90,341-90,416
+                    ms across nine independent r3 calls. At 122.6 tok/s with 35 s
+                    reserved for the first token, 6,743 tokens fit.
+      CONSTRAINT 2  qwen's compaction reserve, COMPACT_MAX_OUTPUT_TOKENS =
+                    20,000. Below it a compaction summary is cut at
+                    `finish_reason=length` and the run reasons on from a
+                    truncated memory (four times on v41) or dies outright with
+                    COMPRESSION_FAILED_EMPTY_SUMMARY (r5).
+
+    6,743 < 20,000, so no number satisfies both. The harness took 6,700 and
+    launched. THAT is the bug, and it is not fixed by choosing the other number:
+    the honest outcome is that this lane cannot safely run this workload, unless
+    the settings make compaction genuinely unreachable.
+    """
+    lines = []
+    problems = []
+    fitting = fitting_output_tokens(generation_window_s, tokens_per_s,
+                                    ttft_reserve_s)
+    if generation_window_s:
+        lines.append(
+            "CONSTRAINT 1 — the provider's generation clock: a %gs window at %g "
+            "tok/s with %gs reserved for the first token delivers at most %d "
+            "output tokens." % (generation_window_s, tokens_per_s,
+                                ttft_reserve_s, fitting))
+    else:
+        lines.append("CONSTRAINT 1 — the provider's generation clock: this lane "
+                     "declares none, so no clock bounds the output budget.")
+    lines.append(
+        "CONSTRAINT 2 — qwen's compaction reserve: COMPACT_MAX_OUTPUT_TOKENS = "
+        "%d, the budget a compaction summary needs to finish. Below it the "
+        "summary is cut at finish_reason=length." % SUMMARY_RESERVE)
+    lines.append("declared max_tokens = %d" % max_tokens)
+    if generation_window_s and max_tokens > fitting:
+        problems.append(
+            "CONSTRAINT 1 LOSES: max_tokens %d cannot finish inside the lane's "
+            "%gs generation window (%d fits) — the provider cuts the answer and "
+            "bills it" % (max_tokens, generation_window_s, fitting))
+    if max_tokens < SUMMARY_RESERVE:
+        auto, _hard = thresholds(window)
+        needed_window = window_for_reserve(tokens_per_s, ttft_reserve_s)
+        largest = (session_token_limit + max_tokens) if session_token_limit else 0
+        if not compaction_reachable(window, max_tokens, session_token_limit):
+            lines.append(
+                "RESOLVED, NOT SUPPRESSED: max_tokens %d is below the %d "
+                "compaction reserve, but model.sessionTokenLimit %d ends the "
+                "session first — the largest prompt that can still be sent is "
+                "%d + %d = %d, and qwen only fires auto-compaction at %d. "
+                "Compaction is unreachable on these settings, so the reserve is "
+                "never asked for. This is a fact about the configuration, not a "
+                "waived check: raise the limit above %d and this refuses again."
+                % (max_tokens, SUMMARY_RESERVE, session_token_limit,
+                   session_token_limit, max_tokens, largest, int(auto),
+                   int(auto) - max_tokens))
+        elif generation_window_s:
+            problems.append(
+                "%s — CONSTRAINT 1 allows at most %d output tokens on a %gs "
+                "window, CONSTRAINT 2 needs %d, and %d < %d, so NO max_tokens "
+                "satisfies both. Carrying the reserve would need a %ds window at "
+                "%g tok/s; this lane declares %g. The harness took the smaller "
+                "number silently once (run 20260827T173511Z-v41, max_tokens "
+                "6700) and clipped four of its own compaction and state-snapshot "
+                "summaries. Either run this workload on a lane without a %gs "
+                "clock, or declare a model.sessionTokenLimit of at most %d so "
+                "the session ends before compaction can fire."
+                % (CONFLICT, fitting, generation_window_s, SUMMARY_RESERVE,
+                   fitting, SUMMARY_RESERVE, int(window_for_reserve(
+                       tokens_per_s, ttft_reserve_s)), tokens_per_s,
+                   generation_window_s, generation_window_s,
+                   int(auto) - max_tokens))
+            lines.append("a %ds window would be needed to carry the %d-token "
+                         "reserve (%.1f s of generation + %gs first-token "
+                         "reserve)"
+                         % (int(needed_window), SUMMARY_RESERVE,
+                            SUMMARY_RESERVE / float(tokens_per_s),
+                            ttft_reserve_s))
+        else:
+            problems.append(
+                "max_tokens %d is below the %d qwen reserves for a compaction "
+                "summary: the summary is cut at finish_reason=length and the "
+                "session dies with COMPRESSION_FAILED_EMPTY_SUMMARY (measured, "
+                "r5). Declare a model.sessionTokenLimit of at most %d if this "
+                "session genuinely never compacts."
+                % (max_tokens, SUMMARY_RESERVE, int(auto) - max_tokens))
+    if session_token_limit and session_token_limit + max_tokens > gate:
+        problems.append(
+            "model.sessionTokenLimit %d plus the output budget %d exceeds the "
+            "gate %d — the backstop itself permits an illegal request"
+            % (session_token_limit, max_tokens, gate))
+    return lines, problems
+
+
 def prove(window, max_tokens, gate, generation_window_s=None,
-          output_tokens_per_s=122.6, ttft_reserve_s=13.5,
+          output_tokens_per_s=OUTPUT_TOKENS_PER_S,
+          ttft_reserve_s=TTFT_RESERVE_S,
           session_token_limit=SESSION_TOKEN_LIMIT):
     """The worst reachable `prompt + max_tokens`, and why.
 
@@ -210,25 +365,18 @@ def prove(window, max_tokens, gate, generation_window_s=None,
     the staging, not a survivable event. The gate arithmetic is unaffected — a
     smaller output budget can only lower the worst total.
     """
-    lines = []
-    problems = []
-    if generation_window_s:
-        fitting = int((generation_window_s - ttft_reserve_s) * output_tokens_per_s)
-        lines.append("this lane declares a %ss generation window at %s tok/s "
-                     "with %ss reserved for the first token => an output budget "
-                     "of %d fits" % (generation_window_s, output_tokens_per_s,
-                                     ttft_reserve_s, fitting))
-        if max_tokens > fitting:
-            problems.append("max_tokens %d cannot finish inside the lane's %ss "
-                            "generation window (%d fits) — the provider cuts the "
-                            "answer and bills it"
-                            % (max_tokens, generation_window_s, fitting))
-        if max_tokens < SUMMARY_RESERVE:
-            lines.append("CONSEQUENCE, STATED: %d < the %d qwen reserves for a "
-                         "compaction summary, so compaction CANNOT complete on "
-                         "this lane. Compaction firing is therefore a failure of "
-                         "the session staging, not a survivable event — that is "
-                         "exactly how r5 died." % (max_tokens, SUMMARY_RESERVE))
+    # THE FIX-7 REGRESSION, NAMED. This used to be two separate checks: a
+    # `if generation_window_s:` branch that printed the compaction consequence
+    # as a "CONSEQUENCE, STATED" NOTE, and a reserve check written
+    # `if max_tokens < SUMMARY_RESERVE and not generation_window_s`. Declaring a
+    # generation window therefore DISARMED the one check that exists to stop a
+    # budget below the compaction reserve — so `prove` would have passed the
+    # exact configuration that clipped four of run 20260827T173511Z-v41's own
+    # state snapshots, had anything asked it. Both are now one call, and a
+    # conflict is a PROBLEM (which blocks) rather than a note.
+    lines, problems = budget_conflict(
+        window, max_tokens, gate, generation_window_s, output_tokens_per_s,
+        ttft_reserve_s, session_token_limit)
     auto, hard = thresholds(window)
     lines.append("declared window W = %d" % window)
     lines.append("margin(W) = max(10000, 0.05*W) = %d" % margin(window))
@@ -238,12 +386,6 @@ def prove(window, max_tokens, gate, generation_window_s=None,
         problems.append("the declared window %d is itself above the gate %d — a "
                         "prompt that large is refused before any output"
                         % (window, gate))
-    if max_tokens < SUMMARY_RESERVE and not generation_window_s:
-        problems.append("max_tokens %d is below the %d qwen reserves for a "
-                        "compaction summary: the summary is cut at "
-                        "finish_reason=length and the session dies with "
-                        "COMPRESSION_FAILED_EMPTY_SUMMARY (measured, r5)"
-                        % (max_tokens, SUMMARY_RESERVE))
     # Walk every prompt size qwen can actually send, at the resolution that
     # matters — the clamp is piecewise linear, so the edges are what count.
     worst = 0
@@ -283,11 +425,6 @@ def prove(window, max_tokens, gate, generation_window_s=None,
                         "check qwen has is sessionTokenLimit, which refuses a "
                         "turn when the PROVIDER'S reported prompt_tokens already "
                         "exceeds it" % gate)
-    elif session_token_limit + max_tokens > gate:
-        problems.append("model.sessionTokenLimit %d plus the output budget %d "
-                        "exceeds the gate %d — the backstop itself permits an "
-                        "illegal request"
-                        % (session_token_limit, max_tokens, gate))
     else:
         lines.append("backstop: model.sessionTokenLimit %d refuses the next turn "
                      "once the provider reports more than that, so %d + %d = %d "
@@ -299,7 +436,8 @@ def prove(window, max_tokens, gate, generation_window_s=None,
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("command", choices=("emit", "prove", "verify-bundle"))
+    ap.add_argument("command",
+                    choices=("emit", "prove", "verify-bundle", "check-budget"))
     ap.add_argument("--gate", type=int, default=GATE)
     ap.add_argument("--window", type=int, default=None,
                     help="declared context window (default: the gate itself)")
@@ -314,6 +452,12 @@ def main():
                     help="the provider's hard generation clock, if it has one "
                          "(CloseRouter: 90). Derives the output budget and "
                          "states the compaction consequence out loud.")
+    ap.add_argument("--output-tokens-per-s", type=float,
+                    default=OUTPUT_TOKENS_PER_S,
+                    help="the lane's MEASURED generation-only throughput")
+    ap.add_argument("--ttft-reserve-s", type=float, default=TTFT_RESERVE_S,
+                    help="seconds reserved for the first token (the largest "
+                         "TTFT ever recorded here, not the average)")
     ap.add_argument("--extra-key", action="append", default=[],
                     help="also require this dotted key (used by the tests)")
     args = ap.parse_args()
@@ -322,6 +466,26 @@ def main():
     if args.command == "emit":
         print(json.dumps(profile(window, args.max_tokens), indent=2,
                          sort_keys=True))
+        return 0
+
+    if args.command == "check-budget":
+        # THE LAUNCH GATE. Narrow on purpose: it judges the two output-budget
+        # constraints against each other and nothing else, so it can be called
+        # by any launcher on any lane — including one with no generation clock
+        # and no declared session limit — without demanding the whole corporate
+        # profile. `prove` remains the full arithmetic proof.
+        lines, problems = budget_conflict(
+            window, args.max_tokens, args.gate, args.generation_window_s,
+            args.output_tokens_per_s, args.ttft_reserve_s,
+            args.session_token_limit)
+        for line in lines:
+            print(line)
+        for why in problems:
+            print("\u2717 %s" % why)
+        if problems:
+            return 1
+        print("\u2713 the output budget %d satisfies every declared constraint"
+              % args.max_tokens)
         return 0
 
     if args.command == "prove":

@@ -55,8 +55,10 @@ from lane_guard import (CACHE_JUDGEMENT_TERMS, DEFAULT_CACHE_MIN_CALLS,
                         DEFAULT_CACHE_MIN_RATE, cache_cost_fact,
                         cache_judgement, cache_terms, cache_tokens,
                         GENERATION_WINDOW_EXCEEDED,
-                        deterministic_refusal, model_family, note_cache_call,
-                        same_family)
+                        COMPACTION_SUMMARY_RESERVE,
+                        compaction_request_class, completion_clipped,
+                        deterministic_refusal, last_message_text, model_family,
+                        note_cache_call, same_family)
 
 UPSTREAM_BASE = os.environ.get("UPSTREAM_BASE", "https://linkapi.ai/v1").rstrip("/")
 UPSTREAM_LOG = os.environ.get("UPSTREAM_LOG", "upstream.jsonl")
@@ -2158,6 +2160,48 @@ class Proxy(BaseHTTPRequestHandler):
               ) == GENERATION_WINDOW_EXCEEDED:
                   window_fields = {
                       "upstream_refusal_class": GENERATION_WINDOW_EXCEEDED}
+              # A COMPLETION THE BUDGET CUT, NAMED WHILE THE RUN IS ALIVE
+              # (fix 7). THE PROXY IS THE ONLY PLACE THIS CAN HAPPEN: it holds
+              # the request body and the response at the same moment. The
+              # request says whether this turn was qwen summarising ITSELF —
+              # a compaction, or a <state_snapshot> — and the response says
+              # whether it was cut at `finish_reason: "length"`. qwen never
+              # tells the harness either, interactive-drive.py sees neither,
+              # and the acceptance gate reads a report file after the money is
+              # gone. That is how run 20260827T173511Z-v41 clipped four of its
+              # own state summaries and nothing noticed for a day.
+              #
+              # Written ONLY on a clipped row, so a run that was never cut
+              # keeps the exact ledger shape every previous run wrote.
+              clip_fields = {}
+              if completion_clipped({"finish_reason": state["finish_reason"]}):
+                  clip_fields = {
+                      "completion_clipped": True,
+                      "clipped_request_class": compaction_request_class(
+                          last_message_text(body)),
+                  }
+                  # LOUD, on the run's own stderr, and loudest for the class
+                  # that corrupts the run rather than merely truncating an
+                  # answer. A clipped compaction means every later turn
+                  # reasons from a memory that stops mid-sentence.
+                  try:
+                      sys.stderr.write(
+                          "upstream-log-proxy: %s COMPLETION CLIPPED at "
+                          "max_tokens=%s (finish_reason=length, request class "
+                          "%s)%s\n"
+                          % ("RUN-INTEGRITY:"
+                             if clip_fields["clipped_request_class"] != "work"
+                             else "DEFECT:",
+                             request_max_tokens,
+                             clip_fields["clipped_request_class"],
+                             " — qwen was writing its OWN memory and was cut; "
+                             "it needs %d tokens to finish a summary"
+                             % COMPACTION_SUMMARY_RESERVE
+                             if clip_fields["clipped_request_class"] != "work"
+                             else ""))
+                      sys.stderr.flush()
+                  except Exception:
+                      pass          # observability never alters delivery
               discard_fields = {}
               if state["substituted"]:
                   discard_fields = {"discarded_substitution": True,
@@ -2165,7 +2209,7 @@ class Proxy(BaseHTTPRequestHandler):
                                     "substitution_retry_exhausted": not retryable}
               try:
                   record(**_capture_row(capture), **discard_fields,
-                         **window_fields, **route_fields,
+                         **window_fields, **route_fields, **clip_fields,
                          request_max_tokens=request_max_tokens, requested_model=requested,
                          returned_model=state["returned_model"], attempt=attempt,
                          tool_call=state["tool_call"], status=status,

@@ -711,6 +711,65 @@ if [ "$GEN_FITTING" != "0" ]; then
 else
   echo "▶ generation window: none declared for this lane (SHERLOCK_GENERATION_WINDOW_S=$GEN_WINDOW_S) ⇒ max_tokens $MAX_OUT unchecked"
 fi
+
+# ── FIX 7. THE SECOND CONSTRAINT, WHICH NOTHING HERE USED TO ASK ABOUT. ────
+# The check above knows exactly ONE thing: does the budget fit the provider's
+# clock? 6,700 fits 6,743, so it said yes — and run 20260827T173511Z-v41
+# launched at max_tokens 6700 and clipped FOUR of its own compaction and
+# state-snapshot summaries at exactly that number. measure/corporate-settings.py
+# had the other constraint (COMPACT_MAX_OUTPUT_TOKENS = 20,000) and an explicit
+# check for it in `prove()`, and THIS SCRIPT NEVER CALLED EITHER. Two
+# constraints disagreed and the harness silently took the smaller one.
+#
+# So the two are now judged TOGETHER, before a byte is spent, by the file that
+# owns the target's constants. A conflict is a REFUSAL: below the reserve
+# compaction cannot finish, above the fitting budget generation cannot finish,
+# and when both cannot hold this lane cannot safely run this workload. Saying
+# so is the correct outcome — a run that "delivers" by clipping its own state
+# snapshots is worse than one that refuses to start.
+#
+# The one non-refusal is a FACT about the settings, not a waiver: a
+# model.sessionTokenLimit low enough that the session ends before qwen can ever
+# fire auto-compaction. That is why SHERLOCK_SESSION_TOKEN_LIMIT reaches the
+# target's settings.json below — an escape whose premise is never written into
+# the settings the target reads would be a bypass.
+SESSION_TOKEN_LIMIT="${SHERLOCK_SESSION_TOKEN_LIMIT:-0}"
+case "$SESSION_TOKEN_LIMIT" in *[!0-9]*|'') echo "✗ invalid SHERLOCK_SESSION_TOKEN_LIMIT" >&2; exit 1 ;; esac
+BUDGET_GATE_ARGS="--window $([ "$CTX_WINDOW" != "0" ] && echo "$CTX_WINDOW" || echo 262000) --max-tokens $MAX_OUT --session-token-limit $SESSION_TOKEN_LIMIT --output-tokens-per-s $OUTPUT_TOKENS_PER_S --ttft-reserve-s $TTFT_RESERVE_S"
+if [ "$GEN_FITTING" != "0" ]; then
+  BUDGET_GATE_ARGS="$BUDGET_GATE_ARGS --generation-window-s $GEN_WINDOW_S"
+fi
+# The proof is CAPTURED, not merely printed: it is written into the trace below
+# so "which two constraints disagreed, which won, and why" is answerable from
+# the run's own artefacts and not from a terminal somebody closed.
+# MAX_OUT=0 declares NO budget at all — qwen-code then auto-escalates
+# max_tokens itself and there is no number here to judge. That case belongs to
+# the generation-window check above, which refuses it outright on any lane with
+# a clock; judging 0 against the compaction reserve would only mislabel it.
+set +e
+if [ "$MAX_OUT" = "0" ]; then
+  BUDGET_PROOF="CONSTRAINT 1 and CONSTRAINT 2 are both unjudgeable: SHERLOCK_MAX_OUTPUT_TOKENS=0 declares no output budget, so qwen-code auto-escalates max_tokens and this launcher has no number to check."
+  BUDGET_RC=0
+else
+  BUDGET_PROOF="$(python3 "$MEASURE_DIR/corporate-settings.py" check-budget $BUDGET_GATE_ARGS 2>&1)"
+  BUDGET_RC=$?
+fi
+set -e
+printf '%s\n' "$BUDGET_PROOF"
+if [ "$BUDGET_RC" != "0" ]; then
+  printf '%s\n' "$BUDGET_PROOF" >&2
+  echo "✗ refusing to launch: the output budget constraints cannot all hold — resolve them, do not pick one" >&2
+  exit 1
+fi
+# THE ESCAPE, MADE REAL IN THE SETTINGS THE TARGET READS. `check-budget` will
+# accept a budget below the compaction reserve on exactly one ground — that
+# model.sessionTokenLimit ends the session before compaction can fire. That
+# ground is a lie unless the key is actually there, so the same variable feeds
+# both the check and the file, and 0 writes nothing at all.
+STL_JSON=''
+if [ "$SESSION_TOKEN_LIMIT" != "0" ]; then
+  STL_JSON=", \"sessionTokenLimit\": $SESSION_TOKEN_LIMIT"
+fi
 SAMPLING_JSON=''
 if [ "$MAX_OUT" != "0" ]; then
   SAMPLING_JSON=", \"samplingParams\": { \"max_tokens\": $MAX_OUT }"
@@ -748,12 +807,12 @@ if arm_ge "$ARM" 30; then
   if arm_ge "$ARM" 31; then
     MEMORY_JSON=', "memory": { "enableManagedAutoMemory": false, "enableDreams": false }, "model_fallback": { "enabled": false }'
   fi
-  printf '{ "model": { "generationConfig": { "contextWindowSize": %s%s, "timeout": %s, "maxRetries": %s } }%s%s }\n' \
-    "$CTX_WINDOW" "$SAMPLING_JSON" "$REQUEST_TIMEOUT_MS" "$MAX_RETRIES" "$EXCLUDE_JSON" "$MEMORY_JSON" > "$W/.qwen/settings.json"
+  printf '{ "model": { "generationConfig": { "contextWindowSize": %s%s, "timeout": %s, "maxRetries": %s }%s }%s%s }\n' \
+    "$CTX_WINDOW" "$SAMPLING_JSON" "$REQUEST_TIMEOUT_MS" "$MAX_RETRIES" "$STL_JSON" "$EXCLUDE_JSON" "$MEMORY_JSON" > "$W/.qwen/settings.json"
 elif [ "$CTX_WINDOW" != "0" ]; then
   mkdir -p "$W/.qwen"
-  printf '{ "model": { "generationConfig": { "contextWindowSize": %s%s } }%s }\n' \
-    "$CTX_WINDOW" "$SAMPLING_JSON" "$EXCLUDE_JSON" > "$W/.qwen/settings.json"
+  printf '{ "model": { "generationConfig": { "contextWindowSize": %s%s }%s }%s }\n' \
+    "$CTX_WINDOW" "$SAMPLING_JSON" "$STL_JSON" "$EXCLUDE_JSON" > "$W/.qwen/settings.json"
 elif [ -n "$EXCLUDE_JSON" ]; then
   mkdir -p "$W/.qwen"
   printf '{ "tools": { "exclude": ["agent"] } }\n' > "$W/.qwen/settings.json"
@@ -779,6 +838,11 @@ try:
 finally:
     if os.path.exists(temporary): os.unlink(temporary)
 PY
+
+# THE CONFLICT, LEGIBLE IN THE RUN'S OWN ARTEFACTS (fix 7). Both constraints,
+# the numbers behind each, which one bound the budget and why — on disk, beside
+# the settings they produced. v41's «why 6700?» took a human replaying a ledger.
+printf '%s\n' "$BUDGET_PROOF" > "$TRACE/output-budget-proof.txt"
 
 if [ "$ARM" != "none" ]; then
   mkdir -p "$W/.qwen/skills"
@@ -861,11 +925,15 @@ ARM_COMMIT="$(git -C "$HERE" rev-parse HEAD 2>/dev/null || echo unknown)"
 # than by the absence of a key.
 python3 - "$TRACE/run-inputs.json" "$CORPUS_SOURCE" "$RUN_CORPUS" "$PROMPT_SHA" "$ARM_COMMIT" "$ARM" \
   "$MAX_SESSION_TURNS" "$MAX_WALL_TIME_S" "$MAX_TOOL_CALLS" "$WORKFLOW_AGENT_MAX_TURNS" "$TIMEOUT" \
-  "$GEN_WINDOW_S" "$OUTPUT_TOKENS_PER_S" "$TTFT_RESERVE_S" "$MAX_OUT" "$GEN_FITTING" <<'PY'
+  "$GEN_WINDOW_S" "$OUTPUT_TOKENS_PER_S" "$TTFT_RESERVE_S" "$MAX_OUT" "$GEN_FITTING" \
+  "$SESSION_TOKEN_LIMIT" "$CTX_WINDOW" "$MEASURE_DIR" <<'PY'
 import json, sys
+sys.path.insert(0, sys.argv[-1])
+from lane_guard import COMPACTION_SUMMARY_RESERVE
 (target, corpus_source, staged_root, prompt_sha, arm_commit, arm,
  turns, wall_s, tool_calls, workflow_turns, outer_timeout,
- window_s, tokens_per_s, ttft_reserve_s, max_out, fitting) = sys.argv[1:]
+ window_s, tokens_per_s, ttft_reserve_s, max_out, fitting,
+ session_token_limit, context_window, _measure_dir) = sys.argv[1:]
 with open(target, "w", encoding="utf-8") as fh:
     json.dump({"schema": 1, "arm": arm,
                "corpus_source": corpus_source, "staged_root": staged_root,
@@ -882,7 +950,20 @@ with open(target, "w", encoding="utf-8") as fh:
                    "output_tokens_per_second": float(tokens_per_s),
                    "ttft_reserve_seconds": float(ttft_reserve_s),
                    "max_output_tokens": int(max_out),
-                   "fitting_max_output_tokens": int(fitting)}},
+                   "fitting_max_output_tokens": int(fitting)},
+               # FIX 7. THE OTHER CONSTRAINT, RECORDED BESIDE THE FIRST. Run
+               # 20260827T173511Z-v41's run-inputs.json named only the
+               # generation window, so its artefacts could not say that a
+               # SECOND constraint existed, lost, and took four compaction
+               # summaries with it. Both are here now, with the settings key
+               # that is the only honest way out of a conflict between them.
+               "output_budget": {
+                   "max_output_tokens": int(max_out),
+                   "fitting_max_output_tokens": int(fitting),
+                   "compaction_summary_reserve": COMPACTION_SUMMARY_RESERVE,
+                   "session_token_limit": int(session_token_limit),
+                   "context_window": int(context_window),
+                   "proof_file": "output-budget-proof.txt"}},
               fh, ensure_ascii=False, sort_keys=True)
     fh.write("\n")
 PY

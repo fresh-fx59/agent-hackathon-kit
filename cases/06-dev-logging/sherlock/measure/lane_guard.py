@@ -651,6 +651,14 @@ ACCOUNTING_TERMS = (
     # lane declares none, in which case the other two are always 0.
     "generation_window_exceeded_calls", "generation_window_exceeded_ms",
     "generation_window_s",
+    # FIX 7. A completion the HARNESS'S OWN budget cut, which is a different
+    # animal from one the provider's clock cut: HTTP 200, a real answer, and
+    # `finish_reason: "length"` at exactly `request_max_tokens`. Counted for
+    # every run, because six of them went unnoticed for a day on
+    # 20260827T173511Z-v41; `clipped_compaction_calls` is the subset the proxy
+    # stamped as qwen compacting or snapshotting its own state, which is a
+    # run-integrity failure rather than a long answer.
+    "length_stop_calls", "clipped_compaction_calls",
 )
 
 
@@ -856,6 +864,168 @@ def generation_window_refusal(max_output_tokens, tokens_per_s, ttft_reserve_s,
                window, fits))
 
 
+# ======================================================================
+# FIX 7 — A COMPLETION THE HARNESS'S OWN BUDGET CUT.
+#
+# Run 20260827T173511Z-v41 shipped `max_tokens: 6700` because two constraints
+# disagreed and the launcher silently took the smaller one. Six of its 341
+# ledger rows came back `finish_reason: "length"`, every one at exactly 6,700
+# completion tokens, and FOUR of the six were qwen COMPACTING OR SNAPSHOTTING
+# ITSELF - the model writing the only memory the next turns would have, cut
+# mid-sentence. Nothing noticed until a human replayed the ledger a day later.
+#
+# `finish_reason: "length"` on an ordinary turn is a defect signal: the answer
+# is incomplete and it was billed in full. On a compaction or a state snapshot
+# it is a RUN-INTEGRITY failure - the run continues with a corrupted memory and
+# every later finding rests on it. So the two are counted separately and only
+# the second ends a run.
+#
+# WHY THE CLASSIFICATION HAPPENS IN THE PROXY. Only the proxy holds both halves
+# at once: the REQUEST body says whether this turn was qwen summarising itself,
+# and the response says whether it was cut. `interactive-drive.py` never sees
+# either; the acceptance gate reads a report file after the money is spent. So
+# the proxy stamps `completion_clipped` and `clipped_request_class` on the row
+# while the run is alive, and this file turns the stamped rows into a verdict.
+#
+# A ROW WITH NO STAMP IS NEVER GUESSED AT. Every ledger recorded before fix 7
+# has `finish_reason` and no class; those rows are COUNTED (so an old run can
+# still say how often it was cut) and never judged, because inferring "that was
+# probably a compaction" from a token count is exactly the kind of confident
+# wrong answer this harness exists to stop.
+# ======================================================================
+COMPACTION_OUTPUT_CLIPPED = "COMPACTION_OUTPUT_CLIPPED"
+#: qwen-code 0.22.0's COMPACT_MAX_OUTPUT_TOKENS - the output budget a
+#: compaction summary needs to finish. Below it, compaction is cut at
+#: `finish_reason=length` and the session dies with
+#: COMPRESSION_FAILED_EMPTY_SUMMARY (measured, r5). Same number as
+#: corporate-settings.py's SUMMARY_RESERVE, and deliberately restated here so
+#: the ledger auditor does not import a CLI.
+COMPACTION_SUMMARY_RESERVE = 20000
+
+#: Read out of the prompts qwen actually sent on 20260827T173511Z-v41 (rows
+#: 274/280 and 275/278 of its ledger, request bodies captured by the proxy).
+#: The needles are the fixed preamble of each prompt, not a paraphrase.
+_COMPACTION_NEEDLES = (
+    "you are the component that summarizes a conversation",
+    "compressionfailed",
+)
+_STATE_SNAPSHOT_NEEDLES = (
+    "<state_snapshot>",
+    "produce the <state_snapshot",
+)
+#: The classes a clipped request can be in. "work" is an ordinary turn.
+COMPACTION_REQUEST_CLASSES = ("compaction", "state_snapshot", "work")
+
+
+def completion_clipped(row):
+    """True when the provider stopped this row because the BUDGET ran out.
+
+    `finish_reason: "length"` is the provider's own word for it and it is the
+    only signal that is both universal and unambiguous - a truncated answer
+    under HTTP 200 looks like a short answer in every other field.
+    """
+    if not isinstance(row, dict):
+        return False
+    return row.get("finish_reason") == "length"
+
+
+def last_message_text(body):
+    """The text of the LAST message in a chat-completions request body.
+
+    Accepts the raw bytes the proxy holds, a decoded string, or an
+    already-parsed dict, and returns "" for anything it cannot read. Never
+    raises: this runs on the hot path of a live paid run, and an observability
+    read that can kill a request is worse than no read at all.
+
+    ONLY THE LAST MESSAGE. A summariser prompt quoted earlier in a transcript
+    would otherwise mark every later turn a compaction, and a verdict that ends
+    runs must not fire on a transcript that merely mentions compaction.
+    """
+    obj = body
+    if isinstance(obj, (bytes, bytearray)):
+        try:
+            obj = obj.decode("utf-8", "replace")
+        except Exception:                          # pragma: no cover - defensive
+            return ""
+    if isinstance(obj, str):
+        try:
+            obj = json.loads(obj)
+        except (ValueError, TypeError):
+            return ""
+    if not isinstance(obj, dict):
+        return ""
+    messages = obj.get("messages")
+    if not isinstance(messages, list) or not messages:
+        return ""
+    last = messages[-1]
+    if not isinstance(last, dict):
+        return ""
+    content = last.get("content")
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = []
+        for part in content:
+            if isinstance(part, dict) and isinstance(part.get("text"), str):
+                parts.append(part["text"])
+            elif isinstance(part, str):
+                parts.append(part)
+        return "\n".join(parts)
+    return ""
+
+
+def compaction_request_class(text):
+    """"compaction", "state_snapshot" or "work" for one request's last message.
+
+    Unreadable, empty and unrecognised all mean "work". That is the safe
+    direction: mislabelling an ordinary turn a compaction would end a healthy
+    run, while mislabelling a compaction as work only loses the loudest half of
+    a signal that is still counted as a length-stop.
+    """
+    low = str(text or "").lower()
+    if not low:
+        return "work"
+    if any(needle in low for needle in _COMPACTION_NEEDLES):
+        return "compaction"
+    if any(needle in low for needle in _STATE_SNAPSHOT_NEEDLES):
+        return "state_snapshot"
+    return "work"
+
+
+def clipped_compaction_breach(rows):
+    """(reason, detail) when this run clipped its own memory, else None.
+
+    Counts every `finish_reason: "length"` row, and breaches only on the ones
+    the proxy STAMPED as a compaction or a state snapshot. An ordinary clipped
+    turn is a defect worth printing and not a reason to throw a run away.
+    """
+    clipped = [row for row in rows
+               if isinstance(row, dict) and completion_clipped(row)]
+    if not clipped:
+        return None
+    memory = [row for row in clipped
+              if row.get("clipped_request_class") in ("compaction",
+                                                      "state_snapshot")]
+    if not memory:
+        return None
+    budgets = sorted({_int(row.get("request_max_tokens")) for row in memory}
+                     - {0})
+    asked = "/".join(str(value) for value in budgets) or "an undeclared budget"
+    return COMPACTION_OUTPUT_CLIPPED, (
+        "%d of this run's %d clipped completions were qwen writing its OWN "
+        "memory (%d compaction, %d state snapshot) and were cut mid-summary at "
+        "the requested budget of %s: qwen reserves %d tokens for a compaction "
+        "summary, so every turn after them reasoned from a truncated state. "
+        "A run that continues on a clipped state snapshot has not measured "
+        "what it claims to have measured."
+        % (len(memory), len(clipped),
+           sum(1 for row in memory
+               if row.get("clipped_request_class") == "compaction"),
+           sum(1 for row in memory
+               if row.get("clipped_request_class") == "state_snapshot"),
+           asked, COMPACTION_SUMMARY_RESERVE))
+
+
 def deterministic_refusal(status, text, duration_ms=None,
                           generation_window_s=0):
     """The named class of a failure that retrying cannot fix, else None.
@@ -898,6 +1068,9 @@ def _accounting_zero():
         # the request budget that caused it - so a run can say "I was cut by
         # the provider's clock" from its own artifacts.
         "generation_window_exceeded_detail": [],
+        # One entry per finish_reason=length row: when, what budget cut it,
+        # how many tokens came back, and what the request was doing.
+        "length_stop_detail": [],
         "route_generations": {}, "route_bases": {}, "route_identities": {},
         "route_advances": 0, "route_advances_blocked": 0,
         "route_advance_checks": {},
@@ -971,6 +1144,25 @@ def _account_call(row, summary, identity_check, generation_window_s=0):
         _bump(summary["discarded_by_model"],
               name if isinstance(name, str) else "?")
         return
+    # CUT BY THE HARNESS'S OWN BUDGET (fix 7). Counted for every run, before
+    # any other verdict, because six of these went unseen for a day on
+    # 20260827T173511Z-v41. The row still counts as an accepted answer below —
+    # it IS an answer, just a truncated one — so nothing else in the accounting
+    # moves; what changes is that the run can now say so from its own numbers.
+    if completion_clipped(row):
+        summary["length_stop_calls"] += 1
+        clip_class = row.get("clipped_request_class")
+        if clip_class in ("compaction", "state_snapshot"):
+            summary["clipped_compaction_calls"] += 1
+        summary["length_stop_detail"].append({
+            "ts": row.get("ts") if isinstance(row.get("ts"), str) else "",
+            "request_max_tokens": _int(row.get("request_max_tokens")),
+            "completion_tokens": _int(
+                (row.get("usage") or {}).get("completion_tokens")
+                if isinstance(row.get("usage"), dict) else 0),
+            "clipped_request_class": (clip_class
+                                      if isinstance(clip_class, str) else ""),
+        })
     # CUT BY THE PROVIDER'S CLOCK: billed, and not an answer. It is counted
     # above as a call and a billed call, and it stops here - a turn the
     # provider killed at its own generation window never reached the client,
@@ -1169,7 +1361,8 @@ def audit_ledger(ledger_path, expected_identity="", cache_guard=True,
                  min_rate=DEFAULT_CACHE_MIN_RATE,
                  min_calls=DEFAULT_CACHE_MIN_CALLS, abort_path="",
                  identity_check=True, summary=None, advances_path="",
-                 generation_window_s=0, per_request_token_gate=0):
+                 generation_window_s=0, per_request_token_gate=0,
+                 compaction_clip_guard=True):
     """Judge a finished run's upstream ledger. Returns (reason, detail) or None.
 
     FAIL-CLOSED, deliberately and in every direction. A ledger that is absent,
@@ -1246,12 +1439,20 @@ def audit_ledger(ledger_path, expected_identity="", cache_guard=True,
     # the run measured the wrong thing, which outranks "the run measured the
     # right thing illegally". It reads the same rows; if they cannot be read,
     # _ledger_verdict has already said so.
-    if verdict is None and per_request_token_gate:
+    if verdict is None and (per_request_token_gate or compaction_clip_guard):
         try:
             rows = list(_rows(ledger_path))
         except (OSError, ValueError, TypeError):
             rows = []
-        verdict = per_request_token_breach(rows, per_request_token_gate)
+        if per_request_token_gate:
+            verdict = per_request_token_breach(rows, per_request_token_gate)
+        # AND LAST OF ALL, the run's own memory (fix 7). Last because it is the
+        # weakest claim of the three: identity says the run measured the wrong
+        # model, the ceiling says it sent an illegal request, and this says it
+        # kept reasoning from a state snapshot that was cut mid-sentence. All
+        # three end the run; the first two say more about why.
+        if verdict is None and compaction_clip_guard:
+            verdict = clipped_compaction_breach(rows)
     if summary is not None and verdict:
         summary["ledger_verdict"] = verdict[0]
     if summary is not None and per_request_token_gate:
