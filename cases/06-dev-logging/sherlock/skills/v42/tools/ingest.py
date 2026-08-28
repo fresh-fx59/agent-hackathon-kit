@@ -20,6 +20,7 @@ is worse than no corpus: the report that follows looks complete and is not.
 """
 import argparse
 import gzip
+import hashlib
 import json
 import os
 import shutil
@@ -253,6 +254,13 @@ class Result(object):
     def __init__(self):
         self.rows = []            # (source, dest, how, note)
         self.skipped = []         # (source, why)
+        # WHAT WE WERE HANDED, and its digest. The corpus is derived evidence;
+        # the archive is the evidence. Without this line a report cites
+        # `Security.jsonl:19934` and nothing on disk ties that back to the file
+        # the customer actually sent — «которую именно выгрузку ты смотрел?»
+        # has no answer. Recorded first in the manifest, so it travels with the
+        # corpus into every downstream hash.
+        self.origins = []         # (path, sha256 or "-", bytes or -1, kind)
 
     def took(self, src, dest, how, note=""):
         self.rows.append((src, dest, how, note))
@@ -271,22 +279,27 @@ def unique(path):
     return "%s-%d%s" % (base, n, ext)
 
 
-def ingest_file(src, out_dir, rel, result, depth):
+def ingest_file(src, out_dir, rel, result, depth, display=None):
+    # `src` is where the bytes are RIGHT NOW (often a temp dir we are about to
+    # delete); `display` is where they CAME FROM, which is the only one worth
+    # writing down. They differ for everything unpacked out of an archive.
+    display = display or src
     name = os.path.basename(src)
     low = name.lower()
 
     if lower_suffixes(src):
         if depth >= MAX_DEPTH:
-            result.skip(src, "archive nested deeper than %d levels" % MAX_DEPTH)
+            result.skip(display, "archive nested deeper than %d levels" % MAX_DEPTH)
             return
         tmp = tempfile.mkdtemp(prefix="ingest-")
         try:
             extract(src, tmp)
         except Exception as exc:
-            result.skip(src, str(exc))
+            result.skip(display, str(exc))
             shutil.rmtree(tmp, ignore_errors=True)
             return
-        walk(tmp, out_dir, os.path.join(rel, name + ".d"), result, depth + 1)
+        walk(tmp, out_dir, os.path.join(rel, name + ".d"), result, depth + 1,
+             (tmp, display + "!"))
         shutil.rmtree(tmp, ignore_errors=True)
         return
 
@@ -295,7 +308,7 @@ def ingest_file(src, out_dir, rel, result, depth):
         try:
             how = evtx_to_jsonl(src, dest)
         except Exception as exc:
-            result.skip(src, str(exc))
+            result.skip(display, str(exc))
             return
         n = count_lines(dest)
         # AN EMPTY CHANNEL IS A FACT, NOT A FAILURE. Windows ships dozens of
@@ -303,23 +316,23 @@ def ingest_file(src, out_dir, rel, result, depth):
         # real archive were empty. Naming them keeps «nothing here» different
         # from «we could not read it», which is the difference between a gap
         # the analyst knows about and one they do not.
-        result.took(src, dest, how, "%d records%s"
+        result.took(display, dest, how, "%d records%s"
                     % (n, " — пустой канал" if n == 0 else ""))
         return
 
     if low.endswith(".gz") or is_gzip(src):
         dest = unique(os.path.join(out_dir, flat(rel, name)))
         shutil.copy2(src, dest)
-        result.took(src, dest, "copied (gzip, read directly downstream)")
+        result.took(display, dest, "copied (gzip, read directly downstream)")
         return
 
     if looks_binary(src):
-        result.skip(src, "binary file of an unknown format")
+        result.skip(display, "binary file of an unknown format")
         return
 
     dest = unique(os.path.join(out_dir, flat(rel, name)))
     shutil.copy2(src, dest)
-    result.took(src, dest, "copied")
+    result.took(display, dest, "copied")
 
 
 def flat(rel, name):
@@ -327,6 +340,17 @@ def flat(rel, name):
     citation `Security.jsonl:19934` stays a single unambiguous token."""
     rel = rel.strip("/").replace(os.sep, "-")
     return ("%s-%s" % (rel, name)) if rel else name
+
+
+def sha256_file(path):
+    h = hashlib.sha256()
+    try:
+        with open(path, "rb") as fh:
+            for chunk in iter(lambda: fh.read(1024 * 1024), b""):
+                h.update(chunk)
+    except OSError as exc:
+        return "-", -1, str(exc)
+    return h.hexdigest(), os.path.getsize(path), ""
 
 
 def count_lines(path):
@@ -340,9 +364,19 @@ def count_lines(path):
     return n
 
 
-def walk(root, out_dir, rel, result, depth):
+def shown(src, display_root):
+    """Where these bytes came from, as a human would name it:
+    `/case/winevt.zip!Logs/Security.evtx`, never `/tmp/ingest-t8sdmbwh/...`."""
+    if not display_root:
+        return src
+    base, prefix = display_root
+    rel = os.path.relpath(src, base)
+    return prefix + rel.replace(os.sep, "/")
+
+
+def walk(root, out_dir, rel, result, depth, display_root=None):
     if os.path.isfile(root):
-        ingest_file(root, out_dir, rel, result, depth)
+        ingest_file(root, out_dir, rel, result, depth, shown(root, display_root))
         return
     for base, dirs, files in os.walk(root):
         dirs[:] = sorted(d for d in dirs
@@ -352,12 +386,12 @@ def walk(root, out_dir, rel, result, depth):
                 continue
             src = os.path.join(base, name)
             if os.path.islink(src):
-                result.skip(src, "symlink")
+                result.skip(shown(src, display_root), "symlink")
                 continue
             sub = os.path.relpath(base, root)
             sub = "" if sub == "." else sub
             ingest_file(src, out_dir, os.path.join(rel, sub) if rel else sub,
-                        result, depth)
+                        result, depth, shown(src, display_root))
 
 
 def main():
@@ -388,10 +422,23 @@ def main():
         if not os.path.exists(item):
             result.skip(item, "no such file or directory")
             continue
+        item = os.path.abspath(item)
+        if os.path.isfile(item):
+            digest, size, why = sha256_file(item)
+            result.origins.append((item, digest, size,
+                                   "архив" if lower_suffixes(item) else "файл"))
+            if why:
+                result.skip(item, "cannot be read: %s" % why)
+                continue
+        else:
+            result.origins.append((item, "-", -1, "каталог"))
         walk(item, a.out, "", result, 0)
 
     manifest = os.path.join(a.out, "_ingest-manifest.tsv")
     with open(manifest, "w", encoding="utf-8") as fh:
+        for path, digest, size, kind in result.origins:
+            fh.write("# исходный %s\t%s\tsha256:%s\t%s байт\n"
+                     % (kind, path, digest, size if size >= 0 else "-"))
         fh.write("источник\tрезультат\tкак\tзаметка\n")
         for src, dest, how, note in result.rows:
             fh.write("%s\t%s\t%s\t%s\n"
@@ -399,6 +446,10 @@ def main():
         for src, why in result.skipped:
             fh.write("%s\t-\tПРОПУЩЕН\t%s\n" % (src, why))
 
+    for path, digest, size, kind in result.origins:
+        print("  исходный %s: %s" % (kind, path))
+        print("    sha256: %s  (%s байт)"
+              % (digest, size if size >= 0 else "-"))
     print("✓ %d file(s) ingested into %s" % (len(result.rows), a.out))
     print("  manifest: %s" % manifest)
     if result.skipped:

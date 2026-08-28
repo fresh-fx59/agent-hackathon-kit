@@ -1,7 +1,7 @@
 
 # Sherlock (log-rca) — running it in the corporate environment
 
-This is the operator runbook for **this skill directory** (arm v41). `SKILL.md` is
+This is the operator runbook for **this skill directory** (arm v42). `SKILL.md` is
 what the model reads; this README is what a human reads before the first run.
 
 > Source: arm **v41**, proven end to end on 2026-08-27 by paid run
@@ -62,7 +62,7 @@ On the proven run the largest prompt ever sent was **229,978 tokens — 22 under
 
 ```
 mkdir -p <PROJECT>/.qwen/skills
-cp -r <KIT>/cases/06-dev-logging/sherlock/skills/v41 <PROJECT>/.qwen/skills/log-rca
+cp -r <KIT>/cases/06-dev-logging/sherlock/skills/v42 <PROJECT>/.qwen/skills/log-rca
 ```
 
 The skill also needs one **subagent definition**. Without it the phases run
@@ -102,11 +102,27 @@ python3 .qwen/skills/log-rca/tools/ingest.py <THE ZIP OR FOLDER> --out ./corpus
 It unpacks `.zip`, `.tar`, `.tar.gz`, `.tar.bz2`, `.tar.xz` and `.7z`, converts
 `.evtx` to JSONL, copies text and `.gz` straight through, and ignores `__MACOSX`
 sidecars. Measured on a real 6 MB `winevt.zip`: **296 entries → 143 channels in
-3.4 seconds.**
+3.4 seconds.** Re-measured 2026-08-28 on the full 143-file, 87 MB
+`Logs/` handover zipped as a customer would: **143/143 converted, 0 failed,
+90,267 records, 5.1 seconds** — and byte-identical to the hand-built corpus the
+paid run used, apart from an `evtx_dump` version difference in how an empty
+`EventData/Data` is rendered (`""` vs `null`) in 18 of the 143 channels.
 
 It **never loses input quietly.** Everything it could not read is printed and
 written to `corpus/_ingest-manifest.tsv`, and the command exits non-zero. Pass
 `--keep-going` only when you have read the list and accept the gap.
+
+**It records what you were handed.** The manifest opens with the sha256 of every
+input you named, and every extracted row is called `winevt.zip!Logs/Security.evtx`
+— the archive and the path inside it, not the temp directory the bytes passed
+through. That is the chain of custody: a report citing `Security.jsonl:19934`
+is tied, on disk, to the exact archive the customer sent. Keep the archive; the
+digest in the manifest is what proves the corpus came from it.
+
+```
+head -1 corpus/_ingest-manifest.tsv
+# исходный архив	/case/winevt.zip	sha256:343cc89e…	6003199 байт
+```
 
 An empty channel is not an error — Windows ships dozens that never recorded
 anything, and they appear in the manifest as «пустой канал».
