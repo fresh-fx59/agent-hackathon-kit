@@ -525,6 +525,54 @@ PY
     fi
   fi
 
+  # SEAL THE WHOLE GRADER, NOT JUST ITS SCRIPTS — and make the trace inert.
+  # `gate-tools/` alone is HALF a grader: citecheck resolves its enum EXTENSION
+  # table as `<tools>/../reference/enum-tables.tsv`, and the v41 trace had no
+  # `reference/` at all, so replaying it graded against whatever the repo held
+  # that day (fix 5 has since added 28 Status/SubStatus rows to that table — the
+  # divergence grows). Sealing the sibling `reference/` as `$TRACE/reference`
+  # makes the sealed tools resolve their own data with no env var and no
+  # patching. The file list is DERIVED from the sealed gate source, so a profile
+  # added by a later fix travels on its own — see seal-trace.py.
+  #
+  # A trace that cannot be replayed is not a result, so a failure here is
+  # recorded and turned into a non-zero run exit below (RC 6) rather than a
+  # warning nobody reads.
+  if [ -d "$TRACE/gate-tools" ] && [ -n "$ARM_TOOLS" ]; then
+    if ! python3 "$HERE/seal-trace.py" grader --trace "$TRACE" --arm-tools "$ARM_TOOLS"; then
+      printf '{"schema": 1, "stage": "grader"}\n' > "$TRACE/seal-failure.json"
+    fi
+  fi
+  if ! python3 "$HERE/seal-trace.py" inert --trace "$TRACE"; then
+    printf '{"schema": 1, "stage": "inert"}\n' > "$TRACE/seal-failure.json"
+  fi
+  # The audit runs LAST, over the finished trace, and is the only thing that can
+  # say "this directory keeps replay.sh's promise". Its failure is the run's.
+  if ! python3 "$HERE/seal-trace.py" audit --trace "$TRACE"; then
+    printf '{"schema": 1, "stage": "audit"}\n' > "$TRACE/seal-failure.json"
+  fi
+
+  # The comparison the replay makes, kept out of the printf soup. It reads only
+  # gates.json and the three exits the replay just produced; it writes nothing,
+  # so a replay never mutates the evidence it is checking.
+  REPLAY_COMPARE='import json, os, sys
+try:
+    recorded = json.load(open("gates.json"))
+except Exception as error:
+    print("no recorded verdict to compare against: %r" % (error,)); sys.exit(2)
+rows = recorded.get("gates") or {}
+bad = []
+for name in ("citecheck", "triagecheck", "statecheck"):
+    was = rows.get(name, {}).get("exit_code")
+    now = os.environ.get("REPLAYED_" + name.upper())
+    now = int(now) if now not in (None, "") else None
+    if was != now:
+        bad.append("%s recorded=%r replayed=%r" % (name, was, now))
+print("recorded verdict: %s %s" % (recorded.get("verdict"),
+      {k: v.get("exit_code") for k, v in rows.items()}))
+if bad:
+    print("REPLAY DIVERGED: " + "; ".join(bad)); sys.exit(3)
+print("replay reproduced the recorded gate exits")'
   # REPLAY. Ten lines that remove the human error this whole change exists for:
   # pointing --corpus at the original corpus instead of the staged one. A future
   # validator runs this script and nothing else.
@@ -537,14 +585,27 @@ PY
     printf 'HERE="$(cd "$(dirname "$0")" && pwd -P)"\n'
     printf 'C="$HERE/staged-corpus"   # the tree the model was scored against\n'
     printf 'T="$HERE/gate-tools"      # the exact grader this run used\n'
-    printf 'T="${SHERLOCK_GATE_TOOLS:-$T}"\n'
-    printf '[ -d "$C" ] || { echo "no staged-corpus in this trace" >&2; exit 2; }\n'
-    printf '[ -d "$T" ] || { echo "no gate-tools in this trace; set SHERLOCK_GATE_TOOLS" >&2; exit 2; }\n'
+    printf 'R="$HERE/reference"       # the grader DATA it read at grade time\n'
+    printf '# REFUSE, NEVER FALL BACK. A replay that quietly resolves tools through\n'
+    printf '# the live checkout re-validates today code, not this run - which is the\n'
+    printf '# one thing this script exists to prevent. SHERLOCK_GATE_TOOLS may only\n'
+    printf '# name this trace own grader.\n'
+    printf 'if [ -n "${SHERLOCK_GATE_TOOLS:-}" ]; then\n'
+    printf '  if [ "$(cd "$SHERLOCK_GATE_TOOLS" 2>/dev/null && pwd -P)" != "$T" ]; then\n'
+    printf '    echo "refusing: SHERLOCK_GATE_TOOLS points outside this trace" >&2; exit 2\n'
+    printf '  fi\n'
+    printf 'fi\n'
+    printf '[ -d "$C" ] || { echo "refusing: no staged-corpus in this trace" >&2; exit 2; }\n'
+    printf '[ -d "$T" ] || { echo "refusing: no gate-tools in this trace" >&2; exit 2; }\n'
+    printf '[ -d "$R" ] || { echo "refusing: no reference/ in this trace" >&2; exit 2; }\n'
     printf 'cd "$HERE" || exit 2\n'
-    printf 'python3 "$T/citecheck.py" work/report.md --corpus "$C" --require-quote --ledger work/worklist.tsv; echo "citecheck rc=$?"\n'
-    printf 'python3 "$T/triagecheck.py" --worklist work/worklist.tsv --rules work/rules.tsv --corpus "$C"; echo "triagecheck rc=$?"\n'
-    printf 'python3 "$T/statecheck.py" --corpus "$C" --report work/report.md; echo "statecheck rc=$?"\n'
-    printf 'echo "recorded verdicts:"; python3 -c %s 2>/dev/null || true\n' "'import json;d=json.load(open(\"gates.json\"));print(d[\"verdict\"], {k:v.get(\"exit_code\") for k,v in d[\"gates\"].items()})'"
+    printf 'python3 "$T/citecheck.py" work/report.md --corpus "$C" --require-quote --ledger work/worklist.tsv; CITE=$?; echo "citecheck rc=$CITE"\n'
+    printf 'python3 "$T/triagecheck.py" --worklist work/worklist.tsv --rules work/rules.tsv --corpus "$C"; TRIAGE=$?; echo "triagecheck rc=$TRIAGE"\n'
+    printf 'python3 "$T/statecheck.py" --corpus "$C" --report work/report.md; STATE=$?; echo "statecheck rc=$STATE"\n'
+    printf '# THE POINT OF A REPLAY: does it reproduce the recorded verdict? Nothing\n'
+    printf '# used to check, so a divergence looked exactly like a successful replay.\n'
+    printf 'REPLAYED_CITECHECK=$CITE REPLAYED_TRIAGECHECK=$TRIAGE REPLAYED_STATECHECK=$STATE \\\n'
+    printf '  python3 -c %s\n' "'$REPLAY_COMPARE'"
   } > "$TRACE/replay.sh"
   chmod +x "$TRACE/replay.sh"
 
@@ -1297,7 +1358,15 @@ try:
 except Exception: print("unreadable")' "$TRACE/gates.json" 2>/dev/null || echo "unreadable")"
   [ -n "$GATE_VERDICT" ] || GATE_VERDICT="unreadable"
 fi
-if [ -n "$LANE_BREACH" ]; then
+# A TRACE THAT CANNOT BE REPLAYED IS NOT A RESULT. seal-trace.py records its own
+# failure so this ladder can refuse the run: the v41 trace promised "no
+# reconstruction and no access to the original corpus" in its own replay.sh and
+# could not keep it, and nothing objected. Its own code (6) so "unsealable
+# evidence" is never confused with "refused by its gates" (4).
+if [ -f "$TRACE/seal-failure.json" ]; then
+  echo "✗ the trace could not be sealed self-contained — see seal-failure.json" >&2
+  RC=6
+elif [ -n "$LANE_BREACH" ]; then
   echo "✗ lane integrity: $LANE_BREACH — this run did not measure the model it committed to" >&2
   RC=5
 elif [ ! -f "$TRACE/candidate.json" ] || [ "${QWEN_RC:-2}" -ne 0 ]; then
@@ -1311,23 +1380,35 @@ elif [ -n "$GATE_VERDICT" ] && [ "$GATE_VERDICT" != "clean" ]; then
 else
   RC=0
 fi
+# A TERMINAL PHASE, NOT A PROMISE TO CHECK LATER. The v41 trace ended on
+# `FINISHED_UNCHECKED` while its own gates.json said verdict=clean: the gates had
+# run and passed, and nothing wrote the phase that says so, so a reader of
+# status.json alone concluded the run was never checked. The vocabulary is the
+# one bench-status.py already declares (ACCEPTED / REJECTED are its terminal
+# phases and were never written by anything), and the schema is unchanged.
+# FINISHED_UNCHECKED now means exactly what it says: no gates.json, i.e. the
+# gates genuinely did not run.
+if [ -f "$TRACE/gates.json" ]; then
+  if [ "$GATE_VERDICT" = "clean" ]; then TERMINAL_PHASE=ACCEPTED; else TERMINAL_PHASE=REJECTED; fi
+else
+  TERMINAL_PHASE=FINISHED_UNCHECKED
+fi
+# RC 4 is "the gates ran and refused it" — REJECTED says that; RUN_FAILED would
+# blur it into "the run fell over".
+[ "$RC" -eq 4 ] && FAILED_PHASE=REJECTED || FAILED_PHASE=RUN_FAILED
 if [ "$RC" -eq 0 ]; then
-  state_set --run-tag "$STAMP" --phase FINISHED_UNCHECKED --dataset "$DATASET" --arm "$ARM" --trace-dir "$TRACE" \
-    --attempt "$RESUME_ATTEMPTS" --session-id "${LAST_SESSION:-$RESUME_SESSION}" --upstream-log "$TRACE.upstream.jsonl" \
-    --inflight-path "$TRACE/upstream-inflight.json"
-  state_event FINISHED_UNCHECKED --run-tag "$STAMP" --phase FINISHED_UNCHECKED --dataset "$DATASET" --arm "$ARM" --trace-dir "$TRACE" \
-    --attempt "$RESUME_ATTEMPTS" --session-id "${LAST_SESSION:-$RESUME_SESSION}" --upstream-log "$TRACE.upstream.jsonl" \
-    --inflight-path "$TRACE/upstream-inflight.json"
+  state_set --run-tag "$STAMP" --phase "$TERMINAL_PHASE" --dataset "$DATASET" --arm "$ARM" --trace-dir "$TRACE" \
+    --attempt "$RESUME_ATTEMPTS" --session-id "${LAST_SESSION:-$RESUME_SESSION}" --upstream-log "$TRACE.upstream.jsonl"
+  state_event "$TERMINAL_PHASE" --run-tag "$STAMP" --phase "$TERMINAL_PHASE" --dataset "$DATASET" --arm "$ARM" --trace-dir "$TRACE" \
+    --attempt "$RESUME_ATTEMPTS" --session-id "${LAST_SESSION:-$RESUME_SESSION}" --upstream-log "$TRACE.upstream.jsonl"
   TERMINAL_WRITTEN=1
 else
-  state_set --run-tag "$STAMP" --phase RUN_FAILED --dataset "$DATASET" --arm "$ARM" --trace-dir "$TRACE" \
+  state_set --run-tag "$STAMP" --phase "$FAILED_PHASE" --dataset "$DATASET" --arm "$ARM" --trace-dir "$TRACE" \
     --attempt "$RESUME_ATTEMPTS" --exit-code "$RC" ${LANE_REASON_ARG[@]+"${LANE_REASON_ARG[@]}"} \
-    --upstream-log "$TRACE.upstream.jsonl" \
-    --inflight-path "$TRACE/upstream-inflight.json"
-  state_event RUN_FAILED --run-tag "$STAMP" --phase RUN_FAILED --dataset "$DATASET" --arm "$ARM" --trace-dir "$TRACE" \
+    --upstream-log "$TRACE.upstream.jsonl"
+  state_event "$FAILED_PHASE" --run-tag "$STAMP" --phase "$FAILED_PHASE" --dataset "$DATASET" --arm "$ARM" --trace-dir "$TRACE" \
     --attempt "$RESUME_ATTEMPTS" --exit-code "$RC" ${LANE_REASON_ARG[@]+"${LANE_REASON_ARG[@]}"} \
-    --upstream-log "$TRACE.upstream.jsonl" \
-    --inflight-path "$TRACE/upstream-inflight.json"
+    --upstream-log "$TRACE.upstream.jsonl"
   TERMINAL_WRITTEN=1
 fi
 # the CLI's own stderr is the only clue when the run produced nothing

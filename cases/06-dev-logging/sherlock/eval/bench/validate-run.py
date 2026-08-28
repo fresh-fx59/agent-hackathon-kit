@@ -504,7 +504,13 @@ def validate_fresh(trace, trace_fd, manifest, candidate, candidate_data):
     _, work_blobs = trace_tree(trace_fd, "work",
         excluded=(r"report\.md", r"worklist(?:-[^/]+)?\.tsv", r"rules\.tsv", r"map(?:-[^/]+)?\.txt", r"hosts\.tsv", r"axis[^/]*\.tsv"))
     marker = json_object(read_relative(trace_fd, ".sherlock/active.json", "MARKER", MAX_JSON), "inventory_target_failed")
-    marker.update({"workspace": str(target_root), "out": str(target_work),
+    # `active: True` because a SEALED trace is inert by design (fix 10: the v41
+    # trace shipped `"active": true` and a `skill_root` into the live checkout).
+    # This marker is not the trace's; it describes the authority workspace this
+    # validator just built, which IS live for the length of the check — the same
+    # reason workspace/out/corpus/skill_root are overridden on the line below.
+    marker.update({"active": True, "workspace": str(target_root),
+                   "out": str(target_work),
                    "corpus": str(corpus), "skill_root": str(skill)})
     (target_root / ".sherlock").mkdir(); (target_root / ".sherlock/active.json").write_bytes(canonical(marker)+b"\n")
     inventory_row = {"expected_rows": None, "observed_rows": None,
