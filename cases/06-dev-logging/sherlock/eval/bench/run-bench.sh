@@ -468,6 +468,14 @@ gates = {
                     "--rules", "work/rules.tsv", "--corpus", "corpus", "--json"],
     "statecheck": ["statecheck.py", "--corpus", "corpus",
                    "--report", "work/report.md", "--json"],
+    # THE GATE THE HARNESS FORGOT. Fix 5 added reportcheck — the operator's own
+    # report contract, the exact thing whose absence made the paid v41 run a
+    # false positive — and wired it into the skill's VERIFY step and its Stop
+    # hook. Nothing wired it in HERE, so the run's own record of "what the gates
+    # said" covered three of four, and the trace sealed
+    # reference/report-contract.corporate.json for a gate it never invoked.
+    # A gate the harness does not run cannot be an audit of the harness.
+    "reportcheck": ["reportcheck.py", "work/report.md", "--json"],
 }
 out = {"schema": 1, "verdict": "clean", "gates": {}}
 for name, argv in gates.items():
@@ -562,7 +570,7 @@ except Exception as error:
     print("no recorded verdict to compare against: %r" % (error,)); sys.exit(2)
 rows = recorded.get("gates") or {}
 bad = []
-for name in ("citecheck", "triagecheck", "statecheck"):
+for name in ("citecheck", "triagecheck", "statecheck", "reportcheck"):
     was = rows.get(name, {}).get("exit_code")
     now = os.environ.get("REPLAYED_" + name.upper())
     now = int(now) if now not in (None, "") else None
@@ -602,9 +610,12 @@ print("replay reproduced the recorded gate exits")'
     printf 'python3 "$T/citecheck.py" work/report.md --corpus "$C" --require-quote --ledger work/worklist.tsv; CITE=$?; echo "citecheck rc=$CITE"\n'
     printf 'python3 "$T/triagecheck.py" --worklist work/worklist.tsv --rules work/rules.tsv --corpus "$C"; TRIAGE=$?; echo "triagecheck rc=$TRIAGE"\n'
     printf 'python3 "$T/statecheck.py" --corpus "$C" --report work/report.md; STATE=$?; echo "statecheck rc=$STATE"\n'
+    printf '# reportcheck reads only the report and its own sealed contract under $R.\n'
+    printf 'python3 "$T/reportcheck.py" work/report.md; REPORTC=$?; echo "reportcheck rc=$REPORTC"\n'
     printf '# THE POINT OF A REPLAY: does it reproduce the recorded verdict? Nothing\n'
     printf '# used to check, so a divergence looked exactly like a successful replay.\n'
     printf 'REPLAYED_CITECHECK=$CITE REPLAYED_TRIAGECHECK=$TRIAGE REPLAYED_STATECHECK=$STATE \\\n'
+    printf '  REPLAYED_REPORTCHECK=$REPORTC \\\n'
     printf '  python3 -c %s\n' "'$REPLAY_COMPARE'"
   } > "$TRACE/replay.sh"
   chmod +x "$TRACE/replay.sh"
