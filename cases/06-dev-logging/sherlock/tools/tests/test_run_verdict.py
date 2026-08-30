@@ -8,6 +8,7 @@ import sys
 import tempfile
 import threading
 import unittest
+from unittest import mock
 
 
 HERE = Path(__file__).resolve().parent
@@ -24,6 +25,7 @@ def load(name, path):
 
 
 FIXTURES = load("run_verdict_manifest_fixture", MANIFEST_TEST)
+VERDICT_TOOL = load("run_verdict_tool", TOOL)
 
 
 class RunVerdictTests(unittest.TestCase):
@@ -161,12 +163,32 @@ class RunVerdictTests(unittest.TestCase):
         self.assertTrue(row["finished"])
         self.assertTrue(row["successful"])
         self.assertTrue(row["report_correct"])
+        self.assertEqual(row["report_correctness_scope"], "sealed-contract-gates")
         self.assertEqual(row["failures"], [])
         self.assertEqual(
             row["metrics"]["gate_exits"],
             {"citecheck": 0, "reportcheck": 0, "statecheck": 0, "triagecheck": 0},
         )
         self.assertEqual(row["improvements"], [])
+
+    @mock.patch.object(
+        VERDICT_TOOL.subprocess,
+        "run",
+        return_value=subprocess.CompletedProcess([], 0),
+    )
+    def test_replay_resolves_bash_from_path_on_nixos(self, run):
+        """Catches hard-coding /bin/bash, which does not exist on NixOS."""
+        self.write_clean_report_artifacts()
+        nixos_bash = "/run/current-system/sw/bin/bash"
+
+        with mock.patch.object(VERDICT_TOOL.shutil, "which", return_value=nixos_bash):
+            result = VERDICT_TOOL.replay(self.fx.trace)
+
+        self.assertEqual(result, 0)
+        command = run.call_args.args[0]
+        environment = run.call_args.kwargs["env"]
+        self.assertEqual(command[0], nixos_bash)
+        self.assertIn("/run/current-system/sw/bin", environment["PATH"].split(":"))
 
     def test_trace_only_discovers_and_authenticates_manifest_authority(self):
         """Catches forcing the operator to recover authority paths already in the manifest."""
@@ -185,8 +207,8 @@ class RunVerdictTests(unittest.TestCase):
         self.assertTrue(row["report_correct"])
         self.assertTrue(row["authenticated"])
 
-    def test_direct_paid_trace_is_explicitly_uncontrolled_but_still_verifiable(self):
-        """Catches the real direct launcher being either unreadable or falsely authenticated."""
+    def test_direct_paid_trace_is_verifiable_but_never_successful(self):
+        """Catches an uncontrolled trace being promoted to authoritative success."""
         (self.fx.trace / "run-manifest.json").unlink()
         self.write_status("ACCEPTED", run_tag=self.fx.trace.name)
         self.write_clean_report_artifacts()
@@ -194,13 +216,14 @@ class RunVerdictTests(unittest.TestCase):
 
         result = self.verdict_auto()
 
-        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.returncode, 1, result.stderr)
         row = json.loads(result.stdout)
         self.assertTrue(row["finished"])
-        self.assertTrue(row["successful"])
-        self.assertTrue(row["report_correct"])
+        self.assertFalse(row["successful"])
+        self.assertFalse(row["report_correct"])
         self.assertFalse(row["authenticated"])
         self.assertEqual(row["authority"], "uncontrolled-local")
+        self.assertIn("AUTHORITY_UNCONTROLLED", row["failures"])
         self.assertIn(
             "USE_AUTHENTICATED_CONTROLLER_NEXT_RUN",
             {item["code"] for item in row["improvements"]},
@@ -357,6 +380,89 @@ class RunVerdictTests(unittest.TestCase):
         self.assertEqual(row["metrics"]["length_stops"], 1)
         self.assertEqual(row["metrics"]["peak_prompt_plus_max_tokens"], 22000)
 
+    def test_reasoning_snapshot_clip_names_the_actual_budget_fix(self):
+        """Catches treating an unwindowed reasoning-token clip as a provider clock."""
+        self.write_status(
+            "RUN_FAILED", exit_code=5, reason="COMPACTION_OUTPUT_CLIPPED"
+        )
+        self.write_validity(False, ("transport_failed",))
+        self.write_clean_report_artifacts()
+        (self.fx.trace / "lane-integrity.json").write_text(
+            json.dumps({"schema": 1, "verdict": "breach",
+                        "reason": "COMPACTION_OUTPUT_CLIPPED", "detail": "snapshot clipped"}),
+            encoding="utf-8",
+        )
+        (self.fx.trace / "run-inputs.json").write_text(
+            json.dumps({"generation_window": {"generation_window_seconds": -1.0}}),
+            encoding="utf-8",
+        )
+        (self.fx.trace / "upstream-completed.jsonl").write_text(
+            json.dumps({
+                "status": 200,
+                "finish_reason": "length",
+                "clipped_request_class": "state_snapshot",
+                "request_max_tokens": 20000,
+                "usage": {
+                    "prompt_tokens": 128993,
+                    "completion_tokens": 20000,
+                    "completion_tokens_details": {"reasoning_tokens": 13427},
+                },
+            }) + "\n",
+            encoding="utf-8",
+        )
+
+        result = self.verdict()
+
+        self.assertEqual(result.returncode, 1, result.stderr)
+        row = json.loads(result.stdout)
+        self.assertIn("COMPACTION_OUTPUT_CLIPPED", row["failures"])
+        self.assertEqual(row["metrics"]["reasoning_tokens"], 13427)
+        self.assertEqual(row["metrics"]["snapshot_visible_tokens"], 6573)
+        repairs = {item["code"] for item in row["improvements"]}
+        self.assertIn("SEPARATE_REASONING_FROM_SNAPSHOT_BUDGET", repairs)
+        self.assertNotIn("USE_UNWINDOWED_OR_198S_LANE", repairs)
+
+    def test_reasoning_compaction_clip_uses_the_same_memory_budget_fix(self):
+        """Catches reasoning-clipped compaction falling back to the old clock advice."""
+        self.write_status(
+            "RUN_FAILED", exit_code=5, reason="COMPACTION_OUTPUT_CLIPPED"
+        )
+        self.write_validity(False, ("transport_failed",))
+        self.write_clean_report_artifacts()
+        (self.fx.trace / "lane-integrity.json").write_text(
+            json.dumps({"schema": 1, "verdict": "breach",
+                        "reason": "COMPACTION_OUTPUT_CLIPPED", "detail": "compaction clipped"}),
+            encoding="utf-8",
+        )
+        (self.fx.trace / "run-inputs.json").write_text(
+            json.dumps({"generation_window": {"generation_window_seconds": -1.0}}),
+            encoding="utf-8",
+        )
+        (self.fx.trace / "upstream-completed.jsonl").write_text(
+            json.dumps({
+                "status": 200,
+                "finish_reason": "length",
+                "clipped_request_class": "compaction",
+                "request_max_tokens": 20000,
+                "usage": {
+                    "prompt_tokens": 120000,
+                    "completion_tokens": 20000,
+                    "completion_tokens_details": {"reasoning_tokens": 12000},
+                },
+            }) + "\n",
+            encoding="utf-8",
+        )
+
+        result = self.verdict()
+
+        row = json.loads(result.stdout)
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertEqual(row["metrics"]["memory_reasoning_tokens"], 12000)
+        self.assertEqual(row["metrics"]["memory_visible_tokens"], 8000)
+        repairs = {item["code"] for item in row["improvements"]}
+        self.assertIn("SEPARATE_REASONING_FROM_SNAPSHOT_BUDGET", repairs)
+        self.assertNotIn("USE_UNWINDOWED_OR_198S_LANE", repairs)
+
     def test_each_report_gate_names_its_own_repair(self):
         """Catches collapsing distinct report defects into one generic recommendation."""
         expected = {
@@ -380,6 +486,72 @@ class RunVerdictTests(unittest.TestCase):
                 self.assertEqual(result.returncode, 1, result.stderr)
                 row = json.loads(result.stdout)
                 self.assertIn(code, {item["code"] for item in row["improvements"]})
+
+    def test_live_gate_shapes_name_enum_and_label_parser_fixes(self):
+        """Catches describing validator defects as report citation or content repairs."""
+        self.write_status("RUN_FAILED", exit_code=5)
+        self.write_validity(False, ("gate_failed",))
+        self.write_clean_report_artifacts()
+        gates_path = self.fx.trace / "gates.json"
+        gates = json.loads(gates_path.read_text(encoding="utf-8"))
+        gates["verdict"] = "blocking"
+        gates["gates"]["citecheck"] = {
+            "exit_code": 1,
+            "blocking": 1,
+            "json": {"report_evidence": {"enum_decode": {
+                "blocking": 1,
+                "items": [{"kind": "unknown_value", "field": "status",
+                           "value": 3221549076, "line": 63}],
+            }}},
+        }
+        gates["gates"]["reportcheck"] = {
+            "exit_code": 1,
+            "blocking": 2,
+            "json": {"defects": [
+                {"defect": "label_unknown", "detail": "ADMINI"},
+                {"defect": "label_unknown", "detail": "IPSERVER"},
+            ]},
+        }
+        gates_path.write_text(json.dumps(gates), encoding="utf-8")
+
+        result = self.verdict()
+
+        self.assertEqual(result.returncode, 1, result.stderr)
+        repairs = {item["code"] for item in json.loads(result.stdout)["improvements"]}
+        self.assertIn("FIX_UNKNOWN_ENUM_DECODE", repairs)
+        self.assertIn("FIX_LABEL_BOUNDARY_PARSER", repairs)
+        self.assertNotIn("FIX_CITATION_DEFECTS", repairs)
+        self.assertNotIn("REPAIR_REPORT_CONTRACT", repairs)
+
+    def test_changed_frozen_arm_is_an_explicit_failure(self):
+        """Catches hiding a measurement-input mutation inside a generic gate failure."""
+        self.write_status("RUN_FAILED", exit_code=5)
+        self.write_validity(False, ("gate_failed",))
+        self.write_clean_report_artifacts()
+        gates_path = self.fx.trace / "gates.json"
+        gates = json.loads(gates_path.read_text(encoding="utf-8"))
+        gates["verdict"] = "blocking"
+        gates["arm_intact"] = False
+        gates_path.write_text(json.dumps(gates), encoding="utf-8")
+        (self.fx.trace / "arm-integrity.json").write_text(
+            json.dumps({"schema": 1, "intact": False, "changed": [
+                {"path": "reference/report-contract.corporate.json"},
+                {"path": "reference/enum-tables.tsv"},
+            ]}),
+            encoding="utf-8",
+        )
+
+        result = self.verdict()
+
+        self.assertEqual(result.returncode, 1, result.stderr)
+        row = json.loads(result.stdout)
+        self.assertIn("ARM_MUTATED", row["failures"])
+        repair = next(item for item in row["improvements"]
+                      if item["code"] == "PREVENT_ARM_MUTATION")
+        self.assertEqual(repair["evidence"]["changed"], [
+            "reference/report-contract.corporate.json",
+            "reference/enum-tables.tsv",
+        ])
 
     def test_replay_divergence_blocks_success_and_names_the_fix(self):
         """Catches trusting recorded clean gates when the sealed replay diverges."""
@@ -411,6 +583,7 @@ class RunVerdictTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("FINISHED run-001 ACCEPTED", result.stdout)
         self.assertIn("successful=yes report_correct=yes", result.stdout)
+        self.assertIn("report_scope=sealed-contract-gates", result.stdout)
         self.assertIn("failures=none", result.stdout)
         self.assertIn("improvements=none", result.stdout)
 
@@ -514,6 +687,7 @@ class RunVerdictTests(unittest.TestCase):
         row = json.loads(result.stdout)
         self.assertEqual(result.returncode, 1, result.stderr)
         self.assertFalse(row["successful"])
+        self.assertFalse(row["report_correct"])
         self.assertIn("LANE_INTEGRITY_INVALID", row["failures"])
         self.assertIn(
             "REPAIR_LANE_INTEGRITY_EVIDENCE",
@@ -533,6 +707,7 @@ class RunVerdictTests(unittest.TestCase):
 
         row = json.loads(result.stdout)
         self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertFalse(row["report_correct"])
         self.assertIn("REBUILD_SELF_CONTAINED_TRACE",
                       {item["code"] for item in row["improvements"]})
 
