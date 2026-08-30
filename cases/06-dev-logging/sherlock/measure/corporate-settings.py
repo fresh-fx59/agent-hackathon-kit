@@ -202,6 +202,30 @@ OUTPUT_TOKENS_PER_S = 122.6
 #: average — the average is not what kills a run.
 TTFT_RESERVE_S = 35
 
+#: A LANE THAT ACTUALLY CARRIES THE RESERVE, MEASURED 2026-08-30. The escape
+#: withdrawn below leaves exactly two remedies for the conflict: a longer
+#: window, or a lane with no generation clock at all. The second one now
+#: exists and it was measured rather than assumed — neuraldeep
+#: (https://api.neuraldeep.ru/v1, deepseek-v4-flash), one streamed
+#: /chat/completions with max_tokens=20000, run twice from contabo:
+#:
+#:   elapsed=163.2s  ttft=1.6s  finish=length  chars=66851
+#:   elapsed=158.9s  ttft=1.2s  finish=length  chars=66115
+#:
+#: Both ran ~160 s WITHOUT being cut and both ended at finish_reason=length,
+#: i.e. the full 20,000-token budget was delivered and the stop came from the
+#: budget rather than from a clock. CloseRouter severs the same request at
+#: 90,000 ms. So this lane declares NO generation window — not a large one:
+#: no clock was observed, and inventing a number would be the same unmeasured
+#: constant this file exists to refuse. Generation-only throughput implied by
+#: the second run is 20000 / (158.9 - 1.2) = 126.8 tok/s, and TTFT is 1.2-1.6 s
+#: against the 35 s reserve above. With no window declared `budget_conflict`
+#: judges CONSTRAINT 2 alone, max_tokens = SUMMARY_RESERVE = 20000 satisfies
+#: it, and `prove --gate 262000 --window 262000 --max-tokens 20000` puts the
+#: worst reachable request at prompt 229000 + output 19900 = 248900, i.e.
+#: 13,100 under the ceiling. The 262,000 gate is unchanged: the customer's
+#: ceiling is not a function of what a provider advertises.
+
 #: THE REFUSAL THE LAUNCHER GREPS FOR. A constraint conflict must never be
 #: resolved by silently taking the smaller number, which is exactly what
 #: produced run 20260827T173511Z-v41.
