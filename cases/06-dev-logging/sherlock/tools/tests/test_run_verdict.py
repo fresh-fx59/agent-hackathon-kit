@@ -1,0 +1,555 @@
+#!/usr/bin/env python3
+"""Provider-free contract tests for the Sherlock run verdict wrapper."""
+import importlib.util
+import json
+from pathlib import Path
+import subprocess
+import sys
+import tempfile
+import threading
+import unittest
+
+
+HERE = Path(__file__).resolve().parent
+SHERLOCK = HERE.parents[1]
+TOOL = SHERLOCK / "eval" / "bench" / "run-verdict.py"
+MANIFEST_TEST = HERE / "test_run_manifest.py"
+
+
+def load(name, path):
+    spec = importlib.util.spec_from_file_location(name, str(path))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+FIXTURES = load("run_verdict_manifest_fixture", MANIFEST_TEST)
+
+
+class RunVerdictTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.fx = FIXTURES.Fixture(self.temp.name)
+        self.fx.stage()
+        self.manifest = self.fx.create()
+
+    def write_status(self, phase="QWEN_RUNNING", **updates):
+        row = {
+            "schema": 1,
+            "run_tag": "run-001",
+            "phase": phase,
+            "updated_at": "2026-08-30T19:00:00Z",
+            "pid": None,
+            "attempt": 0,
+            "dataset": "fixture",
+            "arm": "v28",
+            "trace_dir": str(self.fx.trace),
+            "detail": None,
+            "session_id": None,
+            "reason": None,
+            "exit_code": None,
+            "duration_s": None,
+            "upstream_log": None,
+            "inflight_path": None,
+        }
+        row.update(updates)
+        (self.fx.trace / "status.json").write_text(json.dumps(row), encoding="utf-8")
+
+    def verdict(self, *extra):
+        command = [
+            sys.executable,
+            str(TOOL),
+            str(self.fx.trace),
+            "--commitment-file",
+            str(self.fx.commitment),
+            "--commitment-key",
+            str(self.fx.commitment_key),
+            "--json",
+            *extra,
+        ]
+        return subprocess.run(command, text=True, capture_output=True)
+
+    def verdict_text(self, *extra):
+        command = [
+            sys.executable,
+            str(TOOL),
+            str(self.fx.trace),
+            "--commitment-file",
+            str(self.fx.commitment),
+            "--commitment-key",
+            str(self.fx.commitment_key),
+            *extra,
+        ]
+        return subprocess.run(command, text=True, capture_output=True)
+
+    def verdict_auto(self, *extra):
+        command = [
+            sys.executable,
+            str(TOOL),
+            str(self.fx.trace),
+            "--json",
+            *extra,
+        ]
+        return subprocess.run(command, text=True, capture_output=True)
+
+    def write_validity(self, valid=True, reasons=()):
+        row = {
+            "schema": 1,
+            "valid": valid,
+            "reasons": list(reasons),
+            "run_tag": "run-001",
+            "manifest_sha256": self.manifest["manifest_sha256"],
+            "candidate_sha256": "0" * 64,
+        }
+        validity = load(
+            "run_verdict_validity_writer",
+            SHERLOCK / "eval" / "bench" / "validate-run.py",
+        )
+        row["hmac_sha256"] = validity.sign(row, self.fx.commitment_key.read_bytes())
+        (self.fx.trace / "validity.json").write_text(json.dumps(row), encoding="utf-8")
+
+    def write_clean_report_artifacts(self):
+        work = self.fx.trace / "work"
+        work.mkdir(exist_ok=True)
+        (work / "report.md").write_text("# Verified report\n", encoding="utf-8")
+        gates = {
+            "schema": 1,
+            "verdict": "clean",
+            "arm_intact": True,
+            "gates": {
+                name: {"exit_code": 0, "blocking": 0}
+                for name in ("citecheck", "triagecheck", "statecheck", "reportcheck")
+            },
+        }
+        (self.fx.trace / "gates.json").write_text(json.dumps(gates), encoding="utf-8")
+        (self.fx.trace / "lane-integrity.json").write_text(
+            json.dumps({"schema": 1, "verdict": "clean", "reason": None, "detail": None}),
+            encoding="utf-8",
+        )
+        replay = self.fx.trace / "replay.sh"
+        replay.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+        replay.chmod(0o755)
+
+    def test_running_trace_is_unfinished(self):
+        """Catches treating a healthy live process as a completed result."""
+        self.write_status()
+
+        result = self.verdict()
+
+        self.assertTrue(TOOL.exists(), result.stderr)
+        self.assertEqual(result.returncode, 2, result.stderr)
+        row = json.loads(result.stdout)
+        self.assertEqual(row["state"], "running")
+        self.assertFalse(row["finished"])
+        self.assertIsNone(row["successful"])
+        self.assertIsNone(row["report_correct"])
+        self.assertEqual(row["phase"], "QWEN_RUNNING")
+        self.assertEqual(row["failures"], [])
+        self.assertEqual(row["improvements"], [])
+
+    def test_accepted_trace_with_clean_replay_is_correct(self):
+        """Catches reporting success without all four gates and reproducible evidence."""
+        self.write_status("ACCEPTED")
+        self.write_validity()
+        self.write_clean_report_artifacts()
+
+        result = self.verdict()
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        row = json.loads(result.stdout)
+        self.assertTrue(row["finished"])
+        self.assertTrue(row["successful"])
+        self.assertTrue(row["report_correct"])
+        self.assertEqual(row["failures"], [])
+        self.assertEqual(
+            row["metrics"]["gate_exits"],
+            {"citecheck": 0, "reportcheck": 0, "statecheck": 0, "triagecheck": 0},
+        )
+        self.assertEqual(row["improvements"], [])
+
+    def test_trace_only_discovers_and_authenticates_manifest_authority(self):
+        """Catches forcing the operator to recover authority paths already in the manifest."""
+        self.write_status("ACCEPTED")
+        self.write_validity()
+        self.write_clean_report_artifacts()
+        controller_key = self.fx.commitment_key.with_name("controller.key")
+        self.fx.commitment_key.replace(controller_key)
+        self.fx.commitment_key = controller_key
+
+        result = self.verdict_auto()
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        row = json.loads(result.stdout)
+        self.assertTrue(row["successful"])
+        self.assertTrue(row["report_correct"])
+        self.assertTrue(row["authenticated"])
+
+    def test_direct_paid_trace_is_explicitly_uncontrolled_but_still_verifiable(self):
+        """Catches the real direct launcher being either unreadable or falsely authenticated."""
+        (self.fx.trace / "run-manifest.json").unlink()
+        self.write_status("ACCEPTED", run_tag=self.fx.trace.name)
+        self.write_clean_report_artifacts()
+        (self.fx.trace / "candidate.json").write_text("{}\n", encoding="utf-8")
+
+        result = self.verdict_auto()
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        row = json.loads(result.stdout)
+        self.assertTrue(row["finished"])
+        self.assertTrue(row["successful"])
+        self.assertTrue(row["report_correct"])
+        self.assertFalse(row["authenticated"])
+        self.assertEqual(row["authority"], "uncontrolled-local")
+        self.assertIn(
+            "USE_AUTHENTICATED_CONTROLLER_NEXT_RUN",
+            {item["code"] for item in row["improvements"]},
+        )
+
+    def test_direct_accepted_status_without_candidate_is_not_success(self):
+        """Catches trusting an uncontrolled status after its candidate disappeared."""
+        (self.fx.trace / "run-manifest.json").unlink()
+        self.write_status("ACCEPTED", run_tag=self.fx.trace.name)
+        self.write_clean_report_artifacts()
+
+        result = self.verdict_auto()
+
+        row = json.loads(result.stdout)
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertFalse(row["successful"])
+        self.assertIn("CANDIDATE_MISSING", row["failures"])
+        self.assertIn(
+            "PRESERVE_CANDIDATE_ARTIFACT",
+            {item["code"] for item in row["improvements"]},
+        )
+
+    def test_manifest_entry_cannot_downgrade_to_uncontrolled_on_auth_failure(self):
+        """Catches a broken manifest link silently selecting the weaker direct mode."""
+        manifest = self.fx.trace / "run-manifest.json"
+        manifest.unlink()
+        manifest.symlink_to(self.fx.trace / "missing-manifest.json")
+        self.write_status("ACCEPTED", run_tag=self.fx.trace.name)
+        self.write_clean_report_artifacts()
+
+        result = self.verdict_auto()
+
+        self.assertEqual(result.returncode, 2, result.stdout)
+        self.assertIn("TRACE_AUTHORITY_UNRESOLVED", result.stderr)
+
+    def test_rejected_citations_name_the_report_improvement(self):
+        """Catches a blocking citation gate that produces no actionable diagnosis."""
+        self.write_status("REJECTED", exit_code=4)
+        self.write_validity(False, ("citation_failed",))
+        self.write_clean_report_artifacts()
+        gates_path = self.fx.trace / "gates.json"
+        gates = json.loads(gates_path.read_text(encoding="utf-8"))
+        gates["verdict"] = "blocking"
+        gates["gates"]["citecheck"].update({"exit_code": 1, "blocking": 3})
+        gates_path.write_text(json.dumps(gates), encoding="utf-8")
+
+        result = self.verdict()
+
+        self.assertEqual(result.returncode, 1, result.stderr)
+        row = json.loads(result.stdout)
+        self.assertTrue(row["finished"])
+        self.assertFalse(row["successful"])
+        self.assertFalse(row["report_correct"])
+        self.assertIn("GATES_BLOCKING", row["failures"])
+        self.assertIn("gate_blocking", row["metrics"])
+        self.assertEqual(row["metrics"]["gate_blocking"]["citecheck"], 3)
+        self.assertIn(
+            "FIX_CITATION_DEFECTS",
+            {item["code"] for item in row["improvements"]},
+        )
+
+    def test_wait_returns_the_terminal_verdict(self):
+        """Catches --wait returning the first non-terminal projection."""
+        self.write_status()
+        self.write_validity()
+        self.write_clean_report_artifacts()
+        timer = threading.Timer(0.15, lambda: self.write_status("ACCEPTED"))
+        timer.start()
+        self.addCleanup(timer.cancel)
+
+        result = self.verdict(
+            "--wait", "--poll-seconds", "0.02", "--timeout-seconds", "2"
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        row = json.loads(result.stdout)
+        self.assertEqual(row["phase"], "ACCEPTED")
+        self.assertTrue(row["finished"])
+
+    def test_compaction_clip_names_the_lane_fix(self):
+        """Catches recommending a settings tweak for a provider generation clock."""
+        self.write_status(
+            "RUN_FAILED", exit_code=5, reason="COMPACTION_OUTPUT_CLIPPED"
+        )
+        self.write_validity(False, ("transport_failed",))
+        self.write_clean_report_artifacts()
+        lane_path = self.fx.trace / "lane-integrity.json"
+        lane_path.write_text(
+            json.dumps(
+                {
+                    "schema": 1,
+                    "verdict": "breach",
+                    "reason": "COMPACTION_OUTPUT_CLIPPED",
+                    "detail": "2 memory calls ended with finish_reason=length",
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        result = self.verdict()
+
+        self.assertEqual(result.returncode, 1, result.stderr)
+        row = json.loads(result.stdout)
+        self.assertIn("LANE_INTEGRITY_BREACH", row["failures"])
+        improvement = {item["code"]: item for item in row["improvements"]}
+        self.assertIn("USE_UNWINDOWED_OR_198S_LANE", improvement)
+        self.assertEqual(
+            improvement["USE_UNWINDOWED_OR_198S_LANE"]["evidence"]["reason"],
+            "COMPACTION_OUTPUT_CLIPPED",
+        )
+
+    def test_upstream_ledger_exposes_clipped_memory_and_token_metrics(self):
+        """Catches a false green that ignores a clipped compaction ledger row."""
+        self.write_status("ACCEPTED")
+        self.write_validity()
+        self.write_clean_report_artifacts()
+        rows = [
+            {
+                "status": 200,
+                "finish_reason": "stop",
+                "request_max_tokens": 500,
+                "usage": {
+                    "prompt_tokens": 1000,
+                    "completion_tokens": 200,
+                    "prompt_tokens_details": {"cached_tokens": 700},
+                },
+            },
+            {
+                "status": 200,
+                "finish_reason": "length",
+                "clipped_request_class": "compaction",
+                "request_max_tokens": 20000,
+                "usage": {
+                    "prompt_tokens": 2000,
+                    "completion_tokens": 20000,
+                    "prompt_tokens_details": {"cached_tokens": 800},
+                },
+            },
+        ]
+        (self.fx.trace / "upstream-completed.jsonl").write_text(
+            "".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8"
+        )
+
+        result = self.verdict()
+
+        self.assertEqual(result.returncode, 1, result.stderr)
+        row = json.loads(result.stdout)
+        self.assertIn("COMPACTION_OUTPUT_CLIPPED", row["failures"])
+        self.assertEqual(row["metrics"]["upstream_calls"], 2)
+        self.assertEqual(row["metrics"]["prompt_tokens"], 3000)
+        self.assertEqual(row["metrics"]["output_tokens"], 20200)
+        self.assertEqual(row["metrics"]["cached_prompt_tokens"], 1500)
+        self.assertEqual(row["metrics"]["cache_hit_percent"], 50.0)
+        self.assertEqual(row["metrics"]["length_stops"], 1)
+        self.assertEqual(row["metrics"]["peak_prompt_plus_max_tokens"], 22000)
+
+    def test_each_report_gate_names_its_own_repair(self):
+        """Catches collapsing distinct report defects into one generic recommendation."""
+        expected = {
+            "triagecheck": "CLOSE_WORKLIST_GAPS",
+            "statecheck": "ADD_MISSING_STATE_EVIDENCE",
+            "reportcheck": "REPAIR_REPORT_CONTRACT",
+        }
+        self.write_status("REJECTED", exit_code=4)
+        self.write_validity(False, ("gate_failed",))
+        for gate, code in expected.items():
+            with self.subTest(gate=gate):
+                self.write_clean_report_artifacts()
+                gates_path = self.fx.trace / "gates.json"
+                gates = json.loads(gates_path.read_text(encoding="utf-8"))
+                gates["verdict"] = "blocking"
+                gates["gates"][gate].update({"exit_code": 1, "blocking": 2})
+                gates_path.write_text(json.dumps(gates), encoding="utf-8")
+
+                result = self.verdict()
+
+                self.assertEqual(result.returncode, 1, result.stderr)
+                row = json.loads(result.stdout)
+                self.assertIn(code, {item["code"] for item in row["improvements"]})
+
+    def test_replay_divergence_blocks_success_and_names_the_fix(self):
+        """Catches trusting recorded clean gates when the sealed replay diverges."""
+        self.write_status("ACCEPTED")
+        self.write_validity()
+        self.write_clean_report_artifacts()
+        replay = self.fx.trace / "replay.sh"
+        replay.write_text("#!/usr/bin/env bash\nexit 3\n", encoding="utf-8")
+
+        result = self.verdict()
+
+        self.assertEqual(result.returncode, 1, result.stderr)
+        row = json.loads(result.stdout)
+        self.assertIn("REPLAY_FAILED", row["failures"])
+        self.assertFalse(row["report_correct"])
+        self.assertIn(
+            "REPAIR_REPLAY_DIVERGENCE",
+            {item["code"] for item in row["improvements"]},
+        )
+
+    def test_plain_output_answers_the_operator_questions(self):
+        """Catches making a human decode JSON to learn the final verdict."""
+        self.write_status("ACCEPTED")
+        self.write_validity()
+        self.write_clean_report_artifacts()
+
+        result = self.verdict_text()
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("FINISHED run-001 ACCEPTED", result.stdout)
+        self.assertIn("successful=yes report_correct=yes", result.stdout)
+        self.assertIn("failures=none", result.stdout)
+        self.assertIn("improvements=none", result.stdout)
+
+    def test_missing_gate_blocking_count_is_unknown_not_clean(self):
+        """Catches exit zero being trusted when a gate emitted no machine verdict."""
+        self.write_status("ACCEPTED")
+        self.write_validity()
+        self.write_clean_report_artifacts()
+        gates_path = self.fx.trace / "gates.json"
+        gates = json.loads(gates_path.read_text(encoding="utf-8"))
+        gates["gates"]["reportcheck"]["blocking"] = None
+        gates_path.write_text(json.dumps(gates), encoding="utf-8")
+
+        result = self.verdict()
+
+        self.assertEqual(result.returncode, 1, result.stderr)
+        row = json.loads(result.stdout)
+        self.assertFalse(row["report_correct"])
+        self.assertIn("GATE_RESULT_UNKNOWN", row["failures"])
+        self.assertIn(
+            "RECORD_MACHINE_GATE_RESULTS",
+            {item["code"] for item in row["improvements"]},
+        )
+
+    def test_malformed_gate_signals_are_unknown_not_blocking_counts(self):
+        """Catches booleans or negative counts being accepted as integer gate evidence."""
+        self.write_status("ACCEPTED")
+        self.write_validity()
+        self.write_clean_report_artifacts()
+        gates_path = self.fx.trace / "gates.json"
+        gates = json.loads(gates_path.read_text(encoding="utf-8"))
+        gates["gates"]["reportcheck"].update({"exit_code": False, "blocking": -1})
+        gates_path.write_text(json.dumps(gates), encoding="utf-8")
+
+        result = self.verdict()
+
+        row = json.loads(result.stdout)
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn("GATE_RESULT_UNKNOWN", row["failures"])
+        repair = next(item for item in row["improvements"]
+                      if item["code"] == "RECORD_MACHINE_GATE_RESULTS")
+        self.assertIn("reportcheck", repair["evidence"]["gates"])
+
+    def test_malformed_gate_row_returns_a_verdict_instead_of_crashing(self):
+        """Catches a null gate row escaping the wrapper's failure report."""
+        self.write_status("ACCEPTED")
+        self.write_validity()
+        self.write_clean_report_artifacts()
+        gates_path = self.fx.trace / "gates.json"
+        gates = json.loads(gates_path.read_text(encoding="utf-8"))
+        gates["gates"]["citecheck"] = None
+        gates_path.write_text(json.dumps(gates), encoding="utf-8")
+
+        result = self.verdict()
+
+        self.assertEqual(result.returncode, 1, result.stderr)
+        row = json.loads(result.stdout)
+        self.assertFalse(row["report_correct"])
+        self.assertIn("GATE_RESULT_UNKNOWN", row["failures"])
+
+    def test_missing_report_names_the_delivery_fix(self):
+        """Catches a terminal trace with no report and no repair action."""
+        self.write_status("RUN_FAILED", exit_code=3)
+        self.write_validity(False, ("missing_deliverable",))
+        self.write_clean_report_artifacts()
+        (self.fx.trace / "work" / "report.md").unlink()
+
+        result = self.verdict()
+
+        row = json.loads(result.stdout)
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn("REPORT_MISSING", row["failures"])
+        self.assertIn("WRITE_REPORT_ARTIFACT", {item["code"] for item in row["improvements"]})
+
+    def test_wrong_model_lane_names_the_provider_fix(self):
+        """Catches a substituted model being described as a report repair."""
+        self.write_status("RUN_FAILED", exit_code=5, reason="RETURNED_MODEL_MISMATCH")
+        self.write_validity(False, ("identity_mismatch",))
+        self.write_clean_report_artifacts()
+        (self.fx.trace / "lane-integrity.json").write_text(
+            json.dumps({"schema": 1, "verdict": "breach",
+                        "reason": "RETURNED_MODEL_MISMATCH", "detail": "wrong family"}),
+            encoding="utf-8",
+        )
+
+        result = self.verdict()
+
+        row = json.loads(result.stdout)
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn("USE_EXACT_MODEL_LANE", {item["code"] for item in row["improvements"]})
+
+    def test_empty_lane_integrity_is_invalid_not_clean(self):
+        """Catches an empty lane artifact bypassing the exact-model requirement."""
+        self.write_status("ACCEPTED")
+        self.write_validity()
+        self.write_clean_report_artifacts()
+        (self.fx.trace / "lane-integrity.json").write_text("{}\n", encoding="utf-8")
+
+        result = self.verdict()
+
+        row = json.loads(result.stdout)
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertFalse(row["successful"])
+        self.assertIn("LANE_INTEGRITY_INVALID", row["failures"])
+        self.assertIn(
+            "REPAIR_LANE_INTEGRITY_EVIDENCE",
+            {item["code"] for item in row["improvements"]},
+        )
+
+    def test_unsealed_trace_names_the_evidence_fix(self):
+        """Catches an unreplayable trace producing no evidence-preservation action."""
+        self.write_status("RUN_FAILED", exit_code=6)
+        self.write_validity(False, ("trace_unsealed",))
+        self.write_clean_report_artifacts()
+        (self.fx.trace / "seal-failure.json").write_text(
+            json.dumps({"schema": 1, "stage": "audit"}), encoding="utf-8"
+        )
+
+        result = self.verdict()
+
+        row = json.loads(result.stdout)
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn("REBUILD_SELF_CONTAINED_TRACE",
+                      {item["code"] for item in row["improvements"]})
+
+    def test_malformed_upstream_ledger_names_the_observability_fix(self):
+        """Catches unreadable paid-call evidence being silently ignored."""
+        self.write_status("ACCEPTED")
+        self.write_validity()
+        self.write_clean_report_artifacts()
+        (self.fx.trace / "upstream-completed.jsonl").write_text("{broken\n", encoding="utf-8")
+
+        result = self.verdict()
+
+        row = json.loads(result.stdout)
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn("UPSTREAM_LEDGER_INVALID", row["failures"])
+        self.assertIn("REPAIR_UPSTREAM_LEDGER", {item["code"] for item in row["improvements"]})
+
+
+if __name__ == "__main__":
+    unittest.main()

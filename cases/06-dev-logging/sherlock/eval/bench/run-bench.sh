@@ -559,7 +559,8 @@ for name, argv in gates.items():
         row["blocking"] = blocking
         # A gate is clean only if BOTH signals say so. An exit 0 with blocking>0
         # is the citecheck --ledger bug; a non-zero exit with no json is a crash.
-        if done.returncode != 0 or (blocking or 0) > 0: out["verdict"] = "blocking"
+        # Missing or malformed machine output is unknown, never equivalent to zero.
+        if done.returncode != 0 or type(blocking) is not int or blocking > 0: out["verdict"] = "blocking"
     except Exception as error:                       # a crashed gate is not a pass
         row["exit_code"] = None; row["error"] = repr(error)[:500]
         out["verdict"] = "blocking"

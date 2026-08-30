@@ -51,6 +51,15 @@ def extract_parser():
     return textwrap.dedent(src[start:end])
 
 
+def extract_verdict_decision():
+    """Exercise the real line that reduces exit code plus machine count."""
+    src = open(BENCH, encoding="utf-8").read()
+    start = src.index("        # A gate is clean only if BOTH signals say so.")
+    start = src.index("        if ", start)
+    end = src.index("\n", start)
+    return textwrap.dedent(src[start:end])
+
+
 class TestPrettyJsonIsParsed(unittest.TestCase):
     def run_parser(self, stdout):
         ns = {"json": json, "done": type("D", (), {"stdout": stdout})(), "row": {}}
@@ -77,6 +86,16 @@ class TestPrettyJsonIsParsed(unittest.TestCase):
     def test_no_json_at_all_stays_none(self):
         row = self.run_parser("совсем не json\n")
         self.assertIsNone(row["blocking"])
+
+    def test_missing_machine_count_fails_closed(self):
+        """Exit zero cannot replace the second signal required by the contract."""
+        ns = {
+            "blocking": None,
+            "done": type("D", (), {"returncode": 0})(),
+            "out": {"verdict": "clean"},
+        }
+        exec(extract_verdict_decision(), ns)
+        self.assertEqual(ns["out"]["verdict"], "blocking")
 
 
 class TestExitCodeReflectsTheVerdict(unittest.TestCase):
