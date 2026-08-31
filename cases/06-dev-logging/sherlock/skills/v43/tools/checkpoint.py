@@ -201,11 +201,20 @@ def render_handoff(work, done, row, partial=False):
         # in one context, so a long stage has to be many bounded sessions - and
         # the coverage rule («triage EVERY line») is untouched: the stage does not
         # advance until every row is closed.
+        if done in ("draft", "repair"):
+            state_line = ("СОСТОЯНИЕ: %s/checkpoint.json (stage=%s, разделов "
+                          "написано %d из %d, отчёт %d байт)"
+                          % (work, stage, row.get("report_sections_written", 0),
+                             row.get("report_sections_required", 0),
+                             row.get("report_bytes", 0)))
+        else:
+            state_line = ("СОСТОЯНИЕ: %s/checkpoint.json (stage=%s, разобрано "
+                          "%d из %d, осталось %d)"
+                          % (work, stage, row["resolved"], row["total"],
+                             row["unresolved"]))
         return "\n".join([
             "ЧАСТЬ СТУПЕНИ %s ЗАВЕРШЕНА — СТУПЕНЬ ПРОДОЛЖАЕТСЯ." % done,
-            "СОСТОЯНИЕ: %s/checkpoint.json (stage=%s, разобрано %d из %d, "
-            "осталось %d)" % (work, stage, row["resolved"], row["total"],
-                              row["unresolved"]),
+            state_line,
             "",
             "ДАЛЬШЕ — ВЫПОЛНИ ТРИ ДЕЙСТВИЯ ПО ПОРЯДКУ, НЕ ПРОДОЛЖАЙ В ЭТОЙ "
             "СЕССИИ:",
@@ -249,10 +258,44 @@ def render_handoff(work, done, row, partial=False):
     return "\n".join(lines) + "\n"
 
 
-#: Stages where a BATCH boundary means something. Only `triage` iterates over a
-#: countable worklist; `draft` and `repair` are single pieces of work, so a
-#: "partial draft" would be a boundary with nothing to measure.
-BATCHED_STAGES = ("triage",)
+#: Stages where a BATCH boundary means something. v42 allowed only `triage`,
+#: on the grounds that `draft` and `repair` are one piece of work with nothing
+#: to count. On 20260830T190815Z-v42 that made the one mechanism that bounds a
+#: session refuse to run in the 55-minute draft stage where BOTH clipped state
+#: snapshots happened. `draft` and `repair` DO have a countable unit: the
+#: report's own sections, which reportcheck and citecheck already enumerate.
+BATCHED_STAGES = ("triage", "draft", "repair")
+
+#: Section headings the report must carry, by the contract's own roles. Used
+#: only to report progress at a partial boundary — the STAGE still does not
+#: advance until the stage is actually finished.
+REPORT_REQUIRED_ROLES = ("inventory", "missing_data", "coverage", "window",
+                         "verdict")
+
+
+def report_sections(work):
+    """{'written', 'required', 'roles'} counted from work/report.md on disk.
+
+    An in-progress section counts as ABSENT: the count comes from headings that
+    are on disk with a non-empty body, so a half-written section cannot be
+    mistaken for a finished one by the next session.
+    """
+    path = os.path.join(str(work), "report.md")
+    roles, current, body = [], None, []
+    try:
+        with open(path, encoding="utf-8") as fh:
+            lines = fh.read().splitlines()
+    except OSError:
+        return {"written": 0, "required": len(REPORT_REQUIRED_ROLES), "roles": []}
+    for raw in lines + ["## "]:
+        if raw.startswith("## "):
+            if current and any(s.strip() for s in body):
+                roles.append(current)
+            current, body = raw[3:].strip(), []
+        else:
+            body.append(raw)
+    return {"written": len(roles), "required": len(REPORT_REQUIRED_ROLES),
+            "roles": roles}
 
 
 def handoff(work, done, partial=False):
@@ -272,6 +315,15 @@ def handoff(work, done, partial=False):
                              % (", ".join(BATCHED_STAGES), done))
         row["stage_partial"] = True
         row[BOUNDARY_SEQ] = int(row.get(BOUNDARY_SEQ, 0) or 0) + 1
+        if done in ("draft", "repair"):
+            secs = report_sections(work)
+            row["report_sections_written"] = secs["written"]
+            row["report_sections_required"] = secs["required"]
+            try:
+                row["report_bytes"] = os.path.getsize(
+                    os.path.join(str(work), "report.md"))
+            except OSError:
+                row["report_bytes"] = 0
         row["updated_at"] = datetime.datetime.now(
             datetime.timezone.utc).isoformat()
         atomic_text(work / "checkpoint.json",
