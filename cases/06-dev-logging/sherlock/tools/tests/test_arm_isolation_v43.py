@@ -64,13 +64,25 @@ check('dirname "$ARM_HOME"' in src,
       "run-bench.sh must pass the directory CONTAINING the arm, not ARM_HOME "
       "itself — qwen scans a custom skill dir for skill FOLDERS")
 
+# Enabling `user` re-admits every skill installed under $HOME. run-bench must
+# mute them by NAME (skills.disabled), and must never mute the arm's own name.
+check('--disable-skill' in src,
+      "run-bench.sh never mutes the skills the re-enabled `user` level admits")
+check('[ "$n" = "$ARM_SKILL_NAME" ] && continue' in src,
+      "run-bench.sh could mute the arm's own skill name")
+
 sys.path.insert(0, os.path.join(SHERLOCK, "measure"))
 import importlib.util
 spec = importlib.util.spec_from_file_location("corporate_settings", SETTINGS)
 cs = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(cs)
 
+block = cs.skills_settings("/opt/sherlock-arm", ["Superpowers", "linear", "", None])
+check(block.get("disabled") == ["linear", "superpowers"],
+      "skills_settings does not normalise/emit the mute list: %r" % block)
 block = cs.skills_settings("/opt/sherlock-arm")
+check("disabled" not in block,
+      "skills_settings emits an empty mute list: %r" % block)
 check(block.get("directories") == ["/opt/sherlock-arm"],
       "skills_settings drops the directory: %r" % block)
 check("user" not in block.get("disabledLevels", []),

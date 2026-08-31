@@ -38,7 +38,11 @@ def check(cond, msg):
 
 def extract_install_block():
     src = open(BENCH, encoding="utf-8").read()
-    start_marker = 'ARM_HOME="${SHERLOCK_ARM_HOME:-$HOME/.qwen/skills/log-rca}"'
+    # v43 moved ARM_HOME's resolution UP, beside the settings write that has to
+    # name the arm's directory. Slice the INSTALL block alone — starting at the
+    # resolution would now drag the whole settings section in with it, and this
+    # test would be exercising code it says nothing about.
+    start_marker = '  # ARM_HOME was resolved and range-checked above'
     end_marker = 'export QWEN_SKILL_ROOT="$ARM_HOME"'
     start = src.index(start_marker)
     end = src.index(end_marker, start)
@@ -46,12 +50,13 @@ def extract_install_block():
 
 
 def run_block(env_extra, skills, arm, arm_home, w="/nonexistent-W"):
-    # The extracted block itself REASSIGNS ARM_HOME from
-    # ${SHERLOCK_ARM_HOME:-...}, so the way to steer it is the env var the
-    # real script uses, not a plain shell assignment ahead of it.
+    # The install block no longer resolves ARM_HOME itself, so the harness
+    # supplies it the same way the real script does — from SHERLOCK_ARM_HOME,
+    # through the one resolution line the script now runs earlier.
     block = extract_install_block()
     script = "set -uo pipefail\nset -e\n"
     script += 'SKILLS=%r\nARM=%r\nW=%r\n' % (skills, arm, w)
+    script += 'ARM_HOME="${SHERLOCK_ARM_HOME:-$HOME/.qwen/skills/log-rca}"\n' 
     script += block
     script += '\necho "RESULT_ARM_HOME=$ARM_HOME"\n'
     env = {**os.environ, **env_extra, "SHERLOCK_ARM_HOME": arm_home}
@@ -65,6 +70,11 @@ def run_block(env_extra, skills, arm, arm_home, w="/nonexistent-W"):
 def make_shipped_arm(root, content="original"):
     arm_dir = os.path.join(root, "skills", "v43")
     os.makedirs(os.path.join(arm_dir, "tools"), exist_ok=True)
+    # A real arm always carries SKILL.md, and run-bench now reads the arm's own
+    # skill name out of it (to keep that name out of the mute list). A fixture
+    # without it is not an arm.
+    with open(os.path.join(arm_dir, "SKILL.md"), "w") as fh:
+        fh.write("---\nname: sherlock\ndescription: fixture\n---\n")
     with open(os.path.join(arm_dir, "brief.py"), "w") as fh:
         fh.write(content)
     with open(os.path.join(arm_dir, "tools", "statecheck.py"), "w") as fh:
