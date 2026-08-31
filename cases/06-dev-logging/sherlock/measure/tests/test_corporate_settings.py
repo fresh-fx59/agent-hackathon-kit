@@ -215,6 +215,26 @@ def main():
         check("qwen-code bundle present for the key check (skipped off-box)",
               True)
 
+    # ── the handoff threshold must beat auto-compaction ─────────────────────
+    # Auto-compaction cannot be disabled in qwen 0.22.0, so the driver outruns
+    # it instead: `handoff_threshold` must sit far enough below `auto` that no
+    # single turn's growth can carry the prompt past it.
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("corporate_settings", TOOL)
+    cs = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(cs)
+    auto, _hard = cs.thresholds(GATE)
+    t = cs.handoff_threshold(GATE, 20000)
+    check("auto moved", auto == 222700, auto)
+    check("handoff threshold is below auto", t < auto,
+          "t=%d auto=%d" % (t, auto))
+    check("margin between threshold and auto is at least one turn's growth",
+          auto - t >= 20000, "auto-t=%d" % (auto - t))
+    check("threshold is not so low the run would clear constantly",
+          t > 150000, t)
+    check("the threshold uses the MEASURED max jump (53,369), not the "
+          "brief's 20,000 placeholder", t == 169331, t)
+
     print(("✗ FAILED: " + ", ".join(FAILED)) if FAILED
           else "✓ the corporate profile is provably under the gate")
     return 1 if FAILED else 0

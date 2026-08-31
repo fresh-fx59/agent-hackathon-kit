@@ -194,6 +194,38 @@ def thresholds(window):
     return auto, hard
 
 
+#: One turn's growth, MEASURED — not the brief's 20,000 placeholder — on the
+#: paid run 20260830T190815Z-v42's own ledger (upstream-completed.jsonl, 405
+#: completed calls carrying usage):
+#:
+#:   peak prompt_tokens             = 229,123 (already above auto = 222,700,
+#:                                    which is why compaction fired that run)
+#:   max positive jump, call-to-call = 53,369
+#:   top 8 jumps (tokens)      13613 14929 17852 20229 20351 20920 28379 53369
+#:   p95 jump = 10,301   median jump = 1,963
+#:
+#: MAX, NOT P95. The threshold's whole job is that ONE turn cannot carry the
+#: prompt past `auto`. Sizing to p95 leaves one turn in twenty free to defeat
+#: it — the same "should fit" reasoning this file exists to refuse elsewhere.
+#: So the headroom is the largest jump this run ever produced, not a
+#: percentile of it.
+TURN_GROWTH_HEADROOM = 53369
+
+
+def handoff_threshold(window, max_tokens):
+    """Prompt-token count at which the driver forces a partial handoff.
+
+    Auto-compaction CANNOT be disabled in qwen 0.22.0 — `context.
+    autoCompactThreshold` must be greater than 0 and at most 1 (installed
+    bundle, docs/configuration/settings.md:336). So it is outrun instead: the
+    clear fires far enough below `auto` that compaction never gets a turn —
+    far enough meaning at least one turn's worst measured growth,
+    TURN_GROWTH_HEADROOM, below it.
+    """
+    auto, _hard = thresholds(window)
+    return int(auto - TURN_GROWTH_HEADROOM)
+
+
 #: The measured generation-only throughput of the CloseRouter rehearsal lane
 #: (r3's 142 good calls: 142,661 completion tokens in 1,164,091 ms of
 #: generation). Restated from measure/lane_guard.py so this CLI can be run on
@@ -480,7 +512,8 @@ def prove(window, max_tokens, gate, generation_window_s=None,
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("command",
-                    choices=("emit", "prove", "verify-bundle", "check-budget"))
+                    choices=("emit", "prove", "verify-bundle", "check-budget",
+                             "handoff-threshold"))
     ap.add_argument("--gate", type=int, default=GATE)
     ap.add_argument("--window", type=int, default=None,
                     help="declared context window (default: the gate itself)")
@@ -531,6 +564,20 @@ def main():
             return 1
         print("\u2713 the output budget %d satisfies every declared constraint"
               % args.max_tokens)
+        return 0
+
+    if args.command == "handoff-threshold":
+        # THE RUN'S OWN PROOF, EMITTED BESIDE output-budget-proof.txt. The
+        # driver clears BEFORE `auto` fires, not at it — see corporate_
+        # settings.handoff_threshold's docstring for why 20,000 (the brief's
+        # placeholder) was replaced with the measured max jump, 53,369.
+        auto, hard = thresholds(window)
+        t = handoff_threshold(window, args.max_tokens)
+        print("window=%d max_tokens=%d" % (window, args.max_tokens))
+        print("auto=%d hard=%d" % (int(auto), int(hard)))
+        print("TURN_GROWTH_HEADROOM=%d" % TURN_GROWTH_HEADROOM)
+        print("handoff_threshold=%d" % t)
+        print("margin (auto - handoff_threshold)=%d" % (int(auto) - t))
         return 0
 
     if args.command == "prove":

@@ -227,6 +227,35 @@ def checkpoint_row(work):
     return row if isinstance(row, dict) else {}
 
 
+def ledger_prompt_tokens(path):
+    """The last completed call's PROVIDER-MEASURED prompt tokens, or 0.
+
+    Provider-measured, not estimated: this is the same source lane_guard uses
+    for the 262,000 ceiling. The arm's own byte count was considered and
+    rejected — read_file returns into the model's context without passing
+    through any arm tool, so an arm-side meter is an estimate the MODEL owns,
+    in a run where the model has twice edited measurement inputs.
+    """
+    last = 0
+    try:
+        with open(path, encoding="utf-8", errors="replace") as fh:
+            for line in fh:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    row = json.loads(line)
+                except ValueError:
+                    continue
+                usage = row.get("usage") or {}
+                n = usage.get("prompt_tokens")
+                if isinstance(n, int) and n > 0:
+                    last = n
+    except OSError:
+        return 0
+    return last
+
+
 def stage_of(work):
     return checkpoint_row(work).get("stage")
 
@@ -341,9 +370,16 @@ class Session(object):
 def drive(argv, cwd, work, first_prompt, reseed, stage_budget_s, settle_s,
           transcript, skill_command, events_path=None, ledger_path="",
           idle_nudge_s=0, max_nudges=3, nudge_text="продолжай",
-          handoff_grace_s=8.0):
+          handoff_grace_s=8.0, threshold=0):
     ses = Session(argv, cwd, dict(os.environ), transcript)
     events = []
+    # THE LATCH: holds the boundary_seq the driver was at when it crossed the
+    # threshold and typed `handoff --partial`, or None when no crossing is
+    # pending. Its whole job is «one crossing produces one handoff» — without
+    # it, every poll after the crossing would type another `handoff --partial`
+    # until the boundary finally moved, and a slow arm would be typed at
+    # dozens of times for one checkpoint.
+    awaiting_boundary = None
 
     def note(kind, detail=""):
         row = {"at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
@@ -406,11 +442,24 @@ def drive(argv, cwd, work, first_prompt, reseed, stage_budget_s, settle_s,
                     return 3, events
                 now = stage_of(work)
                 now_boundary = boundary_of(work)
-                # EITHER fact is a boundary: the stage moved forward, or the arm
-                # took a batch boundary inside the same stage. The counter is
-                # monotonic, so «greater than» is the whole test.
+                # NEVER CLEAR BEFORE THE CHECKPOINT IS DURABLE ON DISK. This
+                # real-advance test runs FIRST, ahead of the threshold check
+                # below: the arm can advance the boundary/stage on its own in
+                # the very poll that also crosses the threshold (measured
+                # live — the target's reply to the reseed line both finished
+                # the batch AND the ledger was still over threshold on the
+                # next poll), and firing the threshold branch anyway would
+                # type a redundant `handoff --partial` for a boundary that
+                # already closed. Checking the real advance first costs
+                # nothing — the threshold is checked again next poll if it is
+                # still crossed.
                 if (stage_index(now) > stage_index(seen)
                         or now_boundary > seen_boundary):
+                    # The latch is cleared here, at the ONE place that already
+                    # proves the boundary advanced through the real
+                    # `batch_boundary` / `stage_advanced` path — never a second
+                    # clear path, the one that exists.
+                    awaiting_boundary = None
                     partial = (stage_index(now) <= stage_index(seen))
                     # The block names the stage that CLOSED, which for a full
                     # advance is the one we were on, not the one we move to.
@@ -418,6 +467,23 @@ def drive(argv, cwd, work, first_prompt, reseed, stage_budget_s, settle_s,
                     seen = now if now is not None else seen
                     seen_boundary = now_boundary
                     break
+                # Sized to TURN_GROWTH_HEADROOM (corporate_settings.py): the
+                # largest single jump this project has ever measured between
+                # two consecutive completed calls, so one turn cannot carry
+                # the prompt past `auto` before this fires. `awaiting_boundary
+                # is None` is the latch — one crossing produces one `handoff
+                # --partial`, not one per poll. It MUST be an `is None` check,
+                # not a truthiness check: a run's first crossing latches at
+                # boundary_seq 0, which is falsy, so `not awaiting_boundary`
+                # would still read True on the very next poll and refire.
+                elif (ledger_path and threshold and awaiting_boundary is None
+                        and ledger_prompt_tokens(ledger_path) >= threshold):
+                    note("threshold_handoff",
+                         "%s (prompt %d >= %d)"
+                         % (seen, ledger_prompt_tokens(ledger_path), threshold))
+                    ses.type("handoff --partial %s" % seen, settle=2.0)
+                    awaiting_boundary = now_boundary
+                    continue
                 # A STALL IS NOT A LONG STAGE, and the ledger can tell them
                 # apart. Bounded on purpose: a target that answers a nudge with
                 # nothing is broken, and nudging it forever would hide that
@@ -555,6 +621,10 @@ def main():
                          "judging whether it was shown (0 = judge instantly)")
     ap.add_argument("--transcript", required=True)
     ap.add_argument("--events", default=None, help="write the event log here too")
+    ap.add_argument("--threshold", type=int, default=0,
+                    help="ledger prompt_tokens at which the driver forces a "
+                         "partial handoff and clears — 0 disables it "
+                         "(corporate_settings.handoff_threshold())")
     ap.add_argument("command", nargs=argparse.REMAINDER,
                     help="-- the interactive command to drive (default: qwen)")
     args = ap.parse_args()
@@ -574,7 +644,7 @@ def main():
                        args.stage_budget_s, args.settle_s, args.transcript,
                        args.skill_command, args.events, args.ledger,
                        args.idle_nudge_s, args.max_nudges, args.nudge_text,
-                       args.handoff_grace_s)
+                       args.handoff_grace_s, args.threshold)
     print("rc=%d" % rc)
     return rc
 

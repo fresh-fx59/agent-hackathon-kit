@@ -25,6 +25,10 @@ SHERLOCK = os.path.dirname(MEASURE)
 DRIVER = os.path.join(MEASURE, "interactive-drive.py")
 FAKE = os.path.join(HERE, "fixtures", "fake_qwen.py")
 CHECKPOINT = os.path.join(SHERLOCK, "skills", "v40", "tools", "checkpoint.py")
+# v40's checkpoint.py has no --partial flag. Task 7 added it in v43 — used only
+# by the threshold-handoff scenario below, which needs `handoff --partial` to
+# actually advance boundary_seq the way the real arm would.
+CHECKPOINT_V43 = os.path.join(SHERLOCK, "skills", "v43", "tools", "checkpoint.py")
 FAILED = []
 
 HEADER = u"# id\tвердикт\n"
@@ -38,25 +42,33 @@ def check(name, cond, detail=""):
         FAILED.append(name)
 
 
-def scenario(mode, budget=25):
+def scenario(mode, budget=25, checkpoint=CHECKPOINT, ledger=None, threshold=None,
+             extra_env=None):
     root = tempfile.mkdtemp(prefix="drive-")
     work = os.path.join(root, "work")
     os.makedirs(work)
     open(os.path.join(work, "worklist.tsv"), "w", encoding="utf-8").write(
         HEADER + "".join(ROW % i for i in range(1, 4)))
-    subprocess.run([sys.executable, CHECKPOINT, "init", "--work", work],
+    subprocess.run([sys.executable, checkpoint, "init", "--work", work],
                    capture_output=True)
     env = dict(os.environ)
-    env.update({"FAKE_WORK": work, "FAKE_CHECKPOINT": CHECKPOINT,
+    env.update({"FAKE_WORK": work, "FAKE_CHECKPOINT": checkpoint,
                 "FAKE_MODE": mode, "PYTHONUNBUFFERED": "1"})
+    if extra_env:
+        env.update(extra_env)
     transcript = os.path.join(root, "transcript.log")
     events = os.path.join(root, "events.jsonl")
-    p = subprocess.run(
-        [sys.executable, DRIVER, "--work", work, "--cwd", root,
-         "--prompt", "РАЗБЕРИ ИНЦИДЕНТ", "--transcript", transcript,
-         "--events", events, "--stage-budget-s", str(budget),
-         "--settle-s", "0.8", "--", sys.executable, "-u", FAKE],
-        capture_output=True, text=True, env=env, timeout=budget * 4)
+    argv = [sys.executable, DRIVER, "--work", work, "--cwd", root,
+            "--prompt", "РАЗБЕРИ ИНЦИДЕНТ", "--transcript", transcript,
+            "--events", events, "--stage-budget-s", str(budget),
+            "--settle-s", "0.8"]
+    if ledger is not None:
+        argv += ["--ledger", ledger]
+    if threshold is not None:
+        argv += ["--threshold", str(threshold)]
+    argv += ["--", sys.executable, "-u", FAKE]
+    p = subprocess.run(argv, capture_output=True, text=True, env=env,
+                       timeout=budget * 4)
     rows = [json.loads(l) for l in open(events, encoding="utf-8")] \
         if os.path.exists(events) else []
     return p, work, rows, open(transcript, "rb").read().decode("utf-8", "replace")
@@ -139,6 +151,54 @@ def main():
     check("a stage that never advances is STAGE_TIMEOUT",
           p.returncode == 4 and "STAGE_TIMEOUT" in [r["event"] for r in rows],
           "rc=%d %s" % (p.returncode, [r["event"] for r in rows]))
+
+    # --- the ledger threshold forces a partial handoff -----------------------
+    # A ledger whose last completed call is over the threshold must make the
+    # driver type `handoff --partial <stage>` and then WAIT for boundary_seq on
+    # disk before it sends /clear. Clearing first would throw away the state the
+    # checkpoint is supposed to carry.
+    tmp = tempfile.mkdtemp(prefix="ledger-")
+    led = os.path.join(tmp, "upstream.jsonl")
+    with open(led, "w", encoding="utf-8") as fh:
+        fh.write(json.dumps({"usage": {"prompt_tokens": 100}}) + "\n")
+        fh.write(json.dumps({"usage": {"prompt_tokens": 210000}}) + "\n")
+    check("ledger_prompt_tokens reads the last completed call",
+          idrive.ledger_prompt_tokens(led) == 210000,
+          idrive.ledger_prompt_tokens(led))
+    check("a missing ledger reads 0, not an exception",
+          idrive.ledger_prompt_tokens(os.path.join(tmp, "nope.jsonl")) == 0,
+          idrive.ledger_prompt_tokens(os.path.join(tmp, "nope.jsonl")))
+
+    # END TO END: seed the ledger above threshold BEFORE the driver even
+    # starts, so the very first poll must cross it. An obedient fake target
+    # (fake_qwen.py's generic `handoff --partial ` handler) then really calls
+    # checkpoint.py handoff --partial and boundary_seq advances on disk — the
+    # existing batch_boundary path is what must then send /clear.
+    with open(led, "w", encoding="utf-8") as fh:
+        fh.write(json.dumps({"usage": {"prompt_tokens": 300000}}) + "\n")
+    p, work, rows, text = scenario("threshold_then_happy",
+                                   checkpoint=CHECKPOINT_V43,
+                                   ledger=led, threshold=169331)
+    kinds = [r["event"] for r in rows]
+    check("every threshold_handoff is immediately followed by batch_boundary "
+          "— the latch fires once per crossing, not once per poll",
+          [kinds[i + 1] for i, k in enumerate(kinds[:-1])
+           if k == "threshold_handoff"]
+          == ["batch_boundary"] * kinds.count("threshold_handoff"),
+          kinds)
+    check("the ledger stays over threshold the whole run, so every batched "
+          "stage (triage, draft, repair) needed its own crossing — the fake "
+          "never completes a stage on its own in this mode",
+          kinds.count("threshold_handoff") == 3, kinds)
+    check("no /clear was typed before boundary_seq advanced on disk — the "
+          "checkpoint must be durable before the driver clears",
+          text.index("handoff --partial")
+          < text.index("Starting a new session, resetting chat"),
+          "handoff@%r clear@%r"
+          % (text.find("handoff --partial"),
+             text.find("Starting a new session, resetting chat")))
+    check("the run still finishes: the threshold handoff did not strand it",
+          p.returncode == 0, "rc=%d %s" % (p.returncode, kinds))
 
     print(("✗ FAILED: " + ", ".join(FAILED)) if FAILED
           else "✓ the interactive driver is proven on a stand-in")

@@ -63,12 +63,55 @@ while True:
         loaded = True
         say("Base directory for this skill: /fake/skills/v40")
         continue
+    if loaded and line.startswith("handoff --partial "):
+        # The driver, having crossed the token threshold, types this the way a
+        # human would ask the model to checkpoint mid-stage. An obedient target
+        # runs checkpoint.py handoff --partial for real, advancing boundary_seq
+        # on disk — the only fact the driver trusts.
+        st = stage()
+        out = subprocess.run([sys.executable, CHECKPOINT, "handoff", "--work",
+                              WORK, "--done", st, "--partial"],
+                             capture_output=True, text=True)
+        say(out.stdout or ("partial handoff failed: " + out.stderr))
+        continue
     if not loaded:
         say("I have no skill loaded, so I do not know what to do.")
         continue
     if MODE == "die":
         say("boom")
         raise SystemExit(1)
+    if MODE == "threshold_then_happy":
+        # A stage the driver must interrupt: the FIRST message of every stage
+        # is answered with idle chatter and nothing else, so a driver that
+        # never checks the ledger would sit here for the whole stage budget.
+        # Only once `stage_partial` is true on disk — i.e. the driver's own
+        # `handoff --partial` (handled generically above) already ran for
+        # THIS stage — does the stage complete normally. This is the shape
+        # the threshold branch exists for: crossing the token ceiling BEFORE
+        # the arm would otherwise have finished on its own.
+        try:
+            row = json.load(open(os.path.join(WORK, "checkpoint.json"),
+                                 encoding="utf-8"))
+        except (OSError, ValueError):
+            row = {}
+        st = row.get("stage", "triage")
+        if not row.get("stage_partial"):
+            say("Сейчас посмотрю логи...")
+            continue
+        if st == "triage":
+            rows = open(os.path.join(WORK, "worklist.tsv"),
+                       encoding="utf-8").read()
+            open(os.path.join(WORK, "worklist.tsv"), "w",
+                encoding="utf-8").write(rows.replace(
+                    "\t?", "\tN a.log:1 «q» n=1 фон"))
+        if st in ("draft", "repair"):
+            open(os.path.join(WORK, "report.md"), "w", encoding="utf-8").write(
+                "# Отчёт Sherlock\n\n## Находки\n\n### Н-1 fake\n")
+        out = subprocess.run([sys.executable, CHECKPOINT, "handoff", "--work",
+                             WORK, "--done", st], capture_output=True,
+                            text=True)
+        say(out.stdout or ("handoff failed: " + out.stderr))
+        continue
     if MODE == "partial_then_finish":
         # First turn of the triage stage: close HALF the rows and take a BATCH
         # boundary, exactly as a real arm does when its context is filling and

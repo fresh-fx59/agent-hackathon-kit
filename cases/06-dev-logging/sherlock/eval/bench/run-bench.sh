@@ -972,6 +972,14 @@ PY
 # the settings they produced. v41's «why 6700?» took a human replaying a ledger.
 printf '%s\n' "$BUDGET_PROOF" > "$TRACE/output-budget-proof.txt"
 
+# THE HANDOFF THRESHOLD, WRITTEN INTO THE RUN'S OWN ARTEFACTS THE SAME WAY.
+# Fix 8's rule: a budget that can end a run must be chosen by the launcher and
+# recorded, not left implicit in a constant nobody launching the run can see.
+HANDOFF_THRESHOLD_PROOF="$(python3 "$MEASURE_DIR/corporate-settings.py" \
+  handoff-threshold --window "$([ "$CTX_WINDOW" != "0" ] && echo "$CTX_WINDOW" || echo 262000)" \
+  --max-tokens "$MAX_OUT" 2>&1)"
+printf '%s\n' "$HANDOFF_THRESHOLD_PROOF" > "$TRACE/handoff-threshold-proof.txt"
+
 if [ "$ARM" != "none" ]; then
   # THE ARM DOES NOT LIVE IN THE MODEL'S WRITABLE ROOT. Two of five v42 runs
   # ended arm_intact:false because it did: $W is the model's own cwd and it has
