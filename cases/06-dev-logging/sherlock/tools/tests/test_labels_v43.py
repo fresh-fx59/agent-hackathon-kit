@@ -133,6 +133,13 @@ new = report_defects("report-20260830-v43.md")
 check(new == [],
       "the MIGRATED report must be label-clean: %r" % sorted(set(new)))
 
+# --- the skill must TEACH the positions ----------------------------------
+skill = open(os.path.join(V43, "SKILL.md"), encoding="utf-8").read()
+for needed in ("[!PROVEN]", "[!REPORTED]", "[!INFERENCE]", "метка"):
+    check(needed in skill, "SKILL.md does not teach %s" % needed)
+check("PROVEN:" not in skill.replace("[!PROVEN]", ""),
+      "SKILL.md still teaches the old inline `PROVEN:` form")
+
 for msg in FAILED:
     print("FAIL: %s" % msg)
 print("OK" if not FAILED else "FAILED %d" % len(FAILED))
