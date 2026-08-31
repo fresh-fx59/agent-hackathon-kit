@@ -105,6 +105,34 @@ for role in ("inventory", "missing_data", "coverage", "window", "verdict"):
     check(defects("- `%s` текст\n" % CITE, role=role) == [],
           "exempt role %s must produce no label defect" % role)
 
+# --- the real report from the paid run -----------------------------------
+FIX = os.path.join(HERE, "fixtures", "v43")
+
+
+def report_defects(name):
+    path = os.path.join(FIX, name)
+    with open(path, encoding="utf-8") as fh:
+        text = fh.read()
+    sections = rc.split_sections(text, CONTRACT)
+    return [d["defect"] for d in rc.check_labels(sections, CONTRACT)]
+
+
+old = report_defects("report-20260830-v42.md")
+check(old.count("label_unknown") == 0,
+      "the OLD report must raise no label_unknown under v43 — the 32 blockers "
+      "were false: %d" % old.count("label_unknown"))
+# The old report has 47 `- LABEL:` bullets total (43 PROVEN + 1 REPORTED + 3
+# INFERENCE), but 4 of those are aggregate lines with a `jq` query instead of
+# a path:line citation, so check_labels correctly does not require a label on
+# them — verified empirically, not a migration bug. 43 is the real floor.
+check(old.count("assertion_unlabelled") >= 43,
+      "the OLD report uses `- PROVEN:`-style bullets, so under v43 they must "
+      "be unlabelled until migrated: %d" % old.count("assertion_unlabelled"))
+
+new = report_defects("report-20260830-v43.md")
+check(new == [],
+      "the MIGRATED report must be label-clean: %r" % sorted(set(new)))
+
 for msg in FAILED:
     print("FAIL: %s" % msg)
 print("OK" if not FAILED else "FAILED %d" % len(FAILED))
