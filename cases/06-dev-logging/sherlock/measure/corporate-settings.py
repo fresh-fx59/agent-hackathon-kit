@@ -109,9 +109,10 @@ CORE_TOOLS = [
     "run_shell_command", "todo_write", "list_directory", "skill", "agent",
 ]
 
-#: `project` stays enabled — that is where the sherlock skill is installed. The
-#: other three levels are the 18,066-token catalogue r6 paid for on every call.
-DISABLED_SKILL_LEVELS = ["bundled", "extension", "user"]
+#: The arm no longer lives at `project` level — that level IS the model's
+#: writable root. It is installed at `user` level, outside it. `project` joins
+#: the disabled set for exactly the reason `user` used to be in it.
+DISABLED_SKILL_LEVELS = ["bundled", "extension", "project"]
 
 
 def profile(window=GATE, max_tokens=MAX_TOKENS):  # noqa: C901

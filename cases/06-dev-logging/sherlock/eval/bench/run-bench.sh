@@ -462,7 +462,7 @@ PY
   # assignment and `set -e` turns into "abandon the whole finalisation". That is
   # how this check first shipped, and it silently cost three artifacts — the
   # lane verdict, gates.json and replay.sh — on every arm=none run.
-  ARM_SNAPSHOT="$(ls -d "$W"/.qwen/skills/*/ 2>/dev/null | head -1 || true)"
+  ARM_SNAPSHOT="$ARM_HOME"
   if [ "$ARM" != "none" ] && [ -n "$ARM_SNAPSHOT" ] && [ -d "$SKILLS/$ARM" ]; then
     if ! python3 "$HERE/arm-integrity.py" --shipped "$SKILLS/$ARM" \
            --snapshot "$ARM_SNAPSHOT" --out "$TRACE/arm-integrity.json" \
@@ -476,7 +476,7 @@ PY
       fi
     fi
   fi
-  ARM_TOOLS="$(dirname "$(ls "$W"/.qwen/skills/*/tools/citecheck.py 2>/dev/null | head -1)" 2>/dev/null)"
+  ARM_TOOLS="$ARM_HOME/tools"
   if [ -n "$ARM_TOOLS" ] && [ -d "$ARM_TOOLS" ]; then
     # NOT `cp -a`: that copied the live tree's `__pycache__` too, and a `.pyc`
     # embeds `co_filename` — an absolute path into the running checkout. Inert
@@ -570,7 +570,7 @@ with open(target, "w", encoding="utf-8") as fh:
 print("  gates.json verdict=%s" % out["verdict"])
 PY
     else
-      echo "  ⚠ no gate tools found under $W/.qwen/skills/*/tools — gates.json not written" >&2
+      echo "  ⚠ no gate tools found under \$ARM_HOME/tools — gates.json not written" >&2
     fi
   fi
 
@@ -973,10 +973,24 @@ PY
 printf '%s\n' "$BUDGET_PROOF" > "$TRACE/output-budget-proof.txt"
 
 if [ "$ARM" != "none" ]; then
-  mkdir -p "$W/.qwen/skills"
-  cp -r "$SKILLS/$ARM" "$W/.qwen/skills/log-rca" || exit 1
-  export QWEN_SKILL_ROOT="$W/.qwen/skills/log-rca"
+  # THE ARM DOES NOT LIVE IN THE MODEL'S WRITABLE ROOT. Two of five v42 runs
+  # ended arm_intact:false because it did: $W is the model's own cwd and it has
+  # an unrestricted shell under --approval-mode yolo. Corporate never had this
+  # hole — writes outside the launch directory are a hard block in the customer's
+  # harness (operator, 2026-08-31) — so our lane buys the same property with a
+  # path outside $W, owned by a different user where the box allows it.
+  ARM_HOME="${SHERLOCK_ARM_HOME:-$HOME/.qwen/skills/log-rca}"
+  case "$ARM_HOME" in
+    "$W"|"$W"/*) printf 'run-bench.sh: ARM_HOME %s is inside the writable root %s\n' \
+                   "$ARM_HOME" "$W" >&2; exit 2 ;;
+  esac
+  rm -rf "$ARM_HOME"
+  mkdir -p "$(dirname "$ARM_HOME")"
+  cp -r "$SKILLS/$ARM" "$ARM_HOME" || exit 1
+  chmod -R a-w "$ARM_HOME"
+  export QWEN_SKILL_ROOT="$ARM_HOME"
 else
+  ARM_HOME=""
   unset QWEN_SKILL_ROOT
 fi
 
