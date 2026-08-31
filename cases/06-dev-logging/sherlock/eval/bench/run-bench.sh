@@ -1044,6 +1044,23 @@ printf '%s\n' "$HANDOFF_THRESHOLD_PROOF" > "$TRACE/handoff-threshold-proof.txt"
 # one number, one source — and a missing or non-numeric value aborts.
 HANDOFF_THRESHOLD="$(printf '%s\n' "$HANDOFF_THRESHOLD_PROOF" \
   | sed -n 's/^handoff_threshold=\([0-9][0-9]*\)$/\1/p' | head -1)"
+# AN EXPLICIT, RECORDED OVERRIDE — so a crossing can be PROVEN, not waited for.
+# Free run 20260831T211110Z-v43 armed the threshold correctly and then peaked at
+# 157,097 prompt tokens, 12,234 short of 169,331: the branch never fired, and
+# §A.5.3 says a run that never reached the threshold proves nothing about it and
+# must say so rather than pass. Lowering it deliberately is the only way to
+# exercise the live path on demand. It is written into the run's own proof file
+# in the same breath, so a run driven by an override can never be mistaken for
+# one that met the derived number.
+if [ -n "${SHERLOCK_HANDOFF_THRESHOLD:-}" ]; then
+  case "$SHERLOCK_HANDOFF_THRESHOLD" in
+    ''|*[!0-9]*) echo "✗ SHERLOCK_HANDOFF_THRESHOLD must be a positive integer" >&2; exit 1 ;;
+  esac
+  HANDOFF_THRESHOLD_PROOF="$HANDOFF_THRESHOLD_PROOF
+OVERRIDDEN: SHERLOCK_HANDOFF_THRESHOLD=$SHERLOCK_HANDOFF_THRESHOLD replaces the derived handoff_threshold=$HANDOFF_THRESHOLD for this run. This run does NOT demonstrate the derived threshold."
+  HANDOFF_THRESHOLD="$SHERLOCK_HANDOFF_THRESHOLD"
+  printf '%s\n' "$HANDOFF_THRESHOLD_PROOF" > "$TRACE/handoff-threshold-proof.txt"
+fi
 case "$HANDOFF_THRESHOLD" in
   ''|*[!0-9]*)
     printf '%s\n' "$HANDOFF_THRESHOLD_PROOF" >&2

@@ -44,9 +44,21 @@ check("HANDOFF_THRESHOLD_PROOF" in src and
       "launcher wrote — a second constant can drift from the recorded one")
 
 # And an unparseable proof must abort, never fall through to a disabled driver.
-parts = src.split("HANDOFF_THRESHOLD=")
-check(len(parts) > 1 and "refusing to launch" in parts[1][:800],
+# Anchor on the guard itself. Splitting on "HANDOFF_THRESHOLD=" now lands in
+# the SHERLOCK_HANDOFF_THRESHOLD override block, which is a different check.
+guard = re.search(r'case "\$HANDOFF_THRESHOLD" in.*?esac', src, re.S)
+check(guard is not None and "refusing to launch" in guard.group(0),
       "a missing or non-numeric handoff_threshold does not abort the launch")
+
+# The override exists so a crossing can be forced, but it must never be silent.
+ov = re.search(r'if \[ -n "\$\{SHERLOCK_HANDOFF_THRESHOLD:-\}" \]; then.*?\nfi\n',
+               src, re.S)
+check(ov is not None, "no SHERLOCK_HANDOFF_THRESHOLD override")
+if ov:
+    check("OVERRIDDEN" in ov.group(0) and "handoff-threshold-proof.txt" in ov.group(0),
+          "the override does not record itself in the run's own proof file, so "
+          "an overridden run could be mistaken for one that met the derived "
+          "threshold")
 
 # The ledger branch really is gated on a truthy threshold, which is why 0 is
 # not a harmless default but a silent off switch.
