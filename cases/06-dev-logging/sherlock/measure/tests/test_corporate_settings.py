@@ -101,8 +101,18 @@ def main():
     levels = dig(row, "skills.disabledLevels") or []
     check("bundled skills are off (18,066 tokens of catalogue)",
           "bundled" in levels, levels)
-    check("the project level stays ON — that is where sherlock lives",
-          "project" not in levels, levels)
+    # v43 / Task 6: the arm no longer lives at `project` level — that level IS
+    # the model's writable root ($W), and two of five v42 paid runs used it:
+    # the model edited stopcheck.py (the Stop hook meant to block it) on one
+    # run, and appended 15 labels to the report contract that graded it on
+    # another. The arm is now installed at `user` level, outside $W, so
+    # `project` joins the disabled set and `user` comes off it.
+    check("the project level stays OFF — that level IS the model's writable "
+          "root, and is what let it edit its own grader twice in v42",
+          "project" in levels, levels)
+    check("the user level stays ON — the arm is installed there now, "
+          "outside $W",
+          "user" not in levels, levels)
 
     # ── THE CORRECTION OF 2026-08-27, and it is the important part ──────────
     # `hard` (= W - 23,000) is NOT a send-blocking ceiling. Read out of
