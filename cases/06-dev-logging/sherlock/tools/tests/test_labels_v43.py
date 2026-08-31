@@ -121,10 +121,25 @@ old = report_defects("report-20260830-v42.md")
 check(old.count("label_unknown") == 0,
       "the OLD report must raise no label_unknown under v43 — the 32 blockers "
       "were false: %d" % old.count("label_unknown"))
-# The old report has 47 `- LABEL:` bullets total (43 PROVEN + 1 REPORTED + 3
-# INFERENCE), but 4 of those are aggregate lines with a `jq` query instead of
-# a path:line citation, so check_labels correctly does not require a label on
-# them — verified empirically, not a migration bug. 43 is the real floor.
+# 43 is not "47 bullets minus a few". Of the 47 `- LABEL:` bullets, 18 do
+# NOT match the contract's citation regex `([^\s`'"(),;\[\]<>]+?):(\d+)`
+# (a non-space token immediately before `:digits`), across four classes:
+#   10 — `агрегат: ... ` jq-aggregate lines, cited only by a query string,
+#        no `файл:строка`.
+#    3 — `там же :NNN` continuation refs — the SPACE before `:` breaks the
+#        regex (the token group must be adjacent to the colon), so these
+#        escape both label checking and citation validation. Pre-existing
+#        citation-contract behaviour, not introduced by v43 — see the open
+#        question in task-3-4-report.md.
+#    3 — bare `INFERENCE:`/`REPORTED:` sentences with no citation at all
+#        (lines 30, 51, 52 of the fixture).
+#    2 — assertions with no `path:digits` anywhere: the SKU count (line 71)
+#        and a `cite.py: ... — zero-match` diagnostic string (line 54).
+# So 47 − 18 = 29 cited bullets that check_labels DOES require a label on.
+# The other 43 − 29 = 14 come from non-bullet units flagged separately: the
+# 7 paragraph-style assertions and 7 table rows migrated in this same fixture
+# (see the commit body). 29 + 14 = 43 — verified against this exact fixture,
+# not assumed.
 check(old.count("assertion_unlabelled") >= 43,
       "the OLD report uses `- PROVEN:`-style bullets, so under v43 they must "
       "be unlabelled until migrated: %d" % old.count("assertion_unlabelled"))
