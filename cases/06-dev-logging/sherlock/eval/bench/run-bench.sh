@@ -1034,6 +1034,22 @@ HANDOFF_THRESHOLD_PROOF="$(python3 "$MEASURE_DIR/corporate-settings.py" \
   handoff-threshold --window "$([ "$CTX_WINDOW" != "0" ] && echo "$CTX_WINDOW" || echo 262000)" \
   --max-tokens "$MAX_OUT" 2>&1)"
 printf '%s\n' "$HANDOFF_THRESHOLD_PROOF" > "$TRACE/handoff-threshold-proof.txt"
+# ...AND ARMED IN THE DRIVER THAT HAS TO ACT ON IT. Caught by scoring the first
+# free v43 run: the proof file was written, the number was right, and
+# interactive-drive.py was launched WITHOUT --threshold — which defaults to 0
+# and disables the branch entirely. The run climbed to a peak of 200,161 prompt
+# tokens, crossed 169,331 at call 39 and never cleared until the next STAGE
+# boundary 28 minutes later. A recorded threshold nothing reads is a claim, not
+# a mechanism, so it is parsed back out of the proof the launcher just wrote —
+# one number, one source — and a missing or non-numeric value aborts.
+HANDOFF_THRESHOLD="$(printf '%s\n' "$HANDOFF_THRESHOLD_PROOF" \
+  | sed -n 's/^handoff_threshold=\([0-9][0-9]*\)$/\1/p' | head -1)"
+case "$HANDOFF_THRESHOLD" in
+  ''|*[!0-9]*)
+    printf '%s\n' "$HANDOFF_THRESHOLD_PROOF" >&2
+    echo "✗ refusing to launch: no numeric handoff_threshold in the proof above — the driver would run with the threshold disabled" >&2
+    exit 1 ;;
+esac
 
 if [ "$ARM" != "none" ]; then
   # THE ARM DOES NOT LIVE IN THE MODEL'S WRITABLE ROOT. Two of five v42 runs
@@ -1336,6 +1352,7 @@ run_qwen_interactive() {
       --events "$W/interactive-events.jsonl" \
       --stage-budget-s "${SHERLOCK_STAGE_BUDGET_S:-5400}" \
       --ledger "$TRACE.upstream.jsonl" \
+      --threshold "$HANDOFF_THRESHOLD" \
       --idle-nudge-s "${SHERLOCK_IDLE_NUDGE_S:-0}" \
       --max-nudges "${SHERLOCK_MAX_NUDGES:-3}" \
       -- "$QWEN" --auth-type openai --model "$CLIENT_MODEL" \
