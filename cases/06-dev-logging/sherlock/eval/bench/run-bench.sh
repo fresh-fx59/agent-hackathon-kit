@@ -984,10 +984,38 @@ if [ "$ARM" != "none" ]; then
     "$W"|"$W"/*) printf 'run-bench.sh: ARM_HOME %s is inside the writable root %s\n' \
                    "$ARM_HOME" "$W" >&2; exit 2 ;;
   esac
-  rm -rf "$ARM_HOME"
-  mkdir -p "$(dirname "$ARM_HOME")"
-  cp -r "$SKILLS/$ARM" "$ARM_HOME" || exit 1
-  chmod -R a-w "$ARM_HOME"
+  # IDEMPOTENT, AND HONEST ABOUT WHO OWNS ARM_HOME. `chmod -R a-w` above used to
+  # run every time, which made run N+1's `rm -rf` fail (removing an entry needs
+  # write on the DIRECTORY, and run N just cleared it) — a regression a
+  # reviewer caught by running this script twice. On contabo ARM_HOME is
+  # root:root 0555 and this process runs as claude-developer, so `rm -rf` can
+  # never succeed there at all: attempting it anyway would either abort every
+  # run after the first, or — if some future install ran as root — silently
+  # regrade against a copy this process was never supposed to touch. So: if we
+  # own ARM_HOME, reinstall it fresh (idempotent). If we do not, never remove
+  # or overwrite it — verify its content is byte-identical to the shipped arm
+  # and use it as-is; a stale or divergent arm must abort, never run silently.
+  if [ ! -e "$ARM_HOME" ]; then
+    mkdir -p "$(dirname "$ARM_HOME")"
+    cp -r "$SKILLS/$ARM" "$ARM_HOME" || exit 1
+    chmod -R a-w "$ARM_HOME"
+  elif chmod -R u+w "$ARM_HOME" 2>/dev/null && [ -w "$ARM_HOME" ]; then
+    # We can actually reclaim write on it (mode bits only — a previous run of
+    # OURS locked it with `chmod -R a-w` below). Idempotent: wipe and reinstall.
+    rm -rf "$ARM_HOME"
+    mkdir -p "$(dirname "$ARM_HOME")"
+    cp -r "$SKILLS/$ARM" "$ARM_HOME" || exit 1
+    chmod -R a-w "$ARM_HOME"
+  else
+    # We could NOT reclaim write — root-owned on contabo, or flagged immutable.
+    # This is not ours to touch. Use it only if it is byte-identical to the
+    # shipped arm; a stale or divergent copy must abort, never run silently.
+    if ! ARM_DIFF="$(diff -rq "$SKILLS/$ARM" "$ARM_HOME" 2>&1)"; then
+      printf 'run-bench.sh: ARM_HOME %s is not writable by this process (not ours to reinstall) and its content diverges from the shipped arm %s — refusing to run against a stale or divergent grader:\n%s\n' \
+        "$ARM_HOME" "$SKILLS/$ARM" "$ARM_DIFF" >&2
+      exit 2
+    fi
+  fi
   export QWEN_SKILL_ROOT="$ARM_HOME"
 else
   ARM_HOME=""
