@@ -139,7 +139,10 @@ class RunBenchWiring(unittest.TestCase):
 
     def test_it_runs_before_the_gate_tools_are_resolved(self):
         call = self.src.index("arm-integrity.py")
-        tools = self.src.index('ARM_TOOLS="$(dirname')
+        # v43 moved the arm out of $W, so ARM_TOOLS is no longer derived with
+        # `dirname` — it is "$ARM_HOME/tools". The ORDER is what this test is
+        # about, so anchor on the assignment itself, not on the old expression.
+        tools = self.src.index('ARM_TOOLS="')
         self.assertLess(call, tools, "integrity check runs after gate selection")
 
     def test_the_shipped_arm_is_restored(self):

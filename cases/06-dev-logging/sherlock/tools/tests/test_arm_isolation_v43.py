@@ -47,6 +47,48 @@ if m:
           "user skill level is still disabled, but the arm now lives there: %r"
           % levels)
 
+
+# THE ISOLATION MUST NOT SILENTLY DISABLE THE SKILL. Moving the arm out of $W
+# only works if the target is TOLD where it went. qwen 0.22.0 discovers skills
+# from `settings.skills.directories` (chunk-6QSA4JHL.js:37943 -> customSkillDirs)
+# and registers each entry at the **`user`** level (chunk-T6XLJRQY.js:96211).
+# QWEN_SKILL_ROOT feeds hooks and NOTHING else. So two things must hold together
+# or the arm vanishes with no error at all: run-bench.sh must write
+# skills.directories, and `user` must never be in disabledLevels while it does.
+check('skills-json' in src,
+      "run-bench.sh never asks corporate-settings.py for the skills block, so "
+      "nothing writes skills.directories and the relocated arm is undiscoverable")
+check('SKILLS_JSON' in src and '"skills\\": $SKILLS_BLOCK' in src,
+      "run-bench.sh does not splice a skills block into the settings it writes")
+check('dirname "$ARM_HOME"' in src,
+      "run-bench.sh must pass the directory CONTAINING the arm, not ARM_HOME "
+      "itself — qwen scans a custom skill dir for skill FOLDERS")
+
+sys.path.insert(0, os.path.join(SHERLOCK, "measure"))
+import importlib.util
+spec = importlib.util.spec_from_file_location("corporate_settings", SETTINGS)
+cs = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(cs)
+
+block = cs.skills_settings("/opt/sherlock-arm")
+check(block.get("directories") == ["/opt/sherlock-arm"],
+      "skills_settings drops the directory: %r" % block)
+check("user" not in block.get("disabledLevels", []),
+      "skills_settings emits a directory while `user` is disabled: %r" % block)
+
+# And the guard itself must bite, not just happen to be satisfied today.
+saved = list(cs.DISABLED_SKILL_LEVELS)
+try:
+    cs.DISABLED_SKILL_LEVELS = saved + ["user"]
+    try:
+        cs.skills_settings("/opt/sherlock-arm")
+        check(False, "skills_settings accepted a directory with `user` disabled "
+                     "— the arm would silently never load")
+    except ValueError:
+        pass
+finally:
+    cs.DISABLED_SKILL_LEVELS = saved
+
 for msg in FAILED:
     print("FAIL: %s" % msg)
 print("OK" if not FAILED else "FAILED %d" % len(FAILED))

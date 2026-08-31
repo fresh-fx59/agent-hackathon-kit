@@ -894,6 +894,35 @@ fi
 # `check-budget`'s arithmetic and the file the target reads, and 0 writes
 # nothing at all. It is NOT a licence for a budget below the compaction
 # reserve — `check-budget` no longer accepts one on any ground.
+# THE ARM IS DISCOVERED THROUGH `skills.directories` — NOT THROUGH AN ENV VAR.
+# Found before the v43 acceptance run, not after it: this script exports
+# QWEN_SKILL_ROOT=$ARM_HOME, but in qwen 0.22.0 that variable ONLY feeds hook
+# commands. Discovery is settings-driven — chunk-6QSA4JHL.js:37943 reads
+# `settings.skills.directories` into `customSkillDirs`, and
+# chunk-T6XLJRQY.js:96211 appends each entry to the base dirs of the **`user`**
+# level. So once v43 moved the arm out of $W to /opt/sherlock-arm/log-rca,
+# nothing pointed the target at it: `/sherlock` would never load, with no error
+# and no empty-catalogue warning — the run would grade against no grader.
+# Two properties follow, and corporate-settings.py `skills-json` owns both so
+# they cannot drift from the profile: the entry is the directory CONTAINING the
+# skill folder (dirname of ARM_HOME), and `user` must stay out of
+# disabledLevels. That helper REFUSES to emit a directory alongside a disabled
+# `user` level, so the coupling is a startup error rather than a silent hole.
+# ARM_HOME is resolved here, above the settings write, and reused by the
+# install block below.
+ARM_HOME=""
+SKILLS_JSON=''
+if [ "$ARM" != "none" ]; then
+  ARM_HOME="${SHERLOCK_ARM_HOME:-$HOME/.qwen/skills/log-rca}"
+  case "$ARM_HOME" in
+    "$W"|"$W"/*) printf 'run-bench.sh: ARM_HOME %s is inside the writable root %s\n' \
+                   "$ARM_HOME" "$W" >&2; exit 2 ;;
+  esac
+  SKILLS_BLOCK="$(python3 "$MEASURE_DIR/corporate-settings.py" skills-json \
+    --skill-directory "$(dirname "$ARM_HOME")")" || exit 1
+  SKILLS_JSON=", \"skills\": $SKILLS_BLOCK"
+fi
+
 STL_JSON=''
 if [ "$SESSION_TOKEN_LIMIT" != "0" ]; then
   STL_JSON=", \"sessionTokenLimit\": $SESSION_TOKEN_LIMIT"
@@ -935,15 +964,20 @@ if arm_ge "$ARM" 30; then
   if arm_ge "$ARM" 31; then
     MEMORY_JSON=', "memory": { "enableManagedAutoMemory": false, "enableDreams": false }, "model_fallback": { "enabled": false }'
   fi
-  printf '{ "model": { "generationConfig": { "contextWindowSize": %s%s, "timeout": %s, "maxRetries": %s }%s }%s%s }\n' \
-    "$CTX_WINDOW" "$SAMPLING_JSON" "$REQUEST_TIMEOUT_MS" "$MAX_RETRIES" "$STL_JSON" "$EXCLUDE_JSON" "$MEMORY_JSON" > "$W/.qwen/settings.json"
+  printf '{ "model": { "generationConfig": { "contextWindowSize": %s%s, "timeout": %s, "maxRetries": %s }%s }%s%s%s }\n' \
+    "$CTX_WINDOW" "$SAMPLING_JSON" "$REQUEST_TIMEOUT_MS" "$MAX_RETRIES" "$STL_JSON" "$EXCLUDE_JSON" "$MEMORY_JSON" "$SKILLS_JSON" > "$W/.qwen/settings.json"
 elif [ "$CTX_WINDOW" != "0" ]; then
   mkdir -p "$W/.qwen"
-  printf '{ "model": { "generationConfig": { "contextWindowSize": %s%s }%s }%s }\n' \
-    "$CTX_WINDOW" "$SAMPLING_JSON" "$STL_JSON" "$EXCLUDE_JSON" > "$W/.qwen/settings.json"
-elif [ -n "$EXCLUDE_JSON" ]; then
+  printf '{ "model": { "generationConfig": { "contextWindowSize": %s%s }%s }%s%s }\n' \
+    "$CTX_WINDOW" "$SAMPLING_JSON" "$STL_JSON" "$EXCLUDE_JSON" "$SKILLS_JSON" > "$W/.qwen/settings.json"
+elif [ -n "$EXCLUDE_JSON" ] || [ -n "$SKILLS_JSON" ]; then
+  # No model block on this path, so the two optional fragments are the whole
+  # object and the leading ", " of the first one has to go. Never emit a filler
+  # key: an unknown key in the settings the target reads is a lie in the
+  # artefact we seal as qwen-settings-pre.json.
   mkdir -p "$W/.qwen"
-  printf '{ "tools": { "exclude": ["agent"] } }\n' > "$W/.qwen/settings.json"
+  TAIL_JSON="$EXCLUDE_JSON$SKILLS_JSON"
+  printf '{ %s }\n' "${TAIL_JSON#, }" > "$W/.qwen/settings.json"
 fi
 
 # Seal the exact target settings before the target can observe or mutate them.
@@ -987,11 +1021,9 @@ if [ "$ARM" != "none" ]; then
   # hole — writes outside the launch directory are a hard block in the customer's
   # harness (operator, 2026-08-31) — so our lane buys the same property with a
   # path outside $W, owned by a different user where the box allows it.
-  ARM_HOME="${SHERLOCK_ARM_HOME:-$HOME/.qwen/skills/log-rca}"
-  case "$ARM_HOME" in
-    "$W"|"$W"/*) printf 'run-bench.sh: ARM_HOME %s is inside the writable root %s\n' \
-                   "$ARM_HOME" "$W" >&2; exit 2 ;;
-  esac
+  # ARM_HOME was resolved and range-checked above, beside the settings write
+  # that has to name it. Do not re-derive it here — the settings file and the
+  # installed arm must be the same path or the target loads nothing.
   # IDEMPOTENT, AND HONEST ABOUT WHO OWNS ARM_HOME. `chmod -R a-w` above used to
   # run every time, which made run N+1's `rm -rf` fail (removing an entry needs
   # write on the DIRECTORY, and run N just cleared it) — a regression a

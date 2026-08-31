@@ -115,7 +115,36 @@ CORE_TOOLS = [
 DISABLED_SKILL_LEVELS = ["bundled", "extension", "project"]
 
 
-def profile(window=GATE, max_tokens=MAX_TOKENS):  # noqa: C901
+def skills_settings(directory=None):
+    """The `skills` block the target actually reads — the ONE source of truth.
+
+    qwen 0.22.0 does NOT discover a skill from `QWEN_SKILL_ROOT`; that variable
+    only feeds hook commands. Discovery is settings-driven:
+    `chunk-6QSA4JHL.js:37943` reads `settings.skills.directories` into
+    `customSkillDirs`, and `chunk-T6XLJRQY.js:96211` appends each entry to the
+    base dirs of the **`user`** level. Two consequences, both load-bearing:
+
+    * the entry is the directory CONTAINING the skill folder, not the skill
+      folder itself (pass `dirname(ARM_HOME)`, discovered as `log-rca`);
+    * `user` must stay OUT of `disabledLevels`, or the arm is silently never
+      loaded and the run grades against no grader with no error.
+
+    The assertion below makes that coupling a startup failure rather than a
+    silent empty catalogue.
+    """
+    levels = list(DISABLED_SKILL_LEVELS)
+    block = {"disabledLevels": levels}
+    if directory:
+        if "user" in levels:
+            raise ValueError(
+                "skills.directories is set to %r but the `user` level is "
+                "disabled — qwen registers custom skill dirs AT the user "
+                "level, so the arm would silently never load" % (directory,))
+        block["directories"] = [directory]
+    return block
+
+
+def profile(window=GATE, max_tokens=MAX_TOKENS, skill_directory=None):  # noqa: C901
     return {
         "model": {
             "generationConfig": {
@@ -163,7 +192,7 @@ def profile(window=GATE, max_tokens=MAX_TOKENS):  # noqa: C901
             # requested instead of chopping what comes back.
         },
         "mcp": {"excluded": []},
-        "skills": {"disabledLevels": list(DISABLED_SKILL_LEVELS)},
+        "skills": skills_settings(skill_directory),
     }
 
 
@@ -513,7 +542,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("command",
                     choices=("emit", "prove", "verify-bundle", "check-budget",
-                             "handoff-threshold"))
+                             "handoff-threshold", "skills-json"))
     ap.add_argument("--gate", type=int, default=GATE)
     ap.add_argument("--window", type=int, default=None,
                     help="declared context window (default: the gate itself)")
@@ -536,10 +565,26 @@ def main():
     ap.add_argument("--ttft-reserve-s", type=float, default=TTFT_RESERVE_S,
                     help="seconds reserved for the first token (the largest "
                          "TTFT ever recorded here, not the average)")
+    ap.add_argument("--skill-directory", default=None,
+                    help="directory CONTAINING the arm's skill folder; emitted "
+                         "as skills.directories, which qwen registers at the "
+                         "`user` level")
     ap.add_argument("--extra-key", action="append", default=[],
                     help="also require this dotted key (used by the tests)")
     args = ap.parse_args()
     window = args.window if args.window is not None else args.gate
+
+    if args.command == "skills-json":
+        # Emitted as ONE compact JSON object so a shell launcher can splice it
+        # into the settings file it writes without re-deriving the levels and
+        # drifting from this module.
+        try:
+            block = skills_settings(args.skill_directory)
+        except ValueError as exc:
+            sys.stderr.write("\u2717 %s\n" % exc)
+            return 1
+        print(json.dumps(block, sort_keys=True))
+        return 0
 
     if args.command == "emit":
         print(json.dumps(profile(window, args.max_tokens), indent=2,
@@ -607,7 +652,8 @@ def main():
                                  errors="replace").read())
     haystack = "\n".join(text)
     missing = []
-    paths = list(key_paths(profile(window, args.max_tokens))) + args.extra_key
+    paths = list(key_paths(profile(window, args.max_tokens,
+                                   args.skill_directory))) + args.extra_key
     for path in paths:
         leaf = path.rsplit(".", 1)[-1]
         # A settings key reaches the code as its own identifier, so the leaf is
