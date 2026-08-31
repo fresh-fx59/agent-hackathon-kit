@@ -115,7 +115,7 @@ CORE_TOOLS = [
 DISABLED_SKILL_LEVELS = ["bundled", "extension", "project"]
 
 
-def skills_settings(directory=None):
+def skills_settings(directory=None, disabled_names=()):
     """The `skills` block the target actually reads — the ONE source of truth.
 
     qwen 0.22.0 does NOT discover a skill from `QWEN_SKILL_ROOT`; that variable
@@ -134,6 +134,15 @@ def skills_settings(directory=None):
     """
     levels = list(DISABLED_SKILL_LEVELS)
     block = {"disabledLevels": levels}
+    names = sorted({n.strip().lower() for n in disabled_names if n and n.strip()})
+    if names:
+        # `user` cannot be disabled any more (the arm is registered AT that
+        # level), so every skill already installed in this HOME now loads and
+        # competes for the window — 5,066 characters of catalogue on this box,
+        # `superpowers` among them. `skills.disabled` is a NAME list read at
+        # startup (chunk-6QSA4JHL.js:37937 -> disabledSkillNamesProvider), so
+        # it suppresses them by name without disabling the level the arm needs.
+        block["disabled"] = names
     if directory:
         if "user" in levels:
             raise ValueError(
@@ -565,6 +574,10 @@ def main():
     ap.add_argument("--ttft-reserve-s", type=float, default=TTFT_RESERVE_S,
                     help="seconds reserved for the first token (the largest "
                          "TTFT ever recorded here, not the average)")
+    ap.add_argument("--disable-skill", action="append", default=[],
+                    help="suppress this skill NAME (repeatable); used to mute "
+                         "skills already installed in HOME that the now-enabled "
+                         "`user` level would otherwise load")
     ap.add_argument("--skill-directory", default=None,
                     help="directory CONTAINING the arm's skill folder; emitted "
                          "as skills.directories, which qwen registers at the "
@@ -579,7 +592,7 @@ def main():
         # into the settings file it writes without re-deriving the levels and
         # drifting from this module.
         try:
-            block = skills_settings(args.skill_directory)
+            block = skills_settings(args.skill_directory, args.disable_skill)
         except ValueError as exc:
             sys.stderr.write("\u2717 %s\n" % exc)
             return 1

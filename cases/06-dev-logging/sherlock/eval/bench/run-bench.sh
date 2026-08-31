@@ -918,8 +918,29 @@ if [ "$ARM" != "none" ]; then
     "$W"|"$W"/*) printf 'run-bench.sh: ARM_HOME %s is inside the writable root %s\n' \
                    "$ARM_HOME" "$W" >&2; exit 2 ;;
   esac
+  # AND MUTE EVERY OTHER SKILL THIS HOME ALREADY HAS. Enabling `user` is the
+  # price of registering a custom skill dir, and it re-admits whatever is
+  # installed under $HOME — 14 vault skills / 5,066 characters of catalogue on
+  # contabo, `superpowers` among them, none of which the v42 runs ever saw.
+  # `skills.disabled` is a NAME list, so it suppresses them without disabling
+  # the level the arm needs. Enumerated from disk, not hard-coded, and the
+  # arm's own name is never in it.
+  ARM_SKILL_NAME="$(sed -n 's/^name:[[:space:]]*//p' "$SKILLS/$ARM/SKILL.md" | head -1)"
+  [ -n "$ARM_SKILL_NAME" ] || { echo "✗ $SKILLS/$ARM/SKILL.md has no name:" >&2; exit 1; }
+  MUTE_ARGS=""
+  for skdir in "$HOME/.qwen/skills" "$HOME/.agents/skills" "$HOME/.claude/skills"; do
+    [ -d "$skdir" ] || continue
+    for sk in "$skdir"/*/SKILL.md; do
+      [ -f "$sk" ] || continue
+      n="$(sed -n 's/^name:[[:space:]]*//p' "$sk" | head -1)"
+      [ -n "$n" ] || n="$(basename "$(dirname "$sk")")"
+      [ "$n" = "$ARM_SKILL_NAME" ] && continue
+      MUTE_ARGS="$MUTE_ARGS --disable-skill $n"
+    done
+  done
+  # shellcheck disable=SC2086
   SKILLS_BLOCK="$(python3 "$MEASURE_DIR/corporate-settings.py" skills-json \
-    --skill-directory "$(dirname "$ARM_HOME")")" || exit 1
+    --skill-directory "$(dirname "$ARM_HOME")" $MUTE_ARGS)" || exit 1
   SKILLS_JSON=", \"skills\": $SKILLS_BLOCK"
 fi
 
