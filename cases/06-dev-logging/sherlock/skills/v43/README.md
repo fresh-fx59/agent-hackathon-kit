@@ -164,7 +164,10 @@ qwen
 3. **Wait.** The skill maps the corpus, builds a worklist and hands the phases to
    subagents. Do not help it; do not read files for it.
 4. When it prints a **handoff block**, type `/clear`, then type `/sherlock`
-   again. **That is all.** You do not need to tell it where it was: the first
+   again. **That is all.** The block now also appears **mid-stage** — inside
+   `draft` and `repair`, not only at a stage boundary — and the three actions
+   (`/clear`, `/sherlock`, paste the continuation line) are identical when it
+   does; you do not need to tell it where it was: the first
    command of every Sherlock session is
    `checkpoint.py resume --work ./work`, which reads `work/checkpoint.json` and
    prints `СТУПЕНЬ СЕЙЧАС: <stage>`. A cleared session has no conversation, and
@@ -206,6 +209,15 @@ python3 .qwen/skills/log-rca/tools/triagecheck.py --worklist work/worklist.tsv -
 The paid run cleared this bar unaided: citecheck 0, statecheck 0 (864 records, 0
 unaccounted), triagecheck 0 with 250 of 250 rows closed.
 
+**Every assertion carries a label** — `[!PROVEN]`, `[!REPORTED]`, or
+`[!INFERENCE]` — at a fixed position: after the bullet marker for a list item,
+alone on its own line for a paragraph, or in a dedicated `метка` column for a
+table row. A list-item assertion looks like:
+
+```
+- [!PROVEN] служба упала в 03:14 «Fatal error: OOM» app.log:1934
+```
+
 ## What goes wrong, and what it means
 
 | symptom | cause | what to do |
@@ -215,7 +227,7 @@ unaccounted), triagecheck 0 with 250 of 250 rows closed.
 | `/clear` does nothing | background work still alive | wait, then `/clear` again |
 | it starts reading `worklist.tsv` itself | it ignored the cursor | tell it to use `worklist.py next` and `verdict --from-stdin` |
 | a gate exits non-zero | the report is not finished | give the failure back to the session; never hand-edit the report |
-| context climbs past 230,000 | a handoff block was missed | `/clear`, `/sherlock`; it resumes from the checkpoint |
+| контекст дошёл до 169 331 | пора закрыть часть ступени | набери `handoff --partial`, затем `/clear`, `/sherlock`, вставь строку продолжения |
 
 ## Known gaps
 
