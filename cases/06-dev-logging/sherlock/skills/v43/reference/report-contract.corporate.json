@@ -7,14 +7,8 @@
 
   "labels": {
     "allowed": ["PROVEN", "REPORTED", "INFERENCE"],
-    "candidate": "(?<![0-9A-Za-z_])\\[?([A-Z][A-Z_]{3,})\\]?(?![0-9A-Za-z_])",
-    "ignore": ["UTC", "HTTP", "HTTPS", "JSON", "JSONL", "EVTX", "PCAP",
-               "NTLM", "KERBEROS", "POWERSHELL", "WMIC", "TSV", "CSV",
-               "SHA1", "SHA256", "MD5", "NULL", "TODO", "NOTE",
-               "WARN", "INFO", "ERROR", "DEBUG", "TRACE", "FATAL",
-               "LOGON", "LOGOFF", "SYSTEM", "SECURITY", "NETWORK",
-               "TIME", "TRUE", "FALSE", "NONE", "TYPE", "NAME", "PATH",
-               "USER", "HOST", "FILE", "LINE", "DATA", "EVENT"],
+    "table_column": "метка",
+    "positions": {"*": ["paragraph", "list", "table"]},
     "exempt_roles": ["inventory", "missing_data", "coverage", "window", "verdict"]
   },
 

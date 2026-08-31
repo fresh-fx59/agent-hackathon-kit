@@ -102,14 +102,18 @@ def load_contract(path):
         if key not in data:
             raise ContractError("в контракте нет ключа %r: %s" % (key, path))
     labels = data["labels"]
-    if not isinstance(labels, dict) or not labels.get("allowed") \
-            or not labels.get("candidate"):
-        raise ContractError("labels должен нести allowed и candidate: %s" % path)
+    if not isinstance(labels, dict) or not labels.get("allowed"):
+        raise ContractError("labels должен нести allowed: %s" % path)
+    if labels.get("candidate") or labels.get("ignore"):
+        raise ContractError(
+            "labels.candidate/labels.ignore удалены в v43 — метка опознаётся "
+            "по ПОЗИЦИИ, а не поиском по тексту: %s" % path)
+    if not labels.get("table_column"):
+        raise ContractError("labels должен нести table_column: %s" % path)
     if not isinstance(data["sections"], list) or not data["sections"]:
         raise ContractError("sections должен быть непустым списком: %s" % path)
     try:
         data["_cite_re"] = re.compile(data["citation"])
-        data["_label_re"] = re.compile(labels["candidate"])
         for sec in data["sections"]:
             if not isinstance(sec, dict) or "role" not in sec or "title" not in sec:
                 raise ContractError("раздел без role/title: %s" % path)
@@ -280,15 +284,69 @@ def blocks(lines):
     return out
 
 
-def labels_in(text, contract):
-    ignore = set(contract["labels"].get("ignore") or [])
+#: A label is a MARKER at a POSITION. Never a token found in text.
+#: On 20260830T190815Z-v42 the free-text scan produced 32 false blockers from
+#: corpus usernames and SQL keywords, and the model's answer was to append 15
+#: tokens to an ignore list. There is no list any more, so there is nothing to
+#: append to: `ADMINI` is not a label because it is not in a label position.
+MARKER_RE = re.compile(r"\[!([A-Z][A-Z0-9_]*)\]")
+PARA_MARKER_RE = re.compile(r"^\s*>?\s*\[!([A-Z][A-Z0-9_]*)\]\s*$")
+LIST_MARKER_RE = re.compile(r"^\s*[-*+]\s+\[!([A-Z][A-Z0-9_]*)\](\s|$)")
+
+
+def _table_cells(line):
+    """The cells of a markdown table row, outer pipes dropped."""
+    s = line.strip()
+    if not s.startswith("|"):
+        return None
+    parts = s.split("|")
+    return [c.strip() for c in parts[1:-1]] if len(parts) >= 3 else []
+
+
+def marker_at(line):
+    """The label word if `line` is a paragraph marker line, else None."""
+    m = PARA_MARKER_RE.match(line)
+    return m.group(1) if m else None
+
+
+def marker_in_unit(unit, contract, header=None):
+    """(word, defect) for one assertion unit.
+
+    `defect` is None, "label_position" (a marker sits somewhere that is not a
+    label position) or "label_conflict" (more than one marker in the unit).
+    `header` is the table's header cells when the unit is a table row.
+    """
     found = []
-    for m in contract["_label_re"].finditer(text):
-        tok = m.group(1)
-        if tok in ignore:
+    misplaced = False
+    for raw in unit:
+        cells = _table_cells(raw)
+        if cells is not None:
+            col = contract["labels"]["table_column"]
+            idx = header.index(col) if header and col in header else None
+            for i, cell in enumerate(cells):
+                m = MARKER_RE.search(cell)
+                if not m:
+                    continue
+                if i == idx and MARKER_RE.fullmatch(cell):
+                    found.append(m.group(1))
+                else:
+                    misplaced = True
             continue
-        found.append(tok)
-    return found
+        word = marker_at(raw)
+        if word is None:
+            m = LIST_MARKER_RE.match(raw)
+            word = m.group(1) if m else None
+        if word:
+            # The line IS a label position: every marker on it counts as a
+            # found label — a second one here is a conflict, not a misplacement.
+            found.extend(MARKER_RE.findall(raw))
+        elif MARKER_RE.search(raw):
+            misplaced = True
+    if len(found) > 1:
+        return None, "label_conflict"
+    if found:
+        return found[0], None
+    return None, ("label_position" if misplaced else None)
 
 
 # --------------------------------------------------------------------------
@@ -296,31 +354,47 @@ def labels_in(text, contract):
 
 
 def check_labels(sections, contract):
-    """assertion_unlabelled + label_unknown, over every cited assertion."""
+    """assertion_unlabelled / label_unknown / label_position / label_conflict.
+
+    One defect per cause. A unit with a WRONG marker is label_unknown and is NOT
+    also assertion_unlabelled — the label is present, it is just not permitted.
+    """
     allowed = set(contract["labels"]["allowed"])
     exempt = set(contract["labels"].get("exempt_roles") or [])
     bad = []
     for sec in sections:
         if sec["role"] in exempt:
             continue
+        header = None
+        for raw in sec["lines"]:
+            cells = _table_cells(raw)
+            if cells and contract["labels"]["table_column"] in cells \
+                    and _is_table_header(sec["lines"], raw):
+                header = cells
+                break
         for unit in blocks(sec["lines"]):
             text = "\n".join(unit)
             if TABLE_RULE_RE.match(text.strip()):
                 continue
             if not citations(text, contract["_cite_re"]):
                 continue
-            found = labels_in(text, contract)
-            known = [t for t in found if t in allowed]
-            unknown = [t for t in found if t not in allowed]
             where = sec["title"] or "(преамбула)"
             snippet = text.strip().splitlines()[0][:110]
-            for tok in unknown:
-                bad.append({"defect": "label_unknown", "where": where,
-                            "detail": "%s — метка %s вне %s"
-                                      % (snippet, tok, "/".join(sorted(allowed)))})
-            if not known:
+            word, defect = marker_in_unit(unit, contract, header)
+            if defect == "label_conflict":
+                bad.append({"defect": "label_conflict", "where": where,
+                            "detail": "%s — две метки в одном утверждении" % snippet})
+                continue
+            if defect == "label_position":
+                bad.append({"defect": "label_position", "where": where,
+                            "detail": "%s — метка не на своей позиции" % snippet})
+            if word is None:
                 bad.append({"defect": "assertion_unlabelled", "where": where,
                             "detail": snippet})
+            elif word not in allowed:
+                bad.append({"defect": "label_unknown", "where": where,
+                            "detail": "%s — метка %s вне %s"
+                                      % (snippet, word, "/".join(sorted(allowed)))})
     return bad
 
 
