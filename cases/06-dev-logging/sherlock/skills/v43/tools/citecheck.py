@@ -1777,6 +1777,33 @@ ENUM_FIELD_NAMES = {
                   "уточняющего кода", "дополнительный код"],
 }
 
+# fix (v43): a bare «код» cannot block as an unknown status. Some spellings
+# among the aliases above are not specific to a status field at all -- bare
+# «код»/«кода»/«кодом»/«коде» is just Russian for "code": a SKU code, a
+# licensing code, anything. `unknown_value` treats an unrecognised (field,
+# value) pair as evidence the DECODE is wrong; under a bare alias, a value
+# absent from the table is EQUALLY good evidence the word never meant
+# "status" here (measured: the real 20260830T190815Z-v42 report, «SPP 1003
+# перечислил SKU с кодом 0xC004F014» -- a Windows licensing SKU, occurs 4150
+# times in the Application log corpus and 0 times as a "Status" field). So
+# `unknown_value` may only BLOCK when the field name that matched was one of
+# the UNAMBIGUOUS spellings (the ones below that name a status and nothing
+# else, i.e. every `status`/`substatus` alias that is NOT listed here).
+# `missing_decode` and `wrong_decode` are UNCHANGED under either alias class:
+# once a value IS in the table its decode is still checked no matter which
+# alias named the field -- that is what keeps the real v41 sentence
+# «отклонены с кодом 0xc000006d» checked (its value 0xc000006d is in the
+# table, so it never reaches this exemption).
+#
+# `substatus`'s aliases were checked against the same principle: every one of
+# them qualifies «код» with an adjective («уточняющий код», «дополнительный
+# код») or is the word «подстатус»/«субстатус» itself -- there is no BARE
+# «код»/«кода»/«кодом»/«коде» entry under `substatus`, so nothing there is
+# ambiguous and this table has no `substatus` row.
+ENUM_AMBIGUOUS_ALIASES = {
+    "status": {"код", "кода", "кодом", "коде"},
+}
+
 # `"Field":12` — JSON, as it appears inside a verbatim quote.
 ENUM_JSON_PAIR_RE = re.compile(
     r'"([A-Za-z_][A-Za-z0-9_]{0,31})"\s*:\s*(\d{1,10})\b')
@@ -1991,6 +2018,13 @@ def enum_decode_check(report, blocks, structural=None, reference_dir=None):
     items = []
     for label, lo, hi in blocks:
         pairs, decodes = {}, {}
+        # fix (v43): whether at least one SIGHTING of a (field, value) pair
+        # named the field via an unambiguous spelling. A literal JSON key
+        # (`"Status":...`) always is -- it is the field, not an alias. A
+        # prose match is unambiguous unless the matched alias is listed in
+        # ENUM_AMBIGUOUS_ALIASES for that field. `unknown_value` below may
+        # only fire when this is True for the pair.
+        pairs_unambiguous = {}
         for i in range(max(1, lo), min(hi, len(lines)) + 1):
             if not structural[i - 1]:
                 continue          # a fenced example is not evidence
@@ -1998,21 +2032,31 @@ def enum_decode_check(report, blocks, structural=None, reference_dir=None):
             for m in ENUM_JSON_PAIR_RE.finditer(raw):
                 f = m.group(1).lower()
                 if f in dec_fields:
-                    pairs.setdefault((f, int(m.group(2))), i)
+                    key = (f, int(m.group(2)))
+                    pairs.setdefault(key, i)
+                    pairs_unambiguous[key] = True
             for m in ENUM_JSON_HEX_PAIR_RE.finditer(raw):
                 f = m.group(1).lower()
                 if f in hex_fields:
-                    pairs.setdefault((f, _enum_val(m.group(2))), i)
+                    key = (f, _enum_val(m.group(2)))
+                    pairs.setdefault(key, i)
+                    pairs_unambiguous[key] = True
             for prose_re in prose_res:
                 if prose_re is None:
                     continue
                 for m in prose_re.finditer(raw):
-                    f = ENUM_NAME_TO_FIELD.get(m.group(1).lower(),
-                                               m.group(1).lower())
+                    named = m.group(1).lower()
+                    f = ENUM_NAME_TO_FIELD.get(named, named)
                     if f not in fields:
                         continue
+                    ambiguous = named in ENUM_AMBIGUOUS_ALIASES.get(f, ())
                     for part in m.group(2).split("/"):
-                        pairs.setdefault((f, _enum_val(part)), i)
+                        key = (f, _enum_val(part))
+                        pairs.setdefault(key, i)
+                        if not ambiguous:
+                            pairs_unambiguous[key] = True
+                        else:
+                            pairs_unambiguous.setdefault(key, False)
             for decode_re in decode_res:
                 if decode_re is None:
                     continue
@@ -2029,6 +2073,12 @@ def enum_decode_check(report, blocks, structural=None, reference_dir=None):
             entry = table.get((f, v))
             disp = enum_value_text(table, f, v)
             if entry is None:
+                if not pairs_unambiguous.get((f, v), False):
+                    # every sighting of this pair named the field through an
+                    # AMBIGUOUS alias (bare «код» and friends) -- absence from
+                    # the table is evidence the word meant something other
+                    # than "status" here, not evidence of a bad decode.
+                    continue
                 items.append({"block": label, "line": line_no, "field": f,
                               "value": v, "display": disp,
                               "kind": "unknown_value", "text": None,
