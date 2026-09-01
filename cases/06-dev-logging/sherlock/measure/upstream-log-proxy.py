@@ -2106,7 +2106,8 @@ class Proxy(BaseHTTPRequestHandler):
                                tool_call=False, status=status, attempt=attempt,
                                duration_ms=attempt_ms,
                                sent_model=sent, request_bytes=len(body),
-                               path=self.path, stream=False, upstream_error=why)
+                               path=self.path, stream=False, upstream_error=why,
+                               messages_count=messages_count, session_id=session_id)
                     except OSError:
                         pass
                     try:
