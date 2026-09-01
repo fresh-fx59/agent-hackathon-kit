@@ -42,6 +42,14 @@ import time
 ANSI = re.compile(r"\x1b\[[0-9;?]*[a-zA-Z]|\x1b\][^\x07]*\x07|\r")
 HANDOFF_MARK = "СТУПЕНЬ ЗАВЕРШЕНА"
 CLEAR_REFUSAL = "background tasks before starting a new session"
+# BANNERS THAT MEAN «I WILL NOT ACCEPT INPUT», as printed by qwen-code 0.22.0.
+# Kept literal and few: a needle that matches ordinary output would end honest
+# runs, and the one that mattered is verbatim from 20260901T002401Z-v43's
+# transcript, where it appeared 65 times while the driver reported a stall.
+TARGET_REFUSAL_NEEDLES = (
+    "maximum number of turns",
+    "reached the maximum number of turns",
+)
 STAGES = ("triage", "draft", "repair", "done")
 
 
@@ -74,8 +82,12 @@ class MarkWatch(object):
     CONTEXT = 160
 
     def __init__(self, mark):
+        # `mark` is a single needle (HANDOFF_MARK, CLEAR_REFUSAL) or a tuple of
+        # needles (TARGET_REFUSAL_NEEDLES) that all mean the same thing — one
+        # latch, several literal spellings of the fact it watches for.
         self.mark = mark
-        self.overlap = max(0, len(mark) - 1)
+        self.marks = (mark,) if isinstance(mark, str) else tuple(mark)
+        self.overlap = max([0] + [len(m) - 1 for m in self.marks])
         self.reset()
 
     def reset(self):
@@ -89,6 +101,11 @@ class MarkWatch(object):
     def seen(self):
         return self.count > 0
 
+    @property
+    def text(self):
+        """The on-screen text of the first match, for the event that reports it."""
+        return self.hits[0] if self.hits else ""
+
     def feed(self, text):
         self.chars += len(text)
         if self._want and self.hits:
@@ -98,7 +115,11 @@ class MarkWatch(object):
         hay = self._tail + text
         at = 0
         while True:
-            i = hay.find(self.mark, at)
+            i = -1
+            for m in self.marks:
+                j = hay.find(m, at)
+                if j >= 0 and (i < 0 or j < i):
+                    i = j
             if i < 0:
                 break
             self.count += 1
@@ -390,7 +411,13 @@ class Session(object):
         # The full text still exists: it is the transcript on disk.
         self.handoff = MarkWatch(HANDOFF_MARK)
         self.refusal = MarkWatch(CLEAR_REFUSAL)
-        self.watches = (self.handoff, self.refusal)
+        # ALWAYS ON, NEVER RESET. Unlike `refusal` (scoped to one /clear and
+        # reset at every boundary) this watches the whole run: a target that
+        # has hit a process-lifetime limit like --max-session-turns does not
+        # recover, so resetting this per boundary would let the driver keep
+        # nudging a corpse instead of naming what actually happened once.
+        self.target_refusal = MarkWatch(TARGET_REFUSAL_NEEDLES)
+        self.watches = (self.handoff, self.refusal, self.target_refusal)
         # Where this stage's output starts in the transcript, so the second
         # witness reads THIS stage and not the whole run.
         self.stage_offset = 0
@@ -602,6 +629,29 @@ def drive(argv, cwd, work, first_prompt, reseed, stage_budget_s, settle_s,
                     if (quiet is not None and quiet >= idle_nudge_s
                             and (since_nudge is None
                                  or since_nudge >= idle_nudge_s)):
+                        if since_nudge is not None:
+                            # A nudge was sent last pass and the ledger is
+                            # STILL quiet: it did not help. Say what the
+                            # screen said, so the artifact answers the
+                            # question instead of sending the reader to a
+                            # 190 MB transcript for it.
+                            note("nudge_ineffective",
+                                 "%s — nudge %d/%d produced no upstream call "
+                                 "within %d s: %s"
+                                 % (seen, nudges, max_nudges, int(idle_nudge_s),
+                                    ses.target_refusal.text
+                                    or "no reason visible on screen"))
+                        # A REFUSING TARGET IS NOT A SLOW ONE, and nudging it
+                        # is the one thing that cannot help. On
+                        # 20260901T002401Z-v43 all three nudges were refused
+                        # by the CLI and the driver still reported
+                        # STAGE_STALLED after 1,204 s, sending everyone
+                        # downstream to the wrong cause.
+                        if ses.target_refusal.seen:
+                            note("TARGET_REFUSED",
+                                 "%s — the target refused input: %s"
+                                 % (seen, ses.target_refusal.text))
+                            return 10, events
                         if nudges >= max_nudges:
                             note("STAGE_STALLED",
                                  "no upstream call for %d s at stage %s after %d "

@@ -86,6 +86,13 @@ while True:
     line = raw.strip()
     if not line:
         continue
+    if MODE == "turns_exhausted":
+        # THE BANNER THAT ACTUALLY ENDED THE PAID RUN, verbatim. It answers
+        # EVERY input — the reseed, the skill command, all three nudges — so a
+        # stand-in that refuses only /clear cannot express it.
+        say("The session has reached the maximum number of turns: 600. "
+            "Please update this limit in your setting.json file.")
+        continue
     if line == "/clear":
         if MODE == "clear_refused":
             say("Stop the current session's running background tasks before "
