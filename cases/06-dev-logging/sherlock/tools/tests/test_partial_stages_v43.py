@@ -76,6 +76,11 @@ for stage in ("draft", "repair"):
           "the %s partial block reuses triage's row wording" % stage)
     shutil.rmtree(work)
 
+# STILL TRUE, AND STILL CORRECT: the arm RECORDS a barren boundary, it does
+# not judge one. Judging is the driver's job and lives in
+# measure/tests/test_progress_gate_v44.py, which stops a run after two of
+# these in a row. Before v44 nothing judged it at all and a paid run took 12.
+#
 # a partial boundary with NO report yet must still work and say zero
 work = fresh_work("draft")
 row, block = cp.handoff(work, "draft", partial=True)

@@ -190,6 +190,55 @@ while True:
             _time.sleep(float(os.environ.get("FAKE_LATE_S", "2.0")))
         say(block)
         continue
+    if MODE == "barren_boundaries":
+        # THE FAILURE THE SUITE COULD NOT EXPRESS. Every existing mode does
+        # the stage's real work in the same breath as the handoff, so progress
+        # is a POSTCONDITION of taking a boundary and the livelock is
+        # unreachable. This one takes the boundary and produces nothing —
+        # exactly what 20260901T002401Z-v43 did 12 times.
+        subprocess.run([sys.executable, CHECKPOINT, "handoff", "--work", WORK,
+                        "--done", stage(), "--partial"],
+                       capture_output=True, text=True)
+        say("СТУПЕНЬ ЗАВЕРШЕНА: %s" % stage())
+        continue
+    if MODE == "slow_but_honest" and stage() == "triage":
+        # THE CONTROL. Real progress, one worklist row per boundary — slower
+        # than the gate's window but never zero. A gate that cannot tell this
+        # from the mode above would have killed the paid run in its final four
+        # minutes, which were the only productive minutes it had.
+        #
+        # Fixture convention: an open row carries an EMPTY verdict column and
+        # the header is `#`-prefixed — inspect_worklists (checkpoint.py:55)
+        # counts any non-empty, non-"?"-prefixed verdict as resolved, so a
+        # placeholder like "D open" or an unprefixed header line would
+        # silently inflate `resolved` on its own.
+        #
+        # Once every row is resolved, triage really is done — close it for
+        # real (no --partial) so the run falls through to the generic
+        # draft/repair/done handling below instead of looping forever inside
+        # a stage that has nothing left to resolve.
+        path = os.path.join(WORK, "worklist.tsv")
+        lines = open(path, encoding="utf-8").read().splitlines()
+        target = None
+        for index, row in enumerate(lines[1:], start=1):
+            cols = row.split("\t")
+            if len(cols) >= 2 and not cols[1].strip():
+                target = index
+                lines[index] = cols[0] + "\tX closed"
+                break
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write("\n".join(lines) + "\n")
+        if target is not None:
+            subprocess.run([sys.executable, CHECKPOINT, "handoff", "--work",
+                            WORK, "--done", "triage", "--partial"],
+                           capture_output=True, text=True)
+            say("СТУПЕНЬ ЗАВЕРШЕНА: triage")
+        else:
+            out = subprocess.run([sys.executable, CHECKPOINT, "handoff",
+                                  "--work", WORK, "--done", "triage"],
+                                 capture_output=True, text=True)
+            say(out.stdout or ("handoff failed: " + out.stderr))
+        continue
     if MODE == "stall":
         # Working, talkative, and never finishing a stage — the shape of a run
         # that has to be judged by its checkpoint and not by its chatter.

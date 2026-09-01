@@ -284,6 +284,60 @@ def first_fresh_after(path, after_ms):
     return None
 
 
+GATE_TOOLS = ("reportcheck", "citecheck", "statecheck", "triagecheck")
+
+
+def boundary_history(work):
+    """Every boundary row on disk, oldest first. Missing file reads as empty."""
+    rows = []
+    try:
+        with open(os.path.join(work, "checkpoint.jsonl"),
+                  encoding="utf-8", errors="replace") as fh:
+            for line in fh:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    rows.append(json.loads(line))
+                except ValueError:
+                    continue
+    except OSError:
+        return []
+    return rows
+
+
+def boundary_advanced(previous, current):
+    """Did anything DELIVERABLE change between two boundaries?
+
+    Deliberately narrow, and deliberately not file size. A committed report
+    section, a worklist row moving to resolved, or a stage advance — those are
+    the deliverable. A changed byte count alone is churn: run
+    20260831T214240Z-v43's repair transcript never stood still for 1h49m and
+    produced nothing.
+
+    The escape is not charity, it is a measured correction. Paid run
+    20260901T002401Z-v43's final four minutes ran probe.md through
+    reportcheck.py and citecheck.py to learn what the gate would accept before
+    writing — real work toward the deliverable that moves none of the counters
+    above. A gate without this clause kills a run at the moment it starts to
+    succeed.
+    """
+    if previous is None:
+        return True, "first boundary in this stage"
+    if current.get("stage") != previous.get("stage"):
+        return True, "stage advanced"
+    if (current.get("report_sections_written", 0)
+            > previous.get("report_sections_written", 0)):
+        return True, "a report section was committed"
+    if current.get("resolved", 0) > previous.get("resolved", 0):
+        return True, "worklist rows were resolved"
+    if current.get("worklist_seals") != previous.get("worklist_seals"):
+        return True, "a worklist seal changed"
+    if current.get("gate_tools_run"):
+        return True, "a gate tool was run against a candidate"
+    return False, ""
+
+
 def stage_of(work):
     return checkpoint_row(work).get("stage")
 
@@ -408,6 +462,12 @@ def drive(argv, cwd, work, first_prompt, reseed, stage_budget_s, settle_s,
     # until the boundary finally moved, and a slow arm would be typed at
     # dozens of times for one checkpoint.
     awaiting_boundary = None
+    # THE PROGRESS GATE'S COUNTER. Consecutive barren boundaries within the
+    # CURRENT stage — reset to 0 whenever a boundary shows deliverable
+    # progress and whenever `seen` (the stage) changes, so a run that just
+    # crossed into `repair` gets its two-boundary budget fresh rather than
+    # inheriting a near-miss from `draft`.
+    barren = 0
 
     def note(kind, detail=""):
         row = {"at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
@@ -591,6 +651,39 @@ def drive(argv, cwd, work, first_prompt, reseed, stage_budget_s, settle_s,
                      "boundary was not taken through checkpoint.py handoff" % seen)
                 return 5, events
             note("batch_boundary" if partial else "stage_advanced", seen)
+            # THE PROGRESS GATE. Two barren boundaries in one stage, and the
+            # run stops. Two, not three: on 20260901T002401Z-v43 that ends the
+            # run at 01:26 instead of 04:05, saving ~2.6 h and ~85M prompt
+            # tokens. It is a STOP AND ESCALATE, following Claude Code's own
+            # thrash rule — refusing to clear would only trade a livelock for
+            # a window overflow, which is a different failure, not a fix.
+            history = boundary_history(work)
+            if history:
+                same_stage = [r for r in history if r.get("stage") == seen]
+                previous = same_stage[-2] if len(same_stage) >= 2 else None
+                moved, why = boundary_advanced(previous, same_stage[-1])
+                if moved:
+                    barren = 0
+                    if why:
+                        note("progress", "%s — %s" % (seen, why))
+                else:
+                    barren += 1
+                    note("no_progress_boundary",
+                         "%s — boundary %s changed nothing deliverable "
+                         "(%d in a row)"
+                         % (seen, same_stage[-1].get("boundary_seq"), barren))
+                    if barren >= 2:
+                        note("NO_PROGRESS",
+                             "%s — %d consecutive boundaries with no "
+                             "deliverable change: resolved %s, "
+                             "report_sections_written %s, report_bytes %s. "
+                             "Stopping rather than burning the budget."
+                             % (seen, barren,
+                                [r.get("resolved") for r in same_stage[-3:]],
+                                [r.get("report_sections_written")
+                                 for r in same_stage[-3:]],
+                                [r.get("report_bytes") for r in same_stage[-3:]]))
+                        return 9, events
             volume = "%s — closed %s, %d B on screen, %d mark(s)" % (
                 seen, completed, ses.stage_bytes, ses.handoff.count)
             if on_screen:
