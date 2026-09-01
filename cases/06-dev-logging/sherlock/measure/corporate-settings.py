@@ -205,6 +205,47 @@ def profile(window=GATE, max_tokens=MAX_TOKENS, skill_directory=None):  # noqa: 
     }
 
 
+def run_settings(window, max_tokens, session_token_limit=None, timeout_ms=None,
+                 max_retries=None, skill_directory=None, disabled_names=(),
+                 exclude_tools=(), auto_compact=True):
+    """The COMPLETE settings file a run writes — the profile plus lane details.
+
+    `profile()` is what verify-bundle proves against the installed target. Until
+    v44 the launcher wrote its own JSON beside it, and five proven keys never
+    reached any run. One function now owns the file, so a key that is proven is
+    a key that ships.
+    """
+    row = profile(window, max_tokens, skill_directory)
+    if disabled_names:
+        row["skills"] = skills_settings(skill_directory, disabled_names)
+    generation = row["model"]["generationConfig"]
+    if timeout_ms is not None:
+        generation["timeout"] = timeout_ms
+    if max_retries is not None:
+        generation["maxRetries"] = max_retries
+    if session_token_limit:
+        row["model"]["sessionTokenLimit"] = session_token_limit
+    else:
+        # `profile()` bakes in the default SESSION_TOKEN_LIMIT unconditionally
+        # (verify-bundle's `emit` needs it present). `emit-run`'s contract is
+        # that 0 means "omit the key entirely" — skipping the assignment above
+        # is not enough, since the key is already sitting there from profile().
+        row["model"].pop("sessionTokenLimit", None)
+    row["model"]["model_fallback"] = {"enabled": False}
+    row["memory"] = {"enableManagedAutoMemory": False, "enableDreams": False}
+    if exclude_tools:
+        row["tools"]["exclude"] = list(exclude_tools)
+    if not auto_compact:
+        # ONE COMPACTOR, NOT TWO. Run 20260831T214240Z-v43's only two real
+        # context resets were qwen's own auto-compaction firing on top of the
+        # driver's clears, which is why its ledger could not be read. The
+        # documented range is "greater than 0 and at most 1", so there is no
+        # zero: the smallest legal value is the closest thing to off, and the
+        # caller must say out loud that it wants that.
+        row["context"]["autoCompactThreshold"] = 0.99
+    return row
+
+
 def key_paths(row, prefix=""):
     for key, value in row.items():
         path = prefix + key
@@ -550,8 +591,9 @@ def prove(window, max_tokens, gate, generation_window_s=None,
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("command",
-                    choices=("emit", "prove", "verify-bundle", "check-budget",
-                             "handoff-threshold", "skills-json"))
+                    choices=("emit", "emit-run", "prove", "verify-bundle",
+                             "check-budget", "handoff-threshold",
+                             "skills-json"))
     ap.add_argument("--gate", type=int, default=GATE)
     ap.add_argument("--window", type=int, default=None,
                     help="declared context window (default: the gate itself)")
@@ -584,6 +626,16 @@ def main():
                          "`user` level")
     ap.add_argument("--extra-key", action="append", default=[],
                     help="also require this dotted key (used by the tests)")
+    ap.add_argument("--timeout", type=int, default=None,
+                    help="emit-run: model.generationConfig.timeout (ms)")
+    ap.add_argument("--max-retries", type=int, default=None,
+                    help="emit-run: model.generationConfig.maxRetries")
+    ap.add_argument("--exclude-tool", action="append", default=[],
+                    help="emit-run: also exclude this tool NAME (repeatable)")
+    ap.add_argument("--no-auto-compact", action="store_true",
+                    help="emit-run: push context.autoCompactThreshold to the "
+                         "least-reachable legal value (0.99); the driver owns "
+                         "the window instead")
     args = ap.parse_args()
     window = args.window if args.window is not None else args.gate
 
@@ -602,6 +654,19 @@ def main():
     if args.command == "emit":
         print(json.dumps(profile(window, args.max_tokens), indent=2,
                          sort_keys=True))
+        return 0
+
+    if args.command == "emit-run":
+        try:
+            row = run_settings(
+                window, args.max_tokens, args.session_token_limit,
+                args.timeout, args.max_retries, args.skill_directory,
+                args.disable_skill, args.exclude_tool,
+                not args.no_auto_compact)
+        except ValueError as exc:
+            sys.stderr.write("✗ %s\n" % exc)
+            return 1
+        print(json.dumps(row, indent=2, sort_keys=True))
         return 0
 
     if args.command == "check-budget":

@@ -55,11 +55,12 @@ if m:
 # QWEN_SKILL_ROOT feeds hooks and NOTHING else. So two things must hold together
 # or the arm vanishes with no error at all: run-bench.sh must write
 # skills.directories, and `user` must never be in disabledLevels while it does.
-check('skills-json' in src,
-      "run-bench.sh never asks corporate-settings.py for the skills block, so "
+check('emit-run' in src,
+      "run-bench.sh never asks corporate-settings.py for the settings file, so "
       "nothing writes skills.directories and the relocated arm is undiscoverable")
-check('SKILLS_JSON' in src and '"skills\\": $SKILLS_BLOCK' in src,
-      "run-bench.sh does not splice a skills block into the settings it writes")
+check('--skill-directory' in src,
+      "run-bench.sh does not pass the arm's skill directory into emit-run, so "
+      "skills.directories is never written")
 check('dirname "$ARM_HOME"' in src,
       "run-bench.sh must pass the directory CONTAINING the arm, not ARM_HOME "
       "itself — qwen scans a custom skill dir for skill FOLDERS")

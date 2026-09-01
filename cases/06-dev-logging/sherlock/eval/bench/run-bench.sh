@@ -863,6 +863,13 @@ fi
 # to.
 SESSION_TOKEN_LIMIT="${SHERLOCK_SESSION_TOKEN_LIMIT:-0}"
 case "$SESSION_TOKEN_LIMIT" in *[!0-9]*|'') echo "✗ invalid SHERLOCK_SESSION_TOKEN_LIMIT" >&2; exit 1 ;; esac
+# Moved above the settings write (was previously assigned after it) so the
+# single `emit-run` call below has both bound before it runs under `set -u`.
+REQUEST_TIMEOUT_MS="${SHERLOCK_REQUEST_TIMEOUT_MS:-900000}"
+MAX_RETRIES="${SHERLOCK_MAX_RETRIES:-0}"
+case "$REQUEST_TIMEOUT_MS:$MAX_RETRIES" in
+  *[!0-9:]*|:*|*:) echo "✗ invalid request timeout or retry count" >&2; exit 1 ;;
+esac
 BUDGET_GATE_ARGS="--window $([ "$CTX_WINDOW" != "0" ] && echo "$CTX_WINDOW" || echo 262000) --max-tokens $MAX_OUT --session-token-limit $SESSION_TOKEN_LIMIT --output-tokens-per-s $OUTPUT_TOKENS_PER_S --ttft-reserve-s $TTFT_RESERVE_S"
 if [ "$GEN_FITTING" != "0" ]; then
   BUDGET_GATE_ARGS="$BUDGET_GATE_ARGS --generation-window-s $GEN_WINDOW_S"
@@ -911,7 +918,7 @@ fi
 # ARM_HOME is resolved here, above the settings write, and reused by the
 # install block below.
 ARM_HOME=""
-SKILLS_JSON=''
+MUTE_ARGS=""
 if [ "$ARM" != "none" ]; then
   ARM_HOME="${SHERLOCK_ARM_HOME:-$HOME/.qwen/skills/log-rca}"
   case "$ARM_HOME" in
@@ -927,7 +934,6 @@ if [ "$ARM" != "none" ]; then
   # arm's own name is never in it.
   ARM_SKILL_NAME="$(sed -n 's/^name:[[:space:]]*//p' "$SKILLS/$ARM/SKILL.md" | head -1)"
   [ -n "$ARM_SKILL_NAME" ] || { echo "✗ $SKILLS/$ARM/SKILL.md has no name:" >&2; exit 1; }
-  MUTE_ARGS=""
   for skdir in "$HOME/.qwen/skills" "$HOME/.agents/skills" "$HOME/.claude/skills"; do
     [ -d "$skdir" ] || continue
     for sk in "$skdir"/*/SKILL.md; do
@@ -938,23 +944,8 @@ if [ "$ARM" != "none" ]; then
       MUTE_ARGS="$MUTE_ARGS --disable-skill $n"
     done
   done
-  # shellcheck disable=SC2086
-  SKILLS_BLOCK="$(python3 "$MEASURE_DIR/corporate-settings.py" skills-json \
-    --skill-directory "$(dirname "$ARM_HOME")" $MUTE_ARGS)" || exit 1
-  SKILLS_JSON=", \"skills\": $SKILLS_BLOCK"
 fi
 
-STL_JSON=''
-if [ "$SESSION_TOKEN_LIMIT" != "0" ]; then
-  STL_JSON=", \"sessionTokenLimit\": $SESSION_TOKEN_LIMIT"
-fi
-SAMPLING_JSON=''
-if [ "$MAX_OUT" != "0" ]; then
-  SAMPLING_JSON=", \"samplingParams\": { \"max_tokens\": $MAX_OUT }"
-fi
-
-REQUEST_TIMEOUT_MS="${SHERLOCK_REQUEST_TIMEOUT_MS:-900000}"
-MAX_RETRIES="${SHERLOCK_MAX_RETRIES:-0}"
 # CORRECTED 2026-08-24: a `general-purpose` subagent launched by the `agent`
 # tool DOES see the project `.qwen/skills/` directory (qwen-code 0.21.1,
 # measured on this box against the subscription broker) — it listed 23 skills
@@ -972,34 +963,32 @@ MAX_RETRIES="${SHERLOCK_MAX_RETRIES:-0}"
 # reproducible bench arm rather than reopen it mid-series. Keep the target
 # bench on the same, skill-loaded execution path; flip
 # SHERLOCK_ALLOW_SUBAGENT=1 for a measured control arm.
-EXCLUDE_JSON=''
+# ONE SOURCE FOR THE FILE THE TARGET READS. The three hand-built printf
+# branches that used to live here shipped a SUBSET of the profile
+# corporate-settings.py proves against the installed bundle: five keys —
+# context.autoCompactThreshold, model.chatCompression.maxRecentFilesToRetain,
+# model.skipStartupContext, tools.core and mcp.excluded — never reached a
+# single run. So qwen auto-compacted at its default while our driver was also
+# clearing, and the 68-tool schema stayed at full width, ~17,000 tokens of a
+# 38,403-token reseed floor. A proven key must be a shipped key.
+mkdir -p "$W/.qwen"
+EMIT_ARGS=""
+if [ "$ARM" != "none" ]; then
+  EMIT_ARGS="$EMIT_ARGS --skill-directory $(dirname "$ARM_HOME")"
+fi
 if [ "${SHERLOCK_ALLOW_SUBAGENT:-0}" != "1" ]; then
-  EXCLUDE_JSON=', "tools": { "exclude": ["agent"] }'
+  EMIT_ARGS="$EMIT_ARGS --exclude-tool agent"
 fi
-if arm_ge "$ARM" 30; then
-  case "$REQUEST_TIMEOUT_MS:$MAX_RETRIES" in
-    *[!0-9:]*|:*|*:) echo "✗ invalid v30 request timeout or retry count" >&2; exit 1 ;;
-  esac
-  mkdir -p "$W/.qwen"
-  MEMORY_JSON=''
-  if arm_ge "$ARM" 31; then
-    MEMORY_JSON=', "memory": { "enableManagedAutoMemory": false, "enableDreams": false }, "model_fallback": { "enabled": false }'
-  fi
-  printf '{ "model": { "generationConfig": { "contextWindowSize": %s%s, "timeout": %s, "maxRetries": %s }%s }%s%s%s }\n' \
-    "$CTX_WINDOW" "$SAMPLING_JSON" "$REQUEST_TIMEOUT_MS" "$MAX_RETRIES" "$STL_JSON" "$EXCLUDE_JSON" "$MEMORY_JSON" "$SKILLS_JSON" > "$W/.qwen/settings.json"
-elif [ "$CTX_WINDOW" != "0" ]; then
-  mkdir -p "$W/.qwen"
-  printf '{ "model": { "generationConfig": { "contextWindowSize": %s%s }%s }%s%s }\n' \
-    "$CTX_WINDOW" "$SAMPLING_JSON" "$STL_JSON" "$EXCLUDE_JSON" "$SKILLS_JSON" > "$W/.qwen/settings.json"
-elif [ -n "$EXCLUDE_JSON" ] || [ -n "$SKILLS_JSON" ]; then
-  # No model block on this path, so the two optional fragments are the whole
-  # object and the leading ", " of the first one has to go. Never emit a filler
-  # key: an unknown key in the settings the target reads is a lie in the
-  # artefact we seal as qwen-settings-pre.json.
-  mkdir -p "$W/.qwen"
-  TAIL_JSON="$EXCLUDE_JSON$SKILLS_JSON"
-  printf '{ %s }\n' "${TAIL_JSON#, }" > "$W/.qwen/settings.json"
+if [ "${SHERLOCK_TARGET_AUTOCOMPACT:-0}" != "1" ]; then
+  EMIT_ARGS="$EMIT_ARGS --no-auto-compact"
 fi
+# shellcheck disable=SC2086
+python3 "$MEASURE_DIR/corporate-settings.py" emit-run \
+  --window "$([ "$CTX_WINDOW" != "0" ] && echo "$CTX_WINDOW" || echo 262000)" \
+  --max-tokens "$MAX_OUT" \
+  --session-token-limit "$SESSION_TOKEN_LIMIT" \
+  --timeout "$REQUEST_TIMEOUT_MS" --max-retries "$MAX_RETRIES" \
+  $MUTE_ARGS $EMIT_ARGS > "$W/.qwen/settings.json" || exit 1
 
 # Seal the exact target settings before the target can observe or mutate them.
 python3 - "$W/.qwen/settings.json" "$TRACE/qwen-settings-pre.json" <<'PY' || exit 1
