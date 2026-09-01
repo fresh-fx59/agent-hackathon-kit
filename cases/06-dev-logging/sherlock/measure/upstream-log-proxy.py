@@ -421,7 +421,20 @@ def _scrub(value):
 
 def record(**row):
     row = {k: _scrub(v) for k, v in row.items()}
-    row["ts"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    now = time.time()
+    row["ts"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now))
+    # MILLISECONDS, BECAUSE ONE SECOND WAS NOT ENOUGH. On run
+    # 20260831T214240Z-v43 a qwen auto-compaction at 22:51:31Z and a driver
+    # batch_boundary at 22:51:32Z had to be separated by decoding a gzipped
+    # request body and looking for a <state_snapshot> marker. Two integers
+    # would have answered it.
+    row["ts_ms"] = int(now * 1000)
+    # THE DISCRIMINATOR. `pre_send_refused` rows carry no `usage` and no
+    # `body_*` keys, so a reader that assumes one schema crashes on them and
+    # the four context-overflow refusals that ended a run stay invisible.
+    # Refusal rows are the ones that carry an `event`; everything else is a
+    # completed call.
+    row.setdefault("kind", "refusal" if row.get("event") else "call")
     if RUN_TAG:
         row["run_tag"] = RUN_TAG
     line = json.dumps(row, ensure_ascii=False)
@@ -1969,6 +1982,30 @@ class Proxy(BaseHTTPRequestHandler):
         # so lane_guard.audit_ledger can judge a mid-flight-swapped run row by
         # row instead of declaring a family mismatch on every pre-swap call.
         route_fields = route.ledger_fields()
+        # THE ONLY FIELD THAT PROVES /clear ACTUALLY CLEARED. A fresh session sends
+        # exactly two messages — the system prompt and the seed user message. Run
+        # 20260831T214240Z-v43 typed /clear 124 times and only 5 request bodies
+        # ever had messages == 2; the rest climbed to 633 in one conversation.
+        # Reading it here costs nothing: the body is already parsed. Ledger
+        # fields written below: "messages_count" and "session_id".
+        messages_count = None
+        session_id = None
+        try:
+            parsed_body = json.loads(body or b"{}")
+        except Exception:
+            parsed_body = None
+        if isinstance(parsed_body, dict):
+            messages = parsed_body.get("messages")
+            if isinstance(messages, list):
+                messages_count = len(messages)
+            for key in ("session_id", "user", "metadata"):
+                value = parsed_body.get(key)
+                if isinstance(value, str) and value:
+                    session_id = value
+                    break
+                if isinstance(value, dict) and isinstance(value.get("session_id"), str):
+                    session_id = value["session_id"]
+                    break
         t0 = time.time()
         req = urllib.request.Request(route.url_for(self.path), data=body or None,
                                      headers=headers, method=self.command)
@@ -2100,7 +2137,8 @@ class Proxy(BaseHTTPRequestHandler):
                            tool_call=False, status=None, error=str(e)[:300],
                            attempt=attempt,
                            duration_ms=int((time.time() - t0) * 1000), sent_model=sent,
-                           request_bytes=len(body), path=self.path, stream=False)
+                           request_bytes=len(body), path=self.path, stream=False,
+                           messages_count=messages_count, session_id=session_id)
                 except OSError:
                     pass
                 try:
@@ -2216,6 +2254,7 @@ class Proxy(BaseHTTPRequestHandler):
                          usage=state["usage"], finish_reason=state["finish_reason"],
                          duration_ms=row_duration_ms, sent_model=sent,
                          request_bytes=len(body), path=self.path, stream=streaming,
+                         messages_count=messages_count, session_id=session_id,
                          # THE ESTIMATE, BESIDE THE PROVIDER'S OWN COUNT. One
                          # integer, so UPSTREAM_CHARS_PER_TOKEN can be re-derived
                          # from any future run's ledger instead of argued about —
