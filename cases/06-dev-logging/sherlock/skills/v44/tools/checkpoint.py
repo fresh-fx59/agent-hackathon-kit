@@ -298,6 +298,44 @@ def report_sections(work):
             "roles": roles}
 
 
+HISTORY = "checkpoint.jsonl"
+
+
+def append_boundary(work, row, gate_tools_run=()):
+    """One append-only row per boundary — the only place a DELTA can be read.
+
+    checkpoint.json is overwrite-in-place by design: it is the current state.
+    That makes it useless for the question the driver has to answer, which is
+    whether anything changed between boundary N and N+1. Paid run
+    20260901T002401Z-v43 took 12 boundaries with report_sections_written stuck
+    at 0; after the fact only the final row survived and the delta was gone.
+
+    Seals, not counts: inspect_worklists() already computes a sha256 per
+    worklist, and a hash distinguishes real change from a rewrite that lands on
+    the same row count. fsync before returning, because the driver clears the
+    session immediately after this and a truncated history is worse than none.
+    """
+    entry = {
+        "at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "boundary_seq": row.get(BOUNDARY_SEQ),
+        "stage": row.get("stage"),
+        "stage_partial": row.get("stage_partial"),
+        "resolved": row.get("resolved"),
+        "total": row.get("total"),
+        "report_bytes": row.get("report_bytes", 0),
+        "report_sections_written": row.get("report_sections_written", 0),
+        "report_sections_required": row.get("report_sections_required", 0),
+        "worklist_seals": dict(row.get("worklists") or {}),
+        "gate_tools_run": list(gate_tools_run),
+    }
+    path = os.path.join(str(work), HISTORY)
+    with open(path, "a", encoding="utf-8") as handle:
+        handle.write(json.dumps(entry, ensure_ascii=False) + "\n")
+        handle.flush()
+        os.fsync(handle.fileno())
+    return entry
+
+
 def handoff(work, done, partial=False):
     """Close stage `done` (or one BATCH of it), and print the block."""
     work = Path(work).resolve(strict=True)
@@ -328,6 +366,7 @@ def handoff(work, done, partial=False):
             datetime.timezone.utc).isoformat()
         atomic_text(work / "checkpoint.json",
                     json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n")
+        append_boundary(work, row)
         block = render_handoff(str(work), done, row, partial=True)
         atomic_text(work / "handoff.txt", block)
         return row, block
@@ -357,6 +396,7 @@ def handoff(work, done, partial=False):
     row["updated_at"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
     atomic_text(work / "checkpoint.json",
                 json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n")
+    append_boundary(work, row)
     block = render_handoff(str(work), done, row)
     atomic_text(work / "handoff.txt", block)
     return row, block
