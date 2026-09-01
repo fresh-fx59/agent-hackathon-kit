@@ -272,6 +272,19 @@ while True:
             continue
         resolve_one_triage_row_or_finish()
         continue
+    if MODE == "gate_tool_bogus" and stage() == "triage":
+        # THE ANTI-GAMING PROOF (fix round 2). `--gate-tool` is a flag the
+        # model itself supplies under approval-mode yolo, so a name outside
+        # GATE_TOOLS must NOT buy the escape. Every boundary here passes
+        # `--gate-tool bogus` and changes nothing else — if checkpoint.py
+        # filtered it in instead of dropping it, this would survive exactly
+        # like gate_tool_near_miss above; it must NOT survive.
+        subprocess.run([sys.executable, CHECKPOINT, "handoff", "--work",
+                        WORK, "--done", "triage", "--partial",
+                        "--gate-tool", "bogus"],
+                       capture_output=True, text=True)
+        say("СТУПЕНЬ ЗАВЕРШЕНА: triage")
+        continue
     if MODE == "stall":
         # Working, talkative, and never finishing a stage — the shape of a run
         # that has to be judged by its checkpoint and not by its chatter.

@@ -284,7 +284,20 @@ def first_fresh_after(path, after_ms):
     return None
 
 
-GATE_TOOLS = ("reportcheck", "citecheck", "statecheck", "triagecheck")
+# THE CANONICAL LIST LIVES IN THE ARM, NOT HERE. This tuple used to be
+# duplicated here and referenced by nothing — dead documentation, and the
+# exact shape Finding 1 (fix round 1) found: a duplicate that can silently
+# drift out of sync with the copy that actually matters. The name validation
+# that makes the gate-tool escape safe against a self-granted "--gate-tool
+# please" (fix round 2) has to live where `handoff` parses its arguments —
+# skills/v44/tools/checkpoint.py's GATE_TOOLS, enforced there via
+# `choices=GATE_TOOLS` on `--gate-tool` — because the arm ships standalone
+# (installed to /opt/sherlock-arm/log-rca) and cannot import anything from
+# measure/ at runtime, so a shared module under measure/ is not reachable
+# from both sides. The driver does not need its own copy: it never inspects
+# WHICH gate tool ran, only whether `gate_tools_run` is non-empty, and by the
+# time a row reaches checkpoint.jsonl the arm has already refused to write
+# one for an unrecognized name.
 
 
 def boundary_history(work):

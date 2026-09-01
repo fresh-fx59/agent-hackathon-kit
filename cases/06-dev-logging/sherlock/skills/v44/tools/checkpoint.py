@@ -19,6 +19,7 @@ import hashlib
 import json
 import os
 import re
+import sys
 import tempfile
 from pathlib import Path
 
@@ -300,6 +301,15 @@ def report_sections(work):
 
 HISTORY = "checkpoint.jsonl"
 
+#: THE CANONICAL LIST — the one place these four names live. Both `--gate-tool`
+#: below and measure/interactive-drive.py's progress gate must agree on which
+#: boundaries the "the model was doing real preparatory work" escape covers;
+#: keeping one copy here (the arm ships with this file, self-contained) means
+#: there is nothing left in measure/ to drift out of sync with it. Approval
+#: mode `yolo` lets the model itself choose `handoff`'s arguments, so this is
+#: not documentation, it is validated below — see `--gate-tool`'s `choices`.
+GATE_TOOLS = ("reportcheck", "citecheck", "statecheck", "triagecheck")
+
 
 def append_boundary(work, row, gate_tools_run=()):
     """One append-only row per boundary — the only place a DELTA can be read.
@@ -468,12 +478,19 @@ def main():
                         help="print the machine receipt instead of the block")
     parser.add_argument("--gate-tool", action="append", default=[],
                         dest="gate_tools_run", metavar="NAME",
-                        help="a gate tool (reportcheck, citecheck, ...) that "
-                             "was run against a real candidate before this "
-                             "boundary was taken — repeatable. Recorded on "
-                             "the checkpoint.jsonl row so the driver's "
-                             "progress gate can tell preparatory gate-tool "
-                             "work from a boundary that changed nothing.")
+                        help="a gate tool (%s) that was run against a real "
+                             "candidate before this boundary was taken — "
+                             "repeatable. Recorded on the checkpoint.jsonl row "
+                             "so the driver's progress gate can tell "
+                             "preparatory gate-tool work from a boundary that "
+                             "changed nothing. `handoff` is typed by the model "
+                             "itself under approval-mode yolo, so a name "
+                             "outside GATE_TOOLS is filtered out before it is "
+                             "recorded (a warning is printed, the boundary "
+                             "still completes) rather than being trusted: the "
+                             "model must not be able to grant itself the "
+                             "escape by typing any word it likes."
+                             % ", ".join(GATE_TOOLS))
     args = parser.parse_args()
     if args.command == "init":
         print(json.dumps(init(Path(args.work)), ensure_ascii=False,
@@ -482,8 +499,24 @@ def main():
     if args.command == "handoff":
         if not args.done:
             raise SystemExit("handoff needs --done <stage>")
+        # ANTI-GAMING FILTER. `handoff` is typed by the model itself under
+        # approval-mode yolo, so `--gate-tool` cannot be trusted as given: an
+        # unrecognized name (a typo, or a bare word chosen to fake the escape)
+        # is DROPPED here, loudly, rather than recorded — a boundary whose
+        # only "progress" is a name outside GATE_TOOLS is still barren. The
+        # boundary itself still completes (it may be genuinely resolving
+        # rows or writing a report even when a gate-tool name is wrong), so a
+        # typo costs the escape credit, never the whole checkpoint.
+        verified_gate_tools = [g for g in args.gate_tools_run
+                              if g in GATE_TOOLS]
+        for bogus in args.gate_tools_run:
+            if bogus not in GATE_TOOLS:
+                sys.stderr.write(
+                    "⚠ --gate-tool %r is not one of %s — ignored, this "
+                    "boundary does not count as gate-tool progress on that "
+                    "name alone\n" % (bogus, ", ".join(GATE_TOOLS)))
         row, block = handoff(args.work, args.done, partial=args.partial,
-                             gate_tools_run=args.gate_tools_run)
+                             gate_tools_run=verified_gate_tools)
         print(json.dumps(row, ensure_ascii=False, sort_keys=True) if args.json
               else block, end="" if not args.json else "\n")
         return

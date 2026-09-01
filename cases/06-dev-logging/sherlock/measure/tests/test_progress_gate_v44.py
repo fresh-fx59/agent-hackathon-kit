@@ -130,6 +130,21 @@ check("NO_PROGRESS" not in kinds3,
 check(rc3 == 0, "the gate-tool near-miss run did not finish cleanly: rc %r (%s)"
       % (rc3, out3[-400:]))
 
+# THE ANTI-GAMING GUARANTEE (fix round 2). `--gate-tool bogus` must NOT
+# populate gate_tools_run — checkpoint.py's GATE_TOOLS filter drops any name
+# outside the known four and the boundary is otherwise identical to
+# barren_boundaries. Two consecutive boundaries of nothing-but-a-bogus-name
+# must still trip the gate exactly like plain barren_boundaries does. This is
+# the assertion that matters: if it fails, the model can grant itself the
+# escape by typing any word at all.
+rc4, events4, out4 = run_case("gate_tool_bogus")
+kinds4 = [e.get("event") for e in events4]
+check("NO_PROGRESS" in kinds4,
+      "an unrecognized --gate-tool name bought the escape — the gate never "
+      "tripped: %r" % kinds4)
+check(rc4 == 9, "expected rc 9 for a bogus-gate-tool run, got %r (%s)"
+      % (rc4, out4[-400:]))
+
 for msg in FAILED:
     print("FAIL: %s" % msg)
 print("OK" if not FAILED else "FAILED %d" % len(FAILED))
