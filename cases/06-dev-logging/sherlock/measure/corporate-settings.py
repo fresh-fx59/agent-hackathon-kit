@@ -219,6 +219,15 @@ def run_settings(window, max_tokens, session_token_limit=None, timeout_ms=None,
     if disabled_names:
         row["skills"] = skills_settings(skill_directory, disabled_names)
     generation = row["model"]["generationConfig"]
+    if not max_tokens:
+        # The old hand-built launcher's `SAMPLING_JSON=''` branch treated
+        # MAX_OUT=0 as "declare no output budget at all" — qwen-code then
+        # auto-escalates max_tokens itself. `profile()` bakes samplingParams
+        # in unconditionally, so — same fix as sessionTokenLimit below —
+        # the key has to be popped, not just left unset: emitting
+        # `max_tokens: 0` would ask the provider for a zero-token
+        # completion, which is worse than the behaviour it replaced.
+        generation.pop("samplingParams", None)
     if timeout_ms is not None:
         generation["timeout"] = timeout_ms
     if max_retries is not None:

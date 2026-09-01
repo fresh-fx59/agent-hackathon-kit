@@ -71,6 +71,22 @@ for key in ("context.autoCompactThreshold", "model.skipStartupContext",
 check(emitted.get("skills", {}).get("directories") == ["/opt/sherlock-arm"],
       "emit-run lost the skill directory")
 
+# --max-tokens 0 must omit samplingParams entirely, the same contract as
+# --session-token-limit 0 for sessionTokenLimit. Emitting `max_tokens: 0`
+# would ask the provider for a zero-token completion — worse than the old
+# hand-built launcher's SAMPLING_JSON='' branch it replaces.
+zero_out = json.loads(subprocess.run(
+    [sys.executable, SETTINGS, "emit-run", "--window", "262000",
+     "--max-tokens", "0", "--session-token-limit", "0",
+     "--timeout", "900000", "--max-retries", "0",
+     "--skill-directory", "/opt/sherlock-arm"],
+    capture_output=True, text=True).stdout or "{}")
+check("samplingParams" not in zero_out.get("model", {}).get(
+          "generationConfig", {}),
+      "emit-run --max-tokens 0 still emits samplingParams: %r" % zero_out)
+check("samplingParams" in emitted.get("model", {}).get("generationConfig", {}),
+      "emit-run drops samplingParams even for a normal --max-tokens")
+
 src = open(BENCH, encoding="utf-8").read()
 check("emit-run" in src,
       "run-bench.sh still hand-builds its settings instead of calling "
