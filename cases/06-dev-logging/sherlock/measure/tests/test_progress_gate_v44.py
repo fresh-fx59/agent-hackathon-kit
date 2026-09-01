@@ -11,6 +11,13 @@ and citecheck.py so the model could learn what the gate would accept. None of
 that moves report_sections_written, report_bytes or a worklist seal, so a naive
 gate would have killed the run exactly when it started to succeed.
 
+Three cases: the gate (barren_boundaries, must trip at boundary 2), the
+control (slow_but_honest, must survive because it always makes real
+progress), and the escape's own control (gate_tool_near_miss, must survive
+because two/three consecutive boundaries ran a gate tool and moved nothing
+else — proving the gate-tool escape in boundary_advanced is load-bearing, not
+dead code).
+
 Worklist fixture rows use an empty verdict column for "still open" and
 "X closed" for resolved, header `#`-prefixed — `inspect_worklists`
 (skills/v44/tools/checkpoint.py:55) counts a row RESOLVED when column 2 is
@@ -108,6 +115,20 @@ check("NO_PROGRESS" not in kinds2,
       "the gate aborted an honest run that was making slow progress: %r" % kinds2)
 check(rc2 == 0, "the honest run did not finish cleanly: rc %r (%s)"
       % (rc2, out2[-400:]))
+
+# THE ESCAPE'S OWN CONTROL. Two (really three) consecutive boundaries that
+# move none of resolved/report_sections_written/report_bytes/a worklist seal,
+# each one running a gate tool — must NOT trip the gate. Without this, the
+# gate-tool escape in boundary_advanced is untested and could regress to dead
+# code (Finding 1: GATE_TOOLS was declared and referenced by nothing) while
+# every other test here stayed green.
+rc3, events3, out3 = run_case("gate_tool_near_miss")
+kinds3 = [e.get("event") for e in events3]
+check("NO_PROGRESS" not in kinds3,
+      "the gate tripped on gate-tool-only boundaries that ran reportcheck/"
+      "citecheck/statecheck — the escape is not load-bearing: %r" % kinds3)
+check(rc3 == 0, "the gate-tool near-miss run did not finish cleanly: rc %r (%s)"
+      % (rc3, out3[-400:]))
 
 for msg in FAILED:
     print("FAIL: %s" % msg)

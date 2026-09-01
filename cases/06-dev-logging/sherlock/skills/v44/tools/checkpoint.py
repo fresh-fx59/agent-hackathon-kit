@@ -336,7 +336,7 @@ def append_boundary(work, row, gate_tools_run=()):
     return entry
 
 
-def handoff(work, done, partial=False):
+def handoff(work, done, partial=False, gate_tools_run=()):
     """Close stage `done` (or one BATCH of it), and print the block."""
     work = Path(work).resolve(strict=True)
     if done not in STAGES or done == "done":
@@ -366,7 +366,7 @@ def handoff(work, done, partial=False):
             datetime.timezone.utc).isoformat()
         atomic_text(work / "checkpoint.json",
                     json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n")
-        append_boundary(work, row)
+        append_boundary(work, row, gate_tools_run=gate_tools_run)
         block = render_handoff(str(work), done, row, partial=True)
         atomic_text(work / "handoff.txt", block)
         return row, block
@@ -396,7 +396,7 @@ def handoff(work, done, partial=False):
     row["updated_at"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
     atomic_text(work / "checkpoint.json",
                 json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n")
-    append_boundary(work, row)
+    append_boundary(work, row, gate_tools_run=gate_tools_run)
     block = render_handoff(str(work), done, row)
     atomic_text(work / "handoff.txt", block)
     return row, block
@@ -466,6 +466,14 @@ def main():
                              "(triage only)")
     parser.add_argument("--json", action="store_true",
                         help="print the machine receipt instead of the block")
+    parser.add_argument("--gate-tool", action="append", default=[],
+                        dest="gate_tools_run", metavar="NAME",
+                        help="a gate tool (reportcheck, citecheck, ...) that "
+                             "was run against a real candidate before this "
+                             "boundary was taken — repeatable. Recorded on "
+                             "the checkpoint.jsonl row so the driver's "
+                             "progress gate can tell preparatory gate-tool "
+                             "work from a boundary that changed nothing.")
     args = parser.parse_args()
     if args.command == "init":
         print(json.dumps(init(Path(args.work)), ensure_ascii=False,
@@ -474,7 +482,8 @@ def main():
     if args.command == "handoff":
         if not args.done:
             raise SystemExit("handoff needs --done <stage>")
-        row, block = handoff(args.work, args.done, partial=args.partial)
+        row, block = handoff(args.work, args.done, partial=args.partial,
+                             gate_tools_run=args.gate_tools_run)
         print(json.dumps(row, ensure_ascii=False, sort_keys=True) if args.json
               else block, end="" if not args.json else "\n")
         return

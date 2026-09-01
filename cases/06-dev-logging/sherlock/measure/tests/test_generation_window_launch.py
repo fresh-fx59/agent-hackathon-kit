@@ -314,11 +314,24 @@ class TheRunnerRefusesAnImpossibleOutputBudget(Rig, unittest.TestCase):
                          GENERATION_WINDOW_TOKENS_PER_S)
         self.assertEqual(window["ttft_reserve_seconds"],
                          float(GENERATION_WINDOW_TTFT_RESERVE_S))
+        # RE-ANCHORED 2026-09: Task 3 replaced the hand-built settings block
+        # (which ended at `SAMPLING_JSON=`) with a single call to
+        # corporate-settings.py `emit-run` — that variable no longer exists in
+        # run-bench.sh at all (measure/tests/test_settings_superset_v44.py
+        # pins the replacement: it asserts "emit-run" is present and the old
+        # `printf '{ "model": ...' block is gone). The property THIS case
+        # guards is narrower and still real: the window-derivation code above
+        # (from `GEN_VARS=` down to the `emit-run` invocation) must keep
+        # reading 122.6 / 35 out of lane_guard.py rather than re-embedding
+        # them as shell literals — the same "one measurement, one copy" rule
+        # test_settings_superset_v44.py enforces for the settings JSON shape,
+        # applied here to the numbers instead of the keys.
         runner = os.path.join(os.path.dirname(HERE), os.pardir,
                               "eval", "bench", "run-bench.sh")
         with open(os.path.abspath(runner), encoding="utf-8") as fh:
             text = fh.read()
-        block = text[text.index("GEN_VARS="):text.index("SAMPLING_JSON=")]
+        end_marker = 'corporate-settings.py" emit-run'
+        block = text[text.index("GEN_VARS="):text.index(end_marker)]
         self.assertNotIn("122.6", block, "the throughput is copied into shell")
         self.assertNotIn(":-35}", block, "the TTFT reserve is copied into shell")
 

@@ -466,8 +466,14 @@ def drive(argv, cwd, work, first_prompt, reseed, stage_budget_s, settle_s,
     # CURRENT stage — reset to 0 whenever a boundary shows deliverable
     # progress and whenever `seen` (the stage) changes, so a run that just
     # crossed into `repair` gets its two-boundary budget fresh rather than
-    # inheriting a near-miss from `draft`.
+    # inheriting a near-miss from `draft`. `boundary_advanced` already returns
+    # True with "stage advanced" on the first boundary of a new stage (because
+    # `same_stage` is pre-filtered to the CURRENT `seen`, so `previous` is None
+    # right after a stage change) — the explicit `last_seen` check below is a
+    # second, independent reset that does not depend on that filtering, so a
+    # future refactor of `same_stage` cannot silently reintroduce carry-over.
     barren = 0
+    last_seen = None
 
     def note(kind, detail=""):
         row = {"at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
@@ -657,9 +663,12 @@ def drive(argv, cwd, work, first_prompt, reseed, stage_budget_s, settle_s,
             # tokens. It is a STOP AND ESCALATE, following Claude Code's own
             # thrash rule — refusing to clear would only trade a livelock for
             # a window overflow, which is a different failure, not a fix.
+            if seen != last_seen:
+                barren = 0
+                last_seen = seen
             history = boundary_history(work)
-            if history:
-                same_stage = [r for r in history if r.get("stage") == seen]
+            same_stage = [r for r in history if r.get("stage") == seen]
+            if same_stage:
                 previous = same_stage[-2] if len(same_stage) >= 2 else None
                 moved, why = boundary_advanced(previous, same_stage[-1])
                 if moved:

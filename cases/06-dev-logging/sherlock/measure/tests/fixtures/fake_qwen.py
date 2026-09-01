@@ -41,6 +41,41 @@ def stage():
     except Exception:
         return "triage"
 
+
+def resolve_one_triage_row_or_finish():
+    """Resolve exactly one open worklist row, or — if none are left — close
+    `triage` for real (no --partial). Shared by `slow_but_honest` and
+    `gate_tool_near_miss`: both need triage to eventually finish so the run
+    can fall through to the generic draft/repair/done handling below rather
+    than looping forever inside a stage that has nothing left to resolve.
+
+    Fixture convention: an open row carries an EMPTY verdict column and the
+    header is `#`-prefixed — inspect_worklists (checkpoint.py:55) counts any
+    non-empty, non-"?"-prefixed verdict as resolved, so a placeholder like
+    "D open" or an unprefixed header line would silently inflate `resolved`.
+    """
+    path = os.path.join(WORK, "worklist.tsv")
+    lines = open(path, encoding="utf-8").read().splitlines()
+    target = None
+    for index, row in enumerate(lines[1:], start=1):
+        cols = row.split("\t")
+        if len(cols) >= 2 and not cols[1].strip():
+            target = index
+            lines[index] = cols[0] + "\tX closed"
+            break
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write("\n".join(lines) + "\n")
+    if target is not None:
+        subprocess.run([sys.executable, CHECKPOINT, "handoff", "--work",
+                        WORK, "--done", "triage", "--partial"],
+                       capture_output=True, text=True)
+        say("СТУПЕНЬ ЗАВЕРШЕНА: triage")
+    else:
+        out = subprocess.run([sys.executable, CHECKPOINT, "handoff",
+                              "--work", WORK, "--done", "triage"],
+                             capture_output=True, text=True)
+        say(out.stdout or ("handoff failed: " + out.stderr))
+
 say("\x1b[32mfake qwen ready\x1b[0m")
 while True:
     # readline(), not `for raw in sys.stdin`: iteration read-aheads a block, so
@@ -206,38 +241,36 @@ while True:
         # than the gate's window but never zero. A gate that cannot tell this
         # from the mode above would have killed the paid run in its final four
         # minutes, which were the only productive minutes it had.
-        #
-        # Fixture convention: an open row carries an EMPTY verdict column and
-        # the header is `#`-prefixed — inspect_worklists (checkpoint.py:55)
-        # counts any non-empty, non-"?"-prefixed verdict as resolved, so a
-        # placeholder like "D open" or an unprefixed header line would
-        # silently inflate `resolved` on its own.
-        #
-        # Once every row is resolved, triage really is done — close it for
-        # real (no --partial) so the run falls through to the generic
-        # draft/repair/done handling below instead of looping forever inside
-        # a stage that has nothing left to resolve.
-        path = os.path.join(WORK, "worklist.tsv")
-        lines = open(path, encoding="utf-8").read().splitlines()
-        target = None
-        for index, row in enumerate(lines[1:], start=1):
-            cols = row.split("\t")
-            if len(cols) >= 2 and not cols[1].strip():
-                target = index
-                lines[index] = cols[0] + "\tX closed"
-                break
-        with open(path, "w", encoding="utf-8") as fh:
-            fh.write("\n".join(lines) + "\n")
-        if target is not None:
+        resolve_one_triage_row_or_finish()
+        continue
+    if MODE == "gate_tool_near_miss" and stage() == "triage":
+        # THE ESCAPE'S OWN CONTROL. Two — really three, since the first
+        # boundary of a stage always passes on "first boundary" alone —
+        # CONSECUTIVE boundaries that move none of resolved,
+        # report_sections_written, report_bytes or a worklist seal, each one
+        # running a gate tool (reportcheck, citecheck, statecheck — matching
+        # GATE_TOOLS in interactive-drive.py). This is exactly the paid run
+        # 20260901T002401Z-v43's final four minutes: probe.md -> probe4.md
+        # tested against reportcheck.py/citecheck.py, which moves none of the
+        # declared metrics. If boundary_advanced's gate-tool escape is not
+        # wired to something real, this run trips NO_PROGRESS and dies at the
+        # moment it starts to succeed — which is the failure Finding 1 fixed.
+        counter_path = os.path.join(WORK, ".gate_tool_near_miss_calls")
+        try:
+            n = int(open(counter_path, encoding="utf-8").read().strip())
+        except (OSError, ValueError):
+            n = 0
+        gate_tools = ("reportcheck", "citecheck", "statecheck")
+        if n < len(gate_tools):
             subprocess.run([sys.executable, CHECKPOINT, "handoff", "--work",
-                            WORK, "--done", "triage", "--partial"],
+                            WORK, "--done", "triage", "--partial",
+                            "--gate-tool", gate_tools[n]],
                            capture_output=True, text=True)
+            with open(counter_path, "w", encoding="utf-8") as fh:
+                fh.write(str(n + 1))
             say("СТУПЕНЬ ЗАВЕРШЕНА: triage")
-        else:
-            out = subprocess.run([sys.executable, CHECKPOINT, "handoff",
-                                  "--work", WORK, "--done", "triage"],
-                                 capture_output=True, text=True)
-            say(out.stdout or ("handoff failed: " + out.stderr))
+            continue
+        resolve_one_triage_row_or_finish()
         continue
     if MODE == "stall":
         # Working, talkative, and never finishing a stage — the shape of a run
