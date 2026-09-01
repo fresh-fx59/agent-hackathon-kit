@@ -256,6 +256,34 @@ def ledger_prompt_tokens(path):
     return last
 
 
+def first_fresh_after(path, after_ms):
+    """The first completed CALL row logged after `after_ms`, or None.
+
+    Refusal rows are skipped by `kind`: they carry no usage and no body, and a
+    reader that assumes one schema raises on them — which is how four
+    context-overflow refusals stayed invisible in two prior investigations.
+    Rows without `ts_ms` are pre-v44 and are ignored rather than guessed at.
+    """
+    try:
+        with open(path, encoding="utf-8", errors="replace") as fh:
+            for line in fh:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    row = json.loads(line)
+                except ValueError:
+                    continue
+                if row.get("kind") != "call":
+                    continue
+                stamp = row.get("ts_ms")
+                if isinstance(stamp, int) and stamp > after_ms:
+                    return row
+    except OSError:
+        return None
+    return None
+
+
 def stage_of(work):
     return checkpoint_row(work).get("stage")
 
@@ -582,6 +610,7 @@ def drive(argv, cwd, work, first_prompt, reseed, stage_budget_s, settle_s,
             # question before it was asked. Reset here, so only THIS `/clear`
             # can answer for itself.
             ses.refusal.reset()
+            reseed_at_ms = int(time.time() * 1000)
             ses.type("/clear", settle=settle_s)
             if ses.refusal.seen:
                 note("CLEAR_REFUSED", "a background task was still alive")
@@ -590,6 +619,45 @@ def drive(argv, cwd, work, first_prompt, reseed, stage_budget_s, settle_s,
             ses.type(reseed % {"work": os.path.abspath(work), "stage": seen},
                      settle=2.0)
             note("reseeded", seen)
+            # DO NOT BELIEVE YOUR OWN KEYSTROKES. The refusal needle above
+            # catches a /clear that says no; it cannot catch one that says
+            # nothing and keeps the conversation, which is exactly what run
+            # 20260831T214240Z-v43 did 119 times out of 124. A fresh session
+            # sends exactly two messages — system prompt and seed — so the
+            # first call after the reseed settles it as a fact, not a heuristic.
+            # Token counts were considered and rejected: legitimate per-stage
+            # growth makes any multiple of the floor an invented constant.
+            if ledger_path:
+                fresh = None
+                verify_end = time.time() + max(settle_s * 4, 60.0)
+                while time.time() < verify_end:
+                    if not ses.pump(2.0) and not ses.alive():
+                        break
+                    fresh = first_fresh_after(ledger_path, reseed_at_ms)
+                    if fresh is not None:
+                        break
+                if fresh is None:
+                    note("clear_unverified",
+                         "no completed call after the reseed within the "
+                         "verification window — cannot confirm the clear")
+                else:
+                    count = fresh.get("messages_count")
+                    if count is None:
+                        note("clear_unverified",
+                             "the first call after the reseed carries no "
+                             "messages_count (pre-v44 proxy)")
+                    elif count != 2:
+                        note("CLEAR_NOT_EFFECTIVE",
+                             "the first call after the reseed carried %d "
+                             "messages, not 2 — /clear did not clear, and "
+                             "every later measurement would be meaningless"
+                             % count)
+                        return 8, events
+                    else:
+                        note("clear_verified",
+                             "%s — fresh session, %d messages, prompt %s"
+                             % (seen, count,
+                                (fresh.get("usage") or {}).get("prompt_tokens")))
     finally:
         ses.close()
 

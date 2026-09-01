@@ -56,6 +56,14 @@ while True:
             say("Stop the current session's running background tasks before "
                 "starting a new session.")
             continue
+        if MODE == "clear_noop":
+            # THE SILENT NO-OP, which is what actually happened. Run
+            # 20260831T214240Z-v43's TUI accepted the keystroke, printed
+            # nothing, and kept the conversation: `messages` climbed to 633
+            # across 124 reseeds. It never refused — CLEAR_REFUSED's needle
+            # matched 0 times in a 374 MB transcript — so a stand-in that
+            # refuses cannot express this failure.
+            continue
         loaded = False
         say("\x1b[2JStarting a new session, resetting chat, and clearing terminal.")
         continue

@@ -18,6 +18,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 MEASURE = os.path.dirname(HERE)
@@ -174,8 +175,28 @@ def main():
     # (fake_qwen.py's generic `handoff --partial ` handler) then really calls
     # checkpoint.py handoff --partial and boundary_seq advances on disk — the
     # existing batch_boundary path is what must then send /clear.
+    #
+    # This static ledger is never appended to during the run (nothing here
+    # plays proxy), so Task 2's post-/clear verification (first_fresh_after)
+    # would otherwise find no `kind == "call"` row newer than the reseed and
+    # block for its full verification window (>=60s) at each of the three
+    # reseeds — blowing this scenario's `budget * 4` subprocess timeout. Line
+    # 1 is a synthetic "already fresh" call dated a day in the future, so
+    # first_fresh_after matches it immediately at every reseed regardless of
+    # wall-clock time; line 2 keeps the ledger over threshold (it is LAST, so
+    # ledger_prompt_tokens — which wants the last, not the first, usage row —
+    # still reads 300000). Never weaken the driver's check: it is the fixture
+    # that must speak the v44 ledger schema now.
+    far_future_ms = int(time.time() * 1000) + 24 * 3600 * 1000
     with open(led, "w", encoding="utf-8") as fh:
-        fh.write(json.dumps({"usage": {"prompt_tokens": 300000}}) + "\n")
+        fh.write(json.dumps({"kind": "call", "ts_ms": far_future_ms,
+                             "usage": {"prompt_tokens": 5},
+                             "messages_count": 2,
+                             "session_id": "s-fresh"}) + "\n")
+        fh.write(json.dumps({"kind": "call", "ts_ms": int(time.time() * 1000),
+                             "usage": {"prompt_tokens": 300000},
+                             "messages_count": 400,
+                             "session_id": "s-stale"}) + "\n")
     p, work, rows, text = scenario("threshold_then_happy",
                                    checkpoint=CHECKPOINT_V43,
                                    ledger=led, threshold=169331)
