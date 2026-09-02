@@ -11,10 +11,39 @@ import json
 import os
 import subprocess
 import sys
+import threading
+import time
 
 WORK = os.environ["FAKE_WORK"]
 CHECKPOINT = os.environ.get("FAKE_CHECKPOINT")     # checkpoint.py to call
 MODE = os.environ.get("FAKE_MODE", "happy")
+# THE v44 QUEUING BUG, reproduced. `busy_after_boundary`: for FAKE_BUSY_S
+# seconds after every stage boundary, this stand-in (a) keeps repainting the
+# real TUI's in-flight footer, and (b) SWALLOWS every typed line instead of
+# acting on it — a keystroke typed into a busy qwen-code 0.22.0 queues
+# («⏳ N queued») rather than executing, and 20260902T021751Z-v44 shows those
+# queued clears never draining before the next boundary made the target busy
+# again. A driver that types /clear the instant the boundary lands (the
+# pre-fix behaviour) always loses its keystrokes here; one that waits for the
+# footer to go quiet first (wait_idle) types after the window closes and gets
+# through.
+BUSY_S = float(os.environ.get("FAKE_BUSY_S", "0"))
+_busy_until = [0.0]
+_busy_lock = threading.Lock()
+
+
+def _busy_footer():
+    while True:
+        time.sleep(0.2)
+        with _busy_lock:
+            busy = time.time() < _busy_until[0]
+        if busy:
+            say("  ⣋ Aligning the stars for optimal response "
+                "(0s · esc to cancel)")
+
+
+if MODE == "busy_after_boundary" and BUSY_S > 0:
+    threading.Thread(target=_busy_footer, daemon=True).start()
 # How much chatter the flood modes print before they hand off. The driver used
 # to keep an 8 MB per-stage ring buffer, so «more than 8 MB» is the shape that
 # made it answer `handoff_block_unknown` on the paid run.
@@ -86,6 +115,14 @@ while True:
     line = raw.strip()
     if not line:
         continue
+    if MODE == "busy_after_boundary":
+        with _busy_lock:
+            busy = time.time() < _busy_until[0]
+        if busy:
+            # SWALLOWED, exactly like the real bug: the keystroke queues
+            # instead of acting, and this stand-in never drains that queue —
+            # the next boundary just opens a new busy window first.
+            continue
     if MODE == "turns_exhausted":
         # THE BANNER THAT ACTUALLY ENDED THE PAID RUN, rendered the way the
         # real TUI actually wrapped it in 20260901T002401Z-v43's transcript —
@@ -342,3 +379,6 @@ while True:
     out = subprocess.run([sys.executable, CHECKPOINT, "handoff", "--work", WORK,
                           "--done", st], capture_output=True, text=True)
     say(out.stdout or ("handoff failed: " + out.stderr))
+    if MODE == "busy_after_boundary":
+        with _busy_lock:
+            _busy_until[0] = time.time() + BUSY_S

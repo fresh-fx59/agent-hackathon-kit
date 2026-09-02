@@ -63,6 +63,30 @@ TARGET_REFUSAL_NEEDLES = (
     "this limit in your setting.json",
 )
 STAGES = ("triage", "draft", "repair", "done")
+# THE ROOT CAUSE OF v44's free-run block, run 20260902T021751Z-v44: qwen-code
+# 0.22.0 QUEUES typed input while a turn is in flight — «⏳ 2 queued» — instead
+# of executing it. This driver used to type `/clear` the instant
+# `boundary_seq` advanced on disk, with no regard for whether the target was
+# still generating. The keystrokes landed in the TUI's own input queue, never
+# reached the model, and `messages_count` climbed across every later boundary
+# (23, 25, 27, 33, 37, 41 in that run) because the conversation was never
+# actually reset.
+#
+# THE NEEDLE: the in-flight footer `esc to cancel`, verified against that
+# run's real transcript (`command grep -c "esc to cancel"` found 3,977 hits,
+# always inside the spinner line `⠋ ... (Ns · esc to cancel)`). It CANNOT
+# appear on an idle screen: qwen-code only ever prints it as part of the
+# busy-spinner footer, which is replaced by the plain
+# `Enter to steer · Ctrl+Q to queue · ...` status line the instant a turn
+# finishes — that line never carries "esc to cancel" (checked against the
+# same transcript: every "esc to cancel" hit sits on a `⠋/⠙/⠹/⠸/⠼/⠴/⠦` spinner
+# row, none on the bare status row). `queued` and `Ctrl+Q to queue` were
+# considered and rejected: `Ctrl+Q to queue` is a STATIC hint painted on the
+# status line whether or not anything is queued (it appears whenever the
+# footer with "Enter to steer" is on screen, which is most of an idle
+# session), so it would make the idle-wait time out on almost every
+# boundary — the opposite of a safe needle.
+BUSY_MARKER = "esc to cancel"
 
 
 def strip(text):
@@ -174,6 +198,40 @@ class AllOfWatch(object):
             if w.hits:
                 return w.hits[0]
         return ""
+
+
+class RecencyWatch(object):
+    """CURRENT STATE, NOT A LATCH: «how long since this mark last appeared».
+
+    `MarkWatch.seen` is the wrong tool for "is the target busy RIGHT NOW" —
+    it only ever answers "at least once, ever" and never resets itself, so
+    once a run's first spinner frame fires, `seen` would stay true for the
+    rest of the run and an idle-wait built on it would time out on every
+    single boundary. What the idle-wait needs is a reading of the MOST RECENT
+    screen content: has the busy marker stopped repainting, not "was it once
+    seen". This class keeps only the timestamp of the latest match; `idle_for`
+    reports how long the screen has been silent on that mark, which ages back
+    toward "idle" the moment the target's spinner stops being repainted —
+    exactly the current-state question the wait needs answered on every poll.
+    """
+
+    def __init__(self, mark):
+        self.mark = mark
+        self._tail = ""
+        self.last_seen = 0.0     # 0.0 == "never seen" (monotonic time is never 0)
+
+    def feed(self, text):
+        hay = self._tail + text
+        if self.mark in hay:
+            self.last_seen = time.time()
+        over = len(self.mark) - 1
+        self._tail = hay[-over:] if over else ""
+
+    def idle_for(self):
+        """Seconds since the mark last appeared, or +inf if never seen."""
+        if not self.last_seen:
+            return float("inf")
+        return time.time() - self.last_seen
 
 
 def hit_names_stage(context, completed):
@@ -479,7 +537,11 @@ class Session(object):
         # recover, so resetting this per boundary would let the driver keep
         # nudging a corpse instead of naming what actually happened once.
         self.target_refusal = AllOfWatch(TARGET_REFUSAL_NEEDLES)
-        self.watches = (self.handoff, self.refusal, self.target_refusal)
+        # CURRENT STATE, fed the same way as the latches above (every pump()
+        # call) but answering a different question — see RecencyWatch.
+        self.busy = RecencyWatch(BUSY_MARKER)
+        self.watches = (self.handoff, self.refusal, self.target_refusal,
+                         self.busy)
         # Where this stage's output starts in the transcript, so the second
         # witness reads THIS stage and not the whole run.
         self.stage_offset = 0
@@ -526,6 +588,26 @@ class Session(object):
         except (OSError, IOError, ValueError):
             self.stage_offset = 0
 
+    def wait_idle(self, bound_s, settle_s=1.0, poll_s=0.2):
+        """Block until the target has looked idle for `settle_s` seconds, or
+        `bound_s` total has elapsed — whichever comes first.
+
+        BOUNDED, NEVER A NEW TERMINAL. Returns True if the screen went idle,
+        False if the bound expired — the caller's fallback on False is to type
+        anyway (today's behaviour), so this can only make a `/clear` land
+        better than before, never worse. `idle_for()` is read AFTER every
+        pump, i.e. it is always a reading of what the screen looks like right
+        now, not of whether the marker ever fired earlier in the run.
+        """
+        deadline = time.time() + bound_s
+        while True:
+            remaining = deadline - time.time()
+            self.pump(poll_s if remaining > 0 else 0.0)
+            if self.busy.idle_for() >= settle_s:
+                return True
+            if time.time() >= deadline:
+                return False
+
     def type(self, text, settle=1.5):
         """Type a line the way a human does: the text, then Enter."""
         os.write(self.fd, text.encode("utf-8"))
@@ -554,7 +636,8 @@ class Session(object):
 def drive(argv, cwd, work, first_prompt, reseed, stage_budget_s, settle_s,
           transcript, skill_command, events_path=None, ledger_path="",
           idle_nudge_s=0, max_nudges=3, nudge_text="продолжай",
-          handoff_grace_s=8.0, threshold=0, reseed_command=""):
+          handoff_grace_s=8.0, threshold=0, reseed_command="",
+          clear_idle_wait_s=20.0, clear_idle_settle_s=1.0):
     ses = Session(argv, cwd, dict(os.environ), transcript)
     events = []
     # THE LATCH: holds the boundary_seq the driver was at when it crossed the
@@ -837,6 +920,20 @@ def drive(argv, cwd, work, first_prompt, reseed, stage_budget_s, settle_s,
             # question before it was asked. Reset here, so only THIS `/clear`
             # can answer for itself.
             ses.refusal.reset()
+            # WAIT FOR IDLE BEFORE TYPING /clear — see BUSY_MARKER above. A
+            # target that is still generating queues the keystroke instead of
+            # acting on it, which is exactly what turned 120 clears into 120
+            # silent no-ops in stage `repair` on run 20260902T021751Z-v44. The
+            # bound is finite and the fallback on expiry is to type anyway —
+            # never a new terminal, only a note — so this can only improve on
+            # today's behaviour.
+            went_idle = ses.wait_idle(clear_idle_wait_s,
+                                      settle_s=clear_idle_settle_s)
+            if not went_idle:
+                note("clear_typed_while_busy",
+                     "%s — target never looked idle within %.0fs; typing "
+                     "/clear anyway (today's behaviour, never worse)"
+                     % (seen, clear_idle_wait_s))
             reseed_at_ms = int(time.time() * 1000)
             ses.type("/clear", settle=settle_s)
             if ses.refusal.seen:
@@ -985,6 +1082,16 @@ def main():
                     help="ledger prompt_tokens at which the driver forces a "
                          "partial handoff and clears — 0 disables it "
                          "(corporate_settings.handoff_threshold())")
+    ap.add_argument("--clear-idle-wait-s", type=float, default=20.0,
+                    help="before typing /clear, wait up to this long for the "
+                         "target to stop looking busy (\"esc to cancel\" gone "
+                         "from the screen for --clear-idle-settle-s) — a busy "
+                         "target QUEUES the keystroke instead of acting on "
+                         "it. 0 disables the wait (types immediately, the "
+                         "pre-v44 behaviour).")
+    ap.add_argument("--clear-idle-settle-s", type=float, default=1.0,
+                    help="how long the busy marker must have been absent "
+                         "before the screen counts as idle")
     ap.add_argument("command", nargs=argparse.REMAINDER,
                     help="-- the interactive command to drive (default: qwen)")
     args = ap.parse_args()
@@ -1005,7 +1112,8 @@ def main():
                        args.skill_command, args.events, args.ledger,
                        args.idle_nudge_s, args.max_nudges, args.nudge_text,
                        args.handoff_grace_s, args.threshold,
-                       args.reseed_command)
+                       args.reseed_command, args.clear_idle_wait_s,
+                       args.clear_idle_settle_s)
     print("rc=%d" % rc)
     return rc
 
