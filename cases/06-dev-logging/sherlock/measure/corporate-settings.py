@@ -242,6 +242,29 @@ def run_settings(window, max_tokens, session_token_limit=None, timeout_ms=None,
         row["model"].pop("sessionTokenLimit", None)
     row["model"]["model_fallback"] = {"enabled": False}
     row["memory"] = {"enableManagedAutoMemory": False, "enableDreams": False}
+    # PIN THE BINARY FOR THE LIFE OF THE RUN. qwen-code 0.22.0 checks npm for
+    # a newer version at TUI startup and STAGES it for the next launch: a
+    # throwaway probe on 2026-09-02 printed «Update successful! The new
+    # version will be used on your next run.» and left
+    # `$HOME/.qwen/updates/npm/*/active.json` = {"version": "0.22.3",
+    # "baseVersion": "0.22.0"}. A multi-hour run relaunches the CLI at every
+    # handoff boundary, so a staged update would swap the binary MID-RUN —
+    # and this driver reads the TUI's own footer strings to decide whether
+    # the target is busy (see FOOTER_ANCHOR in interactive-drive.py), so a
+    # cosmetic change in 0.22.3 would silently break the clear gate. It would
+    # also make the measurement meaningless: two halves of one run on two
+    # different builds.
+    #
+    # PROVEN, red-then-green, on the real binary
+    # (`/home/claude-developer/probe/updprobe.py`, two throwaway $HOMEs, 90s
+    # of interactive TUI each): default settings staged 0.22.3 and printed
+    # the update line; `general.enableAutoUpdate: false` staged nothing and
+    # printed nothing. The `-p` (non-interactive) path never staged at all,
+    # so this is a TUI-side check — which is exactly the path this harness
+    # drives. The legacy spelling `general.disableAutoUpdate` is still
+    # accepted by 0.22.0's settings migration, but the current name is the
+    # one written here.
+    row.setdefault("general", {})["enableAutoUpdate"] = False
     if exclude_tools:
         row["tools"]["exclude"] = list(exclude_tools)
     if not auto_compact:
