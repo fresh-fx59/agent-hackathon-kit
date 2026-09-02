@@ -87,11 +87,20 @@ while True:
     if not line:
         continue
     if MODE == "turns_exhausted":
-        # THE BANNER THAT ACTUALLY ENDED THE PAID RUN, verbatim. It answers
-        # EVERY input — the reseed, the skill command, all three nudges — so a
-        # stand-in that refuses only /clear cannot express it.
-        say("The session has reached the maximum number of turns: 600. "
-            "Please update this limit in your setting.json file.")
+        # THE BANNER THAT ACTUALLY ENDED THE PAID RUN, rendered the way the
+        # real TUI actually wrapped it in 20260901T002401Z-v43's transcript —
+        # not as one tidy line. Fix round 2: the real qwen-code box wraps the
+        # sentence across two screen rows, with trailing padding and a
+        # box-drawing border character on each, and the wrap point falls
+        # INSIDE "update this limit" — "update" ends row 1, "this limit..."
+        # starts row 2. A fixture that prints the banner as a single
+        # unwrapped line proves nothing about needles that must survive real
+        # rendering; this one reproduces the wrap exactly, so the test proves
+        # the latch fires against what the screen actually looked like.
+        say("● The session has reached the maximum number of turns: 600. "
+            "Please update    │")
+        say("  this limit in your setting.json file."
+            "                                      █")
         continue
     if MODE == "grep_echo_only":
         # THE FALSE POSITIVE THIS FIXTURE PROVES CLOSED (fix round 1). This
@@ -99,8 +108,8 @@ while True:
         # screen while investigating THIS VERY CASE — narrating the phrase,
         # or `command grep "maximum number of turns" transcript.log` over a
         # corpus that contains it — without ever printing the CLI's real
-        # banner's distinguishing tail ("update this limit in your
-        # setting.json"). It must NOT be read as a refusal: the target just
+        # banner's distinguishing tail ("this limit in your setting.json").
+        # It must NOT be read as a refusal: the target just
         # never advances, so the run should reach its normal STAGE_STALLED
         # terminal, not TARGET_REFUSED.
         say("note: transcript.log:41: target appears to have hit its "

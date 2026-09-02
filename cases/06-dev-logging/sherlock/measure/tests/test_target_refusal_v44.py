@@ -17,7 +17,7 @@ banner came from, so an honest RCA agent narrating its own investigation, or
 `command grep "maximum number of turns" ...`-ing a transcript, could put that
 bare fragment on screen. `test_a_bare_fragment_is_not_a_refusal` proves that
 does NOT trip TARGET_REFUSED — the fix requires the CLI's own distinguishing
-tail ("update this limit in your setting.json") to ALSO be on screen before
+tail ("this limit in your setting.json") to ALSO be on screen before
 the latch fires.
 """
 import json

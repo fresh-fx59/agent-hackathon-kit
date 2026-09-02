@@ -60,7 +60,7 @@ CLEAR_REFUSAL = "background tasks before starting a new session"
 # configurable and this run's value is not a fact about the banner.
 TARGET_REFUSAL_NEEDLES = (
     "reached the maximum number of turns",
-    "update this limit in your setting.json",
+    "this limit in your setting.json",
 )
 STAGES = ("triage", "draft", "repair", "done")
 
