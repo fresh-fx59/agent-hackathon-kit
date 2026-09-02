@@ -13,6 +13,17 @@ counts RESOLVED when column 2 is non-empty and does not start with `?`) and
 the shape tools/tests/test_boundary_history_v44.py already uses, NOT the
 "D open" placeholder text a plan draft used, which inspect_worklists would
 have counted as resolved.
+
+KNOWN TEST DEBT, disclosed rather than hidden: the second fixture below
+reaches `stage=draft` with 7 of 10 worklist rows still open by HAND-EDITING
+checkpoint.json after `init()`, not through a real `triage` -> `draft`
+transition. That state is UNREACHABLE through the real state machine:
+`handoff --done triage` refuses while any row is open (checkpoint.py's
+`handoff()`), so a genuine triage->draft transition always leaves
+`unresolved == 0`. The hand-edit only exists to exercise `reseed_line()`'s
+field-reading (resolved/total, section counts, bytes) with numbers that
+differ from each other; it proves nothing about that combination of stage
+and worklist state being reachable in a real run.
 """
 import os
 import re
@@ -44,6 +55,22 @@ with open(os.path.join(work, "report.md"), "w", encoding="utf-8") as fh:
     fh.write("# Отчёт\n\n## Находки\n\nсодержимое\n\n## Покрытие\n\nсодержимое\n")
 subprocess.run([sys.executable, CHECKPOINT, "init", "--work", work],
                capture_output=True, text=True)
+
+# BOUNDARY 0 — a brand-new investigation that has read NOTHING yet must
+# NOT be told not to re-read: that is exactly the failure the reviewer
+# caught (reseed_line() used to append the anti-redo clause
+# unconditionally, so a fresh checkpoint at границ пройдено 0 printed «НЕ
+# ПЕРЕЧИТЫВАЙ» before anything had ever been read once).
+fresh_proc = subprocess.run([sys.executable, CHECKPOINT, "reseed-line",
+                             "--work", work], capture_output=True, text=True)
+check(fresh_proc.returncode == 0,
+      "reseed-line failed on a fresh checkpoint: %s" % fresh_proc.stderr[-300:])
+fresh_line = fresh_proc.stdout.strip()
+check(not re.search(r"(НЕ ПЕРЕЧИТЫВАЙ|не перечитывай)", fresh_line),
+      "a FRESH checkpoint (boundary 0) still carries the anti-redo clause "
+      "— it tells a model that has read nothing not to re-read: %r"
+      % fresh_line)
+check(fresh_line, "reseed-line printed nothing on a fresh checkpoint")
 # The fixture wants the stage past triage (7 of 10 rows closed, 3 still
 # open — triage itself never completes with rows open) so it can exercise
 # the draft stage's own section-count fields. init() never advances a

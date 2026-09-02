@@ -427,24 +427,47 @@ def reseed_line(work):
     (already the section headings actually on disk), never from the dict
     itself: `", ".join(dict)` would join its KEYS and print nonsense.
 
-    The anti-redo clause is copied in spirit from qwen's own post-compaction
-    trailer — «Continue from the last in-flight step; do not acknowledge the
-    summary, do not re-introduce» — because the one thing the model must not
-    do is start over politely.
+    THE ANTI-REDO CLAUSE IS CONDITIONAL ON boundary_seq > 0. CAUGHT IN REVIEW:
+    a first version appended it unconditionally, so a BRAND-NEW investigation
+    at `границ пройдено 0` — one that has read nothing at all — was told «НЕ
+    ПЕРЕЧИТЫВАЙ справочники» before it had ever read them once. That is
+    exactly the failure mode the spec's §C amendment warns about (§8/C6: a
+    ceiling on RE-reading must never become a floor that discourages a first,
+    genuine read). At boundary 0 the state line still prints (stage,
+    resolved/total, sections, bytes) — that part is true and harmless at any
+    boundary — but the slot that would carry an anti-redo instruction is
+    replaced with an affirmative first-session instruction instead of being
+    silently dropped, so the model is never left without SOME next-action
+    text in that position.
+
+    The anti-redo clause itself is copied in spirit from qwen's own
+    post-compaction trailer — «Continue from the last in-flight step; do not
+    acknowledge the summary, do not re-introduce» — because the one thing a
+    model that HAS already read the material must not do is start over
+    politely.
     """
     row = read_row(work) or {}
     sections = report_sections(work)
     done = ", ".join(sections["roles"]) if sections["roles"] else "нет"
+    boundary_seq = row.get(BOUNDARY_SEQ, 0) or 0
+    if boundary_seq > 0:
+        action = ("НЕ ПЕРЕЧИТЫВАЙ справочники и НЕ ПОВТОРЯЙ уже сделанное — "
+                  "продолжи со следующего незаконченного шага и пиши в "
+                  "report.md сейчас.")
+    else:
+        # First session, nothing read yet — say so plainly rather than say
+        # nothing: a first-session run still needs a next action.
+        action = ("ЭТО ПЕРВАЯ СЕССИЯ РАССЛЕДОВАНИЯ — прочти нужные "
+                  "справочники и начни с STEP 0.")
     return (
         "ПРОДОЛЖИ РАССЛЕДОВАНИЕ ИЗ %s — СТУПЕНЬ %s. "
         "Разобрано %s из %s. Разделов отчёта написано %s из %s (%s), "
         "отчёт %s байт, границ пройдено %s. "
-        "НЕ ПЕРЕЧИТЫВАЙ справочники и НЕ ПОВТОРЯЙ уже сделанное — "
-        "продолжи со следующего незаконченного шага и пиши в report.md сейчас."
+        "%s"
         % (os.path.abspath(str(work)), row.get("stage"),
            row.get("resolved"), row.get("total"),
            sections["written"], sections["required"], done,
-           row.get("report_bytes", 0), row.get(BOUNDARY_SEQ, 0)))
+           row.get("report_bytes", 0), boundary_seq, action))
 
 
 def resume(work):
