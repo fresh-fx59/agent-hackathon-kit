@@ -42,8 +42,47 @@ def _busy_footer():
                 "(0s · esc to cancel)")
 
 
+# THE FALSE-IDLE REGRESSION LOCK — reproduces the ACTUAL shape of run
+# 20260902T053801Z-v44, confirmed by reading that transcript directly: the
+# spinner line `esc to cancel` prints once when the turn starts and then
+# goes QUIET (a model that is "thinking" — Compiling the 1s and 0s... —
+# stops repainting that exact line for long stretches; measured against the
+# real transcript, the max gap between consecutive "esc to cancel" repaints
+# in one run was 1.7 MB / a long silent stretch), while the OTHER busy
+# signal, the queued-input indicator (`⏳ N queued`), keeps repainting the
+# whole time — `queued` was seen 261 times in that same transcript window,
+# never once caught by the pre-fix detector because its `BUSY_MARKER` was
+# `esc to cancel` ALONE (the pre-fix code explicitly rejected `queued` as a
+# needle, conflating it with the always-present `Ctrl+Q to queue` hint — see
+# the BUSY_MARKER comment above). A detector watching only `esc to cancel`
+# goes idle the instant that one line stops repainting; a detector that also
+# accepts `queued` (this fix's `BUSY_MARKERS`) does not.
+REPAINT_S = float(os.environ.get("FAKE_REPAINT_S", "0.3"))
+
+
+def _sparse_busy_footer():
+    """Print the spinner ONCE, then only the queued-input indicator."""
+    printed_spinner = False
+    n = 0
+    while True:
+        time.sleep(REPAINT_S)
+        with _busy_lock:
+            busy = time.time() < _busy_until[0]
+        if not busy:
+            continue
+        if not printed_spinner:
+            say("  ⣋ Aligning the stars for optimal response "
+                "(0s · esc to cancel)")
+            printed_spinner = True
+            continue
+        n += 1
+        say("  ⏳ %d queued" % n)
+
+
 if MODE == "busy_after_boundary" and BUSY_S > 0:
     threading.Thread(target=_busy_footer, daemon=True).start()
+if MODE == "sparse_busy_after_boundary" and BUSY_S > 0:
+    threading.Thread(target=_sparse_busy_footer, daemon=True).start()
 # THE THIRD SWALLOW WINDOW, one keystroke type further still: a queued
 # `handoff --partial` at a threshold crossing. `handoff_busy_once` goes busy
 # ONCE, right when the target starts "thinking" about the very first message
@@ -262,7 +301,7 @@ while True:
     line = raw.strip()
     if not line:
         continue
-    if MODE in ("busy_after_boundary", "handoff_busy_once"):
+    if MODE in ("busy_after_boundary", "sparse_busy_after_boundary", "handoff_busy_once"):
         with _busy_lock:
             busy = time.time() < _busy_until[0]
         if busy:
@@ -314,7 +353,7 @@ while True:
             continue
         loaded = False
         say("\x1b[2JStarting a new session, resetting chat, and clearing terminal.")
-        if MODE == "busy_after_boundary":
+        if MODE in ("busy_after_boundary", "sparse_busy_after_boundary"):
             # THE SECOND SWALLOW WINDOW. A real qwen-code session does not
             # sit idle just because /clear landed — it starts doing
             # something right away (the fresh session's own first turn), so
@@ -545,6 +584,20 @@ while True:
                         "--done", st], capture_output=True)
         say("...done, but I said nothing useful.")
         continue
+    if MODE == "sparse_busy_after_boundary":
+        # ARM BEFORE THE BOUNDARY WRITE, not after. The driver detects
+        # `stage_advanced` by polling checkpoint.json from a SEPARATE
+        # process, so if the busy window only starts once that file is
+        # written, the very first `wait_before` check can land before the
+        # sparse footer thread has printed even once — genuinely idle, not a
+        # test of the false-idle bug at all. Arming a few repaint ticks
+        # early (`2 * REPAINT_S` sleep, footer already ticking during it)
+        # guarantees at least one repaint has already landed, and that the
+        # window is still open, by the time the driver notices the boundary
+        # and calls `wait_before("/clear")`.
+        with _busy_lock:
+            _busy_until[0] = time.time() + REPAINT_S * 2 + BUSY_S
+        time.sleep(REPAINT_S * 2)
     out = subprocess.run([sys.executable, CHECKPOINT, "handoff", "--work", WORK,
                           "--done", st], capture_output=True, text=True)
     say(out.stdout or ("handoff failed: " + out.stderr))

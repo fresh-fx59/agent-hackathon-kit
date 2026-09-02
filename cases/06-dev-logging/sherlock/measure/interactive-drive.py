@@ -80,13 +80,47 @@ STAGES = ("triage", "draft", "repair", "done")
 # `Enter to steer · Ctrl+Q to queue · ...` status line the instant a turn
 # finishes — that line never carries "esc to cancel" (checked against the
 # same transcript: every "esc to cancel" hit sits on a `⠋/⠙/⠹/⠸/⠼/⠴/⠦` spinner
-# row, none on the bare status row). `queued` and `Ctrl+Q to queue` were
-# considered and rejected: `Ctrl+Q to queue` is a STATIC hint painted on the
-# status line whether or not anything is queued (it appears whenever the
-# footer with "Enter to steer" is on screen, which is most of an idle
-# session), so it would make the idle-wait time out on almost every
-# boundary — the opposite of a safe needle.
+# row, none on the bare status row). `Ctrl+Q to queue` itself is rejected as
+# a needle: it is a STATIC hint painted on the status line whether or not
+# anything is queued (it appears whenever the footer with "Enter to steer"
+# is on screen, which is most of an idle session), so it would make the
+# idle-wait time out on almost every boundary.
+#
+# `queued`, spelled exactly like this — the PAST PARTICIPLE, not the verb —
+# is a SEPARATE, safe second marker (round 3 fix, run 20260902T053801Z-v44):
+# the queued-input indicator only ever reads `⏳ N queued`, printed once
+# something is actually sitting in the input queue; the idle footer's own
+# `Ctrl+Q to queue` does not contain the substring "queued" (it ends in
+# "queue", four characters short), so it cannot false-positive against this
+# needle the way it would have against a needle of "queue".
 BUSY_MARKER = "esc to cancel"
+QUEUED_MARKER = "queued"
+BUSY_MARKERS = (BUSY_MARKER, QUEUED_MARKER)
+# TAIL WINDOW for the CURRENT-SCREEN read of the transcript file (see
+# `screen_busy` below). Sized off the real run 20260902T053801Z-v44's own
+# transcript: the raw byte gap between consecutive `esc to cancel` repaints
+# has a median of 997 B and a p95 of 1613 B (measured directly against that
+# transcript). 16 KiB is ~10x the p95 gap — comfortable margin for a slower
+# or irregular repaint tick — while staying a fixed, cheap read (one seek +
+# one read) against a transcript that reaches hundreds of MB.
+BUSY_TAIL_BYTES = 1 << 14
+# THE OTHER HALF OF THE RECENCY GUARANTEE. A byte window alone bounds
+# recency only while the transcript keeps growing — a target that goes
+# GENUINELY idle typically stops writing to the pty almost entirely (no
+# more spinner, no more tokens), so the last busy repaint can sit inside
+# `BUSY_TAIL_BYTES` of an otherwise-frozen file forever, and a pure
+# byte-window check would then read "busy" for good. (Caught in testing:
+# `test_idle_wait_v44.py`'s busy-then-truly-idle fixture hung past 90s on a
+# byte-window-only version of this function — the transcript stopped
+# growing the instant the busy window closed, so the stale marker never
+# aged out.) `BUSY_STALE_S` closes that: the transcript file's own mtime is
+# the wall-clock moment its last byte was written, so a busy verdict also
+# requires that timestamp to be recent. 3.0s is comfortably above the
+# measured repaint gap (p95 1613 B / roughly a second or so of real spinner
+# cadence) so a genuinely busy target's own silences never trip it, while a
+# target that has actually gone idle and stopped writing reads idle within
+# a few seconds, not "forever".
+BUSY_STALE_S = 3.0
 # THE RECOVERABLE LATCH's bound. `handoff --partial` has no retry today: the
 # `awaiting_boundary is None` check exists so ONE crossing produces ONE
 # typed command, and the only thing that ever clears it is a REAL boundary
@@ -254,38 +288,15 @@ class AllOfWatch(object):
         return ""
 
 
-class RecencyWatch(object):
-    """CURRENT STATE, NOT A LATCH: «how long since this mark last appeared».
-
-    `MarkWatch.seen` is the wrong tool for "is the target busy RIGHT NOW" —
-    it only ever answers "at least once, ever" and never resets itself, so
-    once a run's first spinner frame fires, `seen` would stay true for the
-    rest of the run and an idle-wait built on it would time out on every
-    single boundary. What the idle-wait needs is a reading of the MOST RECENT
-    screen content: has the busy marker stopped repainting, not "was it once
-    seen". This class keeps only the timestamp of the latest match; `idle_for`
-    reports how long the screen has been silent on that mark, which ages back
-    toward "idle" the moment the target's spinner stops being repainted —
-    exactly the current-state question the wait needs answered on every poll.
-    """
-
-    def __init__(self, mark):
-        self.mark = mark
-        self._tail = ""
-        self.last_seen = 0.0     # 0.0 == "never seen" (monotonic time is never 0)
-
-    def feed(self, text):
-        hay = self._tail + text
-        if self.mark in hay:
-            self.last_seen = time.time()
-        over = len(self.mark) - 1
-        self._tail = hay[-over:] if over else ""
-
-    def idle_for(self):
-        """Seconds since the mark last appeared, or +inf if never seen."""
-        if not self.last_seen:
-            return float("inf")
-        return time.time() - self.last_seen
+# NOTE ON HISTORY: an earlier `RecencyWatch` class lived here — "how long
+# since this mark last appeared", fed only the bytes each `pump()` call had
+# just read off the pty. It answered "has NEW OUTPUT containing the marker
+# arrived recently", not "is the marker on screen right now" — the two agree
+# only while the target keeps repainting on every single poll tick, and
+# diverge (false idle) the instant a poll's chunk happens to miss a marker
+# that is still sitting on screen. Replaced by `screen_busy` below, which
+# re-reads the transcript FILE's current tail on every check instead of
+# trusting incremental arrival — see `screen_busy` and `Session.wait_idle`.
 
 
 def hit_names_stage(context, completed):
@@ -345,6 +356,64 @@ def scan_transcript(path, start, mark=HANDOFF_MARK, chunk=1 << 20):
                 at = i + 1
             carry = hay[-over:] if over else b""
     return hits
+
+
+def screen_busy(path, tail_bytes=BUSY_TAIL_BYTES, markers=BUSY_MARKERS,
+                 stale_s=BUSY_STALE_S):
+    """Is the target busy RIGHT NOW, judged from CURRENT SCREEN CONTENT?
+
+    THE BUG THIS REPLACES: the previous detector (`RecencyWatch`, still
+    above for the git history but no longer wired to `wait_idle`) fed only
+    the bytes each `pump()` call had just read, and aged its "last seen"
+    clock whenever a poll's chunk did not happen to contain the marker. That
+    measures NEW OUTPUT ARRIVAL, not idleness — a target that is genuinely
+    busy but not repainting on a given 0.2s tick (measured against the real
+    run 20260902T053801Z-v44: the byte gap between consecutive `esc to
+    cancel` repaints in that transcript has a p95 of 1613 B, not a fixed
+    cadence) reads as idle the instant one poll's chunk misses it, even
+    though the busy footer is still sitting on screen. Run
+    20260902T053801Z-v44 failed exactly this way: no `clear_typed_while_busy`
+    and no ESC note in the events log, i.e. `wait_idle` decided the target
+    was idle without ever waiting or cancelling, while the terminal was
+    showing an in-flight spinner AND a queued `/clear`/`/sherlock`.
+
+    THE FIX: re-read the CURRENT tail of the transcript FILE on every poll
+    — not the incremental chunk just read, the last `tail_bytes` of what is
+    on disk right now — strip ANSI, and test it for either busy marker. A
+    marker byte written once stays in that window for as long as the file
+    doesn't grow past it by `tail_bytes` — so a marker from a genuine repaint
+    a moment ago is still visible even on a poll whose own fresh chunk had
+    none, closing exactly the gap above.
+
+    RECENCY BOUND, TWO PARTS. (1) Reading is always anchored to the file's
+    CURRENT end (a fresh open+seek(-tail_bytes) every call, never a fixed
+    offset), so the window slides forward with the file — a marker printed
+    minutes ago is only still "seen" if the transcript has grown by less
+    than `tail_bytes` since. (2) That alone is not enough for a target that
+    has gone genuinely idle and all but stops writing to the pty — the
+    window would then stay frozen on a stale marker indefinitely, so the
+    verdict also requires the file's own mtime (the wall-clock moment its
+    last byte landed) to be within `stale_s` — see `BUSY_STALE_S`. Either
+    the file keeps growing past the marker, or it goes quiet and the mtime
+    check catches it: neither path lets a stale marker read as busy forever
+    the way a latch (`MarkWatch.seen`) would.
+    """
+    try:
+        st = os.stat(path)
+    except (OSError, IOError):
+        return False
+    if time.time() - st.st_mtime > stale_s:
+        return False
+    size = st.st_size
+    start = max(0, size - int(tail_bytes))
+    try:
+        with open(path, "rb") as fh:
+            fh.seek(start)
+            blk = fh.read()
+    except (OSError, IOError):
+        return False
+    text = strip(blk.decode("utf-8", "replace"))
+    return any(m in text for m in markers)
 
 
 def ledger_quiet_s(ledger_path):
@@ -591,15 +660,49 @@ class Session(object):
         # recover, so resetting this per boundary would let the driver keep
         # nudging a corpse instead of naming what actually happened once.
         self.target_refusal = AllOfWatch(TARGET_REFUSAL_NEEDLES)
-        # CURRENT STATE, fed the same way as the latches above (every pump()
-        # call) but answering a different question — see RecencyWatch.
-        self.busy = RecencyWatch(BUSY_MARKER)
-        self.watches = (self.handoff, self.refusal, self.target_refusal,
-                         self.busy)
+        self.watches = (self.handoff, self.refusal, self.target_refusal)
         # Where this stage's output starts in the transcript, so the second
         # witness reads THIS stage and not the whole run.
         self.stage_offset = 0
         self.stage_bytes = 0
+        # CURRENT-STATE BUSY CLOCK, sourced from `screen_busy` (a fresh read
+        # of the transcript file's own tail), not from incremental byte
+        # arrival. 0.0 == "never seen busy". Updated by `_mark_busy` from two
+        # places: every `pump()` tick (so a target that goes busy WITHOUT
+        # producing new pty bytes on a given tick is still caught — see
+        # `screen_busy`'s docstring) and every `wait_idle` check (so the
+        # very moment being judged is itself fresh, never stale). Keeping
+        # this a timestamp rather than re-scanning history on every call is
+        # what lets a session that has never looked busy return from
+        # `wait_idle` immediately, the same performance the old (buggy)
+        # `RecencyWatch` fast path had — but here the timestamp only ever
+        # advances off a real tail-of-file read, never off "did this one
+        # chunk happen to carry the marker".
+        self.busy_last_seen = 0.0
+
+    def _mark_busy(self):
+        """Read the transcript's CURRENT tail; if busy, stamp `busy_last_seen`.
+
+        Returns the busy bool. Cheap (one seek + a `BUSY_TAIL_BYTES` read),
+        safe to call on every pump tick and every wait_idle poll.
+        """
+        busy = screen_busy(self.transcript_path)
+        if busy:
+            self.busy_last_seen = time.time()
+        return busy
+
+    def idle_for(self):
+        """Seconds since the screen last looked busy, or +inf if never.
+
+        Always starts with a FRESH read (`_mark_busy`) so the answer is
+        never older than this call — the fast path in `wait_idle` relies on
+        that freshness, not on a possibly-stale timestamp from a while ago.
+        """
+        if self._mark_busy():
+            return 0.0
+        if not self.busy_last_seen:
+            return float("inf")
+        return time.time() - self.busy_last_seen
 
     def pump(self, seconds):
         """Read for `seconds`, appending to the transcript and feeding the latches."""
@@ -609,22 +712,26 @@ class Session(object):
                 ready, _, _ = select.select([self.fd], [], [], 0.2)
             except (OSError, ValueError):
                 return False
-            if not ready:
-                continue
-            try:
-                chunk = os.read(self.fd, 65536)
-            except OSError as exc:
-                if exc.errno in (errno.EIO, errno.EBADF):
+            if ready:
+                try:
+                    chunk = os.read(self.fd, 65536)
+                except OSError as exc:
+                    if exc.errno in (errno.EIO, errno.EBADF):
+                        return False
+                    raise
+                if not chunk:
                     return False
-                raise
-            if not chunk:
-                return False
-            self.transcript.write(chunk)
-            self.transcript.flush()
-            self.stage_bytes += len(chunk)
-            text = strip(chunk.decode("utf-8", "replace"))
-            for watch in self.watches:
-                watch.feed(text)
+                self.transcript.write(chunk)
+                self.transcript.flush()
+                self.stage_bytes += len(chunk)
+                text = strip(chunk.decode("utf-8", "replace"))
+                for watch in self.watches:
+                    watch.feed(text)
+            # CONTINUOUS COVERAGE, not just when a chunk arrived: a target
+            # that is busy but not repainting on this exact 0.2s tick (see
+            # `screen_busy`) must still keep `busy_last_seen` fresh, so this
+            # runs every tick, `ready` or not.
+            self._mark_busy()
         return True
 
     def stage_reset(self):
@@ -649,24 +756,33 @@ class Session(object):
         BOUNDED, NEVER A NEW TERMINAL. Returns True if the screen went idle,
         False if the bound expired — the caller's fallback on False is to type
         anyway (today's behaviour), so this can only make a `/clear` land
-        better than before, never worse. `idle_for()` is read AFTER every
-        pump, i.e. it is always a reading of what the screen looks like right
-        now, not of whether the marker ever fired earlier in the run.
+        better than before, never worse.
+
+        JUDGED FROM CURRENT SCREEN CONTENT, not from output arrival:
+        `idle_for()` is backed by `screen_busy`, a fresh read of the
+        transcript file's own tail on every check, kept warm every 0.2s by
+        `pump()` even between `wait_idle` calls — never a latch, never
+        "did the bytes *this* poll happened to read carry the marker". See
+        `screen_busy`'s docstring for why the previous arrival-based
+        detector (feeding only each poll's own chunk) produced a false idle
+        on run 20260902T053801Z-v44: it aged `last_seen` back to idle the
+        instant one 0.2s tick's chunk missed the marker, even though the
+        marker was still sitting on screen a few hundred bytes back in the
+        file. `idle_for() >= settle_s` requires the FULL settle window to
+        read busy-free, exactly as before.
         """
-        # FAST PATH: a session that has never shown the busy marker (or has
-        # not shown it for a full settle period already) is idle right now —
-        # answer without spending even one poll's worth of wall time on it.
-        # Cheap on the common case (the target usually IS idle when the
-        # driver gets here) and correctness-neutral: it is the exact same
-        # `idle_for() >= settle_s` test the loop below makes on every pass,
-        # just asked once before paying for a pump.
-        if self.busy.idle_for() >= settle_s:
+        # FAST PATH: a session that has never looked busy (or has not
+        # looked busy for a full settle period already) is idle right now —
+        # answer without spending a poll's wall time on it. Safe because
+        # `idle_for()` itself starts with a fresh tail read, not a stale
+        # timestamp — see `idle_for`'s docstring.
+        if self.idle_for() >= settle_s:
             return True
         deadline = time.time() + bound_s
         while True:
             remaining = deadline - time.time()
             self.pump(poll_s if remaining > 0 else 0.0)
-            if self.busy.idle_for() >= settle_s:
+            if self.idle_for() >= settle_s:
                 return True
             if time.time() >= deadline:
                 return False
