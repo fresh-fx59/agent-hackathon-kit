@@ -87,6 +87,37 @@ detail = " ".join(e.get("detail", "") for e in events
 check("131" in detail,
       "the event does not name the messages_count it saw: %r" % detail)
 
+
+# Reproduce 20260902T014942Z-v44's shape: the first completed call after the
+# reseed is the tail of the pre-clear conversation still draining (high
+# messages_count, arriving within a couple of seconds), and the REAL fresh
+# session's 2-message call shows up a little later in the same bounded
+# window. The old first-row read treated this as CLEAR_NOT_EFFECTIVE and
+# killed an otherwise healthy run at rc 8; the window-based check must
+# instead find the later 2-message row and verify.
+race = []
+for i in range(1, 400):
+    # In-flight tail of the pre-clear conversation, arriving first in each
+    # slot — this is the row the OLD first-row check would have (wrongly)
+    # trusted.
+    race.append({"kind": "call", "ts_ms": now_ms + i * 10 * 1000,
+                 "usage": {"prompt_tokens": 65365}, "messages_count": 29})
+    # The real fresh session's first call, 2 seconds later in the same slot —
+    # matches the actual v44 timing (reseed 01:54:58, race row 01:55:00).
+    race.append({"kind": "call", "ts_ms": now_ms + i * 10 * 1000 + 2 * 1000,
+                 "usage": {"prompt_tokens": 412}, "messages_count": 2})
+rc2, events2, output2 = run_case("clear_verified", race)
+
+kinds2 = [e.get("event") for e in events2]
+check("clear_verified" in kinds2,
+      "a /clear whose window contains a later 2-message call was not "
+      "verified: %r (rc=%r, tail=%s)" % (kinds2, rc2, output2[-400:]))
+check("CLEAR_NOT_EFFECTIVE" not in kinds2,
+      "the in-flight tail of the pre-clear conversation falsely triggered "
+      "CLEAR_NOT_EFFECTIVE: %r" % kinds2)
+check(rc2 != 8, "the race case must not return rc 8, got %r (%s)"
+      % (rc2, output2[-400:]))
+
 for msg in FAILED:
     print("FAIL: %s" % msg)
 print("OK" if not FAILED else "FAILED %d" % len(FAILED))

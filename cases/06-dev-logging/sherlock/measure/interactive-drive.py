@@ -330,6 +330,23 @@ def first_fresh_after(path, after_ms):
     context-overflow refusals stayed invisible in two prior investigations.
     Rows without `ts_ms` are pre-v44 and are ignored rather than guessed at.
     """
+    rows = fresh_rows_after(path, after_ms)
+    return rows[0] if rows else None
+
+
+def fresh_rows_after(path, after_ms):
+    """Every completed CALL row logged after `after_ms`, oldest first.
+
+    Same schema tolerance as `first_fresh_after` (which this now implements):
+    refusal rows have no `kind == "call"` and are skipped, rows without
+    `ts_ms` are pre-v44 and ignored. Returning the whole window — not just
+    the first row — is what lets the /clear-verification check judge the
+    WINDOW instead of a single race-prone row: on 20260902T014942Z-v44 the
+    first call after the reseed was the tail of the pre-clear conversation
+    still in flight (2 seconds later, 29 messages), with the real 2-message
+    fresh-session call arriving later in the same window.
+    """
+    out = []
     try:
         with open(path, encoding="utf-8", errors="replace") as fh:
             for line in fh:
@@ -344,10 +361,10 @@ def first_fresh_after(path, after_ms):
                     continue
                 stamp = row.get("ts_ms")
                 if isinstance(stamp, int) and stamp > after_ms:
-                    return row
+                    out.append(row)
     except OSError:
-        return None
-    return None
+        return out
+    return out
 
 
 # THE CANONICAL LIST LIVES IN THE ARM, NOT HERE. This tuple used to be
@@ -853,41 +870,78 @@ def drive(argv, cwd, work, first_prompt, reseed, stage_budget_s, settle_s,
             # catches a /clear that says no; it cannot catch one that says
             # nothing and keeps the conversation, which is exactly what run
             # 20260831T214240Z-v43 did 119 times out of 124. A fresh session
-            # sends exactly two messages — system prompt and seed — so the
-            # first call after the reseed settles it as a fact, not a heuristic.
-            # Token counts were considered and rejected: legitimate per-stage
-            # growth makes any multiple of the floor an invented constant.
+            # sends exactly two messages — system prompt and seed.
+            #
+            # Judge the WINDOW, not the first row after the reseed. The first
+            # v44 acceptance run (20260902T014942Z-v44) proved the first-row
+            # read is a false positive generator: the reseed was typed at
+            # 01:54:58, and the first completed call after it (01:55:00,
+            # messages_count=29) was the TAIL of the pre-clear conversation
+            # still draining — not the new session. Earlier v43 forensics had
+            # already measured this shape ("a race, 1-4 calls wide — the
+            # first call of every cycle fires on /sherlock alone"). Separately,
+            # with SHERLOCK_ALLOW_SUBAGENT=1 a child session opens its OWN
+            # 2-message conversation with no reseed nearby, so
+            # `messages_count == 2` alone never meant "the parent reset" —
+            # only "some 2-message call showed up". So: poll for ANY
+            # completed call inside the bounded window with messages_count
+            # == 2. If one appears at all, the clear is verified. Only an
+            # EMPTY window (or a window where every row is pre-v44 and
+            # carries no messages_count) fails to confirm.
+            #
+            # This flips the residual risk to a false NEGATIVE — a
+            # subagent's 2-message call could satisfy the check while the
+            # parent conversation was never actually reset — but that is the
+            # safe direction: it only restores the pre-v44 behaviour (wasted
+            # budget on a stale conversation), never a false CLEAR_NOT_EFFECTIVE
+            # that kills an honest run in five minutes. A genuinely inert
+            # /clear (clear_noop) still fails: no row in the whole window
+            # ever carries messages_count == 2, so the window expires empty
+            # and rc 8 still fires.
+            #
+            # Token counts were considered and rejected as a STRENGTHENING
+            # signal (e.g. "prompt_tokens must have dropped from its
+            # pre-clear peak"): legitimate per-stage growth makes any
+            # threshold an invented constant, and a subagent's own prompt
+            # tokens are just as capable of dropping as a real reset's — it
+            # would not close the false-negative gap, only add a new tunable
+            # that could itself go stale and start flagging honest resets.
             if ledger_path:
-                fresh = None
+                rows = []
                 verify_end = time.time() + max(settle_s * 4, 60.0)
                 while time.time() < verify_end:
                     if not ses.pump(2.0) and not ses.alive():
                         break
-                    fresh = first_fresh_after(ledger_path, reseed_at_ms)
-                    if fresh is not None:
+                    rows = fresh_rows_after(ledger_path, reseed_at_ms)
+                    if any(r.get("messages_count") == 2 for r in rows):
                         break
-                if fresh is None:
+                if not rows:
                     note("clear_unverified",
                          "no completed call after the reseed within the "
                          "verification window — cannot confirm the clear")
                 else:
-                    count = fresh.get("messages_count")
-                    if count is None:
-                        note("clear_unverified",
-                             "the first call after the reseed carries no "
-                             "messages_count (pre-v44 proxy)")
-                    elif count != 2:
-                        note("CLEAR_NOT_EFFECTIVE",
-                             "the first call after the reseed carried %d "
-                             "messages, not 2 — /clear did not clear, and "
-                             "every later measurement would be meaningless"
-                             % count)
-                        return 8, events
-                    else:
+                    verified = next(
+                        (r for r in rows if r.get("messages_count") == 2),
+                        None)
+                    if verified is not None:
                         note("clear_verified",
-                             "%s — fresh session, %d messages, prompt %s"
-                             % (seen, count,
-                                (fresh.get("usage") or {}).get("prompt_tokens")))
+                             "%s — a fresh 2-message call appeared in the "
+                             "verification window, prompt %s"
+                             % (seen,
+                                (verified.get("usage") or {}).get(
+                                    "prompt_tokens")))
+                    elif all(r.get("messages_count") is None for r in rows):
+                        note("clear_unverified",
+                             "every call after the reseed carries no "
+                             "messages_count (pre-v44 proxy)")
+                    else:
+                        note("CLEAR_NOT_EFFECTIVE",
+                             "no call in the verification window carried "
+                             "messages_count == 2 (saw %s) — /clear did not "
+                             "clear, and every later measurement would be "
+                             "meaningless"
+                             % [r.get("messages_count") for r in rows])
+                        return 8, events
     finally:
         ses.close()
 
