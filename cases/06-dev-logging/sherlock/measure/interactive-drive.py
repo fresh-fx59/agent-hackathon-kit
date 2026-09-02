@@ -120,6 +120,56 @@ BUSY_MARKERS = (BUSY_MARKER, QUEUED_MARKER)
 # rejecting the hint is what left the detector with only past-tense needles.
 FOOTER_ANCHOR = "YOLO mode"
 FOOTER_BUSY_HINTS = ("Enter to steer", "Ctrl+Q to queue")
+# STARTUP IS NOT A BOUNDARY, AND IT NEEDED ITS OWN GATE. Paid run
+# 20260902T171049Z-v44 made ZERO upstream calls and sat silent for 28
+# minutes. Its transcript says why: `/sherlock` was typed 7 seconds after
+# launch, while the TUI still showed «Initializing...», and came back
+# `✕ Unknown command: /sherlock` — thirteen times. The task prompt then
+# went into a session with NO SKILL LOADED and nothing was ever sent.
+#
+# The cause was structural, not a tuning miss. `drive()` opened with
+# `ses.pump(settle_s)  # let the UI come up` — a blind fixed wait written on
+# 2026-08-27 (d1e2fbe), before any idleness detection existed — and every
+# one of v44's four idle-wait fixes was wired into the BOUNDARY path
+# (`/clear`, the `/sherlock` retype, `handoff --partial`, the reseed line).
+# Startup was never given one. Free run 20260902T105204Z-v44 typed at the
+# same +7s an hour earlier and won the race, which is why five prior runs
+# proved nothing about it.
+#
+# AND AN IDLE WAIT ALONE WOULD NOT HAVE SAVED IT. While qwen-code is
+# initializing, its footer carries NO busy hint — no `esc to cancel`, no
+# `Ctrl+Q to queue`, no `queued` — so every busy marker this driver has,
+# the footer rule above included, reads that screen as IDLE. Readiness is a
+# POSITIVE signal, and the honest one is that the init spinner has STOPPED
+# REPAINTING: it ticks continuously while loading (27 frames in that paid
+# transcript) and stops only when loading ends, so arrival recency answers
+# it correctly — unlike the busy question, where a marker going quiet
+# mid-turn is exactly the trap.
+INIT_MARKER = "Initializing"
+# 2.0s: the real TUI repaints the init spinner several times a second (the
+# frames in that transcript are well under a second apart), so two seconds
+# of silence on it is many missed ticks, not one slow one.
+INIT_QUIET_S = 2.0
+# 180s bounds the wait so a target that never becomes ready still reaches a
+# terminal instead of hanging — the paid run's 28 silent minutes, and the
+# 21,600s it would have burned, are the reason this number exists at all.
+INIT_WAIT_S = 180.0
+# THE SECOND HALF OF THE SAME BUG: nothing checked the OUTCOME. The driver
+# logged `typed /sherlock`, which records that keystrokes were sent, never
+# that the command was accepted, and no code looked for the rejection. So
+# the race had no way of being observed until it lost, with money on the
+# table. `Unknown command: <the skill command>` is the target's own words,
+# matched exactly — scoped to the bytes that arrive right after the command
+# is typed, so a corpus that merely contains the phrase cannot trip it.
+SKILL_REJECTED_FMT = "Unknown command: %s"
+# 3 attempts, each preceded by a fresh readiness wait: enough for a target
+# whose skills register late, bounded so a genuinely missing skill (the v43
+# `settings.skills.directories` failure) is NAMED rather than run around.
+SKILL_TYPE_ATTEMPTS = 3
+# 1.0s bounds how long the rejection is waited for, but it is a CEILING and
+# not a cost: the probe returns the moment the needle appears, and an
+# accepted command pays one 0.2s tick. The real target answered instantly.
+SKILL_REJECT_PROBE_S = 1.0
 # TAIL WINDOW for the CURRENT-SCREEN read of the transcript file (see
 # `screen_busy` below). Sized off the real run 20260902T053801Z-v44's own
 # transcript: the raw byte gap between consecutive `esc to cancel` repaints
@@ -244,6 +294,13 @@ class MarkWatch(object):
         self.hits = []
         self.count = 0
         self.chars = 0        # how much text flowed through, for the record
+        # WHEN the mark last ARRIVED, not whether it is on screen. For the
+        # busy question that distinction is a trap (a thinking model stops
+        # repainting and arrival goes quiet while the screen is still busy —
+        # the bug `screen_busy` exists to avoid). For a mark that repaints on
+        # a fixed tick and stops only when its phase ENDS, arrival recency is
+        # exactly the right signal: see INIT_MARKER.
+        self.last_at = 0.0
 
     @property
     def seen(self):
@@ -276,6 +333,7 @@ class MarkWatch(object):
                 self.hits.append(ctx)
                 self._want = self.CONTEXT - len(ctx)
             at = i + 1
+            self.last_at = time.time()
         self._tail = hay[-self.overlap:] if self.overlap else ""
 
 
@@ -473,7 +531,7 @@ def screen_busy(path, tail_bytes=BUSY_TAIL_BYTES, markers=BUSY_MARKERS,
     return any(m in text for m in markers)
 
 
-def ledger_quiet_s(ledger_path):
+def ledger_quiet_s(ledger_path, since=None):
     """Seconds since the upstream ledger last grew, or None if there is none yet.
 
     THE ONLY HONEST IDLE SIGNAL AVAILABLE. A TUI always shows its input prompt, so
@@ -488,14 +546,30 @@ def ledger_quiet_s(ledger_path):
     whole 5,400-second stage budget before STAGE_TIMEOUT. A human would have typed
     «продолжай» in ten seconds.
 
-    None means "no ledger": nothing has started, which is not a stall.
+    THE "NO LEDGER" CASE WAS WRONG, and it cost a paid run. This used to
+    answer None whenever the ledger did not exist yet, documented as
+    «nothing has started, which is not a stall». Paid run
+    20260902T171049Z-v44 is the counter-example: its `/sherlock` was
+    rejected during startup, no request was EVER sent, so no ledger file was
+    ever created — and a None here meant the nudge branch could not fire at
+    all. It sat silent for 28 minutes and would have run its full 21,600s
+    timeout. Nothing having started IS the stall, and the most common one:
+    it is the only window in which the target has produced no evidence at
+    all. `since` (the moment the first prompt was typed) gives that window a
+    clock, so quiet is measured from the run's own start until the first
+    call replaces it with the ledger's mtime.
+
+    None now means only «no clock available at all» — no ledger and no
+    `since` — which a caller reads as "do not judge".
     """
-    if not ledger_path:
-        return None
-    try:
-        return max(0.0, time.time() - os.path.getmtime(ledger_path))
-    except OSError:
-        return None
+    if ledger_path:
+        try:
+            return max(0.0, time.time() - os.path.getmtime(ledger_path))
+        except OSError:
+            pass
+    if since is not None:
+        return max(0.0, time.time() - since)
+    return None
 
 
 def stage_index(stage):
@@ -717,7 +791,12 @@ class Session(object):
         # recover, so resetting this per boundary would let the driver keep
         # nudging a corpse instead of naming what actually happened once.
         self.target_refusal = AllOfWatch(TARGET_REFUSAL_NEEDLES)
-        self.watches = (self.handoff, self.refusal, self.target_refusal)
+        # NEVER RESET, and read only through `wait_ready`: this one is asked
+        # «when did the init spinner last tick», so a per-stage reset would
+        # throw away the only timestamp that answers it.
+        self.init = MarkWatch(INIT_MARKER)
+        self.watches = (self.handoff, self.refusal, self.target_refusal,
+                        self.init)
         # Where this stage's output starts in the transcript, so the second
         # witness reads THIS stage and not the whole run.
         self.stage_offset = 0
@@ -850,6 +929,89 @@ class Session(object):
         time.sleep(0.35)
         os.write(self.fd, b"\r")
         self.pump(settle)
+
+    def wait_ready(self, bound_s=INIT_WAIT_S, quiet_s=INIT_QUIET_S,
+                   poll_s=0.25):
+        """Block until the target has FINISHED starting up, bounded.
+
+        Ready means two things at once: the init spinner has not ticked for
+        `quiet_s` (or never ticked at all — a fast start, or a stand-in that
+        does not print one), AND the screen is not busy by the footer rule.
+        Both are required: init looks idle to every busy marker, and a target
+        that has gone straight from init into a turn is not ready for typed
+        input either.
+
+        Returns True if ready, False if `bound_s` ran out — the caller then
+        decides, and the run still reaches a terminal rather than hanging,
+        which is the whole lesson of paid run 20260902T171049Z-v44.
+        """
+        deadline = time.time() + bound_s
+        while True:
+            self.pump(poll_s)
+            ticked = self.init.last_at
+            quiet = (not ticked) or (time.time() - ticked >= quiet_s)
+            if quiet and not self._mark_busy():
+                return True
+            if time.time() >= deadline:
+                return False
+
+    def type_skill(self, skill_command, settle, note,
+                   attempts=SKILL_TYPE_ATTEMPTS):
+        """Type the skill command and PROVE it was accepted, or say it wasn't.
+
+        The rejection is read from the transcript FILE, from the byte offset
+        that was current before the command was typed — so the needle is
+        scoped to this command's own output and cannot be tripped by a corpus
+        that happens to contain the phrase, nor missed because a ring buffer
+        had already dropped it.
+
+        Returns True once the target accepts the command. Returns False after
+        `attempts` rejections, each one preceded by a fresh readiness wait —
+        which is the honest answer when the skill genuinely is not installed
+        (the v43 `settings.skills.directories` failure), and is reported as a
+        terminal instead of being run around for six hours.
+        """
+        needle = SKILL_REJECTED_FMT % skill_command
+        for attempt in range(1, attempts + 1):
+            try:
+                self.transcript.flush()
+                before = self.transcript.tell()
+            except (OSError, IOError, ValueError):
+                before = 0
+            self.type(skill_command, settle=settle)
+            note("typed", skill_command)
+            # POLL, DON'T SLEEP. A fixed extra settle here is pure latency on
+            # the happy path — and this driver's startup latency is inside
+            # every test's own timeout arithmetic, so a blind second is not
+            # free. The rejection lands in the same instant the command is
+            # rejected (the real target printed it immediately, thirteen
+            # times), so read the disk on a short tick and stop as soon as
+            # there is an answer; a clean screen costs one tick, not one
+            # second.
+            fresh = ""
+            rejected = False
+            probe_deadline = time.time() + SKILL_REJECT_PROBE_S
+            while True:
+                try:
+                    with open(self.transcript_path, "rb") as fh:
+                        fh.seek(before)
+                        fresh = strip(fh.read().decode("utf-8", "replace"))
+                except (OSError, IOError):
+                    fresh = ""
+                if needle in fresh:
+                    rejected = True
+                    break
+                if time.time() >= probe_deadline:
+                    break
+                self.pump(0.2)
+            if not rejected:
+                return True
+            note("skill_command_rejected",
+                 "attempt %d/%d — the target answered «%s»; it was still "
+                 "starting up, so waiting for readiness and retyping"
+                 % (attempt, attempts, needle))
+            self.wait_ready()
+        return False
 
     def escape(self, settle=0.5):
         """Send a bare ESC — cancel the in-flight turn, the way the TUI's own
@@ -992,10 +1154,29 @@ def drive(argv, cwd, work, first_prompt, reseed, stage_budget_s, settle_s,
         # happy path recorded `not_shown` at every boundary while printing the
         # block at every boundary. Reset, type, wait, judge.
         ses.stage_reset()
-        ses.type(skill_command, settle=settle_s)
-        note("typed", skill_command)
+        # WAIT FOR REAL READINESS, never a blind settle. See INIT_MARKER: the
+        # paid run typed into «Initializing...» and ran a whole session with
+        # no skill loaded and no request sent.
+        if not ses.wait_ready():
+            note("init_wait_timeout",
+                 "target never looked ready within %.0fs; typing anyway "
+                 "rather than hanging" % INIT_WAIT_S)
+        if not ses.type_skill(skill_command, settle_s, note):
+            note("SKILL_NOT_LOADED",
+                 "the target rejected %s on every one of %d attempts — the "
+                 "skill is not registered, so the session would run with no "
+                 "skill at all (paid run 20260902T171049Z-v44 did exactly "
+                 "that for 28 minutes and never sent a request)"
+                 % (skill_command, SKILL_TYPE_ATTEMPTS))
+            return 11, events
         ses.type(first_prompt, settle=2.0)
         note("typed", "the task prompt")
+        # WHEN THE RUN ACTUALLY BEGAN, for the nudge. Until the first upstream
+        # call there is no ledger to read, and `ledger_quiet_s` used to answer
+        # None there and call it "not a stall" — so the paid run's 28 silent
+        # minutes could not have been nudged, and would have burned the whole
+        # 21,600s timeout. Quiet is measured from this moment instead.
+        started_at = time.time()
         while True:
             deadline = time.time() + stage_budget_s
             nudges = 0
@@ -1096,7 +1277,7 @@ def drive(argv, cwd, work, first_prompt, reseed, stage_budget_s, settle_s,
                 # nothing is broken, and nudging it forever would hide that
                 # behind an hour of silence.
                 if idle_nudge_s > 0:
-                    quiet = ledger_quiet_s(ledger_path)
+                    quiet = ledger_quiet_s(ledger_path, since=started_at)
                     since_nudge = (None if last_nudge is None
                                    else time.time() - last_nudge)
                     if (quiet is not None and quiet >= idle_nudge_s

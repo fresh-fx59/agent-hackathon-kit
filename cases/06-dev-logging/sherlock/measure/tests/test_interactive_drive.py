@@ -68,8 +68,18 @@ def scenario(mode, budget=25, checkpoint=CHECKPOINT, ledger=None, threshold=None
     if threshold is not None:
         argv += ["--threshold", str(threshold)]
     argv += ["--", sys.executable, "-u", FAKE]
+    # TIMEOUT SIZED FROM MEASUREMENT, NOT FROM THE STAGE BUDGET. `budget * 4`
+    # was a knife edge: `threshold_then_happy` crosses three boundaries and
+    # each one waits out a full 60s clear-verification window, so the
+    # scenario really takes ~100.5s against a 100s ceiling — measured, not
+    # estimated. It passed only by luck, and any change that added a second
+    # to startup turned it into a TimeoutExpired that looks exactly like a
+    # driver regression (it did, on 2026-09-02, for the startup-readiness
+    # fix). The floor of 240s is ~2.4x the measured worst scenario, so the
+    # timeout still catches a genuine hang while no longer failing on
+    # arithmetic.
     p = subprocess.run(argv, capture_output=True, text=True, env=env,
-                       timeout=budget * 4)
+                       timeout=max(240, budget * 4))
     rows = [json.loads(l) for l in open(events, encoding="utf-8")] \
         if os.path.exists(events) else []
     return p, work, rows, open(transcript, "rb").read().decode("utf-8", "replace")

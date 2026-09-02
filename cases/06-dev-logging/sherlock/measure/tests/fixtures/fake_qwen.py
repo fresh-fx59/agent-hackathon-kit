@@ -58,6 +58,25 @@ def _busy_footer():
 # goes idle the instant that one line stops repainting; a detector that also
 # accepts `queued` (this fix's `BUSY_MARKERS`) does not.
 REPAINT_S = float(os.environ.get("FAKE_REPAINT_S", "0.3"))
+# THE PAID-RUN STARTUP RACE, reproduced. `slow_init`: for FAKE_INIT_S seconds
+# after launch this stand-in behaves exactly as qwen-code 0.22.0 does while it
+# is still loading — it repaints «Initializing...» with a footer that carries
+# NO busy hint (no `esc to cancel`, no `Ctrl+Q to queue`, no `queued`), and it
+# answers any typed slash command with `✕ Unknown command: <line>` because its
+# skills are not registered yet.
+#
+# THIS IS THE SHAPE THAT KILLED THE PAID RUN 20260902T171049Z-v44. The driver
+# typed `/sherlock` 7 seconds after launch, straight into that window; the
+# transcript carries `✕ Unknown command: /sherlock` thirteen times; the task
+# prompt went into a session with NO SKILL LOADED, no upstream call was ever
+# made, and the run sat silent for 28 minutes until it was stopped. The free
+# run an hour earlier typed at the same +7s and happened to win the race, so
+# nothing in five prior runs had ever exposed it.
+#
+# Why a blind wait cannot pass this and an idle wait alone cannot either: the
+# init footer looks IDLE by every busy marker the driver has. Readiness is a
+# POSITIVE signal — the ready footer line — not the absence of a busy one.
+INIT_S = float(os.environ.get("FAKE_INIT_S", "12"))
 
 
 def _sparse_busy_footer():
@@ -291,6 +310,18 @@ if MODE == "busy_until_esc":
             pass
     raise SystemExit(0)
 
+if MODE == "slow_init":
+    # Repaint the real TUI's init frame: banner, empty input box, a footer
+    # with the ready arrow ABSENT and no busy hint anywhere.
+    _init_until = time.time() + INIT_S
+
+    def _init_footer():
+        while time.time() < _init_until:
+            say("  ⠋ Initializing...")
+            say("  YOLO mode (shift + tab to cycle)")
+            time.sleep(0.3)
+
+    threading.Thread(target=_init_footer, daemon=True).start()
 say("\x1b[32mfake qwen ready\x1b[0m")
 while True:
     # readline(), not `for raw in sys.stdin`: iteration read-aheads a block, so
@@ -300,6 +331,22 @@ while True:
         break
     line = raw.strip()
     if not line:
+        continue
+    if MODE == "no_skill":
+        # THE v43 FAILURE, still possible and now NAMED. When
+        # `settings.skills.directories` does not actually reach the target,
+        # /sherlock is unknown for the whole life of the process — no amount
+        # of waiting or retyping helps. Run 20260831's task-10 attempt hit
+        # exactly this and was only caught by reading a transcript by hand.
+        # The driver must reach a terminal that says so, not run a skill-less
+        # session for hours.
+        say("✕ Unknown command: %s" % line)
+        continue
+    if MODE == "slow_init" and time.time() < _init_until:
+        # Skills are not registered yet, so a slash command is unknown and the
+        # line is otherwise DISCARDED — no stage work, no upstream call. This
+        # is verbatim what the real target printed thirteen times.
+        say("✕ Unknown command: %s" % line)
         continue
     if MODE in ("busy_after_boundary", "sparse_busy_after_boundary", "handoff_busy_once"):
         with _busy_lock:
