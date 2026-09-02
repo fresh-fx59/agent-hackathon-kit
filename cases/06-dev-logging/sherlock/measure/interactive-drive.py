@@ -42,13 +42,25 @@ import time
 ANSI = re.compile(r"\x1b\[[0-9;?]*[a-zA-Z]|\x1b\][^\x07]*\x07|\r")
 HANDOFF_MARK = "СТУПЕНЬ ЗАВЕРШЕНА"
 CLEAR_REFUSAL = "background tasks before starting a new session"
-# BANNERS THAT MEAN «I WILL NOT ACCEPT INPUT», as printed by qwen-code 0.22.0.
-# Kept literal and few: a needle that matches ordinary output would end honest
-# runs, and the one that mattered is verbatim from 20260901T002401Z-v43's
-# transcript, where it appeared 65 times while the driver reported a stall.
+# THE BANNER THAT MEANS «I WILL NOT ACCEPT INPUT», as printed by qwen-code
+# 0.22.0 — verbatim from 20260901T002401Z-v43's transcript, where it appeared
+# 65 times while the driver reported a stall:
+#   The session has reached the maximum number of turns: 600. Please update
+#   this limit in your setting.json file.
+#
+# NOT a bare "maximum number of turns": this repo IS the corpus for the case
+# that banner came from, so an honest RCA agent narrating its own
+# investigation, or `command grep "maximum number of turns" ...`-ing a
+# transcript on screen, would echo exactly that fragment — a false positive
+# that would kill an honest run, caught in fix round 1. Two fragments of the
+# CLI's own sentence must BOTH appear before the latch fires (see
+# `AllOfWatch` below): a fragment naming the limit, and the DISTINCT tail
+# that only the CLI's real wording carries — the instruction to edit
+# setting.json. The digits (600) are deliberately excluded: the limit is
+# configurable and this run's value is not a fact about the banner.
 TARGET_REFUSAL_NEEDLES = (
-    "maximum number of turns",
     "reached the maximum number of turns",
+    "update this limit in your setting.json",
 )
 STAGES = ("triage", "draft", "repair", "done")
 
@@ -129,6 +141,39 @@ class MarkWatch(object):
                 self._want = self.CONTEXT - len(ctx)
             at = i + 1
         self._tail = hay[-self.overlap:] if self.overlap else ""
+
+
+class AllOfWatch(object):
+    """Fires only once EVERY one of several literal fragments has appeared on
+    screen (not necessarily adjacent, not necessarily in that order) — for the
+    one case where a single fixed needle is not safe: a fragment an honest
+    agent could plausibly narrate or grep on its own, matched against a target
+    that is refusing input for real. Requiring several distinct fragments of
+    the CLI's actual sentence makes an incidental echo of just one of them
+    harmless, because no realistic single utterance reproduces all of them.
+
+    Same interface as MarkWatch (`feed`, `.seen`, `.text`) so it drops into
+    `Session.watches` and the nudge branch without either caring which one it
+    is holding.
+    """
+
+    def __init__(self, marks):
+        self.watches = [MarkWatch(m) for m in marks]
+
+    def feed(self, text):
+        for w in self.watches:
+            w.feed(text)
+
+    @property
+    def seen(self):
+        return all(w.seen for w in self.watches)
+
+    @property
+    def text(self):
+        for w in self.watches:
+            if w.hits:
+                return w.hits[0]
+        return ""
 
 
 def hit_names_stage(context, completed):
@@ -416,7 +461,7 @@ class Session(object):
         # has hit a process-lifetime limit like --max-session-turns does not
         # recover, so resetting this per boundary would let the driver keep
         # nudging a corpse instead of naming what actually happened once.
-        self.target_refusal = MarkWatch(TARGET_REFUSAL_NEEDLES)
+        self.target_refusal = AllOfWatch(TARGET_REFUSAL_NEEDLES)
         self.watches = (self.handoff, self.refusal, self.target_refusal)
         # Where this stage's output starts in the transcript, so the second
         # witness reads THIS stage and not the whole run.

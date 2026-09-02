@@ -93,6 +93,19 @@ while True:
         say("The session has reached the maximum number of turns: 600. "
             "Please update this limit in your setting.json file.")
         continue
+    if MODE == "grep_echo_only":
+        # THE FALSE POSITIVE THIS FIXTURE PROVES CLOSED (fix round 1). This
+        # echoes ONE bare fragment an honest RCA agent could plausibly put on
+        # screen while investigating THIS VERY CASE — narrating the phrase,
+        # or `command grep "maximum number of turns" transcript.log` over a
+        # corpus that contains it — without ever printing the CLI's real
+        # banner's distinguishing tail ("update this limit in your
+        # setting.json"). It must NOT be read as a refusal: the target just
+        # never advances, so the run should reach its normal STAGE_STALLED
+        # terminal, not TARGET_REFUSED.
+        say("note: transcript.log:41: target appears to have hit its "
+            "maximum number of turns limit; continuing analysis.")
+        continue
     if line == "/clear":
         if MODE == "clear_refused":
             say("Stop the current session's running background tasks before "
