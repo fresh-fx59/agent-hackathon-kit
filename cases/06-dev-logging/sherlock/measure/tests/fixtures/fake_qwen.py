@@ -44,6 +44,23 @@ def _busy_footer():
 
 if MODE == "busy_after_boundary" and BUSY_S > 0:
     threading.Thread(target=_busy_footer, daemon=True).start()
+# THE THIRD SWALLOW WINDOW, one keystroke type further still: a queued
+# `handoff --partial` at a threshold crossing. `handoff_busy_once` goes busy
+# ONCE, right when the target starts "thinking" about the very first message
+# of a stage (the same point threshold_then_happy holds a stage open at) —
+# simulating the model beginning a real turn right as the driver's ledger
+# check fires — then never again, so the RETRY (typed once the window has
+# closed) is what proves the recoverable latch, not repeated luck.
+_handoff_busy_armed = [False]
+# A DETERMINISTIC alternative to the busy-window race above, for proving the
+# RECOVERABLE LATCH itself rather than the timing of a real busy window:
+# `handoff_drop_once` swallows the FIRST `handoff --partial ...` it ever
+# receives — no matter when it arrives — and processes every one after that
+# normally. This is exactly what a queued-and-never-delivered keystroke
+# looks like from the fixture's side, without any real-time race against a
+# footer thread, so the test is fast and does not depend on scheduler
+# timing to land the swallow inside a window.
+_handoff_dropped_once = [False]
 # How much chatter the flood modes print before they hand off. The driver used
 # to keep an 8 MB per-stage ring buffer, so «more than 8 MB» is the shape that
 # made it answer `handoff_block_unknown` on the paid run.
@@ -115,7 +132,7 @@ while True:
     line = raw.strip()
     if not line:
         continue
-    if MODE == "busy_after_boundary":
+    if MODE in ("busy_after_boundary", "handoff_busy_once"):
         with _busy_lock:
             busy = time.time() < _busy_until[0]
         if busy:
@@ -184,6 +201,12 @@ while True:
         say("Base directory for this skill: /fake/skills/v40")
         continue
     if loaded and line.startswith("handoff --partial "):
+        if MODE == "handoff_drop_once" and not _handoff_dropped_once[0]:
+            _handoff_dropped_once[0] = True
+            # SWALLOWED — the fixture's stand-in for a keystroke that queued
+            # and was never delivered. `awaiting_boundary` on the driver
+            # side is now stuck until it recovers on its own.
+            continue
         # The driver, having crossed the token threshold, types this the way a
         # human would ask the model to checkpoint mid-stage. An obedient target
         # runs checkpoint.py handoff --partial for real, advancing boundary_seq
@@ -200,7 +223,7 @@ while True:
     if MODE == "die":
         say("boom")
         raise SystemExit(1)
-    if MODE == "threshold_then_happy":
+    if MODE in ("threshold_then_happy", "handoff_busy_once", "handoff_drop_once"):
         # A stage the driver must interrupt: the FIRST message of every stage
         # is answered with idle chatter and nothing else, so a driver that
         # never checks the ledger would sit here for the whole stage budget.
@@ -216,6 +239,11 @@ while True:
             row = {}
         st = row.get("stage", "triage")
         if not row.get("stage_partial"):
+            if MODE == "handoff_busy_once" and not _handoff_busy_armed[0]:
+                _handoff_busy_armed[0] = True
+                with _busy_lock:
+                    _busy_until[0] = time.time() + BUSY_S
+                threading.Thread(target=_busy_footer, daemon=True).start()
             say("Сейчас посмотрю логи...")
             continue
         if st == "triage":

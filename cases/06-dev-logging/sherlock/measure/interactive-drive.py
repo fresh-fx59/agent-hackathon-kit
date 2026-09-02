@@ -87,6 +87,29 @@ STAGES = ("triage", "draft", "repair", "done")
 # session), so it would make the idle-wait time out on almost every
 # boundary — the opposite of a safe needle.
 BUSY_MARKER = "esc to cancel"
+# THE RECOVERABLE LATCH's bound. `handoff --partial` has no retry today: the
+# `awaiting_boundary is None` check exists so ONE crossing produces ONE
+# typed command, and the only thing that ever clears it is a REAL boundary
+# advance seen on disk — so a `handoff --partial` that gets queued and
+# swallowed (the same busy-swallow risk as /clear and /sherlock, and a
+# forced low --threshold makes it fire repeatedly, which is exactly the
+# condition that makes a swallow likely) leaves the latch set for the rest
+# of the stage: no boundary ever comes, and the run reaches STAGE_TIMEOUT
+# looking like the arm stalled when what actually happened is the driver's
+# own nudge was queued and dropped.
+#
+# HANDOFF_RETRY_WINDOW_S = 45.0: the failing free-lane run's own cycles were
+# 3-4 calls over roughly 36 seconds (checkpoint.json advances as a TOOL
+# CALL, and the model keeps generating afterward) — 45s is ~1.25x that
+# measured cycle, enough margin for one real cycle to land before giving up,
+# not so long that a genuinely stalled target burns the whole stage budget
+# retrying instead of reaching STAGE_TIMEOUT in a reasonable time.
+# HANDOFF_MAX_RETRIES = 3: bounded so a target that truly refuses to advance
+# still falls through to the EXISTING STAGE_TIMEOUT path — never a new
+# terminal, just a latch that unsticks itself instead of hanging forever on
+# one lost keystroke.
+HANDOFF_RETRY_WINDOW_S = 45.0
+HANDOFF_MAX_RETRIES = 3
 
 
 def strip(text):
@@ -646,7 +669,9 @@ def drive(argv, cwd, work, first_prompt, reseed, stage_budget_s, settle_s,
           transcript, skill_command, events_path=None, ledger_path="",
           idle_nudge_s=0, max_nudges=3, nudge_text="продолжай",
           handoff_grace_s=8.0, threshold=0, reseed_command="",
-          clear_idle_wait_s=20.0, clear_idle_settle_s=1.0):
+          clear_idle_wait_s=20.0, clear_idle_settle_s=1.0,
+          handoff_retry_window_s=HANDOFF_RETRY_WINDOW_S,
+          handoff_max_retries=HANDOFF_MAX_RETRIES):
     ses = Session(argv, cwd, dict(os.environ), transcript)
     events = []
     # THE LATCH: holds the boundary_seq the driver was at when it crossed the
@@ -656,6 +681,14 @@ def drive(argv, cwd, work, first_prompt, reseed, stage_budget_s, settle_s,
     # until the boundary finally moved, and a slow arm would be typed at
     # dozens of times for one checkpoint.
     awaiting_boundary = None
+    # THE RECOVERABLE LATCH's own state: when `awaiting_boundary` was set
+    # (so a bounded window can be measured against it) and how many times
+    # it has already been retried this crossing. Both reset alongside
+    # `awaiting_boundary` at the ONE place that proves a real advance —
+    # never a second clear path.
+    awaiting_since = None
+    handoff_retries = 0
+    handoff_gave_up = False
     # THE PROGRESS GATE'S COUNTER. Consecutive barren boundaries within the
     # CURRENT stage — reset to 0 whenever a boundary shows deliverable
     # progress and whenever `seen` (the stage) changes, so a run that just
@@ -685,6 +718,28 @@ def drive(argv, cwd, work, first_prompt, reseed, stage_budget_s, settle_s,
                     fh.flush()
             except OSError:
                 pass
+
+    def wait_before(step_label):
+        """WAIT FOR IDLE BEFORE TYPING — see BUSY_MARKER above. A target that
+        is still generating QUEUES the keystroke instead of acting on it:
+        that is what turned 120 clears into 120 silent no-ops in stage
+        `repair` on run 20260902T021751Z-v44, and the SAME swallow one step
+        later is worse, not milder — if `/clear` lands but the retyped
+        `/sherlock` is what gets queued instead, the reseed line that
+        follows lands in a bare session with no skill loaded and nothing on
+        disk looks wrong. Reused for all four risky keystrokes: /clear, the
+        skill retype, the reseed line, and `handoff --partial` at a
+        threshold crossing — one bounded wait, never a second
+        implementation. The bound is finite and the fallback on expiry is
+        to type anyway — never a new terminal, only a note — so this can
+        only improve on today's behaviour.
+        """
+        idle = ses.wait_idle(clear_idle_wait_s, settle_s=clear_idle_settle_s)
+        if not idle:
+            note("clear_typed_while_busy",
+                 "%s — target never looked idle within %.0fs before %s; "
+                 "typing anyway (today's behaviour, never worse)"
+                 % (seen, clear_idle_wait_s, step_label))
 
     try:
         ses.pump(settle_s)                     # let the UI come up
@@ -748,6 +803,9 @@ def drive(argv, cwd, work, first_prompt, reseed, stage_budget_s, settle_s,
                     # `batch_boundary` / `stage_advanced` path — never a second
                     # clear path, the one that exists.
                     awaiting_boundary = None
+                    awaiting_since = None
+                    handoff_retries = 0
+                    handoff_gave_up = False
                     partial = (stage_index(now) <= stage_index(seen))
                     # The block names the stage that CLOSED, which for a full
                     # advance is the one we were on, not the one we move to.
@@ -769,9 +827,38 @@ def drive(argv, cwd, work, first_prompt, reseed, stage_budget_s, settle_s,
                     note("threshold_handoff",
                          "%s (prompt %d >= %d)"
                          % (seen, ledger_prompt_tokens(ledger_path), threshold))
+                    wait_before("handoff --partial %s" % seen)
                     ses.type("handoff --partial %s" % seen, settle=2.0)
                     awaiting_boundary = now_boundary
+                    awaiting_since = time.time()
                     continue
+                # THE RECOVERABLE LATCH. A queued/swallowed `handoff
+                # --partial` has no other way back: nothing else ever
+                # clears `awaiting_boundary` except a real advance, and
+                # a target that swallowed the keystroke will never produce
+                # one. Bounded (HANDOFF_RETRY_WINDOW_S, see the constant's
+                # comment) and capped (HANDOFF_MAX_RETRIES) — past the cap
+                # this falls through to the EXISTING STAGE_TIMEOUT path
+                # rather than looping or inventing a new terminal.
+                elif (awaiting_boundary is not None and awaiting_since is not None
+                        and time.time() - awaiting_since >= handoff_retry_window_s):
+                    if handoff_retries < handoff_max_retries:
+                        handoff_retries += 1
+                        note("handoff_retry",
+                             "%s — no boundary advance %ds after handoff "
+                             "--partial (attempt %d/%d); it may have been "
+                             "queued and swallowed, retyping"
+                             % (seen, int(time.time() - awaiting_since),
+                                handoff_retries, handoff_max_retries))
+                        awaiting_boundary = None
+                        awaiting_since = None
+                        continue
+                    elif not handoff_gave_up:
+                        handoff_gave_up = True
+                        note("handoff_retry_exhausted",
+                             "%s — %d handoff retries produced no boundary "
+                             "advance; falling through to the stage budget"
+                             % (seen, handoff_max_retries))
                 # A STALL IS NOT A LONG STAGE, and the ledger can tell them
                 # apart. Bounded on purpose: a target that answers a nudge with
                 # nothing is broken, and nudging it forever would hide that
@@ -929,31 +1016,6 @@ def drive(argv, cwd, work, first_prompt, reseed, stage_budget_s, settle_s,
             # question before it was asked. Reset here, so only THIS `/clear`
             # can answer for itself.
             ses.refusal.reset()
-
-            def wait_before(step_label):
-                """WAIT FOR IDLE BEFORE TYPING — see BUSY_MARKER above. A
-                target that is still generating QUEUES the keystroke instead
-                of acting on it: that is what turned 120 clears into 120
-                silent no-ops in stage `repair` on run 20260902T021751Z-v44,
-                and the SAME swallow one step later is worse, not milder — if
-                `/clear` lands but the retyped `/sherlock` is what gets
-                queued instead, the reseed line that follows lands in a bare
-                session with no skill loaded and nothing on disk looks
-                wrong. So every one of the three typed inputs in this
-                sequence (/clear, the skill retype, the reseed line) waits
-                the same way, reusing this one bounded wait. The bound is
-                finite and the fallback on expiry is to type anyway — never a
-                new terminal, only a note — so this can only improve on
-                today's behaviour.
-                """
-                idle = ses.wait_idle(clear_idle_wait_s,
-                                     settle_s=clear_idle_settle_s)
-                if not idle:
-                    note("clear_typed_while_busy",
-                         "%s — target never looked idle within %.0fs before "
-                         "%s; typing anyway (today's behaviour, never worse)"
-                         % (seen, clear_idle_wait_s, step_label))
-
             wait_before("/clear")
             reseed_at_ms = int(time.time() * 1000)
             ses.type("/clear", settle=settle_s)
@@ -1115,6 +1177,18 @@ def main():
     ap.add_argument("--clear-idle-settle-s", type=float, default=1.0,
                     help="how long the busy marker must have been absent "
                          "before the screen counts as idle")
+    ap.add_argument("--handoff-retry-window-s", type=float,
+                    default=HANDOFF_RETRY_WINDOW_S,
+                    help="if no boundary advance follows a `handoff "
+                         "--partial` within this long, assume it was queued "
+                         "and swallowed and retype it — the failing "
+                         "free-lane run's own cycles were 3-4 calls over "
+                         "~36s, so the default is ~1.25x that")
+    ap.add_argument("--handoff-max-retries", type=int,
+                    default=HANDOFF_MAX_RETRIES,
+                    help="cap on handoff --partial retries per crossing — "
+                         "past this, fall through to the existing "
+                         "STAGE_TIMEOUT path instead of retrying forever")
     ap.add_argument("command", nargs=argparse.REMAINDER,
                     help="-- the interactive command to drive (default: qwen)")
     args = ap.parse_args()
@@ -1136,7 +1210,8 @@ def main():
                        args.idle_nudge_s, args.max_nudges, args.nudge_text,
                        args.handoff_grace_s, args.threshold,
                        args.reseed_command, args.clear_idle_wait_s,
-                       args.clear_idle_settle_s)
+                       args.clear_idle_settle_s, args.handoff_retry_window_s,
+                       args.handoff_max_retries)
     print("rc=%d" % rc)
     return rc
 
