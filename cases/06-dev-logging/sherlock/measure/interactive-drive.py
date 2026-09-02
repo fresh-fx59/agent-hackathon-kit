@@ -599,6 +599,15 @@ class Session(object):
         pump, i.e. it is always a reading of what the screen looks like right
         now, not of whether the marker ever fired earlier in the run.
         """
+        # FAST PATH: a session that has never shown the busy marker (or has
+        # not shown it for a full settle period already) is idle right now —
+        # answer without spending even one poll's worth of wall time on it.
+        # Cheap on the common case (the target usually IS idle when the
+        # driver gets here) and correctness-neutral: it is the exact same
+        # `idle_for() >= settle_s` test the loop below makes on every pass,
+        # just asked once before paying for a pump.
+        if self.busy.idle_for() >= settle_s:
+            return True
         deadline = time.time() + bound_s
         while True:
             remaining = deadline - time.time()
@@ -920,25 +929,38 @@ def drive(argv, cwd, work, first_prompt, reseed, stage_budget_s, settle_s,
             # question before it was asked. Reset here, so only THIS `/clear`
             # can answer for itself.
             ses.refusal.reset()
-            # WAIT FOR IDLE BEFORE TYPING /clear — see BUSY_MARKER above. A
-            # target that is still generating queues the keystroke instead of
-            # acting on it, which is exactly what turned 120 clears into 120
-            # silent no-ops in stage `repair` on run 20260902T021751Z-v44. The
-            # bound is finite and the fallback on expiry is to type anyway —
-            # never a new terminal, only a note — so this can only improve on
-            # today's behaviour.
-            went_idle = ses.wait_idle(clear_idle_wait_s,
-                                      settle_s=clear_idle_settle_s)
-            if not went_idle:
-                note("clear_typed_while_busy",
-                     "%s — target never looked idle within %.0fs; typing "
-                     "/clear anyway (today's behaviour, never worse)"
-                     % (seen, clear_idle_wait_s))
+
+            def wait_before(step_label):
+                """WAIT FOR IDLE BEFORE TYPING — see BUSY_MARKER above. A
+                target that is still generating QUEUES the keystroke instead
+                of acting on it: that is what turned 120 clears into 120
+                silent no-ops in stage `repair` on run 20260902T021751Z-v44,
+                and the SAME swallow one step later is worse, not milder — if
+                `/clear` lands but the retyped `/sherlock` is what gets
+                queued instead, the reseed line that follows lands in a bare
+                session with no skill loaded and nothing on disk looks
+                wrong. So every one of the three typed inputs in this
+                sequence (/clear, the skill retype, the reseed line) waits
+                the same way, reusing this one bounded wait. The bound is
+                finite and the fallback on expiry is to type anyway — never a
+                new terminal, only a note — so this can only improve on
+                today's behaviour.
+                """
+                idle = ses.wait_idle(clear_idle_wait_s,
+                                     settle_s=clear_idle_settle_s)
+                if not idle:
+                    note("clear_typed_while_busy",
+                         "%s — target never looked idle within %.0fs before "
+                         "%s; typing anyway (today's behaviour, never worse)"
+                         % (seen, clear_idle_wait_s, step_label))
+
+            wait_before("/clear")
             reseed_at_ms = int(time.time() * 1000)
             ses.type("/clear", settle=settle_s)
             if ses.refusal.seen:
                 note("CLEAR_REFUSED", "a background task was still alive")
                 return 6, events
+            wait_before(skill_command)
             ses.type(skill_command, settle=settle_s)
             line = reseed % {"work": os.path.abspath(work), "stage": seen}
             if reseed_command:
@@ -961,6 +983,7 @@ def drive(argv, cwd, work, first_prompt, reseed, stage_budget_s, settle_s,
                 except (OSError, subprocess.SubprocessError) as exc:
                     note("reseed_command_failed",
                          "%s — falling back to the static template" % exc)
+            wait_before("the reseed line")
             ses.type(line, settle=2.0)
             note("reseeded", seen)
             # DO NOT BELIEVE YOUR OWN KEYSTROKES. The refusal needle above

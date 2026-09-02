@@ -167,6 +167,17 @@ while True:
             continue
         loaded = False
         say("\x1b[2JStarting a new session, resetting chat, and clearing terminal.")
+        if MODE == "busy_after_boundary":
+            # THE SECOND SWALLOW WINDOW. A real qwen-code session does not
+            # sit idle just because /clear landed — it starts doing
+            # something right away (the fresh session's own first turn), so
+            # the very next typed line (the /sherlock retype) is exposed to
+            # the SAME queuing risk /clear was. A driver that waits once
+            # before /clear but not again before /sherlock loses THIS
+            # keystroke instead, and the reseed line that follows lands in a
+            # bare session with no skill loaded.
+            with _busy_lock:
+                _busy_until[0] = time.time() + BUSY_S
         continue
     if line == "/sherlock":
         loaded = True
