@@ -122,6 +122,136 @@ def resolve_one_triage_row_or_finish():
                              capture_output=True, text=True)
         say(out.stdout or ("handoff failed: " + out.stderr))
 
+# THE v44-ROUND-2 QUEUING BUG, reproduced: a target that is BUSY FOR THE
+# WHOLE TURN — no bounded idle wait ever reaches an idle prompt, because the
+# turn genuinely never finishes inside any sane bound — and only returns to
+# an idle prompt when it receives ESC (the TUI's own "esc to cancel"). Real
+# transcript 20260902T045011Z-v44: 4m21s single turn, busy footer 54 times,
+# "queued" 230 times, never idle. `busy_until_esc` reproduces this exactly:
+# once the model has done its ONE piece of real work (the boundary that
+# makes checkpoint.json durable — the fact the ESC-safety argument rests on)
+# it stays busy FOREVER, ignoring every further keystroke, until the byte
+# 0x1b arrives; only then does it drop back to idle and process input
+# normally. Without the ESC-cancel fix a bounded wait_idle can never reach
+# idle here — proving the regression the same way the real run failed.
+FAKE_LEDGER = os.environ.get("FAKE_LEDGER", "")
+_esc_cleared = [False]
+
+
+def _append_ledger_row():
+    """Simulate the upstream proxy's ledger: a call lands roughly every
+    1.5s regardless of whether the screen looks busy or idle (a live model
+    call is exactly what the busy footer is showing). Before a genuine
+    /clear this reports a big, stale messages_count — the swallowed-clear
+    conversation that never actually reset, matching the real run's shape
+    (`messages` climbing instead of resetting). After a genuine /clear it
+    reports messages_count == 2 — a fresh session — so the driver's window
+    check can tell the two states apart exactly the way it tells them apart
+    against a real target."""
+    if not FAKE_LEDGER:
+        return
+    row = {"kind": "call", "ts_ms": int(time.time() * 1000),
+           "usage": {"prompt_tokens": 2 if _esc_cleared[0] else 88000},
+           "messages_count": 2 if _esc_cleared[0] else 57}
+    try:
+        with open(FAKE_LEDGER, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(row) + "\n")
+            fh.flush()
+    except OSError:
+        pass
+
+
+def _ledger_writer():
+    while True:
+        _append_ledger_row()
+        time.sleep(1.5)
+
+
+if MODE == "busy_until_esc":
+    import select
+    import termios
+    import tty
+
+    if FAKE_LEDGER:
+        threading.Thread(target=_ledger_writer, daemon=True).start()
+
+    busy = [False]
+
+    def _forever_busy_footer():
+        while True:
+            time.sleep(0.2)
+            if busy[0]:
+                say("  ⣋ Aligning the stars for optimal response "
+                    "(0s · esc to cancel)")
+
+    threading.Thread(target=_forever_busy_footer, daemon=True).start()
+
+    fd = sys.stdin.fileno()
+    old_attrs = termios.tcgetattr(fd)
+    tty.setraw(fd)
+    loaded = False
+    buf = b""
+    try:
+        while True:
+            ready, _, _ = select.select([fd], [], [], 0.2)
+            if not ready:
+                continue
+            chunk = os.read(fd, 1024)
+            if not chunk:
+                break
+            if busy[0]:
+                if b"\x1b" in chunk:
+                    # THE FIX'S OWN NEEDLE: only an actual ESC byte, never a
+                    # timeout, ever clears `busy` here — this is what proves
+                    # a bounded idle-wait alone cannot pass this fixture.
+                    busy[0] = False
+                    say("\r\nCancelled.\r\n")
+                # every other byte while busy is swallowed exactly like a
+                # real qwen-code 0.22.0 session queuing a keystroke.
+                continue
+            buf += chunk
+            while b"\r" in buf:
+                raw_line, buf = buf.split(b"\r", 1)
+                cmd = raw_line.decode("utf-8", "replace").strip()
+                if not cmd:
+                    continue
+                if cmd == "/clear":
+                    loaded = False
+                    _esc_cleared[0] = True
+                    say("\r\n\x1b[2JStarting a new session, resetting chat, "
+                        "and clearing terminal.\r\n")
+                    continue
+                if cmd == "/sherlock":
+                    loaded = True
+                    say("\r\nBase directory for this skill: /fake/skills/v40\r\n")
+                    continue
+                if not loaded:
+                    say("\r\nI have no skill loaded, so I do not know what "
+                        "to do.\r\n")
+                    continue
+                if cmd.startswith("handoff --partial "):
+                    continue
+                # THE ONE REAL PIECE OF WORK: run checkpoint.py handoff
+                # --partial for the current stage — making boundary_seq
+                # durable on disk BEFORE going busy forever, which is
+                # exactly the ordering the ESC-safety argument depends on —
+                # then go busy forever, as if the model kept narrating after
+                # its own tool call landed.
+                st = stage()
+                out = subprocess.run(
+                    [sys.executable, CHECKPOINT, "handoff", "--work", WORK,
+                     "--done", st, "--partial"],
+                    capture_output=True, text=True)
+                say("\r\n" + (out.stdout or ("partial handoff failed: "
+                                             + out.stderr)) + "\r\n")
+                busy[0] = True
+    finally:
+        try:
+            termios.tcsetattr(fd, termios.TCSADRAIN, old_attrs)
+        except termios.error:
+            pass
+    raise SystemExit(0)
+
 say("\x1b[32mfake qwen ready\x1b[0m")
 while True:
     # readline(), not `for raw in sys.stdin`: iteration read-aheads a block, so

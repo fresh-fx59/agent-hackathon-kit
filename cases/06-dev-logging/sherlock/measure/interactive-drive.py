@@ -111,6 +111,37 @@ BUSY_MARKER = "esc to cancel"
 HANDOFF_RETRY_WINDOW_S = 45.0
 HANDOFF_MAX_RETRIES = 3
 
+# ESC-TO-CANCEL, BOUNDED. Run 20260902T045011Z-v44 proved a bounded IDLE WAIT
+# cannot be the whole fix: the target was 4m21s into a single turn and never
+# went idle in the window, so `/clear` got typed while busy and queued —
+# `clear_typed_while_busy` followed by `CLEAR_NOT_EFFECTIVE`. The TUI names
+# its own escape hatch on that exact busy footer: "esc to cancel". Sending a
+# bare ESC (never followed by \r — that would submit an empty line, not
+# cancel) asks qwen-code to abandon the in-flight turn and return to an idle
+# prompt, which a bounded wait alone can never do for a multi-minute turn.
+#
+# WHY THIS IS SAFE ONLY AT /clear, NEVER AT `handoff --partial`: the driver
+# only reaches the /clear call AFTER `boundary_seq`/`stage` has already
+# advanced on disk (see the real-advance test above `wait_before("/clear")`'s
+# call site) — the checkpoint is durable at that moment, which is the entire
+# reason the boundary gate exists, so cancelling whatever the target is
+# generating past that point discards only a continuation the next session
+# will redo from the checkpoint anyway. `handoff --partial` is typed at a
+# TOKEN-THRESHOLD crossing, before any boundary has advanced — cancelling
+# there could discard in-progress work the checkpoint has not captured yet,
+# so `wait_before` for that call site must NOT be given `allow_cancel=True`.
+#
+# BOUNDED, NOT LOOPED: one ESC may not register (a repaint mid-flight, or the
+# TUI needs a moment to unwind the turn), so a second attempt is allowed, but
+# never more — `ESCAPE_ATTEMPTS` attempts, each followed by its own bounded
+# idle check, and the very first idle-idle check is the same `wait_idle` the
+# driver already uses, unchanged, so a target that is ALREADY idle never sees
+# an ESC at all. If the target is still busy after every attempt, the
+# behaviour falls back to exactly today's: type anyway, log
+# `clear_typed_while_busy`, never worse than before this fix.
+ESCAPE_ATTEMPTS = 2
+ESCAPE_VERIFY_WAIT_S = 8.0
+
 
 def strip(text):
     return ANSI.sub("", text)
@@ -647,6 +678,15 @@ class Session(object):
         os.write(self.fd, b"\r")
         self.pump(settle)
 
+    def escape(self, settle=0.5):
+        """Send a bare ESC — cancel the in-flight turn, the way the TUI's own
+        "esc to cancel" footer names it. NEVER followed by \\r: this is not a
+        line being submitted, and a trailing Enter risks accepting whatever
+        the TUI puts on screen once the turn unwinds instead of a plain
+        cancel. Written the same way `type()` writes to the pty."""
+        os.write(self.fd, b"\x1b")
+        self.pump(settle)
+
     def alive(self):
         try:
             done, _ = os.waitpid(self.pid, os.WNOHANG)
@@ -719,7 +759,7 @@ def drive(argv, cwd, work, first_prompt, reseed, stage_budget_s, settle_s,
             except OSError:
                 pass
 
-    def wait_before(step_label):
+    def wait_before(step_label, allow_cancel=False):
         """WAIT FOR IDLE BEFORE TYPING — see BUSY_MARKER above. A target that
         is still generating QUEUES the keystroke instead of acting on it:
         that is what turned 120 clears into 120 silent no-ops in stage
@@ -733,13 +773,32 @@ def drive(argv, cwd, work, first_prompt, reseed, stage_budget_s, settle_s,
         implementation. The bound is finite and the fallback on expiry is
         to type anyway — never a new terminal, only a note — so this can
         only improve on today's behaviour.
+
+        `allow_cancel`: after the idle wait times out, send a bounded number
+        of ESC keystrokes (see ESCAPE_ATTEMPTS above `handoff --partial` and
+        `/clear`/`/sherlock`/the reseed line — never the risky
+        `handoff --partial` call site: cancelling BEFORE the boundary is
+        durable is not safe, see the comment above ESCAPE_ATTEMPTS.
         """
         idle = ses.wait_idle(clear_idle_wait_s, settle_s=clear_idle_settle_s)
-        if not idle:
-            note("clear_typed_while_busy",
-                 "%s — target never looked idle within %.0fs before %s; "
-                 "typing anyway (today's behaviour, never worse)"
-                 % (seen, clear_idle_wait_s, step_label))
+        if idle:
+            return
+        if allow_cancel:
+            for attempt in range(1, ESCAPE_ATTEMPTS + 1):
+                ses.escape()
+                idle = ses.wait_idle(ESCAPE_VERIFY_WAIT_S,
+                                      settle_s=clear_idle_settle_s)
+                note("esc_sent",
+                     "attempt %d/%d before %s — idle after ESC: %s"
+                     % (attempt, ESCAPE_ATTEMPTS, step_label, idle))
+                if idle:
+                    break
+            if idle:
+                return
+        note("clear_typed_while_busy",
+             "%s — target never looked idle within %.0fs before %s; "
+             "typing anyway (today's behaviour, never worse)"
+             % (seen, clear_idle_wait_s, step_label))
 
     try:
         ses.pump(settle_s)                     # let the UI come up
@@ -1016,7 +1075,7 @@ def drive(argv, cwd, work, first_prompt, reseed, stage_budget_s, settle_s,
             # question before it was asked. Reset here, so only THIS `/clear`
             # can answer for itself.
             ses.refusal.reset()
-            wait_before("/clear")
+            wait_before("/clear", allow_cancel=True)
             reseed_at_ms = int(time.time() * 1000)
             ses.type("/clear", settle=settle_s)
             if ses.refusal.seen:
