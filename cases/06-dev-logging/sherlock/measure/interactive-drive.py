@@ -96,6 +96,30 @@ STAGES = ("triage", "draft", "repair", "done")
 BUSY_MARKER = "esc to cancel"
 QUEUED_MARKER = "queued"
 BUSY_MARKERS = (BUSY_MARKER, QUEUED_MARKER)
+# THE FOOTER, THE ONLY SIGNAL THAT DESCRIBES *NOW*. Both markers above answer
+# a question about the PAST — "did this ever get printed in the window" — and
+# `screen_busy` used to accept that as a verdict about the present. It is not
+# one: qwen-code 0.22.0 keeps REPAINTING after a turn ends (the context-usage
+# line ticks, the prompt redraws), so the transcript keeps growing — the
+# `BUSY_STALE_S` mtime guard never fires — but grows by far less than
+# `BUSY_TAIL_BYTES`, leaving the finished turn's `esc to cancel` inside the
+# window for good. Verdict: busy forever, on a target sitting at an idle
+# prompt. That false-busy is what made every idle wait time out, after which
+# the driver types anyway — the actual cause of the five `CLEAR_NOT_EFFECTIVE`
+# free runs, and why `/sherlock` and the reseed kept getting swallowed.
+#
+# qwen-code paints a footer on EVERY frame, and it differs by state:
+#   in flight   `Enter to steer · Ctrl+Q to queue · YOLO mode (shift + tab...`
+#   idle prompt `YOLO mode (shift + tab to cycle)`
+# So the LAST footer in the window is a statement about the current frame.
+# MEASURED on real pty capture `probe2.raw` (1,072,966 B, qwen 0.22.0,
+# gpt-5.5 via the broker, 2026-09-02): 1,124 busy footers, 12 idle ones, and
+# the two hints below appear on busy frames ONLY. This supersedes the
+# `BUSY_MARKER` comment's claim that `Ctrl+Q to queue` is "a STATIC hint
+# painted... whether or not anything is queued" — that claim was wrong, and
+# rejecting the hint is what left the detector with only past-tense needles.
+FOOTER_ANCHOR = "YOLO mode"
+FOOTER_BUSY_HINTS = ("Enter to steer", "Ctrl+Q to queue")
 # TAIL WINDOW for the CURRENT-SCREEN read of the transcript file (see
 # `screen_busy` below). Sized off the real run 20260902T053801Z-v44's own
 # transcript: the raw byte gap between consecutive `esc to cancel` repaints
@@ -358,6 +382,33 @@ def scan_transcript(path, start, mark=HANDOFF_MARK, chunk=1 << 20):
     return hits
 
 
+def last_frame_busy(text):
+    """Busy verdict from the LAST footer qwen-code painted, or None.
+
+    None means "this window has no footer to read" — a fixture TUI that does
+    not paint one, or a transcript tail that happens to start mid-frame — and
+    the caller then falls back to the past-tense marker scan, which is the
+    conservative direction (it errs toward busy, i.e. toward waiting).
+
+    A queued-input indicator (`⏳ N queued`) printed AFTER the last footer is
+    also busy: input is sitting unexecuted in the TUI's queue, which is the
+    precise condition this whole gate exists to avoid typing into.
+    """
+    idx = text.rfind(FOOTER_ANCHOR)
+    if idx < 0:
+        return None
+    start = text.rfind("\n", 0, idx) + 1
+    end = text.find("\n", idx)
+    if end < 0:
+        end = len(text)
+    line = text[start:end]
+    if any(h in line for h in FOOTER_BUSY_HINTS):
+        return True
+    if QUEUED_MARKER in text[end:]:
+        return True
+    return False
+
+
 def screen_busy(path, tail_bytes=BUSY_TAIL_BYTES, markers=BUSY_MARKERS,
                  stale_s=BUSY_STALE_S):
     """Is the target busy RIGHT NOW, judged from CURRENT SCREEN CONTENT?
@@ -413,6 +464,12 @@ def screen_busy(path, tail_bytes=BUSY_TAIL_BYTES, markers=BUSY_MARKERS,
     except (OSError, IOError):
         return False
     text = strip(blk.decode("utf-8", "replace"))
+    # CURRENT FRAME FIRST (see FOOTER_ANCHOR): the last footer describes now.
+    # The marker scan below is only a fallback for a window with no footer in
+    # it, because on its own it answers about the past and reads false-busy.
+    verdict = last_frame_busy(text)
+    if verdict is not None:
+        return verdict
     return any(m in text for m in markers)
 
 
