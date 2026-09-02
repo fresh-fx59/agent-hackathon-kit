@@ -1350,6 +1350,15 @@ run_qwen_interactive() {
   state_event ATTEMPT_STARTED --run-tag "$STAMP" --phase QWEN_RUNNING --dataset "$DATASET" --arm "$ARM" \
     --trace-dir "$TRACE" --attempt 0 --session-id "" --reason interactive \
     --upstream-log "$TRACE.upstream.jsonl" --inflight-path "$TRACE/upstream-inflight.json"
+  # THE RESEED IS BUILT AT RESEED TIME, from the checkpoint THIS run is
+  # writing, only when an arm (hence a checkpoint.py) is actually under test —
+  # `--reseed-command`'s own 30s-timeout, non-zero-exit and empty-stdout
+  # fallbacks (interactive-drive.py) cover the arm crashing mid-run, but there
+  # is no checkpoint.py to call at all when ARM=none.
+  HAVE_RESEED_CMD=""
+  if [ "$ARM" != "none" ]; then
+    HAVE_RESEED_CMD=1
+  fi
   ( cd "$W" && OPENAI_API_KEY="$SHERLOCK_API_KEY" OPENAI_BASE_URL="$BASE_URL" \
     timeout "$TIMEOUT" python3 "$MEASURE_DIR/interactive-drive.py" \
       --work "$W/work" --cwd "$W" \
@@ -1361,6 +1370,8 @@ run_qwen_interactive() {
       --threshold "$HANDOFF_THRESHOLD" \
       --idle-nudge-s "${SHERLOCK_IDLE_NUDGE_S:-0}" \
       --max-nudges "${SHERLOCK_MAX_NUDGES:-3}" \
+      ${HAVE_RESEED_CMD:+"--reseed-command"} \
+      ${HAVE_RESEED_CMD:+"python3 '$ARM_HOME/tools/checkpoint.py' reseed-line --work '$W/work'"} \
       -- "$QWEN" --auth-type openai --model "$CLIENT_MODEL" \
          --approval-mode yolo \
          --max-session-turns "$MAX_SESSION_TURNS" \

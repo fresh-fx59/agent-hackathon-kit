@@ -412,6 +412,41 @@ def handoff(work, done, partial=False, gate_tools_run=()):
     return row, block
 
 
+def reseed_line(work):
+    """ONE LINE that says where the work stands, not where it lives.
+
+    The v43 reseed was «ПРОДОЛЖИ РАССЛЕДОВАНИЕ ИЗ <dir> — СТУПЕНЬ <stage>» and
+    was byte-identical at every boundary, so a reseeded session learned
+    nothing from it and re-derived everything. Measured on
+    20260901T002401Z-v43: reference/report-format.md was re-read in 11 of 11
+    cycles, about 153,000 tokens on one document, and report.md was never
+    written at all.
+
+    `report_sections()` returns a DICT — {'written', 'required', 'roles'} —
+    not a list of names, so the done-list here is built from `roles`
+    (already the section headings actually on disk), never from the dict
+    itself: `", ".join(dict)` would join its KEYS and print nonsense.
+
+    The anti-redo clause is copied in spirit from qwen's own post-compaction
+    trailer — «Continue from the last in-flight step; do not acknowledge the
+    summary, do not re-introduce» — because the one thing the model must not
+    do is start over politely.
+    """
+    row = read_row(work) or {}
+    sections = report_sections(work)
+    done = ", ".join(sections["roles"]) if sections["roles"] else "нет"
+    return (
+        "ПРОДОЛЖИ РАССЛЕДОВАНИЕ ИЗ %s — СТУПЕНЬ %s. "
+        "Разобрано %s из %s. Разделов отчёта написано %s из %s (%s), "
+        "отчёт %s байт, границ пройдено %s. "
+        "НЕ ПЕРЕЧИТЫВАЙ справочники и НЕ ПОВТОРЯЙ уже сделанное — "
+        "продолжи со следующего незаконченного шага и пиши в report.md сейчас."
+        % (os.path.abspath(str(work)), row.get("stage"),
+           row.get("resolved"), row.get("total"),
+           sections["written"], sections["required"], done,
+           row.get("report_bytes", 0), row.get(BOUNDARY_SEQ, 0)))
+
+
 def resume(work):
     """What a freshly cleared, freshly re-invoked skill must do next."""
     work = Path(work).resolve(strict=True)
@@ -421,9 +456,10 @@ def resume(work):
                          "investigation: start at stage triage" % work)
     stage = row.get("stage", "triage")
     return row, ("СТУПЕНЬ СЕЙЧАС: %s\nСОСТОЯНИЕ: %s (разобрано %s из %s, "
-                 "границ пройдено %s)\n"
+                 "границ пройдено %s)\n%s\n"
                  % (stage, row.get("state", "?"), row.get("resolved", "?"),
-                    row.get("total", "?"), row.get(BOUNDARY_SEQ, 0)))
+                    row.get("total", "?"), row.get(BOUNDARY_SEQ, 0),
+                    reseed_line(work)))
 
 
 def init(work):
@@ -467,7 +503,8 @@ def init(work):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("command", choices=("init", "handoff", "resume"))
+    parser.add_argument("command",
+                        choices=("init", "handoff", "resume", "reseed-line"))
     parser.add_argument("--work", required=True)
     parser.add_argument("--done", help="the stage being closed (handoff only)")
     parser.add_argument("--partial", action="store_true",
@@ -519,6 +556,10 @@ def main():
                              gate_tools_run=verified_gate_tools)
         print(json.dumps(row, ensure_ascii=False, sort_keys=True) if args.json
               else block, end="" if not args.json else "\n")
+        return
+    if args.command == "reseed-line":
+        work = Path(args.work).resolve(strict=True)
+        print(reseed_line(work))
         return
     row, text = resume(args.work)
     print(json.dumps(row, ensure_ascii=False, sort_keys=True) if args.json

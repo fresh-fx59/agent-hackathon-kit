@@ -132,8 +132,12 @@ session.»), and a refused `/clear` looks exactly like one that worked — the u
 types `/sherlock`, the old context is still there, and the ceiling is breached
 anyway.
 
-**STEP 0 — RUN BOTH OF THESE COMMANDS BEFORE ANYTHING ELSE. They are not
-conditional and they cost nothing: two local python calls, no model tokens.**
+**STEP 0 — RUN BOTH OF THESE COMMANDS ONLY ON THE FIRST SESSION OF AN
+INVESTIGATION**, i.e. when `checkpoint.py resume` reports `границ пройдено 0`.
+After any boundary the corpus is already ingested and `work/` already holds the
+brief: re-running them buys nothing and costs a full re-read. Measured on
+20260901T002401Z-v43: re-orienting from scratch every cycle consumed the whole
+window eleven times and produced no report at all.
 Why (measured): `reference/tools.md`, «Resident bytes».
 
     python3 <SKILL_BASE_DIR>/tools/brief.py --work ./work --corpus <LOG_DIR> --skill-root <SKILL_BASE_DIR>

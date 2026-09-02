@@ -537,7 +537,7 @@ class Session(object):
 def drive(argv, cwd, work, first_prompt, reseed, stage_budget_s, settle_s,
           transcript, skill_command, events_path=None, ledger_path="",
           idle_nudge_s=0, max_nudges=3, nudge_text="продолжай",
-          handoff_grace_s=8.0, threshold=0):
+          handoff_grace_s=8.0, threshold=0, reseed_command=""):
     ses = Session(argv, cwd, dict(os.environ), transcript)
     events = []
     # THE LATCH: holds the boundary_seq the driver was at when it crossed the
@@ -826,8 +826,28 @@ def drive(argv, cwd, work, first_prompt, reseed, stage_budget_s, settle_s,
                 note("CLEAR_REFUSED", "a background task was still alive")
                 return 6, events
             ses.type(skill_command, settle=settle_s)
-            ses.type(reseed % {"work": os.path.abspath(work), "stage": seen},
-                     settle=2.0)
+            line = reseed % {"work": os.path.abspath(work), "stage": seen}
+            if reseed_command:
+                # BUILT AT RESEED TIME, so it carries THIS boundary's numbers.
+                # A static template cannot: v43's was byte-identical at all
+                # ten reseeds and told the model nothing it did not already
+                # assume. Single line ONLY — the driver types this straight
+                # into a TUI, and a newline in it would submit early and
+                # split the message, so only the first line is ever used.
+                try:
+                    out = subprocess.run(reseed_command, shell=True,
+                                         capture_output=True, text=True,
+                                         timeout=30)
+                    if out.returncode == 0 and out.stdout.strip():
+                        line = out.stdout.strip().splitlines()[0]
+                    else:
+                        note("reseed_command_failed",
+                             "rc %s — falling back to the static template"
+                             % out.returncode)
+                except (OSError, subprocess.SubprocessError) as exc:
+                    note("reseed_command_failed",
+                         "%s — falling back to the static template" % exc)
+            ses.type(line, settle=2.0)
             note("reseeded", seen)
             # DO NOT BELIEVE YOUR OWN KEYSTROKES. The refusal needle above
             # catches a /clear that says no; it cannot catch one that says
@@ -880,6 +900,14 @@ def main():
     ap.add_argument("--prompt", required=True, help="the first task prompt")
     ap.add_argument("--reseed",
                     default="ПРОДОЛЖИ РАССЛЕДОВАНИЕ ИЗ %(work)s — СТУПЕНЬ %(stage)s")
+    ap.add_argument("--reseed-command", default="",
+                    help="a shell command whose stdout is the reseed line — "
+                         "built fresh at each boundary from the checkpoint, "
+                         "so it carries THIS boundary's numbers rather than "
+                         "the static --reseed template. Only its first "
+                         "output line is used (a single line is typed into "
+                         "the TUI); on a non-zero exit, empty stdout, or a "
+                         "hang past 30s it falls back to --reseed.")
     ap.add_argument("--skill-command", default="/sherlock")
     ap.add_argument("--stage-budget-s", type=int, default=3600)
     ap.add_argument("--ledger", default="",
@@ -922,7 +950,8 @@ def main():
                        args.stage_budget_s, args.settle_s, args.transcript,
                        args.skill_command, args.events, args.ledger,
                        args.idle_nudge_s, args.max_nudges, args.nudge_text,
-                       args.handoff_grace_s, args.threshold)
+                       args.handoff_grace_s, args.threshold,
+                       args.reseed_command)
     print("rc=%d" % rc)
     return rc
 
