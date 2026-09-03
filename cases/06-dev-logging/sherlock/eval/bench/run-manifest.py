@@ -117,7 +117,7 @@ def _replace_path_token(data, root, replacement):
 
 def _profile_url(value, code="E_TARGET_PROFILE_SCHEMA"):
     if (not isinstance(value, str) or not value or value != value.strip() or
-            any(ord(char) < 0x20 or ord(char) == 0x7f for char in value) or
+            any(char.isspace() or ord(char) < 0x20 or ord(char) == 0x7f for char in value) or
             "\\" in value or BAD_PERCENT.search(value)):
         fail(code, "provider URL is invalid")
     try:
@@ -129,6 +129,14 @@ def _profile_url(value, code="E_TARGET_PROFILE_SCHEMA"):
             parts.username is not None or parts.password is not None or
             parts.query or parts.fragment):
         fail(code, "provider URL is invalid")
+    authority = parts.netloc.rsplit("@", 1)[-1]
+    if authority.startswith("["):
+        closing = authority.find("]")
+        explicit_port = closing >= 0 and authority[closing + 1:].startswith(":")
+    else:
+        explicit_port = ":" in authority
+    if explicit_port and (port is None or port < 1 or port > 65535):
+        fail(code, "provider URL port is invalid")
     host = parts.hostname.lower()
     if ":" in host:
         try:
@@ -452,13 +460,22 @@ def _scan_fd(root_fd, prefix):
     return found
 
 
+def _strict_json_object(pairs):
+    value = {}
+    for key, item in pairs:
+        if key in value:
+            raise ValueError("duplicate JSON object key")
+        value[key] = item
+    return value
+
+
 def load_json(path, code, expected_sha256=None, digest_code=None):
     data, canonical_path = _read_path(path, code.replace("E_", ""))
     asset = {"path": canonical_path, "bytes": len(data), "sha256": digest(data)}
     if expected_sha256 is not None and asset["sha256"] != expected_sha256:
         fail(digest_code or code, "bound artifact digest mismatch")
     try:
-        value = json.loads(data.decode("utf-8"))
+        value = json.loads(data.decode("utf-8"), object_pairs_hook=_strict_json_object)
     except (UnicodeError, ValueError, TypeError):
         fail(code, "JSON input is unavailable or invalid")
     if not isinstance(value, dict):

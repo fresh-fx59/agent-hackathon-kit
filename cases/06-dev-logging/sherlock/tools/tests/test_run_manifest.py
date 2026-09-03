@@ -297,8 +297,10 @@ class RunManifestTests(unittest.TestCase):
     def test_target_profile_url_is_strict_and_removes_one_trailing_slash(self):
         profile = json.loads(self.fx.profile.read_text())
         for value in (" https://example.test/v1", "https://example.test/v1\n",
-                      "https://example.test/%zz", "https://exa_mple.test/v1",
-                      "https://example.test\\v1"):
+                      "https://example.test/a b", "https://example.test/%zz",
+                      "https://exa_mple.test/v1", "https://example.test\\v1",
+                      "https://example.test:/v1", "https://example.test:0/v1",
+                      "https://example.test:65536/v1"):
             with self.subTest(value=value):
                 candidate = dict(profile)
                 candidate["provider_base_url"] = value
@@ -307,6 +309,31 @@ class RunManifestTests(unittest.TestCase):
         profile["provider_base_url"] = "HTTPS://EXAMPLE.TEST:443/v1///"
         self.assertEqual(MOD.validate_target_profile(profile)["provider_base_url"],
                          "https://example.test/v1//")
+
+    def test_target_profile_rejects_duplicate_json_keys_at_every_depth(self):
+        for label, old, new in (
+                ("top", '"schema": 1', '"schema": 99, "schema": 1'),
+                ("nested", '"cache": {"enabled": true}',
+                 '"cache": {"enabled": true, "enabled": false}')):
+            with self.subTest(label=label):
+                fx = Fixture(self.root_for("duplicate-profile-" + label))
+                fx.stage()
+                profile = fx.profile.read_text()
+                fx.profile.write_text(profile.replace(old, new, 1))
+                with self.assertRaisesRegex(MOD.ManifestError, "E_TARGET_PROFILE_JSON"):
+                    fx.create()
+
+    def test_compare_cli_rejects_duplicate_nested_json_keys(self):
+        identity = self.valid_manifest()["input_identity"]
+        left = self.fx._file("duplicate-left.json", json.dumps(identity).replace(
+            '"cache": {"enabled": true}', '"cache": {"enabled": true, "enabled": false}', 1))
+        right = self.fx._file("duplicate-right.json", json.dumps(identity))
+        stderr = io.StringIO()
+        with mock.patch.object(sys, "argv", [str(TOOL), "compare", str(left), str(right), "--json"]), \
+                contextlib.redirect_stderr(stderr):
+            code = MOD.main()
+        self.assertEqual(code, 2)
+        self.assertIn("E_COMPARE_JSON", stderr.getvalue())
 
     def test_canonical_prompt_only_normalizes_staged_root(self):
         a = MOD.canonical_prompt(b"read /tmp/a/corpus/Security.jsonl\n", "/tmp/a/corpus")
