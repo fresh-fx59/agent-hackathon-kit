@@ -30,9 +30,16 @@ MODE = os.environ.get("FAKE_MODE", "happy")
 BUSY_S = float(os.environ.get("FAKE_BUSY_S", "0"))
 _busy_until = [0.0]
 _busy_lock = threading.Lock()
+_tool_hang_armed = [False]
 
 
 def _busy_footer():
+    # REPAINT IN BOTH STATES, the way the real TUI does. Since 053cc79 the
+    # driver judges busy from the LAST FOOTER line, so a fixture that printed
+    # only a busy spinner would (a) be read as idle while busy, proving
+    # nothing, and (b) leave a stale BUSY footer as the last frame once its
+    # window closed, which would read as busy forever. Painting the idle
+    # footer when not busy is what makes the last frame mean «now».
     while True:
         time.sleep(0.2)
         with _busy_lock:
@@ -40,6 +47,10 @@ def _busy_footer():
         if busy:
             say("  ⣋ Aligning the stars for optimal response "
                 "(0s · esc to cancel)")
+            say("  Enter to steer · Ctrl+Q to queue · YOLO mode "
+                "(shift + tab to cycle)")
+        else:
+            say("  YOLO mode (shift + tab to cycle)")
 
 
 # THE FALSE-IDLE REGRESSION LOCK — reproduces the ACTUAL shape of run
@@ -77,6 +88,19 @@ REPAINT_S = float(os.environ.get("FAKE_REPAINT_S", "0.3"))
 # init footer looks IDLE by every busy marker the driver has. Readiness is a
 # POSITIVE signal — the ready footer line — not the absence of a busy one.
 INIT_S = float(os.environ.get("FAKE_INIT_S", "12"))
+# A TARGET BLOCKED INSIDE A TOOL CALL IS NOT A TARGET THAT STOPPED, and the
+# driver used to report them identically. `tool_hang`: after the task prompt
+# lands, this stand-in prints the real TUI's shell-tool banner and then
+# repaints the BUSY footer forever, swallowing typed input — the shape of free
+# run 20260902T193433Z-v44, where the model ran the arm's own
+# `stopcheck.py` from the shell and it blocked on stdin for the full
+# 600,000 ms. That run's screen said
+# «⠋ Communing with the machine spirit... (6m 21s · ↑ 11k tokens · esc to
+# cancel)» while the driver's terminal said «the target stopped and will not
+# restart». The terminal was right; the diagnosis was wrong, and it cost a
+# transcript read to find the real culprit.
+HANG_TOOL = ("python3 /opt/sherlock-arm/log-rca/tools/stopcheck.py "
+             "--work /tmp/work --report /tmp/work/report.md")
 
 
 def _sparse_busy_footer():
@@ -332,6 +356,19 @@ while True:
     line = raw.strip()
     if not line:
         continue
+    if MODE == "tool_hang":
+        if not _tool_hang_armed[0]:
+            _tool_hang_armed[0] = True
+            say('  x Shell {"command":"%s","is_background":false,'
+                '"timeout":600000,"description":"gate"}' % HANG_TOOL)
+            with _busy_lock:
+                # Busy for far longer than any test will wait: the point is
+                # that it NEVER comes back on its own.
+                _busy_until[0] = time.time() + 3600.0
+            threading.Thread(target=_busy_footer, daemon=True).start()
+        # Every later line is swallowed, exactly as a busy TUI queues it.
+        continue
+
     if MODE == "no_skill":
         # THE v43 FAILURE, still possible and now NAMED. When
         # `settings.skills.directories` does not actually reach the target,

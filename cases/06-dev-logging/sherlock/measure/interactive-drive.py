@@ -170,6 +170,27 @@ SKILL_TYPE_ATTEMPTS = 3
 # not a cost: the probe returns the moment the needle appears, and an
 # accepted command pays one 0.2s tick. The real target answered instantly.
 SKILL_REJECT_PROBE_S = 1.0
+# QUIET AND IDLE IS «STOPPED». QUIET AND BUSY IS «BLOCKED IN A TOOL CALL»,
+# and those are different components with different fixes. Free acceptance run
+# 20260902T193433Z-v44 reported `STAGE_STALLED — the target stopped and will
+# not restart` while its screen read
+# «⠋ Communing with the machine spirit... (6m 21s · ↑ 11k tokens · esc to
+# cancel)» under a shell call to the arm's own `stopcheck.py`, which was
+# blocking forever on stdin. The terminal was the right call and the wording
+# sent the reader at the wrong component; finding the truth took a hand read
+# of a 190 MB transcript.
+#
+# Both signals were already here — the ledger for "has it talked to the
+# provider", the footer for "is the screen busy" — they were simply never
+# combined. And the distinction is not cosmetic: typing a nudge into a busy
+# qwen-code 0.22.0 QUEUES instead of executing (the reason v44 waits for idle
+# at every other typing site), so every nudge sent to a tool-blocked target is
+# wasted by construction, and that run spent 603 s proving it.
+TOOL_CALL_MARK = 'Shell {"command":"'
+# How much of the transcript tail to search for the in-flight command. Sized
+# to hold several frames of a wrapped tool banner plus its spinner repaints;
+# the real banner in that run wrapped over four screen rows.
+TOOL_TAIL_BYTES = 1 << 16
 # TAIL WINDOW for the CURRENT-SCREEN read of the transcript file (see
 # `screen_busy` below). Sized off the real run 20260902T053801Z-v44's own
 # transcript: the raw byte gap between consecutive `esc to cancel` repaints
@@ -529,6 +550,35 @@ def screen_busy(path, tail_bytes=BUSY_TAIL_BYTES, markers=BUSY_MARKERS,
     if verdict is not None:
         return verdict
     return any(m in text for m in markers)
+
+
+def inflight_tool(path, tail_bytes=TOOL_TAIL_BYTES):
+    """The last shell command visible on screen, or "" if none is.
+
+    Evidence, not a gate: it turns «the target stopped» into «the target is
+    waiting on THIS», which is the difference between reading a verdict and
+    reading a 190 MB transcript. The command is taken from the LAST banner in
+    the window, since an earlier completed call is not what the target is
+    waiting on now.
+    """
+    try:
+        size = os.path.getsize(path)
+        with open(path, "rb") as fh:
+            fh.seek(max(0, size - int(tail_bytes)))
+            text = strip(fh.read().decode("utf-8", "replace"))
+    except (OSError, IOError):
+        return ""
+    at = text.rfind(TOOL_CALL_MARK)
+    if at < 0:
+        return ""
+    start = at + len(TOOL_CALL_MARK)
+    # The banner is JSON-ish but WRAPPED across screen rows, so it cannot be
+    # parsed — read to the closing quote of the command value and squeeze the
+    # wrap whitespace out of what is left.
+    end = text.find('","', start)
+    if end < 0:
+        end = min(len(text), start + 400)
+    return " ".join(text[start:end].split())[:300]
 
 
 def ledger_quiet_s(ledger_path, since=None):
@@ -1180,6 +1230,9 @@ def drive(argv, cwd, work, first_prompt, reseed, stage_budget_s, settle_s,
         while True:
             deadline = time.time() + stage_budget_s
             nudges = 0
+            # One note per blocked window, not one per poll: a mutable cell
+            # because the branch that sets it sits inside the loop.
+            tool_block_noted = [False]
             completed = seen
             # THE NUDGE'S OWN CLOCK, separate from the ledger's. Measured on the
             # paid run 20260827T150830Z-v41 and on the free rehearsal before it:
@@ -1306,11 +1359,37 @@ def drive(argv, cwd, work, first_prompt, reseed, stage_budget_s, settle_s,
                                  "%s — the target refused input: %s"
                                  % (seen, ses.target_refusal.text))
                             return 10, events
+                        # ASK THE SCREEN BEFORE NAMING THE CAUSE. See
+                        # TOOL_CALL_MARK: a busy screen with a quiet ledger is
+                        # a target waiting on a tool, and nudging it only
+                        # queues the keystroke.
+                        if ses.idle_for() <= 0.0:
+                            waiting_on = inflight_tool(ses.transcript_path)
+                            if quiet >= idle_nudge_s * (max_nudges + 1):
+                                note("TOOL_CALL_BLOCKED",
+                                     "%s — no upstream call for %d s, but the "
+                                     "screen is BUSY: the target is waiting on "
+                                     "a tool that has not returned%s"
+                                     % (seen, int(quiet),
+                                        (" — " + waiting_on) if waiting_on
+                                        else " (no command visible on screen)"))
+                                return 12, events
+                            if not tool_block_noted[0]:
+                                tool_block_noted[0] = True
+                                note("blocked_in_tool",
+                                     "%s — ledger quiet %d s while the screen "
+                                     "is busy; NOT nudging (a keystroke into a "
+                                     "busy TUI only queues)%s"
+                                     % (seen, int(quiet),
+                                        (" — " + waiting_on) if waiting_on
+                                        else ""))
+                            continue
                         if nudges >= max_nudges:
                             note("STAGE_STALLED",
                                  "no upstream call for %d s at stage %s after %d "
-                                 "nudge(s) — the target stopped and will not "
-                                 "restart" % (int(quiet), seen, nudges))
+                                 "nudge(s) — the screen is idle and the target "
+                                 "stopped; it will not restart"
+                                 % (int(quiet), seen, nudges))
                             return 7, events
                         nudges += 1
                         note("nudged", "%s (quiet %d s, nudge %d/%d)"
