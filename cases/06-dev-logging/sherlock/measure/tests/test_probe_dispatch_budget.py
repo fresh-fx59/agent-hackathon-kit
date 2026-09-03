@@ -5,6 +5,7 @@ Each refusal assertion checks the upstream's real request counter.  A 503 alone
 is not evidence of pre-dispatch safety: it could be a provider response.
 """
 import json
+import hashlib
 import os
 import pathlib
 import subprocess
@@ -30,19 +31,26 @@ class Upstream(BaseHTTPRequestHandler):
         size = int(self.headers.get("Content-Length") or 0)
         self.rfile.read(size)
         self.server.requests += 1
+        status = (self.server.statuses.pop(0) if self.server.statuses else 200)
         delay = getattr(self.server, "delay_s", 0)
         if delay:
             time.sleep(delay)
         payload = json.dumps({
             "model": "fixture-model",
             "choices": [{"message": {"role": "assistant", "content": "ok"}}],
-            "usage": self.server.usage,
+            "usage": None if status >= 400 else self.server.usage,
         }).encode("utf-8")
-        self.send_response(200)
+        self.send_response(status)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(payload)))
         self.end_headers()
-        self.wfile.write(payload)
+        if self.server.drip_s:
+            midpoint = max(1, len(payload) // 3)
+            for offset in range(0, len(payload), midpoint):
+                self.wfile.write(payload[offset:offset + midpoint]); self.wfile.flush()
+                time.sleep(self.server.drip_s)
+        else:
+            self.wfile.write(payload)
 
 
 def free_port():
@@ -58,6 +66,8 @@ class DispatchBudget(unittest.TestCase):
         self.upstream = HTTPServer(("127.0.0.1", free_port()), Upstream)
         self.upstream.requests = 0
         self.upstream.delay_s = 0
+        self.upstream.drip_s = 0
+        self.upstream.statuses = []
         self.upstream.usage = {"prompt_tokens": 10, "completion_tokens": 5}
         self.up_port = self.upstream.server_port
         threading.Thread(target=self.upstream.serve_forever, daemon=True).start()
@@ -82,16 +92,23 @@ class DispatchBudget(unittest.TestCase):
         return {"schema": 1, "run_tag": run_tag, "limits": limits}
 
     def _rates(self, run_tag="dispatch-fixture"):
-        return {"schema": 1, "run_tag": run_tag,
+        row = {"schema": 1, "run_tag": run_tag,
                 "effective_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
                 "source": "fixture",
-                "sha256": "a" * 64,
                 "prompt_rub_per_token": 0.01,
                 "completion_rub_per_token": 0.02}
+        return self._sign_rates(row)
+
+    def _sign_rates(self, row):
+        signed = dict(row); signed.pop("sha256", None)
+        canonical = json.dumps(signed, ensure_ascii=False, sort_keys=True,
+                               separators=(",", ":")).encode("utf-8")
+        signed["sha256"] = hashlib.sha256(canonical).hexdigest()
+        return signed
 
     def start(self, limits=None, rates=True, action_tag="dispatch-fixture",
               rate_tag="dispatch-fixture", action_document=None, rate_document=None,
-              keep_controls=False):
+              keep_controls=False, extra_env=None):
         limits = limits or {"max_provider_calls": 10, "max_prompt_tokens": 1000,
                             "max_completion_tokens": 1000, "max_wall_time_s": 300,
                             "max_estimated_cost_rub": 100.0}
@@ -110,6 +127,7 @@ class DispatchBudget(unittest.TestCase):
                    UPSTREAM_BUDGET_STATE=str(state),
                    UPSTREAM_ACTION_BUDGET=str(action),
                    UPSTREAM_RATE_SNAPSHOT=str(rate), UPSTREAM_READ_TIMEOUT="2")
+        env.update(extra_env or {})
         self.process = subprocess.Popen([sys.executable, PROXY], env=env,
                                         stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         for _ in range(100):
@@ -129,6 +147,16 @@ class DispatchBudget(unittest.TestCase):
             data=json.dumps({"model": "fixture", "max_tokens": max_tokens,
                              "messages": [{"role": "user", "content": "hello"}]}).encode(),
             headers={"Content-Type": "application/json"})
+        try:
+            with urllib.request.urlopen(request, timeout=5) as response:
+                return response.status, response.read()
+        except urllib.error.HTTPError as error:
+            return error.code, error.read()
+
+    def post_raw(self, raw):
+        request = urllib.request.Request(
+            "http://127.0.0.1:%d/v1/chat/completions" % self.px_port,
+            data=raw, headers={"Content-Type": "application/json"})
         try:
             with urllib.request.urlopen(request, timeout=5) as response:
                 return response.status, response.read()
@@ -289,6 +317,158 @@ class DispatchBudget(unittest.TestCase):
         self.assertEqual(status, 503)
         self.assertEqual(self.upstream.requests, 1)
         self.assertEqual(self.budget(state)["projected"]["provider_calls"], 1)
+
+    def test_budget_refusal_precedes_route_and_credential_reads(self):
+        limits = {"max_provider_calls": 0, "max_prompt_tokens": 1000,
+                  "max_completion_tokens": 1000, "max_wall_time_s": 300,
+                  "max_estimated_cost_rub": 100.0}
+        missing = str(pathlib.Path(self.temp.name) / "does-not-exist-key")
+        state = self.start(limits, extra_env={"UPSTREAM_API_KEY_FILE": missing})
+        status, _ = self.post()
+        self.assertEqual(status, 503)
+        self.assertEqual(self.upstream.requests, 0)
+        self.assertEqual(self.budget(state)["reason"], "MAX_MAX_PROVIDER_CALLS")
+
+    def test_duplicate_max_tokens_is_refused_before_upstream(self):
+        state = self.start()
+        status, _ = self.post_raw(
+            b'{"model":"fixture","max_tokens":1000,"max_tokens":1,'
+            b'"messages":[{"role":"user","content":"hello"}]}')
+        self.assertEqual(status, 503)
+        self.assertEqual(self.upstream.requests, 0)
+        self.assertEqual(self.budget(state)["reason"], "REQUEST_JSON_INVALID")
+
+    def test_rate_digest_tampering_is_refused_before_upstream(self):
+        bad = self._rates(); bad["sha256"] = "0" * 64
+        state = self.start(rate_document=bad)
+        status, _ = self.post()
+        self.assertEqual(status, 503)
+        self.assertEqual(self.upstream.requests, 0)
+        self.assertEqual(self.budget(state)["reason"], "RATE_SNAPSHOT_INVALID")
+
+    def test_unknown_usage_still_counts_completed_contact(self):
+        self.upstream.usage = None
+        state = self.start()
+        status, _ = self.post()
+        self.assertEqual(status, 200)
+        self.assertEqual(self.upstream.requests, 1)
+        for _ in range(100):
+            row = self.budget(state)
+            if row["observed"]["provider_calls"] == 1:
+                break
+            time.sleep(0.02)
+        self.assertEqual(row["observed"]["provider_calls"], 1)
+        self.assertEqual(row["observed_usage_unknown"], 1)
+
+    def test_post_route_model_growth_is_covered_before_contact(self):
+        limits = {"max_provider_calls": 10, "max_prompt_tokens": 100,
+                  "max_completion_tokens": 1000, "max_wall_time_s": 300,
+                  "max_estimated_cost_rub": 100.0}
+        state = self.start(limits, extra_env={"UPSTREAM_MODEL": "m" * 300})
+        status, _ = self.post()
+        self.assertEqual(status, 503)
+        self.assertEqual(self.upstream.requests, 0)
+        self.assertEqual(self.budget(state)["reason"], "MAX_MAX_PROMPT_TOKENS")
+
+    def test_retry_needs_a_second_reservation_before_second_contact(self):
+        self.upstream.statuses = [503, 200]
+        limits = {"max_provider_calls": 2, "max_prompt_tokens": 10000,
+                  "max_completion_tokens": 1000, "max_wall_time_s": 300,
+                  "max_estimated_cost_rub": 100.0}
+        state = self.start(limits)
+        status, _ = self.post()
+        self.assertEqual(status, 503)
+        self.assertEqual(self.upstream.requests, 1)
+        self.assertEqual(self.budget(state)["projected"]["provider_calls"], 1)
+
+    def test_drip_body_obeys_reserved_end_to_end_deadline(self):
+        self.upstream.drip_s = 0.75
+        limits = {"max_provider_calls": 10, "max_prompt_tokens": 10000,
+                  "max_completion_tokens": 1000, "max_wall_time_s": 2,
+                  "max_estimated_cost_rub": 100.0}
+        state = self.start(limits)
+        began = time.monotonic(); status, _ = self.post(); elapsed = time.monotonic() - began
+        self.assertEqual(status, 502)
+        self.assertLess(elapsed, 2.5)
+        self.assertEqual(self.upstream.requests, 1)
+        self.assertEqual(self.budget(state)["projected"]["wall_time_s"], 2.0)
+
+    def test_semantic_state_rollback_fails_closed_after_restart(self):
+        limits = {"max_provider_calls": 1, "max_prompt_tokens": 10000,
+                  "max_completion_tokens": 1000, "max_wall_time_s": 300,
+                  "max_estimated_cost_rub": 100.0}
+        state = self.start(limits)
+        self.assertEqual(self.post()[0], 200); self.assertEqual(self.upstream.requests, 1)
+        for _ in range(100):
+            if self.budget(state)["observed"]["provider_calls"] == 1:
+                break
+            time.sleep(0.02)
+        self.assertEqual(self.budget(state)["observed"]["provider_calls"], 1)
+        self.process.terminate(); self.process.wait(timeout=5)
+        self.process.stdout.close(); self.process.stderr.close(); self.process = None
+        row = self.budget(state); row["projected"]["provider_calls"] = 0
+        state.write_text(json.dumps(row), encoding="utf-8")
+        self.px_port = free_port(); self.start(limits, keep_controls=True)
+        status, _ = self.post()
+        self.assertEqual(status, 503)
+        self.assertEqual(self.upstream.requests, 1)
+
+    def test_http_error_still_counts_completed_contact_with_unknown_usage(self):
+        self.upstream.statuses = [500]
+        state = self.start()
+        status, _ = self.post()
+        self.assertEqual(status, 500)
+        self.assertEqual(self.upstream.requests, 1)
+        for _ in range(100):
+            row = self.budget(state)
+            if row["observed"]["provider_calls"] == 1:
+                break
+            time.sleep(0.02)
+        self.assertEqual(row["observed"]["provider_calls"], 1)
+        self.assertEqual(row["observed_usage_unknown"], 1)
+
+    def test_rate_is_rechecked_under_the_admission_lock(self):
+        state = self.start()
+        _, rate, _ = self._paths()
+        stale = self._rates(); stale["effective_at"] = "2000-01-01T00:00:00Z"
+        rate.write_text(json.dumps(self._sign_rates(stale)), encoding="utf-8")
+        status, _ = self.post()
+        self.assertEqual(status, 503)
+        self.assertEqual(self.upstream.requests, 0)
+        self.assertEqual(self.budget(state)["reason"], "RATE_SNAPSHOT_INVALID")
+
+    def test_substitution_retry_needs_a_fresh_reservation_before_contact(self):
+        limits = {"max_provider_calls": 1, "max_prompt_tokens": 10000,
+                  "max_completion_tokens": 1000, "max_wall_time_s": 300,
+                  "max_estimated_cost_rub": 100.0}
+        state = self.start(limits, extra_env={
+            "UPSTREAM_EXPECTED_RETURNED_IDENTITY": "different-model",
+            "UPSTREAM_SUBSTITUTION_RETRY_MAX": "1"})
+        status, _ = self.post()
+        self.assertEqual(status, 503)
+        self.assertEqual(self.upstream.requests, 1)
+        self.assertEqual(self.budget(state)["projected"]["provider_calls"], 1)
+
+    def test_fallback_advance_needs_a_fresh_reservation_before_contact(self):
+        limits = {"max_provider_calls": 2, "max_prompt_tokens": 10000,
+                  "max_completion_tokens": 1000, "max_wall_time_s": 300,
+                  "max_estimated_cost_rub": 100.0}
+        root = pathlib.Path(self.temp.name)
+        base = "http://127.0.0.1:%d/v1" % self.up_port
+        route = root / "route.json"; fallbacks = root / "fallbacks.json"
+        route.write_text(json.dumps({"schema": 1, "base": base, "model": "first",
+                                     "expected_returned_identity": "alpha/alpha-flash-0731",
+                                     "generation": 0}), encoding="utf-8")
+        fallbacks.write_text(json.dumps([{"schema": 1, "base": base, "model": "second",
+                                           "expected_returned_identity": "fixture-model"}]),
+                             encoding="utf-8")
+        state = self.start(limits, extra_env={
+            "UPSTREAM_ROUTE_FILE": str(route), "UPSTREAM_ROUTE_FALLBACKS": str(fallbacks),
+            "UPSTREAM_SUBSTITUTION_RETRY_MAX": "1"})
+        status, _ = self.post()
+        self.assertEqual(status, 503)
+        self.assertEqual(self.upstream.requests, 2)
+        self.assertEqual(self.budget(state)["projected"]["provider_calls"], 2)
 
 
 if __name__ == "__main__":

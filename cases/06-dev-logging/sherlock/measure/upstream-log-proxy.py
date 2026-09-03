@@ -33,9 +33,11 @@ below for the layout and for what those files contain.
 """
 import datetime
 import errno
+import hashlib
 import math
 import fcntl
 import gzip
+import hmac
 import json
 import os
 import socket
@@ -285,6 +287,10 @@ UPSTREAM_ROUTE_FILE = os.environ.get("UPSTREAM_ROUTE_FILE", "").strip()
 # A route is a handful of short strings. Same reasoning as _MAX_KEY_BYTES: this
 # is the torn-read guard, not a tuning knob.
 _MAX_ROUTE_BYTES = 4096
+# In action-budget mode a model rewrite larger than this is refused after the
+# pre-route reservation and before a credential/socket.  It gives the reserve a
+# finite proof while preserving the route file's broader non-budget use.
+_ACTION_ROUTE_MODEL_OVERHEAD_BYTES = 256
 # STREAMING IS THE ONLY CASE THAT MATTERS HERE. Every one of the 51 rows on the
 # v38 run - the substituted one included - is `"stream": true`, so a fix that
 # only handled whole JSON bodies would be a no-op on the real lane.
@@ -451,6 +457,10 @@ def record(**row):
     with _LOG_LOCK:                       # ThreadingHTTPServer ⇒ concurrent turns
         with open(UPSTREAM_LOG, "a", encoding="utf-8") as fh:
             fh.write(line + "\n")
+            # Completion accounting is allowed only after this append survives
+            # the crash window.  JSONL is the action-mode completion journal.
+            fh.flush()
+            os.fsync(fh.fileno())
 
 
 def estimate_prompt_tokens(body):
@@ -646,6 +656,15 @@ def _budget_timestamp():
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
 
+def _valid_budget_timestamp(value):
+    if type(value) is not str:
+        return False
+    try:
+        return datetime.datetime.fromisoformat(value.replace("Z", "+00:00")).tzinfo is not None
+    except ValueError:
+        return False
+
+
 def _strict_object(pairs):
     row = {}
     for key, value in pairs:
@@ -691,7 +710,8 @@ def _strict_action_budget(path):
         raise ValueError("invalid action limits")
     for name in ACTION_LIMITS:
         value = limits[name]
-        if type(value) not in (int, float) or not math.isfinite(value) or value < 0:
+        if type(value) not in (int, float) or isinstance(value, bool) or \
+                not math.isfinite(value) or value < 0:
             raise ValueError("invalid action limit")
     return {"schema": 1, "run_tag": RUN_TAG,
             "limits": {name: limits[name] for name in ACTION_LIMITS}}
@@ -720,9 +740,16 @@ def _strict_rate_snapshot(path):
     # noticeably in the future is equally not evidence available at dispatch.
     if age > 86400 or age < -300:
         raise ValueError("stale rate snapshot")
+    canonical = {name: row[name] for name in fields if name != "sha256"}
+    digest = hashlib.sha256(json.dumps(
+        canonical, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    ).encode("utf-8")).hexdigest()
+    if not hmac.compare_digest(row["sha256"], digest):
+        raise ValueError("rate snapshot digest mismatch")
     for name in ("prompt_rub_per_token", "completion_rub_per_token"):
         value = row[name]
-        if type(value) not in (int, float) or not math.isfinite(value) or value < 0:
+        if type(value) not in (int, float) or isinstance(value, bool) or \
+                not math.isfinite(value) or value < 0:
             raise ValueError("invalid rate snapshot")
     return {name: row[name] for name in fields}
 
@@ -1371,12 +1398,13 @@ def _budget_shape(row):
         observed = ("provider_calls", "prompt_tokens", "completion_tokens")
         fields = {"schema", "run_tag", "updated_at", "limits", "rate_snapshot",
                   "budget_assurance", "projected", "observed", "completed_overshoot",
-                  "verdict", "reason"}
+                  "observed_usage_unknown", "completed_attempt_ids", "verdict", "reason"}
         return (isinstance(row, dict) and set(row) == fields and row.get("schema") == 2 and
                 row.get("run_tag") == RUN_TAG and row.get("limits") ==
                 (_ACTION_BUDGET or {"limits": {name: 1 for name in ACTION_LIMITS}})["limits"] and
                 row.get("rate_snapshot") == _RATE_SNAPSHOT and
                 row.get("budget_assurance") == "client_pre_dispatch" and
+                _valid_budget_timestamp(row.get("updated_at")) and
                 all(type(row.get(group)) is dict for group in
                     ("projected", "observed", "completed_overshoot")) and
                 set(row["projected"]) == set(counters) and
@@ -1386,8 +1414,23 @@ def _budget_shape(row):
                     not isinstance(row["projected"][name], bool) and
                     math.isfinite(row["projected"][name]) and row["projected"][name] >= 0
                     for name in counters) and
+                all(type(row["projected"][name]) is int and
+                    not isinstance(row["projected"][name], bool)
+                    for name in ("provider_calls", "prompt_tokens", "completion_tokens")) and
                 all(type(row[group][name]) is int and row[group][name] >= 0
                     for group in ("observed", "completed_overshoot") for name in observed) and
+                type(row.get("observed_usage_unknown")) is int and
+                row["observed_usage_unknown"] >= 0 and
+                type(row.get("completed_attempt_ids")) is list and
+                all(type(value) is str and re.fullmatch(r"[0-9a-f]{32}\.a[1-9][0-9]*", value)
+                    for value in row["completed_attempt_ids"]) and
+                len(set(row["completed_attempt_ids"])) == len(row["completed_attempt_ids"]) and
+                row["observed"]["provider_calls"] == len(row["completed_attempt_ids"]) and
+                row["projected"]["provider_calls"] >= row["observed"]["provider_calls"] and
+                row["observed_usage_unknown"] <= row["observed"]["provider_calls"] and
+                all(row["completed_overshoot"][name] == max(
+                    row["observed"][name] - row["limits"]["max_" + name], 0)
+                    for name in observed) and
                 row.get("verdict") in ("WITHIN", "EXCEEDED") and
                 (row.get("reason") is None or
                  (isinstance(row.get("reason"), str) and _REASON_CODE.fullmatch(row["reason"])) ))
@@ -1437,6 +1480,8 @@ def _action_initial_budget():
                           "estimated_cost_rub": 0.0},
             "observed": {"provider_calls": 0, "prompt_tokens": 0,
                          "completion_tokens": 0},
+            "observed_usage_unknown": 0,
+            "completed_attempt_ids": [],
             "completed_overshoot": {"provider_calls": 0, "prompt_tokens": 0,
                                     "completion_tokens": 0},
             "verdict": "WITHIN", "reason": None}
@@ -1465,8 +1510,32 @@ def _initialize_action_budget():
 def _reconcile_completed(row):
     """Keep durable reservations at least as large as completed paid rows."""
     if _ACTION_BUDGET_ENABLED:
-        # Projected reservations are deliberately durable across an interrupted
-        # request.  The completed counters are changed only by response usage.
+        # The fsync'd JSONL rows are a journal, not an optional diagnostic.  A
+        # crash after row fsync but before state replacement is reconciled here;
+        # IDs make replay idempotent.  A malformed journal is unknown, never a
+        # reason to reopen a paid cap.
+        try:
+            with _LOG_LOCK, open(UPSTREAM_LOG, encoding="utf-8") as source:
+                for line in source:
+                    if not line.strip():
+                        continue
+                    completed = json.loads(line, object_pairs_hook=_strict_object)
+                    if not isinstance(completed, dict):
+                        raise BudgetUnknown()
+                    if completed.get("run_tag") != RUN_TAG:
+                        continue
+                    attempt_id = completed.get("action_attempt_id")
+                    if attempt_id is None:
+                        continue
+                    if completed.get("action_contact_completed") is not True or \
+                            type(attempt_id) is not str or not re.fullmatch(
+                                r"[0-9a-f]{32}\.a[1-9][0-9]*", attempt_id):
+                        raise BudgetUnknown()
+                    _apply_action_completion(row, attempt_id, completed.get("usage"))
+        except FileNotFoundError:
+            return row
+        except (OSError, ValueError, TypeError, RecursionError) as exc:
+            raise BudgetUnknown() from exc
         return row
     attempts = 0
     request_bytes = 0
@@ -1541,11 +1610,21 @@ def _reserve_budget(request_bytes):
 
 
 def _estimate_dispatch(body, max_output_tokens, rates):
-    """The conservative pre-contact envelope: zero cache discount, output cap."""
+    """The pre-route paid envelope: a byte-token upper bound, never an average.
+
+    Route lookup must happen after durable admission.  Action mode accepts only a
+    `_ACTION_ROUTE_MODEL_OVERHEAD_BYTES` rewrite, and model rewriting replaces
+    (rather than appends) one
+    JSON value, so `len(client body) + _MAX_ROUTE_BYTES` bounds the exact body
+    later sent on every accepted route.  One provider token per UTF-8 byte is a
+    conservative byte-fallback bound; if that envelope cannot fit, fail closed.
+    """
     if type(max_output_tokens) is not int or isinstance(max_output_tokens, bool) or \
             max_output_tokens <= 0:
         raise ValueError("request max_tokens is required")
-    prompt_tokens = estimate_prompt_tokens(body)
+    if type(body) is not bytes:
+        raise ValueError("request bytes required")
+    prompt_tokens = len(body) + _ACTION_ROUTE_MODEL_OVERHEAD_BYTES
     estimated_cost = (prompt_tokens * rates["prompt_rub_per_token"] +
                       max_output_tokens * rates["completion_rub_per_token"])
     if not math.isfinite(estimated_cost) or estimated_cost < 0:
@@ -1572,6 +1651,17 @@ def _reserve_dispatch(estimate):
             "estimated_cost_rub"}:
         raise BudgetUnknown()
     def reserve(row):
+        # Re-read under the same lock that commits this admission: a snapshot
+        # becoming stale or being replaced between startup and contact is a
+        # refusal, not permission inherited from an old process view.
+        try:
+            fresh_rates = _strict_rate_snapshot(UPSTREAM_RATE_SNAPSHOT)
+        except ValueError:
+            row.update(verdict="EXCEEDED", reason="RATE_SNAPSHOT_INVALID")
+            return row
+        if fresh_rates != row["rate_snapshot"]:
+            row.update(verdict="EXCEEDED", reason="RATE_SNAPSHOT_CHANGED")
+            return row
         if row["verdict"] == "EXCEEDED":
             return row
         projected = dict(row["projected"])
@@ -1601,29 +1691,41 @@ def _mark_action_refusal(reason):
     _budget_update(refuse)
 
 
-def _record_completed_usage(usage):
-    """Record provider-reported usage without pretending it is a bill receipt."""
-    if not _ACTION_BUDGET_ENABLED:
-        return None
-    if type(usage) is not dict:
-        return None
+def _apply_action_completion(row, attempt_id, usage):
+    """Apply one fsync'd provider contact exactly once; unknown usage is honest."""
+    if attempt_id in row["completed_attempt_ids"]:
+        return
+    if type(attempt_id) is not str or not re.fullmatch(r"[0-9a-f]{32}\.a[1-9][0-9]*", attempt_id):
+        raise BudgetUnknown()
+    known = type(usage) is dict
     values = {}
-    for name in ("prompt_tokens", "completion_tokens"):
-        value = usage.get(name)
-        if type(value) is not int or isinstance(value, bool) or value < 0:
-            return None
-        values[name] = value
-    def complete(row):
-        observed = dict(row["observed"])
-        observed["provider_calls"] += 1
+    if known:
+        for name in ("prompt_tokens", "completion_tokens"):
+            value = usage.get(name)
+            if type(value) is not int or isinstance(value, bool) or value < 0:
+                known = False
+                break
+            values[name] = value
+    observed = dict(row["observed"])
+    observed["provider_calls"] += 1
+    if known:
         observed["prompt_tokens"] += values["prompt_tokens"]
         observed["completion_tokens"] += values["completion_tokens"]
-        row["observed"] = observed
-        overshoot = dict(row["completed_overshoot"])
-        for counter in overshoot:
-            limit = row["limits"]["max_" + counter]
-            overshoot[counter] = max(overshoot[counter], observed[counter] - limit, 0)
-        row["completed_overshoot"] = overshoot
+    else:
+        row["observed_usage_unknown"] += 1
+    row["observed"] = observed
+    row["completed_attempt_ids"] = row["completed_attempt_ids"] + [attempt_id]
+    row["completed_overshoot"] = {
+        name: max(observed[name] - row["limits"]["max_" + name], 0)
+        for name in ("provider_calls", "prompt_tokens", "completion_tokens")}
+
+
+def _record_completed_usage(usage, attempt_id):
+    """Reconcile a ledger-durable provider contact, including error/no-usage."""
+    if not _ACTION_BUDGET_ENABLED:
+        return None
+    def complete(row):
+        _apply_action_completion(row, attempt_id, usage)
         return row
     return _budget_update(complete)
 
@@ -2021,17 +2123,61 @@ def _stream_socket(resp):
     runs once a line has already arrived, which is exactly the event that is
     never coming. The deadline has to be armed on the socket itself.
     """
-    fp = getattr(resp, "fp", None)
-    for attr in ("_sock", "raw"):
-        obj = getattr(fp, attr, None)
-        if obj is None:
+    queue = [resp]
+    seen = set()
+    while queue:
+        obj = queue.pop()
+        if obj is None or id(obj) in seen:
             continue
+        seen.add(id(obj))
         if hasattr(obj, "settimeout"):
             return obj
-        inner = getattr(obj, "_sock", None)
-        if hasattr(inner, "settimeout"):
-            return inner
-    return fp if hasattr(fp, "settimeout") else None
+        for attr in ("fp", "raw", "_sock", "sock"):
+            try:
+                queue.append(getattr(obj, attr, None))
+            except Exception:
+                pass
+    return None
+
+
+def _action_remaining_deadline(state, sock):
+    """Arm one monotonic action deadline across every socket read."""
+    deadline = state.get("action_deadline")
+    if deadline is None:
+        return
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise TimeoutError("action wall deadline exceeded")
+    if sock is not None:
+        sock.settimeout(remaining)
+
+
+def _read_whole_with_deadline(resp, state):
+    if not _ACTION_BUDGET_ENABLED:
+        return resp.read()
+    sock = _stream_socket(resp)
+    if sock is None:
+        raise TimeoutError("action wall deadline unenforceable")
+    try:
+        if sock.fileno() < 0:
+            # HTTP/1.0 test/close-delimited responses may already be wholly in
+            # BufferedReader when headers arrive; no future socket read exists.
+            return resp.read()
+    except (OSError, ValueError):
+        return resp.read()
+    chunks = []
+    while True:
+        if getattr(resp, "length", None) == 0:
+            return b"".join(chunks)
+        _action_remaining_deadline(state, sock)
+        # HTTPResponse.read(n) is permitted to wait for all n bytes, which
+        # turns a dripped Content-Length body back into an unbounded aggregate.
+        # read1 returns the currently available buffered/socket fragment.
+        reader = getattr(resp, "read1", None)
+        chunk = reader(65536) if reader is not None else resp.read(1)
+        if not chunk:
+            return b"".join(chunks)
+        chunks.append(chunk)
 
 
 def _scan_obj(obj, state):
@@ -2124,10 +2270,18 @@ class Proxy(BaseHTTPRequestHandler):
         # request_bytes alone could never show that, so every past diagnosis of
         # a truncated run had to guess at this number. One integer, no body.
         request_max_tokens = None
+        parsed_request = None
         try:
-            request_max_tokens = (json.loads(body or b"{}") or {}).get("max_tokens")
+            parsed_request = json.loads(body or b"{}", object_pairs_hook=_strict_object)
+            request_max_tokens = (parsed_request or {}).get("max_tokens")
         except Exception:
-            pass
+            if _ACTION_BUDGET_ENABLED:
+                try:
+                    _mark_action_refusal("REQUEST_JSON_INVALID")
+                except BudgetUnknown:
+                    pass
+                self._budget_refusal()
+                return
         if not isinstance(request_max_tokens, int):
             request_max_tokens = None
 
@@ -2182,6 +2336,17 @@ class Proxy(BaseHTTPRequestHandler):
         # judge it against identity C.
         discarded = 0
         while True:
+            # A paid turn obtains its durable token before it can even learn a
+            # route or credential.  Substitution/fallback returns to this top;
+            # ordinary HTTP retries reserve again inside `_relay_once`.
+            if _ACTION_BUDGET_ENABLED:
+                try:
+                    if not _reserve_dispatch(dispatch_estimate):
+                        self._budget_refusal()
+                        return
+                except BudgetUnknown:
+                    self._budget_refusal()
+                    return
             try:
                 route = _current_route()
             except RouteUnavailable as exc:
@@ -2191,6 +2356,16 @@ class Proxy(BaseHTTPRequestHandler):
                 self._route_refusal(exc)
                 return
             sent_body, requested, sent = _apply_route_model(body, route)
+            if _ACTION_BUDGET_ENABLED and len(sent_body) > (
+                    len(body) + _ACTION_ROUTE_MODEL_OVERHEAD_BYTES):
+                # This should be unreachable for an accepted route; treating a
+                # violated proof as an admission failure keeps it a hard wall.
+                try:
+                    _mark_action_refusal("MAX_MAX_PROMPT_TOKENS")
+                except BudgetUnknown:
+                    pass
+                self._budget_refusal()
+                return
             headers = dict(client_headers)
             # OWN THE CREDENTIAL. When a key file is configured the client's
             # Authorization header is REPLACED, never merged and never trusted,
@@ -2211,7 +2386,7 @@ class Proxy(BaseHTTPRequestHandler):
                     return
             outcome = self._relay_once(sent_body, headers, requested, sent,
                                        request_max_tokens, discarded, route,
-                                       dispatch_estimate)
+                                       dispatch_estimate, reserved_first=True)
             if outcome == "SUBSTITUTED":
                 discarded += 1
                 continue
@@ -2238,7 +2413,7 @@ class Proxy(BaseHTTPRequestHandler):
             return
 
     def _relay_once(self, body, headers, requested, sent, request_max_tokens,
-                    discarded, route, dispatch_estimate=None):
+                    discarded, route, dispatch_estimate=None, reserved_first=False):
         """One upstream call.
 
         Returns "SUBSTITUTED" when the provider answered as the wrong model
@@ -2325,10 +2500,12 @@ class Proxy(BaseHTTPRequestHandler):
         try:
           while True:
             attempt += 1
+            action_attempt_id = "%s.a%d" % (request_id, attempt)
             t_try = time.time()
             try:
-                allowed = (_reserve_dispatch(dispatch_estimate)
-                           if _ACTION_BUDGET_ENABLED else _reserve_budget(len(body)))
+                allowed = (True if _ACTION_BUDGET_ENABLED and reserved_first and attempt == 1
+                           else (_reserve_dispatch(dispatch_estimate)
+                                 if _ACTION_BUDGET_ENABLED else _reserve_budget(len(body))) )
                 if not allowed:
                     self._budget_refusal()
                     return
@@ -2336,6 +2513,10 @@ class Proxy(BaseHTTPRequestHandler):
                 self._budget_refusal()
                 return
             try:
+                if _ACTION_BUDGET_ENABLED:
+                    # The reservation is exactly this enforced end-to-end bound,
+                    # not urllib's per-read timeout.
+                    state["action_deadline"] = time.monotonic() + UPSTREAM_READ_TIMEOUT
                 resp = urllib.request.urlopen(req, timeout=UPSTREAM_READ_TIMEOUT)
                 status = resp.getcode()
                 break
@@ -2386,7 +2567,12 @@ class Proxy(BaseHTTPRequestHandler):
                                duration_ms=attempt_ms,
                                sent_model=sent, request_bytes=len(body),
                                path=self.path, stream=False, upstream_error=why,
-                               messages_count=messages_count, session_id=session_id)
+                               messages_count=messages_count, session_id=session_id,
+                               **({"action_attempt_id": action_attempt_id,
+                                   "action_contact_completed": True}
+                                  if _ACTION_BUDGET_ENABLED else {}))
+                        if _ACTION_BUDGET_ENABLED:
+                            _record_completed_usage(None, action_attempt_id)
                     except OSError:
                         pass
                     try:
@@ -2418,7 +2604,12 @@ class Proxy(BaseHTTPRequestHandler):
                            attempt=attempt,
                            duration_ms=int((time.time() - t0) * 1000), sent_model=sent,
                            request_bytes=len(body), path=self.path, stream=False,
-                           messages_count=messages_count, session_id=session_id)
+                           messages_count=messages_count, session_id=session_id,
+                           **({"action_attempt_id": action_attempt_id,
+                               "action_contact_completed": True}
+                              if _ACTION_BUDGET_ENABLED else {}))
+                    if _ACTION_BUDGET_ENABLED:
+                        _record_completed_usage(None, action_attempt_id)
                 except OSError:
                     pass
                 try:
@@ -2546,13 +2737,20 @@ class Proxy(BaseHTTPRequestHandler):
                          content_events=state["content_events"], ttft_ms=state["ttft_ms"],
                          deadline_unenforceable=state["deadline_unenforceable"] or None,
                          stream_parse_errors=state["stream_parse_errors"],
-                         stream_complete=state["stream_complete"], stream_bytes=state["stream_bytes"])
+                         stream_complete=state["stream_complete"], stream_bytes=state["stream_bytes"],
+                         **({"action_attempt_id": action_attempt_id,
+                             "action_contact_completed": True}
+                            if _ACTION_BUDGET_ENABLED else {}))
+                  if _ACTION_BUDGET_ENABLED:
+                      # record() fsyncs this completion journal row before the
+                      # state reconciliation below; retrying it is idempotent.
+                      _record_completed_usage(state["usage"], action_attempt_id)
                   ledger_durable = True
               except OSError:
                   pass
               if ledger_durable:
                   try:
-                      _record_completed_usage(state["usage"])
+                      _record_completed_usage(state["usage"], action_attempt_id)
                   except BudgetUnknown:
                       # Reservation remains durable.  Unknown reconciliation is
                       # not grounds to free it or send another paid request.
@@ -2734,7 +2932,23 @@ class Proxy(BaseHTTPRequestHandler):
             self.send_header(k, v)
 
     def _pump_whole(self, resp, status, state, hold=False, expected=""):
-        payload = resp.read()
+        try:
+            payload = _read_whole_with_deadline(resp, state)
+        except (TimeoutError, socket.timeout, OSError):
+            state["error"] = "action_wall_deadline_exceeded"
+            state["response_valid"] = False
+            try:
+                resp.close()
+            except Exception:
+                pass
+            payload = json.dumps({"error": {"message": "proxy: action wall deadline exceeded"}}).encode()
+            self.send_response(502)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+            state["released"] = True
+            return
         if BODY_DIR:
             state["res_chunks"].append(payload)
         # The body is read exactly once and then relayed verbatim, so recording
@@ -2783,6 +2997,11 @@ class Proxy(BaseHTTPRequestHandler):
         """
         it = iter(resp)
         while True:
+            try:
+                _action_remaining_deadline(state, sock)
+            except TimeoutError:
+                state["error"] = "action_wall_deadline_exceeded"
+                return
             # TWO CLOCKS, because one is not enough. settimeout() bounds a
             # SINGLE read, so an upstream that drips a usage-only keepalive
             # faster than the deadline resets it forever: MEASURED at 8.06 s
@@ -2810,7 +3029,7 @@ class Proxy(BaseHTTPRequestHandler):
                     return
                 raise
             yield raw
-            if (sock is not None and state["content_events"]
+            if (sock is not None and not _ACTION_BUDGET_ENABLED and state["content_events"]
                     and sock.gettimeout() != UPSTREAM_READ_TIMEOUT):
                 sock.settimeout(UPSTREAM_READ_TIMEOUT)
 
@@ -2838,7 +3057,7 @@ class Proxy(BaseHTTPRequestHandler):
 
     def _pump_stream(self, resp, state, hold=False, expected=""):
         state["stream_started_at"] = time.time()
-        sock = _stream_socket(resp) if UPSTREAM_FIRST_TOKEN_MS else None
+        sock = _stream_socket(resp) if (UPSTREAM_FIRST_TOKEN_MS or _ACTION_BUDGET_ENABLED) else None
         if UPSTREAM_FIRST_TOKEN_MS and sock is None:
             # Never pretend to be armed. Recorded in its own field, NOT in
             # `error`: `_scan_obj` only fills `error` when it is empty, so
@@ -2846,7 +3065,10 @@ class Proxy(BaseHTTPRequestHandler):
             # spliced into the 200 body — the two fixes cancelling out.
             state["deadline_unenforceable"] = True
         if sock is not None:
-            sock.settimeout(UPSTREAM_FIRST_TOKEN_MS / 1000.0)
+            if _ACTION_BUDGET_ENABLED:
+                _action_remaining_deadline(state, sock)
+            elif UPSTREAM_FIRST_TOKEN_MS:
+                sock.settimeout(UPSTREAM_FIRST_TOKEN_MS / 1000.0)
         if not hold:
             # Byte-for-byte the pre-retry behaviour when the feature is off:
             # headers first, then relay each line as it arrives.
