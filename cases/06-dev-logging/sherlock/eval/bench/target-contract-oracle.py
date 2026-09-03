@@ -15,10 +15,9 @@ REQUIRED = {
     "F-REPORTED-CONTEXT": ("REPORTED", ("reported_context", "citation_files")),
     "F-TIMELINE-LINK": ("INFERENCE", ("timeline", "citation_files")),
 }
-ANY_HEADING = re.compile(r"^ {0,3}#{1,6}\s+.*$", re.MULTILINE)
-FINDING_HEADING = re.compile(r"^ {0,3}#{1,6}\s+(F-\S+).*?$", re.MULTILINE)
+TIMELINE_RELATION = "authentication_before_inventory"
+HEADING = re.compile(r"^( {0,3})(#{1,6})[ \t]+(.*?)[ \t]*$", re.MULTILINE)
 STRICT_HEADING = re.compile(r"^## (F-[A-Z0-9]+(?:-[A-Z0-9]+)*)$")
-VERDICT = re.compile(r"^## ВЕРДИКТ\s*$", re.MULTILINE)
 FIELD_LINE = re.compile(r"^(?:- \[!([A-Z]+)\] )?([A-Za-z_][A-Za-z0-9_]*)=(.+)$", re.MULTILINE)
 LABEL = re.compile(r"\[!([A-Z]+)\]")
 CITATION = re.compile(r"(?<![\w.-])([A-Za-z0-9][A-Za-z0-9_/-]*\.[A-Za-z0-9._-]+):(\d+)")
@@ -47,29 +46,52 @@ def _load(path):
     return value
 
 
-def _sections(text):
-    headings = list(ANY_HEADING.finditer(text))
+def _headings(text):
+    return [(match.group(0), len(match.group(2)), match.group(3), match.start(), match.end())
+            for match in HEADING.finditer(text)]
+
+
+def _sections(text, headings):
     findings = []
     for index, heading in enumerate(headings):
-        candidate = FINDING_HEADING.match(heading.group(0))
+        candidate = re.match(r"(F-\S+)", heading[2])
         if candidate:
-            findings.append((candidate.group(1), heading.group(0), heading.start(),
-                             text[heading.end():headings[index + 1].start()
+            findings.append((candidate.group(1), heading[0], heading[3],
+                             text[heading[4]:headings[index + 1][3]
                                   if index + 1 < len(headings) else len(text)]))
     return findings
 
 
+def _fence_open(line):
+    marker = re.match(r"^ {0,3}([`~]{3,})(.*)$", line.rstrip("\r\n"))
+    if marker is None or len(set(marker.group(1))) != 1:
+        return None
+    if marker.group(1)[0] == "`" and "`" in marker.group(2):
+        return None
+    return marker.group(1)[0], len(marker.group(1))
+
+
+def _fence_close(line, opening):
+    marker = re.fullmatch(r" {0,3}([`~]+)[ \t]*", line.rstrip("\r\n"))
+    return marker is not None and len(set(marker.group(1))) == 1 and \
+        marker.group(1)[0] == opening[0] and len(marker.group(1)) >= opening[1]
+
+
 def _visible_markdown(text):
     """Preserve line positions while excluding fenced code from the tiny grammar."""
-    visible, fenced = [], False
+    visible, opening = [], None
     for line in text.splitlines(keepends=True):
-        if re.match(r"^ {0,3}(```|~~~)", line):
-            fenced = not fenced
+        if opening is None:
+            opening = _fence_open(line)
+            if opening is None:
+                visible.append(line)
+                continue
             visible.append("\n" if line.endswith("\n") else "")
-        elif fenced:
+        elif _fence_close(line, opening):
+            opening = None
             visible.append("\n" if line.endswith("\n") else "")
         else:
-            visible.append(line)
+            visible.append("\n" if line.endswith("\n") else "")
     return "".join(visible)
 
 
@@ -97,7 +119,7 @@ def _timeline_valid(timeline):
     relation = ("authentication_before_inventory" if left < right else
                 "authentication_equal_inventory" if left == right else
                 "authentication_after_inventory")
-    return timeline.get("relation") == relation
+    return relation == TIMELINE_RELATION and timeline.get("relation") == TIMELINE_RELATION
 
 
 def _field_values(section):
@@ -146,7 +168,8 @@ def audit_report(report, corpus, expectations):
     failures = []
     if type(expected.get("timeline")) is not dict or not _timeline_valid(expected["timeline"]):
         failures.append("timeline_expectation_invalid")
-    findings = _sections(text)
+    headings = _headings(text)
+    findings = _sections(text, headings)
     ids = [finding[0] for finding in findings]
     if sorted(ids) != sorted(REQUIRED):
         if any(finding_id not in REQUIRED for finding_id in ids):
@@ -193,8 +216,9 @@ def audit_report(report, corpus, expectations):
         failures.append("citation_coverage_insufficient")
     if any(not _regular_corpus_path(corpus, citation["path"]) for citation in citations):
         failures.append("citation_corpus_path_invalid")
-    verdicts = list(VERDICT.finditer(text))
-    if len(verdicts) != 1 or (findings and verdicts[0].start() <= max(item[2] for item in findings)):
+    verdicts = [heading for heading in headings if heading[0] == "## ВЕРДИКТ"]
+    if len(verdicts) != 1 or not headings or headings[-1] != verdicts[0] or \
+            (findings and verdicts[0][3] <= max(item[2] for item in findings)):
         failures.append("verdict_not_after_findings")
     return {"schema": 1, "accepted": not failures, "failures": sorted(set(failures)),
             "finding_ids": ids, "citations": citations, "files": files}

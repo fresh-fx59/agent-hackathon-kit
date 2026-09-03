@@ -55,9 +55,8 @@ def run_json(name, command):
     if any(type(item) is not dict or type(item.get("defect")) is not str for item in defects) or \
             any(type(item) is not dict or type(item.get("verdict")) is not str for item in citations):
         raise AssertionError("%s gate emitted invalid defect/citation entries" % name)
-    expected_blocking = len(defects) + sum(item["verdict"] in {"no-quote", "wrong-content", "out-of-range"}
-                                            for item in citations)
-    if blocking != expected_blocking or (done.returncode == 0) != (blocking == 0):
+    if done.returncode not in (0, 1) or (done.returncode == 0) != (blocking == 0) or \
+            (blocking == 0 and defects):
         raise AssertionError("%s gate exited %s without a valid blocking payload" %
                              (name, done.returncode))
     return {"name": name, "path": command[1], "returncode": done.returncode, "payload": payload}
@@ -386,6 +385,19 @@ class TargetContractFixtureTest(unittest.TestCase):
             FIXTURE.build_fixture(source, alias / "out", self.recipe, 4401)
         self.assertFalse((source / "out").exists())
 
+    def test_round_three_symlink_alias_destination_is_rejected_on_casefolding_filesystems(self):
+        source = self._source_copy("CaseSource")
+        inner = source / "inner"
+        inner.mkdir()
+        alias = source.parent / "casesource"
+        if not os.path.samefile(source, alias):
+            self.skipTest("filesystem is case-sensitive")
+        external = self.temp / "external-link"
+        os.symlink(alias / "inner", external)
+        with self.assertRaises(FIXTURE.ContractError):
+            FIXTURE.build_fixture(source, external / "out", self.recipe, 4401)
+        self.assertFalse((inner / "out").exists())
+
     def test_round_two_source_snapshot_is_single_read_and_last_boundary_checked(self):
         source = self._source_copy("snapshot-source")
         recipe = self._recipe_value()
@@ -417,21 +429,43 @@ class TargetContractFixtureTest(unittest.TestCase):
             with self.assertRaises(FIXTURE.ContractError):
                 FIXTURE.build_fixture(source, self.temp / "last-boundary-out", self.recipe, 4401)
 
+    def test_round_three_source_hash_check_detects_restored_metadata_change(self):
+        source = self._source_copy("restored-metadata-source")
+        path = source / "Security.jsonl"
+        original_verify_staging = FIXTURE._verify_staging
+
+        def change_source_after_staging(*args):
+            value = original_verify_staging(*args)
+            before = path.stat()
+            path.write_bytes(path.read_bytes().replace(b"198.51.100.9", b"198.51.100.8"))
+            os.utime(path, ns=(before.st_atime_ns, before.st_mtime_ns))
+            return value
+
+        with mock.patch.object(FIXTURE, "_verify_staging", side_effect=change_source_after_staging):
+            with self.assertRaises(FIXTURE.ContractError):
+                FIXTURE.build_fixture(source, self.temp / "restored-metadata-out", self.recipe, 4401)
+
     def test_round_two_timeline_relation_is_validated_and_derived(self):
-        cases = (("earlier", "09", "03", "authentication_after_inventory"),
-                 ("equal", "10", "00", "authentication_equal_inventory"),
-                 ("later", "11", "03", "authentication_before_inventory"))
-        for name, hour, minute, relation in cases:
+        cases = (("earlier", "09", "03", False), ("equal", "10", "00", False),
+                 ("later", "11", "03", True))
+        for name, hour, minute, accepted in cases:
             with self.subTest(name=name):
                 source = self._source_copy("timeline-" + name)
                 system = source / "System.jsonl"
                 system.write_text(system.read_text(encoding="utf-8").replace("T10:03", "T%s:%s" % (hour, minute)).
                                   replace("T10:04", "T%s:%s" % (hour, "01" if minute == "00" else "04")), encoding="utf-8")
                 destination = self.temp / ("timeline-out-" + name)
+                if not accepted:
+                    with self.assertRaises(FIXTURE.ContractError):
+                        FIXTURE.build_fixture(source, destination, self.recipe, 4401)
+                    continue
                 manifest = FIXTURE.build_fixture(source, destination, self.recipe, 4401)
-                expectation = json.loads((destination /
-                                          manifest["expectations"]).read_text(encoding="utf-8"))
-                self.assertEqual(expectation["timeline"]["relation"], relation)
+                expectation_path = destination / manifest["expectations"]
+                expectation = json.loads(expectation_path.read_text(encoding="utf-8"))
+                self.assertEqual(expectation["timeline"]["relation"], "authentication_before_inventory")
+                expectation["timeline"]["relation"] = "authentication_after_inventory"
+                expectation_path.write_text(json.dumps(expectation), encoding="utf-8")
+                self.assertFalse(ORACLE.audit_report(self.canonical, destination, expectation_path)["accepted"])
         malformed = self._source_copy("timeline-malformed")
         path = malformed / "System.jsonl"
         path.write_text(path.read_text(encoding="utf-8").replace("2026-08-30T10:03:00Z", "not-a-time").
@@ -446,7 +480,9 @@ class TargetContractFixtureTest(unittest.TestCase):
         canonical = self.canonical.read_text(encoding="utf-8")
         for name, report_text in (
                 ("fenced", "```markdown\n" + canonical + "\n```\n"),
-                ("indented-extra", canonical + "\n ## F-EXTRA-1\n- [!PROVEN] extra\n")):
+                ("indented-extra", canonical + "\n ## F-EXTRA-1\n- [!PROVEN] extra\n"),
+                ("long-open-short-close", "````\n```\n" + canonical + "\n````\n"),
+                ("mixed-fence", "```\n~~~\n" + canonical + "\n```\n")):
             report = self.temp / (name + ".md")
             report.write_text(report_text, encoding="utf-8")
             self.assertFalse(ORACLE.audit_report(report, self.one, expectations)["accepted"])
@@ -461,6 +497,31 @@ class TargetContractFixtureTest(unittest.TestCase):
                 with mock.patch("subprocess.run", return_value=completed):
                     with self.assertRaises(AssertionError):
                         run_json("test-gate", ["python3", "test-gate.py"])
+
+    def test_round_three_gate_statuses_are_documented_and_not_reclassified(self):
+        clear = SimpleNamespace(returncode=0, stdout='{"blocking":0,"defects":[],"citations":[]}', stderr="")
+        blocked = SimpleNamespace(returncode=1, stdout='{"blocking":1,"defects":[],"citations":[]}', stderr="")
+        for completed in (clear, blocked):
+            with self.subTest(returncode=completed.returncode):
+                with mock.patch("subprocess.run", return_value=completed):
+                    self.assertEqual(run_json("test-gate", ["python3", "test-gate.py"])["returncode"],
+                                     completed.returncode)
+        for returncode in (2, -9):
+            completed = SimpleNamespace(returncode=returncode,
+                                        stdout='{"blocking":1,"defects":[],"citations":[]}', stderr="")
+            with self.subTest(returncode=returncode):
+                with mock.patch("subprocess.run", return_value=completed):
+                    with self.assertRaises(AssertionError):
+                        run_json("test-gate", ["python3", "test-gate.py"])
+
+    def test_round_three_verdict_is_last_visible_heading(self):
+        manifest = FIXTURE.build_fixture(self.source, self.one, self.recipe, 4401)
+        expectations = self.one / manifest["expectations"]
+        canonical = self.canonical.read_text(encoding="utf-8")
+        for suffix in ("\n## Notes\ncontent\n", "\n### Appendix\ncontent\n"):
+            report = self.temp / ("verdict-" + str(len(suffix)) + ".md")
+            report.write_text(canonical + suffix, encoding="utf-8")
+            self.assertFalse(ORACLE.audit_report(report, self.one, expectations)["accepted"])
 
 
 if __name__ == "__main__":

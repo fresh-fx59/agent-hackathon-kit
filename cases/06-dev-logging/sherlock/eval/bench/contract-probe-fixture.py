@@ -20,6 +20,7 @@ SHAPE_SCHEMAS = {
     "timeline": {"left_file", "right_file", "time_field"},
 }
 CONTROL_NAMES = {"probe-expectations.json", "probe-fixture-manifest.json"}
+TIMELINE_RELATION = "authentication_before_inventory"
 
 
 class ContractError(Exception):
@@ -106,16 +107,19 @@ def _ancestors(path):
 
 
 def _destination_conflicts(source_root, destination):
-    """Compare roots by filesystem identity, including case-folded aliases."""
+    """Reject a destination whose existing target is source or below it."""
     existing = Path(destination)
     while not os.path.lexists(existing):
         if existing.parent == existing:
             return False
         existing = existing.parent
-    # An existing destination ancestor is inside/identical to source if one of
-    # its ancestors is source; it is source's ancestor if it matches any source
-    # ancestor.  samefile is identity-based rather than spelling-based.
-    return any(_samefile(existing_parent, source_root) for existing_parent in _ancestors(existing))
+    try:
+        # Resolve the actual target before walking ancestors: the lexical path
+        # can cross an external symlink whose target is case-folded source data.
+        target = existing.resolve(strict=True)
+    except OSError:
+        return False
+    return any(_samefile(ancestor, source_root) for ancestor in _ancestors(target))
 
 
 def _regular_directory(path, error):
@@ -127,7 +131,7 @@ def _regular_directory(path, error):
         raise ContractError(error)
 
 
-def _read_regular_bytes(root, relative, error):
+def _read_stable_regular_bytes(root, relative, error):
     """Read one root-contained regular file without following a final symlink."""
     path = root
     parts = relative.split("/")
@@ -165,6 +169,11 @@ def _read_regular_bytes(root, relative, error):
             fingerprint(before) != fingerprint(current):
         raise ContractError(error)
     return b"".join(chunks)
+
+
+def _read_regular_bytes(root, relative, error):
+    """Read the immutable extraction snapshot; final verification reopens directly."""
+    return _read_stable_regular_bytes(root, relative, error)
 
 
 def _source_identity(root, relative, error):
@@ -285,6 +294,8 @@ def _expectations(outputs, shapes):
     relation = ("authentication_before_inventory" if left_instant < right_instant else
                 "authentication_equal_inventory" if left_instant == right_instant else
                 "authentication_after_inventory")
+    if relation != TIMELINE_RELATION:
+        raise ContractError("PROBE_REQUIRED_SHAPES")
     return {"schema": 1, "authentication": {"external_ips": ips, "messages": messages},
             "inventory": {"services": services, "processes": processes},
             "reported_context": context,
@@ -300,8 +311,10 @@ def _tree_hash(outputs):
 
 
 def _verify_source_hashes(source, source_hashes, identities):
-    for name in source_hashes:
+    for name, expected_hash in source_hashes.items():
         if _source_identity(source, name, "PROBE_SOURCE_CHANGED") != identities[name]:
+            raise ContractError("PROBE_SOURCE_CHANGED")
+        if _sha256_bytes(_read_stable_regular_bytes(source, name, "PROBE_SOURCE_CHANGED")) != expected_hash:
             raise ContractError("PROBE_SOURCE_CHANGED")
 
 
