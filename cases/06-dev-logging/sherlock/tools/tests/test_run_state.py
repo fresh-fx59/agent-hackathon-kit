@@ -1,6 +1,8 @@
 import fcntl
+import importlib.util
 import json
 import pathlib
+import re
 import subprocess
 import sys
 import threading
@@ -223,6 +225,53 @@ class RunStateTests(unittest.TestCase):
         )
 
         self.assertIsNone(row["primary_failure"])
+
+    def test_primary_failure_vocabulary_matches_every_current_producer(self):
+        """Lane and admission producers cannot silently drift from their consumers."""
+        sherlock = MEASURE.parent
+        sources = [
+            sherlock / "measure" / "lane-audit.py",
+            sherlock / "measure" / "lane_guard.py",
+        ]
+        produced = set().union(*[
+            set(re.findall(r'"([A-Z][A-Z0-9_]{2,})"', source.read_text()))
+            for source in sources
+        ])
+        expected_lane_codes = {
+            "CACHE_TERMS_INCOMPLETE", "COMPACTION_OUTPUT_CLIPPED",
+            "EXPECTED_IDENTITY_UNKNOWN", "GENERATION_WINDOW_EXCEEDED",
+            "LANE_ABORT_UNREADABLE", "LANE_ACCOUNTING_INCOMPLETE", "LEDGER_EMPTY",
+            "LEDGER_MALFORMED", "LEDGER_MISSING", "OUTPUT_BUDGET_EXHAUSTED_BY_REASONING",
+            "PER_REQUEST_TOKEN_GATE_BREACHED", "PER_REQUEST_TOKEN_GATE_UNMEASURED",
+            "PROMPT_CACHE_COLLAPSE", "REASONING_CONTENT_NOT_RELAYED",
+            "RETURNED_MODEL_FAMILY_MISMATCH", "RETURNED_MODEL_UNKNOWN",
+            "ROUTE_ADVANCE_COUNTERS_INCONSISTENT", "ROUTE_ADVANCE_HISTORY_UNREADABLE",
+            "ROUTE_ADVANCE_UNRECORDED", "ROUTE_IDENTITY_UNREADABLE", "USAGE_UNREADABLE",
+        }
+        historical_and_spec_codes = {
+            "ATTRIBUTION_UNAVAILABLE", "LANE_AUDIT_FAILED", "NO_PROGRESS",
+            "CLEAR_NOT_EFFECTIVE", "TARGET_REFUSED", "STAGE_STALLED", "WRAPPER_NONZERO",
+            "DRIVER_EXIT", "HARNESS_QUALIFICATION_MISSING", "TARGET_PROBE_NOT_AUTHORIZED",
+            "TARGET_PROBE_BUDGET", "TARGET_CONTRACT_FAILED", "TARGET_IDENTITY_MISMATCH",
+            "TARGET_IDENTITY_UNVERIFIABLE", "TARGET_RECEIPT_EXPIRED", "TARGET_RECEIPT_USED",
+            "APPROVAL_REPLAYED", "FULL_RUN_NOT_AUTHORIZED", "INPUTS_INCOMPARABLE",
+            "BILLING_UNKNOWN",
+        }
+        self.assertEqual(produced, expected_lane_codes)
+        canonical = run_state.PRIMARY_FAILURE_CODES
+        self.assertTrue(produced | historical_and_spec_codes <= canonical)
+        self.assertIsNone(run_state.state_event("RUN_FAILED", reason="BILLED_999_RUB")["primary_failure"])
+        for code in produced | historical_and_spec_codes:
+            with self.subTest(code=code):
+                self.assertEqual(run_state.state_event("RUN_FAILED", reason=code)["primary_failure"], code)
+        for module_name, path in (
+            ("bench_status_vocabulary", sherlock / "eval" / "bench" / "bench-status.py"),
+            ("run_verdict_vocabulary", sherlock / "eval" / "bench" / "run-verdict.py"),
+        ):
+            spec = importlib.util.spec_from_file_location(module_name, path)
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            self.assertEqual(module.PRIMARY_FAILURE_CODES, canonical)
 
     def test_terminal_state_handles_missing_or_malformed_previous_failure(self):
         """Optional predecessor data cannot make the failure projection crash or lie."""

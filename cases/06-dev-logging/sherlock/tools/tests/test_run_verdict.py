@@ -344,6 +344,63 @@ class RunVerdictTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             VERDICT_TOOL.upstream_metrics(self.fx.trace)
 
+    def test_every_malformed_usage_shape_returns_a_normal_invalid_ledger_verdict(self):
+        """Bad provider counters cannot escape the fail-closed terminal renderer."""
+        self.write_status("ACCEPTED")
+        self.write_validity()
+        self.write_clean_report_artifacts()
+        cases = {
+            "string": "bad", "list": [], "null": None, "bool": False,
+            "bad-prompt": {"prompt_tokens": True, "completion_tokens": 1},
+            "bad-completion": {"prompt_tokens": 1, "completion_tokens": -1},
+            "bad-cache": {"prompt_tokens": 1, "completion_tokens": 1,
+                          "prompt_tokens_details": {"cached_tokens": "bad"}},
+            "bad-reasoning": {"prompt_tokens": 1, "completion_tokens": 1,
+                              "completion_tokens_details": {"reasoning_tokens": True}},
+        }
+        for name, usage in cases.items():
+            with self.subTest(name=name):
+                (self.fx.trace / "upstream-completed.jsonl").write_text(
+                    json.dumps({"status": 200, "usage": usage}) + "\n", encoding="utf-8"
+                )
+                result = self.verdict()
+                self.assertEqual(result.returncode, 1, result.stderr)
+                row = json.loads(result.stdout)
+                self.assertIn("UPSTREAM_LEDGER_INVALID", row["failures"])
+                self.assertEqual(row["metrics"].get("usage_bearing_calls"), None)
+
+    def test_configured_estimate_carries_unverified_rate_assurance(self):
+        """A fresh self-hashed rate is a configured estimate, never provider billing."""
+        self.write_status("ACCEPTED")
+        self.write_validity()
+        self.write_clean_report_artifacts()
+        self.write_budget_estimate(2.5)
+
+        result = self.verdict()
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        row = json.loads(result.stdout)
+        self.assertEqual(row["metrics"]["rate_assurance"], "configured_unverified")
+        summary = VERDICT_TOOL.render_summary(row)
+        self.assertIn("configured_estimated_cost=2.5", summary)
+        self.assertIn("rate_assurance=configured_unverified", summary)
+        self.assertNotIn("provider-authenticated", summary)
+
+    def test_missing_estimate_has_no_rate_assurance_or_cost_summary(self):
+        """No price evidence must not acquire an assurance label or cost prose."""
+        self.write_status("ACCEPTED")
+        self.write_validity()
+        self.write_clean_report_artifacts()
+
+        result = self.verdict()
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        row = json.loads(result.stdout)
+        self.assertIsNone(row["metrics"]["rate_assurance"])
+        summary = VERDICT_TOOL.render_summary(row)
+        self.assertNotIn("configured_estimated_cost", summary)
+        self.assertNotIn("rate_assurance", summary)
+
     def test_malformed_optional_cost_evidence_is_null_not_a_crash(self):
         """Optional receipt and estimate corruption cannot manufacture a cost claim."""
         self.write_status("ACCEPTED")

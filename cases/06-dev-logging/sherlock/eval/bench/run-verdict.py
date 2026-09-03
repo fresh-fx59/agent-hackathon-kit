@@ -3,6 +3,7 @@
 import argparse
 import datetime as dt
 import hashlib
+import importlib.util
 import json
 import math
 import os
@@ -18,22 +19,30 @@ HERE = Path(__file__).resolve().parent
 STATUS_TOOL = HERE / "bench-status.py"
 TERMINAL = {"ACCEPTED", "REJECTED", "RUN_FAILED", "FINISHED", "FINISHED_UNCHECKED"}
 REQUIRED_GATES = ("citecheck", "triagecheck", "statecheck", "reportcheck")
-PRIMARY_FAILURE_CODES = frozenset({
-    "ATTRIBUTION_UNAVAILABLE", "LANE_ABORT_UNREADABLE", "LANE_ACCOUNTING_INCOMPLETE",
-    "LANE_AUDIT_FAILED", "NO_PROGRESS", "CLEAR_NOT_EFFECTIVE", "TARGET_REFUSED",
-    "STAGE_STALLED", "WRAPPER_NONZERO", "DRIVER_EXIT", "BUDGET_EXCEEDED",
-    "RATE_SNAPSHOT_INVALID", "RATE_SNAPSHOT_CHANGED", "ACTION_BUDGET_INVALID",
-    "MAX_PROVIDER_CALLS", "MAX_PROMPT_TOKENS", "MAX_COMPLETION_TOKENS",
-    "MAX_WALL_TIME_S", "MAX_ESTIMATED_COST_RUB",
-    "HARNESS_QUALIFICATION_MISSING", "TARGET_PROBE_NOT_AUTHORIZED",
-    "TARGET_PROBE_BUDGET", "TARGET_CONTRACT_FAILED", "TARGET_IDENTITY_MISMATCH",
-    "TARGET_IDENTITY_UNVERIFIABLE", "TARGET_RECEIPT_EXPIRED", "TARGET_RECEIPT_USED",
-    "APPROVAL_REPLAYED", "FULL_RUN_NOT_AUTHORIZED", "INPUTS_INCOMPARABLE",
-    "BILLING_UNKNOWN",
-})
 MAX_JSON = 1024 * 1024
 MAX_LEDGER = 64 * 1024 * 1024
 MAX_LEDGER_ROWS = 100000
+
+
+def _load_module(name, path):
+    spec = importlib.util.spec_from_file_location(name, str(path))
+    if not spec or not spec.loader:
+        raise RuntimeError("cannot load local failure vocabulary")
+    value = importlib.util.module_from_spec(spec)
+    old = sys.dont_write_bytecode
+    try:
+        sys.dont_write_bytecode = True
+        spec.loader.exec_module(value)
+    finally:
+        sys.dont_write_bytecode = old
+    return value
+
+
+# This script is also run directly, so resolve the sibling source rather than
+# importing through a package or caller-controlled sys.path.
+PRIMARY_FAILURE_CODES = _load_module(
+    "sherlock_verdict_run_state", HERE.parents[1] / "measure" / "run_state.py"
+).PRIMARY_FAILURE_CODES
 
 
 def status_projection(args):
@@ -182,13 +191,17 @@ def upstream_metrics(trace):
                 length += 1
                 if normalized_class in {"compaction", "state_snapshot"}:
                     clipped.append(normalized_class)
-            usage = row.get("usage")
-            if usage is None:
+            # An absent counter is an unknown observation; an explicit null or
+            # malformed provider counter is an invalid ledger, never exact zero.
+            if "usage" not in row:
                 continue
+            usage = row["usage"]
+            if not isinstance(usage, dict):
+                raise ValueError("invalid provider usage counters")
             prompt_tokens = usage.get("prompt_tokens")
             output_tokens = usage.get("completion_tokens")
-            if (not isinstance(usage, dict) or type(prompt_tokens) is not int or
-                    prompt_tokens < 0 or type(output_tokens) is not int or output_tokens < 0):
+            if (type(prompt_tokens) is not int or prompt_tokens < 0 or
+                    type(output_tokens) is not int or output_tokens < 0):
                 raise ValueError("invalid provider usage counters")
             details = usage.get("prompt_tokens_details")
             if details is None:
@@ -669,6 +682,7 @@ def terminal_verdict(args, status):
     estimate, rate_snapshot = _budget_estimate(trace, status.get("run_tag"))
     metrics["estimated_cost"] = estimate
     metrics["rate_snapshot"] = rate_snapshot
+    metrics["rate_assurance"] = "configured_unverified" if estimate is not None else None
     metrics.update(_billing_metrics(trace))
     return {
         "schema": 1,
@@ -700,8 +714,12 @@ def render_summary(row):
     lines = [
         "provider_calls_observed=%s" % metrics.get("provider_calls_observed"),
         "usage_bearing_calls=%s" % metrics.get("usage_bearing_calls"),
-        "estimated_cost=%s" % metrics.get("estimated_cost"),
     ]
+    if metrics.get("estimated_cost") is not None:
+        lines.extend([
+            "configured_estimated_cost=%s" % metrics.get("estimated_cost"),
+            "rate_assurance=%s" % metrics.get("rate_assurance"),
+        ])
     return "\n".join(lines)
 
 
