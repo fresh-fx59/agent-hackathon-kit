@@ -16,6 +16,75 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SKILLS="$(cd "$HERE/../.." && pwd)/skills"
 QWEN="${QWEN_BIN:-$HOME/.local/bin/qwen}"
 ARM="${1:-unknown}"
+# Target-contract probe mode is deliberately a separate, local-only runner
+# seam.  It consumes paths supplied by the sealed controller rather than the
+# ambient bench controls below.  Production cannot enable this mode: it exists
+# solely to exercise the exact controller/trace/audit interface against a
+# loopback stub, without a provider credential or a caller-selected executable.
+if [ "${SHERLOCK_TARGET_PROBE_MODE:-0}" = "1" ]; then
+  [ "${SHERLOCK_PROBE_TEST_MODE:-0}" = "1" ] || {
+    echo "TARGET_PROBE_TEST_MODE_REQUIRED" >&2; exit 2;
+  }
+  python3 - "$HERE" "${SHERLOCK_PROBE_SEALED_INPUT:-}" "${SHERLOCK_TRACE:-}" \
+    "${SHERLOCK_PROBE_ARM:-}" "${SHERLOCK_PROBE_SETTINGS:-}" "${SHERLOCK_PROBE_BUDGET:-}" <<'PY'
+import datetime as dt
+import hashlib
+import json
+import os
+from pathlib import Path
+import shutil
+import subprocess
+import sys
+
+here, sealed_text, trace_text, arm, settings_text, budget_text = sys.argv[1:]
+sealed, trace = Path(sealed_text), Path(trace_text)
+required = ("target-profile.json", "corporate-settings.json", "probe-budget.json",
+            "fixture-manifest.json", "input-package.json", "probe-manifest.json")
+if arm not in {"target", "v44"} or not sealed.is_dir() or not trace.is_dir():
+    raise SystemExit("TARGET_PROBE_INPUT")
+if Path(settings_text) != sealed / "corporate-settings.json" or Path(budget_text) != sealed / "probe-budget.json":
+    raise SystemExit("TARGET_PROBE_BINDING")
+if any(not (sealed / name).is_file() or (sealed / name).is_symlink() for name in required) or (sealed / "fixture").is_symlink():
+    raise SystemExit("TARGET_PROBE_INPUT")
+# Copy the exact package bytes into the audit trace.  The controller already
+# owns a fresh trace containing only run-manifest.json; collision is terminal.
+for name in required:
+    shutil.copy2(sealed / name, trace / name)
+shutil.copytree(sealed / "fixture", trace / "fixture", symlinks=False)
+root = Path(here).parents[1]
+report = root / "tools" / "tests" / "fixtures" / "target-contract-reports" / "canonical.md"
+if not report.is_file():
+    raise SystemExit("TARGET_PROBE_FIXTURE")
+shutil.copy2(report, trace / "final-report.md")
+gate_corpus = trace / "gate-corpus"; shutil.copytree(trace / "fixture", gate_corpus)
+(gate_corpus / "ledger.log").write_text("\n".join(["2026-08-30T10:00:00Z INFO routine health check ok"] * 80 + ["2026-08-30T10:00:01Z ALERT singular contract ledger anomaly"]) + "\n")
+work = trace / "work"; work.mkdir()
+tools = root / "skills" / "v44" / "tools"
+if subprocess.run([sys.executable, str(tools / "logmap.py"), str(gate_corpus), "--out", str(work), "--worklist-cap", "10", "--rate-cap", "0", "--jobs", "1"], capture_output=True).returncode:
+    raise SystemExit("TARGET_PROBE_WORKLIST")
+row = next(line.split("\t") for line in (work / "worklist.tsv").read_text().splitlines() if line and not line.startswith("#"))
+if subprocess.run([sys.executable, str(tools / "worklist.py"), "next", "--work", str(work)], capture_output=True).returncode:
+    raise SystemExit("TARGET_PROBE_WORKLIST")
+if subprocess.run([sys.executable, str(tools / "worklist.py"), "verdict", "--work", str(work), "--id", row[0], "--cell", "N n=1 %s «singular contract ledger anomaly»" % row[3]], capture_output=True).returncode:
+    raise SystemExit("TARGET_PROBE_WORKLIST")
+profile = json.loads((sealed / "target-profile.json").read_text())
+call = "0" * 32 + ".a1"; model = profile["requested_model"]; returned = profile["expected_returned_identity"]
+(trace / "request-bodies").mkdir(); (trace / "response-bodies").mkdir()
+(trace / "request-bodies" / "call-1.json").write_text(json.dumps({"call_id": call, "model": model}))
+(trace / "response-bodies" / "call-1.json").write_text(json.dumps({"call_id": call, "returned_identity": returned, "usage": {"prompt_tokens": 1, "completion_tokens": 1}}))
+(trace / "ledger.json").write_text(json.dumps({"provider_calls_observed": 1, "usage": {"prompt_tokens": 1, "completion_tokens": 1}, "returned_identities": [returned], "sent_models": [model], "call_ids": [call]}))
+effective = dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+rate = {"schema": 1, "run_tag": trace.name, "effective_at": effective, "source": "local-target-contract-stub", "prompt_rub_per_token": 0.0, "completion_rub_per_token": 0.0}
+rate["sha256"] = hashlib.sha256(json.dumps(rate, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+limits = {"max_provider_calls": 10, "max_prompt_tokens": 400000, "max_completion_tokens": 20000, "max_wall_time_s": 600, "max_estimated_cost_rub": 15.0}
+budget = {"schema": 2, "run_tag": trace.name, "updated_at": effective, "limits": limits, "rate_snapshot": rate, "budget_assurance": "client_pre_dispatch", "projected": {"provider_calls": 1, "prompt_tokens": 1, "completion_tokens": 1, "wall_time_s": 1.0, "estimated_cost_rub": 0.0}, "observed": {"provider_calls": 1, "prompt_tokens": 1, "completion_tokens": 1}, "completed_overshoot": {"provider_calls": 0, "prompt_tokens": 0, "completion_tokens": 0}, "observed_usage_unknown": 0, "completed_attempt_ids": [call], "verdict": "WITHIN", "reason": None}
+(trace / "upstream-budget-state.json").write_text(json.dumps(budget, sort_keys=True))
+# This is the Task 7 output-shaped terminal observation consumed by audit, not
+# a caller-supplied exit summary.  It is only made by this explicit test mode.
+(trace / "run-verdict.json").write_text(json.dumps({"schema": 1, "run_tag": trace.name, "state": "succeeded", "finished": True, "successful": True, "report_correct": True, "failures": [], "metrics": {}}))
+PY
+  exit $?
+fi
 # >>> ARM VERSION GATE >>>
 # THE INPUT GATE for the arm name (docs/conventions.md): the version is turned
 # into a NUMBER once, here, and every downstream decision is a `>=` against it.

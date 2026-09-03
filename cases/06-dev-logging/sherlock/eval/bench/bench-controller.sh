@@ -17,6 +17,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from urllib.parse import urlparse
 
 
 HERE = Path(os.environ.pop("BENCH_CONTROLLER_HERE"))
@@ -904,7 +905,14 @@ def target_contract_probe(argv):
         return 1
     transport = profile["provider_base_url"]
     if len(argv) == 6:
-        if os.environ.get("SHERLOCK_PROBE_TEST_MODE") != "1" or not argv[5].startswith("http://127.0.0.1"):
+        try:
+            parsed = urlparse(argv[5]); port = parsed.port
+        except ValueError:
+            parsed = None; port = None
+        if (os.environ.get("SHERLOCK_PROBE_TEST_MODE") != "1" or parsed is None
+                or parsed.scheme != "http" or parsed.hostname not in {"127.0.0.1", "::1"}
+                or parsed.username is not None or parsed.password is not None or port is None
+                or parsed.params or parsed.fragment):
             print("PROBE_TRANSPORT", file=sys.stderr)
             return 1
         transport = argv[5]
@@ -921,14 +929,26 @@ def target_contract_probe(argv):
     except (OSError, ValueError):
         print("PROBE_TRACE", file=sys.stderr)
         return 1
-    env = dict(os.environ)
+    # The probe is sealed input, not a general purpose bench invocation.  Do
+    # not let ambient SHERLOCK switches change the model, prompt, arm, retries,
+    # settings, or proxy after approval.
+    allowed_probe_env = {*RUNTIME_ENV_ALLOW, "SHERLOCK_API_KEY", "SHERLOCK_PROBE_TEST_MODE"}
+    conflicts = sorted(name for name in os.environ if name.startswith("SHERLOCK_") and name not in allowed_probe_env)
+    if conflicts:
+        print("PROBE_ENV_CONFLICT", file=sys.stderr)
+        return 1
+    env = controlled_environment(allowed_probe_env)
     env.update({"BENCH_RUNS": str(runs), "SHERLOCK_RUN_TAG": trace.name,
                 "SHERLOCK_TRACE": str(trace), "SHERLOCK_CORPUS": str(sealed / "fixture"),
                 "SHERLOCK_BASE_URL": transport, "SHERLOCK_MODEL": profile["requested_model"],
                 "SHERLOCK_EXPECTED_RETURNED_IDENTITY": profile["expected_returned_identity"],
                 "QWEN_BIN": profile["qwen"]["cli"], "SHERLOCK_MAX_RETRIES": "0",
-                "SHERLOCK_RESUME_MAX_ATTEMPTS": "0", "SHERLOCK_UPSTREAM_RETRY": "0"})
-    done = subprocess.run(["bash", str(HERE / "run-bench.sh"), "target-contract-probe"],
+                "SHERLOCK_RESUME_MAX_ATTEMPTS": "0", "SHERLOCK_UPSTREAM_RETRY": "0",
+                "SHERLOCK_TARGET_PROBE_MODE": "1", "SHERLOCK_PROBE_SEALED_INPUT": str(sealed),
+                "SHERLOCK_PROBE_SETTINGS": str(sealed / "corporate-settings.json"),
+                "SHERLOCK_PROBE_BUDGET": str(sealed / "probe-budget.json"),
+                "SHERLOCK_PROBE_ARM": json.loads((sealed / "input-package.json").read_text(encoding="utf-8")).get("arm", "")})
+    done = subprocess.run(["bash", str(HERE / "run-bench.sh"), "v44"],
                           env=env, text=True, capture_output=True, timeout=600)
     print(json.dumps({"trace": str(trace), "runner_exit_code": done.returncode,
                       "stdout_sha256": digest(done.stdout.encode("utf-8"))}, sort_keys=True))

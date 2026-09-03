@@ -23,6 +23,7 @@ import sys
 import tempfile
 import math
 import re
+from urllib.parse import urlparse
 
 
 HERE = Path(__file__).resolve().parent
@@ -239,6 +240,43 @@ def _remove_owned(path, expected_sha):
         return
 
 
+def _fsync_directory(path):
+    fd = _open_directory_no_follow(path)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+def _publish_package_no_replace(staging, root):
+    """Claim the final package name with mkdir, never rename over a rival root."""
+    root = Path(root)
+    try:
+        os.mkdir(root, 0o700)
+    except FileExistsError as exc:
+        raise ProbeFailure("TARGET_PROBE_PREPARE", "root already exists") from exc
+    _fsync_directory(root.parent)
+    try:
+        for source in sorted(Path(staging).iterdir(), key=lambda item: item.name):
+            target = root / source.name
+            mode = os.lstat(source).st_mode
+            if stat.S_ISREG(mode):
+                _atomic_no_replace(target, safe_read_regular(source, 64 * 1024 * 1024))
+            elif stat.S_ISDIR(mode) and not stat.S_ISLNK(mode):
+                # The staging directory is agent-owned; copy its stable bytes
+                # under a fresh O_EXCL root rather than replacing a final path.
+                shutil.copytree(source, target, symlinks=False)
+                for current, _, _ in os.walk(target, topdown=False):
+                    _fsync_directory(current)
+            else:
+                raise ProbeFailure("TARGET_PROBE_PREPARE", "unsafe staged package")
+        _fsync_directory(root)
+    except BaseException:
+        # A failed package is deliberately left visible only as an incomplete,
+        # non-authorizable root; deleting a raced path would be less safe.
+        raise
+
+
 def _tree_digest(path):
     root = Path(path)
     try:
@@ -292,6 +330,28 @@ def _asset(path, code="TARGET_PROBE_NOT_AUTHORIZED"):
     except ProbeFailure as exc:
         raise ProbeFailure(code, str(exc)) from exc
     return data, sha256(data)
+
+
+def validate_test_transport(value):
+    """Accept only the explicit loopback transport used by local integration tests.
+
+    This is deliberately separate from the provider URL in a paid profile: it is
+    an opt-in test override and must be rejected before an approval nonce can be
+    spent.  A prefix test is not a URL security boundary (userinfo and DNS
+    suffixes both defeat it).
+    """
+    if not isinstance(value, str) or not value or any(ord(char) < 32 for char in value):
+        raise ProbeFailure("TARGET_PROBE_NOT_AUTHORIZED", "test transport")
+    try:
+        parsed = urlparse(value)
+        port = parsed.port
+    except ValueError as exc:
+        raise ProbeFailure("TARGET_PROBE_NOT_AUTHORIZED", "test transport") from exc
+    if (parsed.scheme != "http" or parsed.hostname not in {"127.0.0.1", "::1"}
+            or parsed.username is not None or parsed.password is not None or port is None
+            or parsed.params or parsed.fragment):
+        raise ProbeFailure("TARGET_PROBE_NOT_AUTHORIZED", "test transport")
+    return value
 
 
 def _gate_digests():
@@ -372,9 +432,7 @@ def prepare(args, secret_reader=None):
                     "input_package_sha256": sha256(files["input-package.json"])}
         (staging / "probe-manifest.json").write_bytes(canonical(manifest) + b"\n")
         # Fixture is part of the sealed package, with its original source bytes only.
-        if os.path.lexists(root):
-            raise ProbeFailure("TARGET_PROBE_PREPARE", "root already exists")
-        os.replace(staging, root)
+        _publish_package_no_replace(staging, root)
         staging = None
     finally:
         if staging and staging.exists():
@@ -400,12 +458,23 @@ def authorize(manifest_path, supplied_hash, nonce_root, action="target_contract_
         raise ProbeFailure("TARGET_PROBE_NOT_AUTHORIZED", "manifest hash")
     row = _strict_json(raw, PROBE_MANIFEST_KEYS)
     created, expires = _iso(row.get("created_at")), _iso(row.get("expires_at"))
-    if row.get("schema") != 1 or row.get("action") != action or expires <= _now() or \
-            expires <= created or expires - created > dt.timedelta(hours=24):
+    if row.get("schema") != 1 or row.get("action") != action or expires <= _now() or expires <= created:
         raise ProbeFailure("TARGET_PROBE_NOT_AUTHORIZED", "action or expiry")
     for name in ("target_profile_sha256", "probe_budget_sha256", "fixture_manifest_sha256", "input_package_sha256"):
         if not _hex(row.get(name)):
             raise ProbeFailure("TARGET_PROBE_NOT_AUTHORIZED", "manifest digest")
+    # Authorization expiry is identity-specific.  An alias is evidence only
+    # briefly; a provider-pinned requested=sent=returned version can last 24h.
+    profile_raw, profile_hash = _asset(Path(manifest_path).parent / "target-profile.json")
+    if not hmac.compare_digest(profile_hash, row["target_profile_sha256"]):
+        raise ProbeFailure("TARGET_PROBE_NOT_AUTHORIZED", "profile binding")
+    profile = _strict_json(profile_raw)
+    mode = profile.get("identity_mode")
+    maximum = dt.timedelta(hours=24) if mode == "provider_pinned_version" else dt.timedelta(minutes=30)
+    if mode not in {"provider_pinned_version", "alias_unresolved"} or expires - created > maximum:
+        raise ProbeFailure("TARGET_PROBE_NOT_AUTHORIZED", "identity expiry")
+    if mode == "provider_pinned_version" and profile.get("requested_model") != profile.get("expected_returned_identity"):
+        raise ProbeFailure("TARGET_PROBE_NOT_AUTHORIZED", "pinned identity")
     if consume:
         try:
             _consume_nonce(nonce_root, row["nonce"], supplied_hash)
@@ -479,10 +548,13 @@ def _verify_package(root, manifest, code="TARGET_PROBE_NOT_AUTHORIZED"):
     return values
 
 
-def run(manifest_path, supplied_hash, nonce_root, *, secret_reader, proxy_starter, runner):
+def run(manifest_path, supplied_hash, nonce_root, *, secret_reader, proxy_starter, runner,
+        transport_base_url=None):
     """Cross the only contact boundary after approval and all sealed-byte checks."""
     work = Path(manifest_path).parent / "probe-work"
     try:
+        if transport_base_url is not None:
+            validate_test_transport(transport_base_url)
         manifest = authorize(manifest_path, supplied_hash, nonce_root, consume=False)
         root = Path(manifest_path).parent
         package = _verify_package(root, manifest)
@@ -492,7 +564,7 @@ def run(manifest_path, supplied_hash, nonce_root, *, secret_reader, proxy_starte
         work.mkdir(mode=0o700)
         sealed = work / "sealed-input"
         sealed.mkdir(mode=0o700)
-        for name in ("target-profile.json", "corporate-settings.json", "probe-budget.json", "fixture-manifest.json", "input-package.json"):
+        for name in ("target-profile.json", "corporate-settings.json", "probe-budget.json", "fixture-manifest.json", "input-package.json", "probe-manifest.json"):
             shutil.copyfile(root / name, sealed / name)
         shutil.copytree(root / "fixture", sealed / "fixture", symlinks=False)
         _verify_package(sealed, manifest)
@@ -504,6 +576,10 @@ def run(manifest_path, supplied_hash, nonce_root, *, secret_reader, proxy_starte
         _verify_package(sealed, manifest)
         profile = _strict_json(_asset(sealed / "target-profile.json")[0])
         proxy = proxy_starter(profile, secret, sealed / "probe-budget.json")
+        # The proxy boundary is external to the sealed package.  Treat it as
+        # hostile and rehash the immutable snapshot immediately before its
+        # pathnames become runner input.
+        _verify_package(sealed, manifest)
         return runner(profile_path=sealed / "target-profile.json", fixture=sealed / "fixture",
                       budget_path=sealed / "probe-budget.json", work=work, proxy=proxy, retries=0)
     except ProbeFailure as exc:
@@ -512,6 +588,15 @@ def run(manifest_path, supplied_hash, nonce_root, *, secret_reader, proxy_starte
             _write_result(terminal_root, {"schema": 1, "accepted": False, "checked_at": _time_text(_now()),
                                           "failure": exc.code, "detail": str(exc)})
         raise
+    except Exception as exc:
+        # Timeout and unexpected local runner errors are terminal observations,
+        # never a reason to omit the one result artifact after nonce use.
+        terminal_root = work if work.is_dir() else Path(manifest_path).parent
+        failure = ProbeFailure("TARGET_CONTRACT_FAILED", type(exc).__name__)
+        if not os.path.lexists(terminal_root / "probe-result.json"):
+            _write_result(terminal_root, {"schema": 1, "accepted": False, "checked_at": _time_text(_now()),
+                                          "failure": failure.code, "detail": str(failure)})
+        raise failure from exc
 
 
 def audit_identity(mode, expected, returned):
@@ -537,13 +622,23 @@ def _strict_budget(row):
     if not isinstance(row, dict) or set(row) != fields or row.get("schema") != 2 or \
             row.get("budget_assurance") != "client_pre_dispatch" or set(row.get("limits", {})) != set(limits) or \
             not all(_finite_number(row["limits"][key]) for key in limits) or \
-            not isinstance(row.get("rate_snapshot"), dict) or set(row["rate_snapshot"]) != {"effective_at", "source", "sha256"} or \
-            not isinstance(row["rate_snapshot"]["source"], str) or not _hex(row["rate_snapshot"]["sha256"]):
+            not isinstance(row.get("run_tag"), str) or not row["run_tag"] or \
+            not isinstance(row.get("rate_snapshot"), dict):
         raise ProbeFailure("TARGET_PROBE_BUDGET")
     try:
-        _iso(row["updated_at"]); _iso(row["rate_snapshot"]["effective_at"])
+        updated = _iso(row["updated_at"]); effective = _iso(row["rate_snapshot"].get("effective_at"))
     except ProbeFailure as exc:
         raise ProbeFailure("TARGET_PROBE_BUDGET") from exc
+    rate = row["rate_snapshot"]
+    rate_fields = {"schema", "run_tag", "effective_at", "source", "sha256", "prompt_rub_per_token", "completion_rub_per_token"}
+    unsigned = {key: rate[key] for key in rate_fields - {"sha256"}} if set(rate) == rate_fields else {}
+    if (set(rate) != rate_fields or rate.get("schema") != 1 or rate.get("run_tag") != row["run_tag"]
+            or not isinstance(rate.get("source"), str) or not rate["source"] or not _hex(rate.get("sha256"))
+            or any(not _finite_number(rate.get(key)) for key in ("prompt_rub_per_token", "completion_rub_per_token"))
+            or not hmac.compare_digest(rate["sha256"], sha256(canonical(unsigned)))
+            or updated > _now() + dt.timedelta(minutes=5) or effective > _now() + dt.timedelta(minutes=5)
+            or _now() - effective > dt.timedelta(hours=24)):
+        raise ProbeFailure("TARGET_PROBE_BUDGET")
     expected_limits = {key: DEFAULT_BUDGET[key] for key in limits}
     if row["limits"] != expected_limits:
         raise ProbeFailure("TARGET_PROBE_BUDGET")
@@ -555,6 +650,18 @@ def _strict_budget(row):
         raise ProbeFailure("TARGET_PROBE_BUDGET")
     if any(row["projected"][key] > row["limits"]["max_" + key] for key in ("provider_calls", "prompt_tokens", "completion_tokens", "wall_time_s", "estimated_cost_rub")):
         raise ProbeFailure("TARGET_PROBE_BUDGET")
+    attempts = row.get("completed_attempt_ids")
+    if (type(row.get("observed_usage_unknown")) is not int or row["observed_usage_unknown"] < 0
+            or not isinstance(attempts, list) or len(set(attempts)) != len(attempts)
+            or any(not isinstance(value, str) or re.fullmatch(r"[0-9a-f]{32}\.a[1-9][0-9]*", value) is None for value in attempts)
+            or row["observed"]["provider_calls"] != len(attempts)
+            or row["observed_usage_unknown"] > row["observed"]["provider_calls"]
+            or row["projected"]["provider_calls"] < row["observed"]["provider_calls"]
+            or any(row["completed_overshoot"][key] != max(row["observed"][key] - row["limits"]["max_" + key], 0) for key in counters)
+            or row.get("verdict") not in {"WITHIN", "EXCEEDED"}
+            or (row["verdict"] == "WITHIN" and (any(row["completed_overshoot"].values()) or row.get("reason") is not None))
+            or (row["verdict"] == "EXCEEDED" and (not any(row["completed_overshoot"].values()) or not isinstance(row.get("reason"), str) or re.fullmatch(r"[A-Z][A-Z0-9_]{0,63}", row["reason"]) is None))):
+        raise ProbeFailure("TARGET_PROBE_BUDGET")
     return row
 
 
@@ -562,9 +669,10 @@ def _write_result(trace, result):
     path = Path(trace) / "probe-result.json"
     try:
         _atomic_no_replace(path, canonical(result) + b"\n")
+        return True
     except ProbeFailure:
         # A sealed result exists; never overwrite an earlier attempt's observation.
-        pass
+        return False
 
 
 def _real_gates(trace, report, fixture):
@@ -641,15 +749,16 @@ def audit(trace):
         gates = _real_gates(trace, report, fixture)
         _atomic_no_replace(trace / "probe-oracle.json", canonical(oracle) + b"\n")
         _atomic_no_replace(trace / "probe-gates.json", canonical(gates) + b"\n")
-        exits = _strict_json(_asset(trace / "exit-layers.json", "TARGET_CONTRACT_FAILED")[0])
-        required_exits = {"attempt_exit_code", "driver_exit_code", "wrapper_exit_code", "status_exit_code",
-                          "gate_exit_codes", "primary_failure", "terminal_observation"}
-        if set(exits) != required_exits or any(type(exits[key]) is not int or exits[key] != 0
-                for key in ("attempt_exit_code", "driver_exit_code", "wrapper_exit_code", "status_exit_code")) or \
-                not isinstance(exits["gate_exit_codes"], dict) or set(exits["gate_exit_codes"]) != set(GATES) or \
-                any(type(value) is not int or value != 0 for value in exits["gate_exit_codes"].values()) or \
-                exits["primary_failure"] is not None or exits["terminal_observation"] != "RUN_SUCCEEDED":
-            raise ProbeFailure("TARGET_CONTRACT_FAILED", "exit layer")
+        # Task 7 owns the terminal projection.  A hand-written list of child
+        # exit codes is not proof that its independent verdict accepted this
+        # trace, so audit consumes the raw run-verdict output instead.
+        verdict_raw, verdict_hash = _asset(trace / "run-verdict.json", "TARGET_CONTRACT_FAILED")
+        verdict = _strict_json(verdict_raw)
+        if (verdict.get("schema") != 1 or verdict.get("run_tag") != trace.name
+                or verdict.get("state") != "succeeded" or verdict.get("finished") is not True
+                or verdict.get("successful") is not True or verdict.get("report_correct") is not True
+                or verdict.get("failures") != [] or not isinstance(verdict.get("metrics"), dict)):
+            raise ProbeFailure("TARGET_CONTRACT_FAILED", "task7 verdict")
         ledger_raw, _ = _asset(trace / "ledger.json", "TARGET_CONTRACT_FAILED")
         ledger = _strict_json(ledger_raw)
         budget = _strict_budget(_strict_json(_asset(trace / "upstream-budget-state.json", "TARGET_CONTRACT_FAILED")[0]))
@@ -667,6 +776,30 @@ def audit(trace):
             raise ProbeFailure("TARGET_PROBE_BUDGET")
         if any(model != package["target-profile.json"]["requested_model"] for model in ledger["sent_models"]):
             raise ProbeFailure("TARGET_IDENTITY_MISMATCH")
+        # Reconcile each ledger row to the exact body bytes.  A summary ledger
+        # cannot invent a sent model, returned identity, call id, or usage.
+        requests = []
+        responses = []
+        for directory, destination in ((trace / "request-bodies", requests), (trace / "response-bodies", responses)):
+            try:
+                names = sorted(path.name for path in directory.iterdir())
+            except OSError as exc:
+                raise ProbeFailure("TARGET_CONTRACT_FAILED", "body tree") from exc
+            for name in names:
+                destination.append(_strict_json(_asset(directory / name, "TARGET_CONTRACT_FAILED")[0]))
+        if len(requests) != calls or len(responses) != calls:
+            raise ProbeFailure("TARGET_PROBE_BUDGET", "body count")
+        request_by_id = {row.get("call_id"): row for row in requests if isinstance(row, dict)}
+        response_by_id = {row.get("call_id"): row for row in responses if isinstance(row, dict)}
+        if len(request_by_id) != calls or len(response_by_id) != calls or set(request_by_id) != set(ledger["call_ids"]) or set(response_by_id) != set(ledger["call_ids"]):
+            raise ProbeFailure("TARGET_PROBE_BUDGET", "body call identity")
+        expected_model = package["target-profile.json"]["requested_model"]
+        for call_id, sent, returned in zip(ledger["call_ids"], ledger["sent_models"], ledger["returned_identities"]):
+            request = request_by_id[call_id]; response = response_by_id[call_id]
+            if (set(request) != {"call_id", "model"} or request["model"] != sent or sent != expected_model
+                    or set(response) != {"call_id", "returned_identity", "usage"}
+                    or response["returned_identity"] != returned or response["usage"] != ledger["usage"]):
+                raise ProbeFailure("TARGET_IDENTITY_MISMATCH", "body correlation")
         identity = audit_identity(package["target-profile.json"]["identity_mode"],
                                   package["target-profile.json"]["expected_returned_identity"],
                                   ledger.get("returned_identities"))
@@ -675,28 +808,36 @@ def audit(trace):
         report_raw, report_hash = _asset(trace / "final-report.md", "TARGET_CONTRACT_FAILED")
         completed = _now()
         receipt_ttl = dt.timedelta(hours=24) if identity == "provider_pinned_version" else dt.timedelta(minutes=30)
+        fixture_manifest = _strict_json(_asset(trace / "fixture-manifest.json", "TARGET_CONTRACT_FAILED")[0])
         receipt = {"schema": 1, "accepted": True, "proof_scope": "representative_sample_only",
                    "created_at": _time_text(completed), "expires_at": _time_text(completed + receipt_ttl), "nonce": manifest["nonce"],
                    "target_profile_sha256": manifest["target_profile_sha256"], "probe_manifest_sha256": sha256(raw_manifest),
                    "fixture_manifest_sha256": manifest["fixture_manifest_sha256"],
                    "input_package_sha256": manifest["input_package_sha256"],
+                   "probe_budget_sha256": manifest["probe_budget_sha256"],
+                   "fixture_seed": fixture_manifest.get("seed"),
+                   "fixture_tree_sha256": package["input-package.json"]["fixture_tree_sha256"],
+                   "fixture_report_sha256": package["input-package.json"]["fixture_expectations_sha256"],
                    "requested_model": package["target-profile.json"]["requested_model"],
                    "sent_model": package["target-profile.json"]["requested_model"],
                    "returned_identities": ledger["returned_identities"], "identity_assurance": identity,
                    "gate_sha256": {name: gates[name]["raw_sha256"] for name in GATES},
+                   "gate_summaries": {name: gates[name]["payload"] for name in GATES},
                    "oracle_sha256": sha256(canonical(oracle)), "probe_oracle_sha256": sha256((trace / "probe-oracle.json").read_bytes()),
                    "probe_gates_sha256": sha256((trace / "probe-gates.json").read_bytes()),
                    "final_report_sha256": report_hash, "ledger_sha256": sha256(ledger_raw),
                    "request_body_tree_sha256": request_tree, "response_body_tree_sha256": response_tree,
                    "provider_calls_observed": calls, "usage": ledger.get("usage"),
                    "estimated_cost_rub": budget.get("projected", {}).get("estimated_cost_rub"),
+                   "cost_inputs": {"projected": budget.get("projected"), "rate_snapshot": budget.get("rate_snapshot")},
                    "rate_snapshot": budget.get("rate_snapshot"), "budget_assurance": "client_pre_dispatch",
-                   "exit_layers": exits, "provider_billed_calls": None, "provider_billed_rub": None,
+                   "task7_verdict_sha256": verdict_hash, "provider_billed_calls": None, "provider_billed_rub": None,
                    "audit_tool_sha256": sha256(Path(__file__).read_bytes())}
         receipt_path = trace / "target-contract-receipt.json"
         checksum_path = Path(str(receipt_path) + ".sha256")
         if os.path.lexists(receipt_path) or os.path.lexists(checksum_path):
             raise ProbeFailure("TARGET_CONTRACT_FAILED", "receipt transaction already exists")
+        receipt["checksum_path"] = str(checksum_path)
         receipt_bytes = canonical(receipt) + b"\n"
         checksum_bytes = sha256(receipt_bytes).encode("ascii") + b"\n"
         _atomic_no_replace(receipt_path, receipt_bytes)
@@ -704,7 +845,8 @@ def audit(trace):
         _atomic_no_replace(checksum_path, checksum_bytes)
         published.append((checksum_path, sha256(checksum_bytes)))
         result.update({"accepted": True, "receipt": str(receipt_path), "identity_assurance": identity})
-        _write_result(trace, result)
+        if not _write_result(trace, result):
+            raise ProbeFailure("TARGET_CONTRACT_FAILED", "terminal result conflict")
         return result
     except ProbeFailure as exc:
         for path, digest in reversed(published):
@@ -759,9 +901,14 @@ def main(argv=None):
                 done = subprocess.run(command, text=True, capture_output=True, timeout=600)
                 if done.returncode:
                     raise ProbeFailure("TARGET_CONTRACT_FAILED", "controlled runner nonzero")
-                return _strict_json(done.stdout.encode("utf-8"))
+                row = _strict_json(done.stdout.encode("utf-8"))
+                if set(row) != {"trace", "runner_exit_code", "stdout_sha256"} or row.get("runner_exit_code") != 0 or not isinstance(row.get("trace"), str):
+                    raise ProbeFailure("TARGET_CONTRACT_FAILED", "controlled runner output")
+                row["audit"] = audit(row["trace"])
+                return row
             row = run(args.manifest, args.operator_approved_probe, args.nonce_root,
-                      secret_reader=secret_reader, proxy_starter=proxy_starter, runner=runner)
+                      secret_reader=secret_reader, proxy_starter=proxy_starter, runner=runner,
+                      transport_base_url=args.transport_base_url)
         print(json.dumps(row, sort_keys=True))
         return 0
     except ProbeFailure as exc:
