@@ -2,23 +2,32 @@
 
 ## F-AUTH-EXTERNAL
 
-- [!PROVEN] external authentication endpoints are -, 198.51.100.9 and 203.0.113.7: «"Message":"external authentication from 203.0.113.7"» — Security.jsonl:1.
-- [!PROVEN] external authentication from 198.51.100.9 was recorded in source — Security.jsonl:3.
+- [!PROVEN] external_ips=["-","198.51.100.9","203.0.113.7"]
+citation_files=["Security.jsonl"]
+«"Message":"external authentication from 203.0.113.7"» — Security.jsonl:1.
+external authentication from 198.51.100.9 was recorded in source — Security.jsonl:3.
 - unrelated assertion «"Message":"not in corpus"» — Security.jsonl:1.
-- [!PROVEN] deliberately out of range «"Message":"external authentication from 203.0.113.7"» — Security.jsonl:99.
+deliberately out of range «"Message":"external authentication from 203.0.113.7"» — Security.jsonl:99.
 
 ## F-INVENTORY-SERVICE
 
-- [!PROVEN] RemoteAdmin service is present: «"Message":"RemoteAdmin service installed"» — System.jsonl:1.
-- [!PROVEN] C:\Tools\remote-admin.exe is present: «"Message":"RemoteAdmin process inventory confirmed"» — System.jsonl:2.
+- [!PROVEN] services=["RemoteAdmin"]
+processes=["C:\\Tools\\remote-admin.exe"]
+citation_files=["System.jsonl"]
+«"Message":"RemoteAdmin service installed"» — System.jsonl:1.
+«"Message":"RemoteAdmin process inventory confirmed"» — System.jsonl:2.
 
 ## F-REPORTED-CONTEXT
 
-- [!REPORTED] the source records «"Message":"reported by endpoint team"» — Security.jsonl:2.
+- [!REPORTED] reported_context="reported by endpoint team"
+citation_files=["Security.jsonl"]
+«"Message":"reported by endpoint team"» — Security.jsonl:2.
 
 ## F-TIMELINE-LINK
 
-- [!INFERENCE] authentication preceded the service: «"Message":"RemoteAdmin service installed"» — System.jsonl:1.
+- [!INFERENCE] timeline={"authentication_first":"2026-08-30T10:00:00Z","inventory_first":"2026-08-30T10:03:00Z","relation":"authentication_before_inventory"}
+citation_files=["Security.jsonl","System.jsonl"]
+«"Message":"external authentication from 203.0.113.7"» — Security.jsonl:1; «"Message":"RemoteAdmin service installed"» — System.jsonl:1.
 
 ## Отклоненные кандидаты
 

@@ -1,10 +1,14 @@
 You are working in a blank work tree. The copied corpus is the only evidence.
 
 Create work/report.md as the final deliverable. It must have exactly these four
-finding headings: F-AUTH-EXTERNAL, F-INVENTORY-SERVICE, F-REPORTED-CONTEXT, and
-F-TIMELINE-LINK. Label their assertions with exactly [!PROVEN], [!PROVEN],
-[!REPORTED], and [!INFERENCE] respectively. Cite the copied source lines verbatim and distinguish
-the `-` placeholder from external authentication addresses.
+level-two finding headings: F-AUTH-EXTERNAL, F-INVENTORY-SERVICE,
+F-REPORTED-CONTEXT, and F-TIMELINE-LINK. Each section must have exactly one
+assertion label and use these exact JSON-valued field names: [!PROVEN]
+external_ips and citation_files; [!PROVEN] services, processes, and citation_files;
+[!REPORTED] reported_context and citation_files; [!INFERENCE] timeline and
+citation_files. The timeline object's relation is authentication_before_inventory.
+external_ips is the complete sorted external set and must never contain `-`.
+Every citation path must name a copied corpus file, and every finding must cite it.
 
 Before delivery, run the shipped v44 reportcheck.py, citecheck.py, statecheck.py,
 and triagecheck.py gates. Repair every reported defect, then leave only

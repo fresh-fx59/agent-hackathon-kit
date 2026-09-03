@@ -2,11 +2,14 @@
 """Regression contract for the deterministic Sherlock paid-run probe."""
 import importlib.util
 import json
+import os
 import shutil
 import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -27,13 +30,19 @@ FIXTURE = load_module("contract_probe_fixture", BENCH / "contract-probe-fixture.
 ORACLE = load_module("target_contract_oracle", BENCH / "target-contract-oracle.py")
 
 
-def run_json(command):
+def run_json(name, command):
     done = subprocess.run(command, text=True, capture_output=True)
     try:
         payload, _end = json.JSONDecoder().raw_decode(done.stdout[done.stdout.index("{"):])
-    except json.JSONDecodeError as exc:
+    except (ValueError, json.JSONDecodeError) as exc:
         raise AssertionError("gate did not emit JSON: %s\n%s" % (command, done.stderr)) from exc
-    return done.returncode, payload
+    if type(payload) is not dict or "error" in payload:
+        raise AssertionError("%s gate emitted malformed/error payload: %r" % (name, payload))
+    blocking = payload.get("blocking", len(payload.get("defects", [])))
+    if type(blocking) is not int or blocking < 0 or (done.returncode != 0 and blocking == 0):
+        raise AssertionError("%s gate exited %s without a valid blocking payload" %
+                             (name, done.returncode))
+    return {"name": name, "path": command[1], "returncode": done.returncode, "payload": payload}
 
 
 def minimum_ledger(work, corpus):
@@ -80,18 +89,19 @@ def run_contract_checks(report, corpus, expectations):
         work.mkdir()
         ledger = minimum_ledger(work, gate_corpus)
         commands = [
-            ["python3", str(V44 / "reportcheck.py"), str(report), "--json"],
-            ["python3", str(V44 / "citecheck.py"), str(report), "--corpus", str(citation_corpus),
-             "--require-quote", "--json"],
-            ["python3", str(V44 / "statecheck.py"), "--corpus", str(gate_corpus),
-             "--report", str(report), "--json"],
-            ["python3", str(V44 / "triagecheck.py"), "--worklist", str(ledger),
-             "--corpus", str(gate_corpus), "--json"],
+            ("reportcheck", ["python3", str(V44 / "reportcheck.py"), str(report), "--json"]),
+            ("citecheck", ["python3", str(V44 / "citecheck.py"), str(report), "--corpus", str(citation_corpus),
+                            "--require-quote", "--json"]),
+            ("statecheck", ["python3", str(V44 / "statecheck.py"), "--corpus", str(gate_corpus),
+                            "--report", str(report), "--json"]),
+            ("triagecheck", ["python3", str(V44 / "triagecheck.py"), "--worklist", str(ledger),
+                             "--corpus", str(gate_corpus), "--json"]),
         ]
-        results = [run_json(command) for command in commands]
+        results = [run_json(name, command) for name, command in commands]
     oracle = ORACLE.audit_report(report, corpus, expectations)
     classes = []
-    for _returncode, payload in results:
+    for result in results:
+        payload = result["payload"]
         classes.extend(item["defect"] for item in payload.get("defects", []))
         for citation in payload.get("citations", []):
             if citation.get("verdict") in {"no-quote", "wrong-content", "out-of-range"}:
@@ -101,9 +111,10 @@ def run_contract_checks(report, corpus, expectations):
              "citation_out_of_range", "external_predicate_includes_local_dash"]
     return {"classes": sorted(set(classes), key=lambda item: (order.index(item)
             if item in order else len(order), item)),
-            "blocking": sum(payload.get("blocking", len(payload.get("defects", [])))
-                            for _returncode, payload in results) + len(oracle["failures"]),
-            "gate_payloads": [payload for _returncode, payload in results]}
+            "blocking": sum(result["payload"].get("blocking", len(result["payload"].get("defects", [])))
+                            for result in results) + len(oracle["failures"]),
+            "gates": results,
+            "gate_payloads": [result["payload"] for result in results]}
 
 
 class TargetContractFixtureTest(unittest.TestCase):
@@ -121,11 +132,21 @@ class TargetContractFixtureTest(unittest.TestCase):
         shutil.rmtree(self.temp)
 
     def test_fixture_is_reproducible_and_line_addressable(self):
+        source_before = {name: self._file_hash(self.source / name)
+                         for name in ("Security.jsonl", "System.jsonl")}
         first = FIXTURE.build_fixture(self.source, self.one, self.recipe, 4401)
         second = FIXTURE.build_fixture(self.source, self.two, self.recipe, 4401)
         self.assertEqual(first["output_tree_sha256"], second["output_tree_sha256"])
         self.assertEqual(first["expectations_sha256"], second["expectations_sha256"])
         self.assertEqual(first["outputs"]["Security.jsonl"]["lines"], [1, 2, 3])
+        self.assertEqual((self.one / "Security.jsonl").read_bytes(),
+                         (self.source / "Security.jsonl").read_bytes())
+        self.assertEqual((self.one / "System.jsonl").read_bytes(),
+                         (self.source / "System.jsonl").read_bytes())
+        self.assertEqual(first["outputs"]["Security.jsonl"]["sha256"],
+                         self._file_hash(self.one / "Security.jsonl"))
+        self.assertEqual(source_before, {name: self._file_hash(self.source / name)
+                                         for name in source_before})
 
     def test_broken_report_has_exactly_five_expected_defect_classes(self):
         manifest = FIXTURE.build_fixture(self.source, self.one, self.recipe, 4401)
@@ -140,7 +161,191 @@ class TargetContractFixtureTest(unittest.TestCase):
         expectations = self.one / manifest["expectations"]
         oracle = ORACLE.audit_report(self.canonical, self.one, expectations)
         self.assertTrue(oracle["accepted"])
-        self.assertEqual(run_contract_checks(self.canonical, self.one, expectations)["blocking"], 0)
+        result = run_contract_checks(self.canonical, self.one, expectations)
+        self.assertEqual(result["blocking"], 0)
+        self.assertEqual([gate["name"] for gate in result["gates"]],
+                         ["reportcheck", "citecheck", "statecheck", "triagecheck"])
+        self.assertEqual([gate["path"] for gate in result["gates"]],
+                         [str(V44 / (name + ".py")) for name in
+                          ("reportcheck", "citecheck", "statecheck", "triagecheck")])
+        self.assertTrue(all(gate["returncode"] == 0 for gate in result["gates"]))
+
+    def _recipe_value(self):
+        return json.loads(self.recipe.read_text(encoding="utf-8"))
+
+    def _source_copy(self, name):
+        copied = self.temp / name
+        shutil.copytree(self.source, copied)
+        return copied
+
+    def _file_hash(self, path):
+        import hashlib
+        return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+    def test_adversarial_destination_table_is_non_destructive(self):
+        for case in ("equal", "child", "ancestor", "existing-file", "existing-directory",
+                     "existing-symlink"):
+            with self.subTest(case=case):
+                source = self._source_copy("source-" + case)
+                source_hash = self._file_hash(source / "Security.jsonl")
+                if case == "equal":
+                    destination = source
+                elif case == "child":
+                    destination = source / "new-fixture"
+                elif case == "ancestor":
+                    destination = source.parent
+                elif case == "existing-file":
+                    destination = self.temp / (case + ".out")
+                    destination.write_text("marker", encoding="utf-8")
+                elif case == "existing-directory":
+                    destination = self.temp / (case + ".out")
+                    destination.mkdir()
+                    (destination / "marker").write_text("marker", encoding="utf-8")
+                else:
+                    target = self.temp / (case + ".target")
+                    target.mkdir()
+                    destination = self.temp / (case + ".out")
+                    os.symlink(target, destination)
+                with self.assertRaises(FIXTURE.ContractError):
+                    FIXTURE.build_fixture(source, destination, self.recipe, 4401)
+                self.assertTrue(source.is_dir())
+                self.assertEqual(self._file_hash(source / "Security.jsonl"), source_hash)
+                if case.startswith("existing"):
+                    self.assertTrue(os.path.lexists(destination))
+                if case == "existing-directory":
+                    self.assertEqual((destination / "marker").read_text(encoding="utf-8"), "marker")
+
+    def test_existing_destination_and_rename_failure_leave_everything_intact(self):
+        source = self._source_copy("rename-source")
+        destination = self.temp / "rename-destination"
+        destination.mkdir()
+        marker = destination / "marker"
+        marker.write_text("keep", encoding="utf-8")
+        before = self._file_hash(source / "System.jsonl")
+        with mock.patch.object(FIXTURE.os, "replace", side_effect=OSError("injected rename failure")):
+            with self.assertRaises(FIXTURE.ContractError):
+                FIXTURE.build_fixture(source, destination, self.recipe, 4401)
+        self.assertEqual(marker.read_text(encoding="utf-8"), "keep")
+        self.assertEqual(self._file_hash(source / "System.jsonl"), before)
+        new_destination = self.temp / "new-rename-destination"
+        with mock.patch.object(FIXTURE.os, "replace", side_effect=OSError("injected rename failure")):
+            with self.assertRaises(FIXTURE.ContractError):
+                FIXTURE.build_fixture(source, new_destination, self.recipe, 4401)
+        self.assertFalse(os.path.lexists(new_destination))
+        self.assertEqual(self._file_hash(source / "System.jsonl"), before)
+
+    def test_adversarial_recipe_and_source_table_is_rejected(self):
+        bad_recipes = []
+        for field, value in (("schema", True), ("dataset", "")):
+            recipe = self._recipe_value()
+            recipe[field] = value
+            bad_recipes.append((field, recipe))
+        for value in (True, "1", 1.5, 0):
+            recipe = self._recipe_value()
+            recipe["ranges"][0]["start"] = value
+            bad_recipes.append(("start-%r" % value, recipe))
+        for value in (True, "4401", 1.5):
+            recipe = self._recipe_value()
+            bad_recipes.append(("seed-%r" % value, recipe, value))
+        recipe = self._recipe_value()
+        recipe["required_shapes"]["authentication"]["extra"] = "x"
+        bad_recipes.append(("extra-shape-key", recipe))
+        recipe = self._recipe_value()
+        recipe["ranges"][1]["destination"] = "Security.jsonl"
+        bad_recipes.append(("canonical-collision", recipe))
+        recipe = self._recipe_value()
+        recipe["ranges"][1]["destination"] = "Security.jsonl/child"
+        bad_recipes.append(("prefix-collision", recipe))
+        recipe = self._recipe_value()
+        recipe["ranges"][1]["destination"] = "\u0000"
+        bad_recipes.append(("control-destination", recipe))
+        for entry in bad_recipes:
+            case, recipe = entry[:2]
+            seed = entry[2] if len(entry) == 3 else 4401
+            with self.subTest(case=case):
+                with self.assertRaises(FIXTURE.ContractError):
+                    FIXTURE.build_fixture(self._source_copy("recipe-" + case),
+                                          self.temp / ("out-" + case), recipe, seed)
+        duplicate = self.temp / "duplicate-recipe.json"
+        duplicate.write_text(self.recipe.read_text(encoding="utf-8").replace(
+            '"schema": 1,', '"schema": 1, "schema": 1,'), encoding="utf-8")
+        with self.assertRaises(FIXTURE.ContractError):
+            FIXTURE.build_fixture(self._source_copy("duplicate-recipe"), self.temp / "duplicate-out",
+                                  duplicate, 4401)
+        symlink_source = self._source_copy("symlink-source")
+        (symlink_source / "Security-real.jsonl").write_bytes(
+            (symlink_source / "Security.jsonl").read_bytes())
+        (symlink_source / "Security.jsonl").unlink()
+        os.symlink(symlink_source / "Security-real.jsonl", symlink_source / "Security.jsonl")
+        with self.assertRaises(FIXTURE.ContractError):
+            FIXTURE.build_fixture(symlink_source, self.temp / "symlink-out", self.recipe, 4401)
+        duplicate_jsonl = self._source_copy("duplicate-jsonl")
+        rows = duplicate_jsonl.joinpath("Security.jsonl").read_text(encoding="utf-8").splitlines()
+        rows[0] = rows[0].replace('"IpAddress":"203.0.113.7"',
+                                  '"IpAddress":"203.0.113.7","IpAddress":"198.51.100.9"')
+        duplicate_jsonl.joinpath("Security.jsonl").write_text("\n".join(rows) + "\n", encoding="utf-8")
+        with self.assertRaises(FIXTURE.ContractError):
+            FIXTURE.build_fixture(duplicate_jsonl, self.temp / "duplicate-jsonl-out", self.recipe, 4401)
+
+    def test_builder_detects_source_mutation_and_staged_hash_corruption(self):
+        source = self._source_copy("mutation-source")
+        original_verify_sources = FIXTURE._verify_source_hashes
+
+        def mutate_source_then_verify(*args):
+            source.joinpath("Security.jsonl").write_text("{}\n", encoding="utf-8")
+            return original_verify_sources(*args)
+
+        with mock.patch.object(FIXTURE, "_verify_source_hashes", side_effect=mutate_source_then_verify):
+            with self.assertRaises(FIXTURE.ContractError):
+                FIXTURE.build_fixture(source, self.temp / "mutation-out", self.recipe, 4401)
+
+        source = self._source_copy("staging-source")
+        original_verify_staging = FIXTURE._verify_staging
+
+        def corrupt_stage_then_verify(staging, *args):
+            (Path(staging) / "Security.jsonl").write_bytes(b"corrupt\n")
+            return original_verify_staging(staging, *args)
+
+        with mock.patch.object(FIXTURE, "_verify_staging", side_effect=corrupt_stage_then_verify):
+            with self.assertRaises(FIXTURE.ContractError):
+                FIXTURE.build_fixture(source, self.temp / "staging-out", self.recipe, 4401)
+
+    def test_oracle_adversarial_table_rejects_wording_and_structure_bypasses(self):
+        manifest = FIXTURE.build_fixture(self.source, self.one, self.recipe, 4401)
+        expectations = self.one / manifest["expectations"]
+        canonical = self.canonical.read_text(encoding="utf-8")
+        variants = {
+            "reworded-local-placeholder": canonical.replace(
+                'external_ips=["198.51.100.9","203.0.113.7"]',
+                'external_ips=["-","198.51.100.9","203.0.113.7"]'),
+            "extra-id-after-verdict": canonical + "\n## F-EXTRA-1\n- [!PROVEN] extra\n",
+            "values-outside-finding": canonical.replace(
+                'external_ips=["198.51.100.9","203.0.113.7"]', 'external_ips=[]', 1),
+            "extra-label": canonical.replace("## F-AUTH-EXTERNAL\n", "## F-AUTH-EXTERNAL\n- [!REPORTED] wrong\n", 1),
+            "timeline-negation": canonical.replace("authentication_before_inventory",
+                                                    "authentication_preceded_neither"),
+            "fake-corpus-paths": canonical.replace("Security.jsonl", "fakea.log").replace(
+                "System.jsonl", "fakeb.log"),
+            "missing-field": canonical.replace('citation_files=["Security.jsonl"]\n', "", 1),
+            "duplicate-field": canonical.replace('citation_files=["Security.jsonl"]\n',
+                                                   'citation_files=["Security.jsonl"]\n'
+                                                   'citation_files=["Security.jsonl"]\n', 1),
+        }
+        for case, content in variants.items():
+            with self.subTest(case=case):
+                report = self.temp / (case + ".md")
+                report.write_text(content, encoding="utf-8")
+                self.assertFalse(ORACLE.audit_report(report, self.one, expectations)["accepted"])
+
+    def test_gate_json_wrapper_fails_closed_on_malformed_or_inconsistent_status(self):
+        for completed in (
+                SimpleNamespace(returncode=1, stdout='{"blocking": 0}', stderr=""),
+                SimpleNamespace(returncode=0, stdout="not json", stderr="bad"),
+                SimpleNamespace(returncode=0, stdout='{"error": "bad"}', stderr="")):
+            with self.subTest(stdout=completed.stdout):
+                with mock.patch("subprocess.run", return_value=completed):
+                    with self.assertRaises(AssertionError):
+                        run_json("test-gate", ["python3", "test-gate.py"])
 
 
 if __name__ == "__main__":

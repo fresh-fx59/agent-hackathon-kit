@@ -2,19 +2,28 @@
 
 ## F-AUTH-EXTERNAL
 
-- [!PROVEN] external authentication endpoints are 198.51.100.9 and 203.0.113.7: «"Message":"external authentication from 203.0.113.7"» — Security.jsonl:1; «"Message":"external authentication from 198.51.100.9"» — Security.jsonl:3.
+- [!PROVEN] external_ips=["198.51.100.9","203.0.113.7"]
+citation_files=["Security.jsonl"]
+«"Message":"external authentication from 203.0.113.7"» — Security.jsonl:1; «"Message":"external authentication from 198.51.100.9"» — Security.jsonl:3.
 
 ## F-INVENTORY-SERVICE
 
-- [!PROVEN] RemoteAdmin service and C:\Tools\remote-admin.exe are present: «"Message":"RemoteAdmin service installed"» — System.jsonl:1; «"Message":"RemoteAdmin process inventory confirmed"» — System.jsonl:2.
+- [!PROVEN] services=["RemoteAdmin"]
+processes=["C:\\Tools\\remote-admin.exe"]
+citation_files=["System.jsonl"]
+«"Message":"RemoteAdmin service installed"» — System.jsonl:1; «"Message":"RemoteAdmin process inventory confirmed"» — System.jsonl:2.
 
 ## F-REPORTED-CONTEXT
 
-- [!REPORTED] the source records «"Message":"reported by endpoint team"» — Security.jsonl:2.
+- [!REPORTED] reported_context="reported by endpoint team"
+citation_files=["Security.jsonl"]
+«"Message":"reported by endpoint team"» — Security.jsonl:2.
 
 ## F-TIMELINE-LINK
 
-- [!INFERENCE] authentication preceded the RemoteAdmin service installation: «"Message":"external authentication from 203.0.113.7"» — Security.jsonl:1; «"Message":"RemoteAdmin service installed"» — System.jsonl:1.
+- [!INFERENCE] timeline={"authentication_first":"2026-08-30T10:00:00Z","inventory_first":"2026-08-30T10:03:00Z","relation":"authentication_before_inventory"}
+citation_files=["Security.jsonl","System.jsonl"]
+«"Message":"external authentication from 203.0.113.7"» — Security.jsonl:1; «"Message":"RemoteAdmin service installed"» — System.jsonl:1.
 
 ## Отклоненные кандидаты
 
