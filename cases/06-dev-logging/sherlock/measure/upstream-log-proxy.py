@@ -3256,7 +3256,12 @@ class Proxy(BaseHTTPRequestHandler):
                     state["substituted"] = True
                     state["held"] = []
                     return
-                if state["returned_model"] or self._hold_expired(state):
+                # An action admission promises the whole paid stream fits its
+                # reserved wall bound.  Knowing the model is enough to release
+                # schema-1's stream, but not enough to tell an action client
+                # success: another fragmented event can still cross the bound.
+                if (not _ACTION_BUDGET_ENABLED and
+                        (state["returned_model"] or self._hold_expired(state))):
                     self._release_head(resp, state)
         finally:
             # Anything held that is NOT a discard must still be delivered,

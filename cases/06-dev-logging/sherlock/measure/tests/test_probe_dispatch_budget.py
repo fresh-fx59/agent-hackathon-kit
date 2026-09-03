@@ -431,6 +431,32 @@ class DispatchBudget(unittest.TestCase):
         self.assertEqual(self.upstream.requests, 1)
         self.assertEqual(self.budget(state)["projected"]["wall_time_s"], 2.0)
 
+    def test_post_model_sse_drip_cannot_release_a_late_success(self):
+        self.upstream.sse_fragments = [
+            (b'data: {"model":"fixture-model","choices":[{"delta":{"content":"ok"}}]}\n\n', 0),
+            (b'data: {"choices":[{"delta":{"content":"still', 0.7),
+            (b' running', 0.7),
+            (b' past deadline', 0.7),
+            (b'"}}]}', 0),
+        ]
+        limits = {"max_provider_calls": 10, "max_prompt_tokens": 10000,
+                  "max_completion_tokens": 1000, "max_wall_time_s": 2,
+                  "max_estimated_cost_rub": 100.0}
+        state = self.start(limits)
+        began = time.monotonic(); status, body = self.post(); elapsed = time.monotonic() - began
+        self.assertEqual(status, 502)
+        self.assertLess(elapsed, 2.5)
+        self.assertNotIn(b'"content":"ok"', body)
+        self.assertEqual(self.upstream.requests, 1)
+        for _ in range(100):
+            row = self.budget(state)
+            if row["observed"]["provider_calls"] == 1:
+                break
+            time.sleep(0.02)
+        self.assertEqual(row["observed"]["provider_calls"], 1)
+        self.assertEqual(row["observed_usage_unknown"], 1)
+        self.assertEqual(row["projected"]["wall_time_s"], 2.0)
+
     def test_semantic_state_rollback_fails_closed_after_restart(self):
         limits = {"max_provider_calls": 1, "max_prompt_tokens": 10000,
                   "max_completion_tokens": 1000, "max_wall_time_s": 300,
