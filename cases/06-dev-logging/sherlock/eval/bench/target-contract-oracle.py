@@ -17,6 +17,8 @@ REQUIRED = {
 }
 TIMELINE_RELATION = "authentication_before_inventory"
 HEADING = re.compile(r"^( {0,3})(#{1,6})[ \t]+(.*?)[ \t]*$", re.MULTILINE)
+SETEXT_HEADING = re.compile(
+    r"^( {0,3})(?=\S)(.*?\S)[ \t]*\r?\n {0,3}(=+|-+)[ \t]*(?:\r?\n|$)", re.MULTILINE)
 STRICT_HEADING = re.compile(r"^## (F-[A-Z0-9]+(?:-[A-Z0-9]+)*)$")
 FIELD_LINE = re.compile(r"^(?:- \[!([A-Z]+)\] )?([A-Za-z_][A-Za-z0-9_]*)=(.+)$", re.MULTILINE)
 LABEL = re.compile(r"\[!([A-Z]+)\]")
@@ -47,8 +49,15 @@ def _load(path):
 
 
 def _headings(text):
-    return [(match.group(0), len(match.group(2)), match.group(3), match.start(), match.end())
-            for match in HEADING.finditer(text)]
+    headings = [(match.group(0), len(match.group(2)), match.group(3), match.start(), match.end())
+                for match in HEADING.finditer(text)]
+    for match in SETEXT_HEADING.finditer(text):
+        if HEADING.fullmatch(match.group(1) + match.group(2)):
+            continue
+        headings.append((match.group(1) + match.group(2),
+                         1 if match.group(3)[0] == "=" else 2,
+                         match.group(2), match.start(), match.end()))
+    return sorted(headings, key=lambda heading: heading[3])
 
 
 def _sections(text, headings):

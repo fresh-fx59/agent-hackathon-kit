@@ -523,6 +523,21 @@ class TargetContractFixtureTest(unittest.TestCase):
             report.write_text(canonical + suffix, encoding="utf-8")
             self.assertFalse(ORACLE.audit_report(report, self.one, expectations)["accepted"])
 
+    def test_round_four_setext_suffixes_are_visible_headings_outside_fences(self):
+        manifest = FIXTURE.build_fixture(self.source, self.one, self.recipe, 4401)
+        expectations = self.one / manifest["expectations"]
+        canonical = self.canonical.read_text(encoding="utf-8")
+        cases = (
+            ("setext-level-one", "\nAppendix\n========\ncontent\n", False),
+            ("setext-level-two", "\nAppendix\n--------\ncontent\n", False),
+            ("fenced-setext-level-two", "\n```markdown\nAppendix\n--------\ncontent\n```\n", True),
+        )
+        for name, suffix, accepted in cases:
+            with self.subTest(name=name):
+                report = self.temp / (name + ".md")
+                report.write_text(canonical + suffix, encoding="utf-8")
+                self.assertEqual(ORACLE.audit_report(report, self.one, expectations)["accepted"], accepted)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
