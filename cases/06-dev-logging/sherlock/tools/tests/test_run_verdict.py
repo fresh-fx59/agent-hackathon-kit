@@ -5,6 +5,7 @@ import datetime as dt
 import hashlib
 import json
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -96,6 +97,20 @@ class RunVerdictTests(unittest.TestCase):
             *extra,
         ]
         return subprocess.run(command, text=True, capture_output=True)
+
+    def copied_tool_tree(self):
+        """Copy only the local verifier tree for dependency-boundary attacks."""
+        copied = Path(self.temp.name) / "copied-sherlock"
+        for relative in (
+            "eval/bench/run-verdict.py", "eval/bench/bench-status.py",
+            "eval/bench/run-manifest.py", "eval/bench/validate-run.py",
+            "measure/run_state.py", "measure/deliverable.py",
+        ):
+            source = SHERLOCK / relative
+            destination = copied / relative
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, destination)
+        return copied
 
     def write_validity(self, valid=True, reasons=()):
         row = {
@@ -227,6 +242,63 @@ class RunVerdictTests(unittest.TestCase):
         self.assertEqual(row["primary_failure"], "NO_PROGRESS")
         self.assertEqual(row["terminal_observation"], "RUN_FAILED")
         self.assertEqual(set(row["gate_exit_codes"]), set(VERDICT_TOOL.REQUIRED_GATES))
+
+    def test_authenticated_primary_failure_is_not_controlled_by_copied_run_state(self):
+        """An unbound helper edit/deletion cannot alter or crash verifier semantics."""
+        self.write_status("RUN_FAILED", exit_code=2, reason="ordinary detail",
+                          primary_failure="BILLED_999_RUB")
+        self.write_validity(False, ("driver_failed",))
+        self.write_clean_report_artifacts()
+        copied = self.copied_tool_tree()
+        copied_state = copied / "measure" / "run_state.py"
+        source = copied_state.read_text(encoding="utf-8")
+        self.assertIn('"BILLING_UNKNOWN",', source)
+        copied_state.write_text(source.replace(
+            '"BILLING_UNKNOWN",', '"BILLING_UNKNOWN", "BILLED_999_RUB",'
+        ), encoding="utf-8")
+        copied_status = copied / "eval" / "bench" / "bench-status.py"
+        copied_verdict = copied / "eval" / "bench" / "run-verdict.py"
+        authority = ["--commitment-file", str(self.fx.commitment),
+                     "--commitment-key", str(self.fx.commitment_key)]
+
+        status = subprocess.run(
+            [sys.executable, str(copied_status), str(self.fx.trace), *authority, "--json"],
+            text=True, capture_output=True, cwd=self.temp.name,
+        )
+        self.assertEqual(status.returncode, 0, status.stderr)
+        projected = json.loads(status.stdout)
+        self.assertIsNone(projected["primary_failure"])
+        self.assertIn("STATUS_INVALID", projected["diagnostics"])
+
+        verdict = subprocess.run(
+            [sys.executable, str(copied_verdict), str(self.fx.trace), *authority, "--json"],
+            text=True, capture_output=True, cwd=self.temp.name,
+        )
+        self.assertIn(verdict.returncode, (1, 2), verdict.stderr)
+        row = json.loads(verdict.stdout)
+        self.assertTrue(row["authenticated"])
+        self.assertIsNone(row.get("primary_failure"))
+        self.assertNotIn("Traceback", verdict.stderr)
+
+        copied_validity = load("copied_validate_run", copied / "eval" / "bench" / "validate-run.py")
+        copied_validity.state(str(self.fx.trace), "VERIFYING", "run-001", self.manifest)
+        self.assertEqual(json.loads((self.fx.trace / "status.json").read_text())["phase"], "VERIFYING")
+        copied_state.unlink()
+        with self.assertRaises(copied_validity.ValidityError) as missing_state:
+            copied_validity.state(str(self.fx.trace), "VERIFYING", "run-001", self.manifest)
+        self.assertEqual(missing_state.exception.code, "authority_import_failed")
+
+        deleted_status = subprocess.run(
+            [sys.executable, str(copied_status), str(self.fx.trace), *authority, "--json"],
+            text=True, capture_output=True, cwd=self.temp.name,
+        )
+        self.assertEqual(deleted_status.returncode, 0, deleted_status.stderr)
+        self.assertNotIn("Traceback", deleted_status.stderr)
+        for tool in (copied_status, copied_verdict):
+            probe = subprocess.run([sys.executable, str(tool), "--help"],
+                                   text=True, capture_output=True, cwd=self.temp.name)
+            self.assertEqual(probe.returncode, 0, probe.stderr)
+            self.assertNotIn("Traceback", probe.stderr)
 
     def test_missing_driver_receipt_does_not_collapse_into_attempt_layer(self):
         """A final attempt is observed evidence, not an invented driver receipt."""

@@ -15,8 +15,8 @@ STATUS_FIELDS = ("schema", "run_tag", "phase", "updated_at", "pid", "attempt",
                  "primary_failure")
 TERMINAL_FAILURES = {"RUN_FAILED", "REJECTED"}
 PRIMARY_FAILURE_CODES = frozenset({
-    # Current runner and lane terminal causes. This is the canonical vocabulary:
-    # projections import it rather than maintaining a permissive copy.
+    # Writer-local closed vocabulary. Authenticated consumers pin the same set
+    # independently: mutable helper code is not a trust boundary for them.
     "ATTRIBUTION_UNAVAILABLE", "CACHE_TERMS_INCOMPLETE", "COMPACTION_OUTPUT_CLIPPED",
     "EXPECTED_IDENTITY_UNKNOWN", "GENERATION_WINDOW_EXCEEDED",
     "LANE_ABORT_UNREADABLE", "LANE_ACCOUNTING_INCOMPLETE", "LANE_AUDIT_FAILED",

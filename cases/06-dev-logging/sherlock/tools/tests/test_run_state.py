@@ -257,9 +257,14 @@ class RunStateTests(unittest.TestCase):
             "APPROVAL_REPLAYED", "FULL_RUN_NOT_AUTHORIZED", "INPUTS_INCOMPARABLE",
             "BILLING_UNKNOWN",
         }
+        budget_and_rate_codes = {
+            "BUDGET_EXCEEDED", "RATE_SNAPSHOT_INVALID", "RATE_SNAPSHOT_CHANGED",
+            "ACTION_BUDGET_INVALID", "MAX_PROVIDER_CALLS", "MAX_PROMPT_TOKENS",
+            "MAX_COMPLETION_TOKENS", "MAX_WALL_TIME_S", "MAX_ESTIMATED_COST_RUB",
+        }
         self.assertEqual(produced, expected_lane_codes)
         canonical = run_state.PRIMARY_FAILURE_CODES
-        self.assertTrue(produced | historical_and_spec_codes <= canonical)
+        self.assertEqual(canonical, produced | historical_and_spec_codes | budget_and_rate_codes)
         self.assertIsNone(run_state.state_event("RUN_FAILED", reason="BILLED_999_RUB")["primary_failure"])
         for code in produced | historical_and_spec_codes:
             with self.subTest(code=code):

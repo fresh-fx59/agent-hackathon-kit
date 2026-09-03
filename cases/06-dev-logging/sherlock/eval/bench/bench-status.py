@@ -33,6 +33,29 @@ STATUS_BASE = {"schema", "run_tag", "phase", "updated_at", "pid", "attempt",
                "exit_code", "duration_s", "upstream_log", "inflight_path"}
 PROCESS_FIELDS = {"process_start_ticks", "pgid", "boot_id_sha256", "command_sha256"}
 STATUS_ADDITIONS = {"primary_failure"}
+PRIMARY_FAILURE_CODES = frozenset({
+    # Authenticated verifier-local closed vocabulary; do not import it from a
+    # mutable sibling helper.
+    "ATTRIBUTION_UNAVAILABLE", "CACHE_TERMS_INCOMPLETE", "COMPACTION_OUTPUT_CLIPPED",
+    "EXPECTED_IDENTITY_UNKNOWN", "GENERATION_WINDOW_EXCEEDED",
+    "LANE_ABORT_UNREADABLE", "LANE_ACCOUNTING_INCOMPLETE", "LANE_AUDIT_FAILED",
+    "LEDGER_EMPTY", "LEDGER_MALFORMED", "LEDGER_MISSING", "NO_PROGRESS",
+    "CLEAR_NOT_EFFECTIVE", "TARGET_REFUSED", "STAGE_STALLED", "WRAPPER_NONZERO",
+    "DRIVER_EXIT", "BUDGET_EXCEEDED", "OUTPUT_BUDGET_EXHAUSTED_BY_REASONING",
+    "PER_REQUEST_TOKEN_GATE_BREACHED", "PER_REQUEST_TOKEN_GATE_UNMEASURED",
+    "PROMPT_CACHE_COLLAPSE", "REASONING_CONTENT_NOT_RELAYED",
+    "RETURNED_MODEL_FAMILY_MISMATCH", "RETURNED_MODEL_UNKNOWN",
+    "ROUTE_ADVANCE_COUNTERS_INCONSISTENT", "ROUTE_ADVANCE_HISTORY_UNREADABLE",
+    "ROUTE_ADVANCE_UNRECORDED", "ROUTE_IDENTITY_UNREADABLE", "USAGE_UNREADABLE",
+    "RATE_SNAPSHOT_INVALID", "RATE_SNAPSHOT_CHANGED", "ACTION_BUDGET_INVALID",
+    "MAX_PROVIDER_CALLS", "MAX_PROMPT_TOKENS", "MAX_COMPLETION_TOKENS",
+    "MAX_WALL_TIME_S", "MAX_ESTIMATED_COST_RUB",
+    "HARNESS_QUALIFICATION_MISSING", "TARGET_PROBE_NOT_AUTHORIZED",
+    "TARGET_PROBE_BUDGET", "TARGET_CONTRACT_FAILED", "TARGET_IDENTITY_MISMATCH",
+    "TARGET_IDENTITY_UNVERIFIABLE", "TARGET_RECEIPT_EXPIRED", "TARGET_RECEIPT_USED",
+    "APPROVAL_REPLAYED", "FULL_RUN_NOT_AUTHORIZED", "INPUTS_INCOMPARABLE",
+    "BILLING_UNKNOWN",
+})
 MANIFEST_KEYS = {"schema", "run_tag", "dataset", "arm", "trace", "commitment",
                  "corpus", "expected", "artifacts", "skill", "target",
                  "target_profile", "input_identity", "health_receipt", "manifest_sha256"}
@@ -54,9 +77,6 @@ def module(name, path):
 
 MANIFEST = module("sherlock_status_manifest", HERE / "run-manifest.py")
 VALIDITY = module("sherlock_status_validity", HERE / "validate-run.py")
-# Keep failure validation in lockstep with the writer without relying on cwd/sys.path.
-RUN_STATE = module("sherlock_status_run_state", HERE.parents[1] / "measure" / "run_state.py")
-PRIMARY_FAILURE_CODES = RUN_STATE.PRIMARY_FAILURE_CODES
 
 
 class Missing(Exception): pass

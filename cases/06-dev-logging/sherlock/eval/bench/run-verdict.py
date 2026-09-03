@@ -3,7 +3,6 @@
 import argparse
 import datetime as dt
 import hashlib
-import importlib.util
 import json
 import math
 import os
@@ -22,27 +21,29 @@ REQUIRED_GATES = ("citecheck", "triagecheck", "statecheck", "reportcheck")
 MAX_JSON = 1024 * 1024
 MAX_LEDGER = 64 * 1024 * 1024
 MAX_LEDGER_ROWS = 100000
-
-
-def _load_module(name, path):
-    spec = importlib.util.spec_from_file_location(name, str(path))
-    if not spec or not spec.loader:
-        raise RuntimeError("cannot load local failure vocabulary")
-    value = importlib.util.module_from_spec(spec)
-    old = sys.dont_write_bytecode
-    try:
-        sys.dont_write_bytecode = True
-        spec.loader.exec_module(value)
-    finally:
-        sys.dont_write_bytecode = old
-    return value
-
-
-# This script is also run directly, so resolve the sibling source rather than
-# importing through a package or caller-controlled sys.path.
-PRIMARY_FAILURE_CODES = _load_module(
-    "sherlock_verdict_run_state", HERE.parents[1] / "measure" / "run_state.py"
-).PRIMARY_FAILURE_CODES
+PRIMARY_FAILURE_CODES = frozenset({
+    # The verdict independently validates an authenticated projection. Keep the
+    # same pinned set as the status verifier; do not execute mutable helpers.
+    "ATTRIBUTION_UNAVAILABLE", "CACHE_TERMS_INCOMPLETE", "COMPACTION_OUTPUT_CLIPPED",
+    "EXPECTED_IDENTITY_UNKNOWN", "GENERATION_WINDOW_EXCEEDED",
+    "LANE_ABORT_UNREADABLE", "LANE_ACCOUNTING_INCOMPLETE", "LANE_AUDIT_FAILED",
+    "LEDGER_EMPTY", "LEDGER_MALFORMED", "LEDGER_MISSING", "NO_PROGRESS",
+    "CLEAR_NOT_EFFECTIVE", "TARGET_REFUSED", "STAGE_STALLED", "WRAPPER_NONZERO",
+    "DRIVER_EXIT", "BUDGET_EXCEEDED", "OUTPUT_BUDGET_EXHAUSTED_BY_REASONING",
+    "PER_REQUEST_TOKEN_GATE_BREACHED", "PER_REQUEST_TOKEN_GATE_UNMEASURED",
+    "PROMPT_CACHE_COLLAPSE", "REASONING_CONTENT_NOT_RELAYED",
+    "RETURNED_MODEL_FAMILY_MISMATCH", "RETURNED_MODEL_UNKNOWN",
+    "ROUTE_ADVANCE_COUNTERS_INCONSISTENT", "ROUTE_ADVANCE_HISTORY_UNREADABLE",
+    "ROUTE_ADVANCE_UNRECORDED", "ROUTE_IDENTITY_UNREADABLE", "USAGE_UNREADABLE",
+    "RATE_SNAPSHOT_INVALID", "RATE_SNAPSHOT_CHANGED", "ACTION_BUDGET_INVALID",
+    "MAX_PROVIDER_CALLS", "MAX_PROMPT_TOKENS", "MAX_COMPLETION_TOKENS",
+    "MAX_WALL_TIME_S", "MAX_ESTIMATED_COST_RUB",
+    "HARNESS_QUALIFICATION_MISSING", "TARGET_PROBE_NOT_AUTHORIZED",
+    "TARGET_PROBE_BUDGET", "TARGET_CONTRACT_FAILED", "TARGET_IDENTITY_MISMATCH",
+    "TARGET_IDENTITY_UNVERIFIABLE", "TARGET_RECEIPT_EXPIRED", "TARGET_RECEIPT_USED",
+    "APPROVAL_REPLAYED", "FULL_RUN_NOT_AUTHORIZED", "INPUTS_INCOMPARABLE",
+    "BILLING_UNKNOWN",
+})
 
 
 def status_projection(args):

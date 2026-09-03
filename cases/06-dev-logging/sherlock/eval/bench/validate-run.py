@@ -56,7 +56,6 @@ def load_module(name, path):
 
 MANIFEST = load_module("sherlock_run_manifest", HERE / "run-manifest.py")
 DELIVERABLE = load_module("sherlock_deliverable", SHERLOCK / "measure" / "deliverable.py")
-RUN_STATE = load_module("sherlock_run_state", SHERLOCK / "measure" / "run_state.py")
 
 def canonical(value):
     return json.dumps(value, ensure_ascii=False, sort_keys=True,
@@ -660,8 +659,11 @@ def state(trace, event, run_tag, manifest, reason=None):
     fields = {"run_tag": run_tag, "phase": event, "trace_dir": trace,
               "dataset": manifest.get("dataset"), "arm": manifest.get("arm")}
     if reason: fields["reason"] = reason[:120]
-    RUN_STATE.write_status(os.path.join(trace, "status.json"), **fields)
-    RUN_STATE.append_event(os.path.join(trace, "status-events.jsonl"), event, **fields)
+    # State writing is the only consumer of this mutable helper. Keep it lazy so
+    # read-only authenticated projections never depend on executable writer code.
+    run_state = load_module("sherlock_run_state", SHERLOCK / "measure" / "run_state.py")
+    run_state.write_status(os.path.join(trace, "status.json"), **fields)
+    run_state.append_event(os.path.join(trace, "status-events.jsonl"), event, **fields)
 
 def bind_verified_trace(trace, trace_fd, manifest):
     try: current = os.stat(trace, follow_symlinks=False)
