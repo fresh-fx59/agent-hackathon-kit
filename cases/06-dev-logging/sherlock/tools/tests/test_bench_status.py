@@ -132,7 +132,7 @@ class BenchStatusTests(unittest.TestCase):
     def test_direct_authenticated_trace_projects_fixed_safe_shape(self):
         self.write_status()
         row = self.projection()
-        self.assertEqual(set(row), {"schema", "selection", "run_tag", "phase", "updated_at", "dataset", "arm", "trace", "last_event", "attempt", "recovery", "upstream", "process", "target", "health", "budget", "validity", "delivery", "diagnostics"})
+        self.assertEqual(set(row), {"schema", "selection", "run_tag", "phase", "updated_at", "dataset", "arm", "trace", "last_event", "attempt", "wrapper_exit_code", "primary_failure", "recovery", "upstream", "process", "target", "health", "budget", "validity", "delivery", "diagnostics"})
         self.assertEqual((row["selection"], row["phase"], row["run_tag"]), ("direct", "QWEN_RUNNING", "run-001"))
         self.assertEqual(row["process"], "unverified")
         self.assertEqual(row["budget"], "not_reported")
@@ -150,6 +150,16 @@ class BenchStatusTests(unittest.TestCase):
         row = self.projection(root)
         self.assertEqual(row["selection"], "none")
         self.assertIn("NO_ACTIVE_RUN", row["diagnostics"])
+
+    def test_status_projection_accepts_optional_persisted_primary_failure(self):
+        """A schema-1 terminal snapshot can carry its immutable failure cause."""
+        self.write_status(phase="RUN_FAILED", exit_code=2, reason="WRAPPER_NONZERO",
+                          primary_failure="NO_PROGRESS")
+
+        row = self.projection()
+
+        self.assertEqual(row["phase"], "RUN_FAILED")
+        self.assertEqual(row["primary_failure"], "NO_PROGRESS")
 
     def test_tampered_manifest_never_projects_facts(self):
         self.write_status()

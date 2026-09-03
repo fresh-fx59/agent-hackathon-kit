@@ -130,6 +130,46 @@ class RunStateTests(unittest.TestCase):
             self.assertEqual(row["boot_id_sha256"], "1" * 64)
             self.assertEqual(row["command_sha256"], "2" * 64)
 
+    def test_first_terminal_failure_is_not_replaced(self):
+        """A later wrapper observation must retain the original root failure."""
+        first = run_state.state_event(
+            "RUN_FAILED", exit_code=9, reason="NO_PROGRESS"
+        )
+        later = run_state.state_event(
+            "RUN_FAILED", exit_code=2, reason="WRAPPER_NONZERO", previous=first
+        )
+
+        self.assertEqual(later["primary_failure"], "NO_PROGRESS")
+        self.assertEqual(later["wrapper_exit_code"], 2)
+
+    def test_terminal_status_persists_the_first_failure_across_later_writes(self):
+        """The durable snapshot, not only an in-memory helper, retains first failure."""
+        import tempfile
+        with tempfile.TemporaryDirectory() as directory:
+            path = pathlib.Path(directory) / "status.json"
+            run_state.write_status(
+                str(path), run_tag="r1", phase="RUN_FAILED", exit_code=9,
+                reason="NO_PROGRESS",
+            )
+            later = run_state.write_status(
+                str(path), run_tag="r1", phase="RUN_FAILED", exit_code=2,
+                reason="WRAPPER_NONZERO",
+            )
+
+            self.assertEqual(later["primary_failure"], "NO_PROGRESS")
+            self.assertEqual(json.loads(path.read_text())["primary_failure"], "NO_PROGRESS")
+
+    def test_terminal_state_handles_missing_or_malformed_previous_failure(self):
+        """Optional predecessor data cannot make the failure projection crash or lie."""
+        missing = run_state.state_event("RUN_FAILED", exit_code=7, reason="DRIVER_EXIT")
+        malformed = run_state.state_event(
+            "RUN_FAILED", exit_code=2, reason="WRAPPER_NONZERO",
+            previous={"primary_failure": ["not", "a", "code"]},
+        )
+
+        self.assertEqual(missing["primary_failure"], "DRIVER_EXIT")
+        self.assertEqual(malformed["primary_failure"], "WRAPPER_NONZERO")
+
 
 if __name__ == "__main__":
     unittest.main()

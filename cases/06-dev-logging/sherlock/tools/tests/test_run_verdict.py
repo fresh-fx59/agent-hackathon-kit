@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Provider-free contract tests for the Sherlock run verdict wrapper."""
 import importlib.util
+import hashlib
 import json
 from pathlib import Path
 import subprocess
@@ -132,6 +133,163 @@ class RunVerdictTests(unittest.TestCase):
         replay = self.fx.trace / "replay.sh"
         replay.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
         replay.chmod(0o755)
+
+    def write_usage_rows(self, usage_calls=1, include_usage=True, estimate=None):
+        rows = []
+        for _ in range(usage_calls):
+            row = {"status": 200, "request_max_tokens": 40}
+            if include_usage:
+                row["usage"] = {
+                    "prompt_tokens": 100,
+                    "completion_tokens": 20,
+                    "prompt_tokens_details": {"cached_tokens": 10},
+                }
+            if estimate is not None:
+                row["estimated_cost_rub"] = estimate
+            rows.append(row)
+        (self.fx.trace / "upstream-completed.jsonl").write_text(
+            "".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8"
+        )
+
+    def write_billing_receipt(self, value):
+        (self.fx.trace / "provider-billing-receipt.json").write_text(
+            json.dumps(value), encoding="utf-8"
+        )
+
+    def write_budget_estimate(self, cost):
+        snapshot = {
+            "schema": 1, "run_tag": "run-001", "effective_at": "2026-09-03T00:00:00Z",
+            "source": "fixture", "prompt_rub_per_token": 0.01,
+            "completion_rub_per_token": 0.02,
+        }
+        snapshot["sha256"] = hashlib.sha256(json.dumps(
+            snapshot, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        ).encode("utf-8")).hexdigest()
+        (self.fx.trace / "upstream-budget-state.json").write_text(json.dumps({
+            "schema": 2, "run_tag": "run-001", "rate_snapshot": snapshot,
+            "projected": {"estimated_cost_rub": cost},
+        }), encoding="utf-8")
+
+    def test_usage_rows_do_not_imply_provider_billing(self):
+        """Provider usage is observation, never a claim that the provider billed it."""
+        self.write_status("ACCEPTED")
+        self.write_validity()
+        self.write_clean_report_artifacts()
+        self.write_usage_rows(usage_calls=3)
+
+        result = self.verdict()
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        row = json.loads(result.stdout)
+        self.assertEqual(row["metrics"]["provider_calls_observed"], 3)
+        self.assertEqual(row["metrics"]["usage_bearing_calls"], 3)
+        self.assertIsNone(row["metrics"]["estimated_cost"])
+        self.assertIsNone(row["metrics"]["provider_billed_calls"])
+        self.assertIsNone(row["metrics"]["provider_billed_cost"])
+        self.assertNotIn("billed", VERDICT_TOOL.render_summary(row).lower())
+
+    def test_terminal_exit_layers_keep_first_failure_when_wrapper_finishes_later(self):
+        """A wrapper exit cannot rewrite the driver failure that started the terminal state."""
+        self.write_status("RUN_FAILED", exit_code=2, reason="WRAPPER_NONZERO",
+                          primary_failure="NO_PROGRESS")
+        self.write_validity(False, ("driver_failed",))
+        self.write_clean_report_artifacts()
+        (self.fx.trace / "attempts.jsonl").write_text(
+            json.dumps({"attempt": 0, "exit_code": 9}) + "\n", encoding="utf-8"
+        )
+        (self.fx.trace / "driver-result.json").write_text(
+            json.dumps({"exit_code": 9}), encoding="utf-8"
+        )
+
+        result = self.verdict()
+
+        self.assertEqual(result.returncode, 1, result.stderr)
+        row = json.loads(result.stdout)
+        self.assertEqual(row["attempt_exit_code"], 9)
+        self.assertEqual(row["driver_exit_code"], 9)
+        self.assertEqual(row["wrapper_exit_code"], 2)
+        self.assertEqual(row["primary_failure"], "NO_PROGRESS")
+        self.assertEqual(row["terminal_observation"], "RUN_FAILED")
+        self.assertEqual(set(row["gate_exit_codes"]), set(VERDICT_TOOL.REQUIRED_GATES))
+
+    def test_latest_attempt_is_the_driver_result_when_no_separate_receipt_exists(self):
+        """Legacy traces still expose the driver's final attempt without inventing a wrapper exit."""
+        self.write_status("RUN_FAILED", exit_code=2, reason="WRAPPER_NONZERO",
+                          primary_failure="NO_PROGRESS")
+        self.write_validity(False, ("driver_failed",))
+        self.write_clean_report_artifacts()
+        (self.fx.trace / "attempts.jsonl").write_text(
+            json.dumps({"attempt": 0, "exit_code": 9}) + "\n", encoding="utf-8"
+        )
+
+        result = self.verdict()
+
+        self.assertEqual(result.returncode, 1, result.stderr)
+        row = json.loads(result.stdout)
+        self.assertEqual(row["attempt_exit_code"], 9)
+        self.assertEqual(row["driver_exit_code"], 9)
+
+    def test_estimate_and_billing_receipt_are_independent_optional_evidence(self):
+        """A rate estimate and a provider receipt remain separate, nullable claims."""
+        self.write_status("ACCEPTED")
+        self.write_validity()
+        self.write_clean_report_artifacts()
+        self.write_usage_rows(usage_calls=2)
+        self.write_budget_estimate(2.5)
+        self.write_billing_receipt({"calls": 2, "cost": 7.5})
+
+        result = self.verdict()
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        metrics = json.loads(result.stdout)["metrics"]
+        self.assertEqual(metrics["estimated_cost"], 2.5)
+        self.assertEqual(metrics["provider_billed_calls"], 2)
+        self.assertEqual(metrics["provider_billed_cost"], 7.5)
+
+    def test_estimate_survives_a_call_without_provider_usage_counters(self):
+        """A known reservation estimate does not depend on a provider usage response."""
+        self.write_status("ACCEPTED")
+        self.write_validity()
+        self.write_clean_report_artifacts()
+        self.write_usage_rows(usage_calls=1, include_usage=False)
+        self.write_budget_estimate(1.25)
+
+        result = self.verdict()
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        metrics = json.loads(result.stdout)["metrics"]
+        self.assertEqual(metrics["provider_calls_observed"], 1)
+        self.assertEqual(metrics["usage_bearing_calls"], 0)
+        self.assertEqual(metrics["estimated_cost"], 1.25)
+
+    def test_budget_estimate_requires_a_bound_rate_snapshot(self):
+        """A terminal estimate is valid only with the budget's checked rate evidence."""
+        self.write_status("ACCEPTED")
+        self.write_validity()
+        self.write_clean_report_artifacts()
+        self.write_usage_rows(usage_calls=1, include_usage=False)
+        self.write_budget_estimate(3.25)
+
+        result = self.verdict()
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout)["metrics"]["estimated_cost"], 3.25)
+
+    def test_malformed_optional_cost_evidence_is_null_not_a_crash(self):
+        """Optional receipt and estimate corruption cannot manufacture a cost claim."""
+        self.write_status("ACCEPTED")
+        self.write_validity()
+        self.write_clean_report_artifacts()
+        self.write_usage_rows(usage_calls=1)
+        self.write_billing_receipt({"calls": True, "cost": "not-a-number"})
+
+        result = self.verdict()
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        metrics = json.loads(result.stdout)["metrics"]
+        self.assertIsNone(metrics["estimated_cost"])
+        self.assertIsNone(metrics["provider_billed_calls"])
+        self.assertIsNone(metrics["provider_billed_cost"])
 
     def test_running_trace_is_unfinished(self):
         """Catches treating a healthy live process as a completed result."""

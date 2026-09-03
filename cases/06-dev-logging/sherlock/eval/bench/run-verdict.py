@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """Wait for a Sherlock trace, verify its report, and explain any failure."""
 import argparse
+import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import shutil
@@ -136,11 +138,13 @@ def upstream_metrics(trace):
     info = path.lstat()
     if path.is_symlink() or not path.is_file() or info.st_size > MAX_LEDGER:
         raise ValueError("unsafe ledger")
-    calls = prompt = output = cached = length = reasoning = 0
+    calls = prompt = output = cached = length = reasoning = usage_calls = 0
     snapshot_visible = snapshot_reasoning = snapshot_clips = 0
     memory_visible = memory_reasoning = memory_clips = 0
     peak = 0
     clipped = []
+    estimates = []
+    estimate_complete = True
     with path.open(encoding="utf-8") as handle:
         for line in handle:
             calls += 1
@@ -149,6 +153,12 @@ def upstream_metrics(trace):
             row = json.loads(line)
             if not isinstance(row, dict):
                 raise ValueError("invalid ledger row")
+            estimate = row.get("estimated_cost_rub")
+            if (isinstance(estimate, bool) or not isinstance(estimate, (int, float))
+                    or not math.isfinite(estimate) or estimate < 0):
+                estimate_complete = False
+            else:
+                estimates.append(estimate)
             request_class = row.get("clipped_request_class")
             normalized_class = (
                 request_class.replace("-", "_") if isinstance(request_class, str) else None
@@ -160,6 +170,7 @@ def upstream_metrics(trace):
             usage = row.get("usage")
             if not isinstance(usage, dict):
                 continue
+            usage_calls += 1
             prompt_tokens = usage.get("prompt_tokens")
             output_tokens = usage.get("completion_tokens")
             prompt_tokens = prompt_tokens if type(prompt_tokens) is int and prompt_tokens >= 0 else 0
@@ -194,6 +205,16 @@ def upstream_metrics(trace):
             peak = max(peak, prompt_tokens + maximum)
     metrics = {
         "upstream_calls": calls,
+        "provider_calls_observed": calls,
+        "usage_bearing_calls": usage_calls,
+        "usage_observed": {
+            "prompt_tokens": prompt,
+            "cached_prompt_tokens": cached,
+            "completion_tokens": output,
+        },
+        "estimated_cost": (
+            sum(estimates) if calls and estimate_complete and len(estimates) == calls else None
+        ),
         "prompt_tokens": prompt,
         "output_tokens": output,
         "cached_prompt_tokens": cached,
@@ -209,6 +230,85 @@ def upstream_metrics(trace):
         "memory_visible_tokens": memory_visible,
     }
     return metrics, clipped
+
+
+def _optional_json(trace, name):
+    try:
+        return read_json(trace / name)
+    except (OSError, UnicodeError, ValueError, json.JSONDecodeError):
+        return None
+
+
+def _exit_code(value):
+    if type(value) is int and value >= 0:
+        return value
+    if isinstance(value, str) and value.isdecimal():
+        return int(value)
+    return None
+
+
+def _latest_attempt_exit(trace):
+    path = trace / "attempts.jsonl"
+    try:
+        info = path.lstat()
+        if path.is_symlink() or not path.is_file() or info.st_size > MAX_JSON:
+            return None
+        rows = path.read_text(encoding="utf-8").splitlines()
+    except (OSError, UnicodeError):
+        return None
+    for line in reversed(rows):
+        try:
+            row = json.loads(line)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            continue
+        if isinstance(row, dict):
+            code = _exit_code(row.get("exit_code"))
+            if code is not None:
+                return code
+    return None
+
+
+def _billing_metrics(trace):
+    receipt = _optional_json(trace, "provider-billing-receipt.json")
+    if not isinstance(receipt, dict):
+        return {"provider_billed_calls": None, "provider_billed_cost": None}
+    calls, cost = receipt.get("calls"), receipt.get("cost")
+    if (type(calls) is not int or calls < 0 or isinstance(cost, bool)
+            or not isinstance(cost, (int, float)) or not math.isfinite(cost) or cost < 0):
+        return {"provider_billed_calls": None, "provider_billed_cost": None}
+    return {"provider_billed_calls": calls, "provider_billed_cost": cost}
+
+
+def _budget_estimate(trace, run_tag):
+    """Return a rate-bound pre-dispatch estimate, never an unproved ledger guess."""
+    budget = _optional_json(trace, "upstream-budget-state.json")
+    if not isinstance(budget, dict) or budget.get("schema") != 2 or budget.get("run_tag") != run_tag:
+        return None, None
+    projected, snapshot = budget.get("projected"), budget.get("rate_snapshot")
+    if not isinstance(projected, dict) or not isinstance(snapshot, dict):
+        return None, None
+    cost = projected.get("estimated_cost_rub")
+    fields = {"schema", "run_tag", "effective_at", "source", "sha256",
+              "prompt_rub_per_token", "completion_rub_per_token"}
+    if (set(snapshot) != fields or snapshot.get("schema") != 1
+            or snapshot.get("run_tag") != run_tag
+            or not all(isinstance(snapshot.get(name), str) and snapshot[name]
+                       for name in ("effective_at", "source", "sha256"))
+            or not isinstance(cost, (int, float)) or isinstance(cost, bool)
+            or not math.isfinite(cost) or cost < 0):
+        return None, None
+    if any(isinstance(snapshot.get(name), bool)
+           or not isinstance(snapshot.get(name), (int, float))
+           or not math.isfinite(snapshot[name]) or snapshot[name] < 0
+           for name in ("prompt_rub_per_token", "completion_rub_per_token")):
+        return None, None
+    unsigned = {name: snapshot[name] for name in fields if name != "sha256"}
+    digest = hashlib.sha256(json.dumps(
+        unsigned, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    ).encode("utf-8")).hexdigest()
+    if snapshot["sha256"] != digest:
+        return None, None
+    return cost, snapshot
 
 
 def terminal_verdict(args, status):
@@ -474,9 +574,33 @@ def terminal_verdict(args, status):
             "action": "Use a lane that returns the committed model identity on every call.",
             "evidence": {"reason": lane.get("reason"), "detail": lane.get("detail")},
         })
+    attempt_exit_code = _latest_attempt_exit(trace)
+    driver = _optional_json(trace, "driver-result.json")
+    if not isinstance(driver, dict):
+        driver = _optional_json(trace, "recovery.json")
+    driver_exit_code = _exit_code(driver.get("exit_code")) if isinstance(driver, dict) else None
+    if driver_exit_code is None:
+        driver_exit_code = attempt_exit_code
+    exit_layers = {
+        "attempt_exit_code": attempt_exit_code,
+        "driver_exit_code": driver_exit_code,
+        "gate_exit_codes": gate_exits,
+        "wrapper_exit_code": _exit_code(
+            status.get("wrapper_exit_code", status.get("exit_code"))
+        ),
+        "primary_failure": (
+            status.get("primary_failure") if isinstance(status.get("primary_failure"), str)
+            else status.get("reason") if isinstance(status.get("reason"), str) else None
+        ),
+        "terminal_observation": status.get("phase"),
+    }
     metrics = {"gate_exits": gate_exits, "gate_blocking": gate_blocking,
                "replay_exit": replay_exit}
     metrics.update(ledger_metrics)
+    estimate, rate_snapshot = _budget_estimate(trace, status.get("run_tag"))
+    metrics["estimated_cost"] = estimate
+    metrics["rate_snapshot"] = rate_snapshot
+    metrics.update(_billing_metrics(trace))
     return {
         "schema": 1,
         "run_tag": status.get("run_tag"),
@@ -491,6 +615,7 @@ def terminal_verdict(args, status):
         "failures": failures,
         "metrics": metrics,
         "improvements": improvements,
+        **exit_layers,
     }
 
 
@@ -498,6 +623,20 @@ def answer(value):
     if value is None:
         return "pending"
     return "yes" if value else "no"
+
+
+def render_summary(row):
+    """Render cost evidence without turning observation or estimates into billing claims."""
+    metrics = row.get("metrics") if isinstance(row.get("metrics"), dict) else {}
+    lines = [
+        "provider_calls_observed=%s" % metrics.get("provider_calls_observed"),
+        "usage_bearing_calls=%s" % metrics.get("usage_bearing_calls"),
+        "estimated_cost=%s" % metrics.get("estimated_cost"),
+    ]
+    if metrics.get("provider_billed_calls") is not None:
+        lines.append("provider_billed_calls=%s" % metrics["provider_billed_calls"])
+        lines.append("provider_billed_cost=%s" % metrics.get("provider_billed_cost"))
+    return "\n".join(lines)
 
 
 def emit(row, as_json):
@@ -518,6 +657,7 @@ def emit(row, as_json):
         "failures=%s" % failures,
         "improvements=%s" % improvements,
     ]
+    lines.extend(render_summary(row).splitlines())
     sys.stdout.write("\n".join(lines) + "\n")
 
 

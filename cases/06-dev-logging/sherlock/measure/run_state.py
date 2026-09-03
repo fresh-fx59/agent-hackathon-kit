@@ -11,7 +11,9 @@ import tempfile
 STATUS_FIELDS = ("schema", "run_tag", "phase", "updated_at", "pid", "attempt",
                  "dataset", "arm", "trace_dir", "detail", "session_id", "reason",
                  "exit_code", "duration_s", "upstream_log", "inflight_path",
-                 "process_start_ticks", "pgid", "boot_id_sha256", "command_sha256")
+                 "process_start_ticks", "pgid", "boot_id_sha256", "command_sha256",
+                 "primary_failure")
+TERMINAL_FAILURES = {"RUN_FAILED", "REJECTED"}
 SECRET_MARKERS = re.compile(r"(?:bearer\s+|(?:sk|ghp|glpat|xox[baprs])-|AKIA[0-9A-Z]{16}|-----BEGIN .*PRIVATE KEY-----|(?:password|token|api[_-]?key)\s*[:=])", re.I)
 
 
@@ -27,7 +29,39 @@ def _safe(value):
     return value
 
 
-def _normalize(fields):
+def _failure_code(value):
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        _safe(value)
+    except ValueError:
+        return None
+    return value
+
+
+def state_event(event: str, *, exit_code=None, reason=None, previous=None) -> dict:
+    """Project a terminal observation without allowing later layers to rewrite it."""
+    prior = previous.get("primary_failure") if isinstance(previous, dict) else None
+    primary_failure = _failure_code(prior)
+    if primary_failure is None and event in TERMINAL_FAILURES:
+        primary_failure = _failure_code(reason)
+    return {
+        "terminal_observation": event,
+        "wrapper_exit_code": exit_code,
+        "primary_failure": primary_failure,
+    }
+
+
+def _previous_status(path):
+    try:
+        with open(path, encoding="utf-8") as handle:
+            value = json.load(handle)
+    except (OSError, UnicodeError, ValueError, json.JSONDecodeError):
+        return None
+    return value if isinstance(value, dict) else None
+
+
+def _normalize(fields, previous=None):
     unknown = set(fields) - set(STATUS_FIELDS)
     if unknown:
         raise ValueError("unknown state field rejected")
@@ -36,13 +70,22 @@ def _normalize(fields):
     row["schema"] = 1
     row["updated_at"] = _now()
     row["pid"] = os.getpid() if row["pid"] is None else row["pid"]
+    terminal = state_event(
+        row["phase"], exit_code=row["exit_code"], reason=row["reason"],
+        previous=previous,
+    )
+    supplied = _failure_code(row["primary_failure"])
+    row["primary_failure"] = (
+        terminal["primary_failure"] or supplied
+        if row["phase"] in TERMINAL_FAILURES else None
+    )
     for value in row.values():
         _safe(value)
     return row
 
 
 def write_status(path: str, **fields) -> dict:
-    row = _normalize(fields)
+    row = _normalize(fields, previous=_previous_status(path))
     directory = os.path.dirname(os.path.abspath(path))
     os.makedirs(directory, exist_ok=True)
     fd, temporary = tempfile.mkstemp(prefix=".status.json.", dir=directory)

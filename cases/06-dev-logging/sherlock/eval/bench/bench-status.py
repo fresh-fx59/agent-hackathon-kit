@@ -32,9 +32,10 @@ STATUS_BASE = {"schema", "run_tag", "phase", "updated_at", "pid", "attempt",
                "dataset", "arm", "trace_dir", "detail", "session_id", "reason",
                "exit_code", "duration_s", "upstream_log", "inflight_path"}
 PROCESS_FIELDS = {"process_start_ticks", "pgid", "boot_id_sha256", "command_sha256"}
+STATUS_ADDITIONS = {"primary_failure"}
 MANIFEST_KEYS = {"schema", "run_tag", "dataset", "arm", "trace", "commitment",
                  "corpus", "expected", "artifacts", "skill", "target",
-                 "health_receipt", "manifest_sha256"}
+                 "target_profile", "input_identity", "health_receipt", "manifest_sha256"}
 SHORT_VALIDITY = {"schema", "valid", "reasons", "run_tag", "manifest_sha256",
                   "candidate_sha256", "hmac_sha256"}
 FULL_ADDITIONS = {"result_stream_sha256", "upstream_sha256", "work_sha256",
@@ -200,7 +201,7 @@ def external_read(path, maximum=MAX_JSON):
 
 
 def manifest_shape(row, trace, commitment_file):
-    if set(row) != MANIFEST_KEYS or row.get("schema") != 2: return False
+    if set(row) != MANIFEST_KEYS or row.get("schema") != 3: return False
     if any(label(row.get(name)) is None for name in ("run_tag", "dataset", "arm")): return False
     seal = row.get("manifest_sha256"); unsigned = dict(row); unsigned.pop("manifest_sha256", None)
     if not is_hex(seal) or not hmac.compare_digest(seal, digest(MANIFEST.canonical(unsigned))): return False
@@ -276,11 +277,12 @@ def status_projection(held, manifest):
     state, row, size = json_read(held, "status.json", retry=True)
     if state != "ok": return None, ["STATUS_INVALID"], size
     keys = set(row)
-    if (not STATUS_BASE.issubset(keys) or keys - STATUS_BASE - PROCESS_FIELDS or
+    if (not STATUS_BASE.issubset(keys) or keys - STATUS_BASE - PROCESS_FIELDS - STATUS_ADDITIONS or
             row.get("schema") != 1 or row.get("run_tag") != manifest["run_tag"] or
             label(row.get("phase")) is None or
             timestamp(row.get("updated_at")) is None or not uint(row.get("attempt"), True) or
-            not uint(row.get("pid"), True)):
+            not uint(row.get("pid"), True) or
+            (row.get("primary_failure") is not None and label(row.get("primary_failure")) is None)):
         return None, ["STATUS_INVALID"], size
     if row["phase"] not in PHASES:
         row = dict(row); row["phase"] = "UNKNOWN"
@@ -574,6 +576,8 @@ def project(trace, manifest, key, selection="direct", proc_root="/", held=None):
                "phase": phase, "updated_at": updated, "dataset": safe(manifest["dataset"]),
                "arm": safe(manifest["arm"]), "trace": paths, "last_event": last_event,
                "attempt": event_attempt if event_attempt is not None else (state.get("attempt") if state else None),
+               "wrapper_exit_code": state.get("exit_code") if state else None,
+               "primary_failure": state.get("primary_failure") if state else None,
                "recovery": recovery, "upstream": completed, "process": process,
                "target": {"provider": safe(manifest["target"]["provider"]),
                           "requested_model": safe(manifest["target"]["requested_model"]),
