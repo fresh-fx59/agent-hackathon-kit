@@ -909,8 +909,7 @@ def target_contract_probe(argv):
             parsed = urlparse(argv[5]); port = parsed.port
         except ValueError:
             parsed = None; port = None
-        if (os.environ.get("SHERLOCK_PROBE_TEST_MODE") != "1" or parsed is None
-                or parsed.scheme != "http" or parsed.hostname not in {"127.0.0.1", "::1"}
+        if (parsed is None or parsed.scheme != "http" or parsed.hostname not in {"127.0.0.1", "::1"}
                 or parsed.username is not None or parsed.password is not None or port is None
                 or parsed.params or parsed.fragment):
             print("PROBE_TRANSPORT", file=sys.stderr)
@@ -932,7 +931,11 @@ def target_contract_probe(argv):
     # The probe is sealed input, not a general purpose bench invocation.  Do
     # not let ambient SHERLOCK switches change the model, prompt, arm, retries,
     # settings, or proxy after approval.
-    allowed_probe_env = {*RUNTIME_ENV_ALLOW, "SHERLOCK_API_KEY", "SHERLOCK_PROBE_TEST_MODE"}
+    secret_ref = profile.get("secret_ref")
+    if not isinstance(secret_ref, str) or not secret_ref or secret_ref not in os.environ:
+        print("PROBE_SECRET_REF", file=sys.stderr)
+        return 1
+    allowed_probe_env = {*RUNTIME_ENV_ALLOW, secret_ref}
     conflicts = sorted(name for name in os.environ if name.startswith("SHERLOCK_") and name not in allowed_probe_env)
     if conflicts:
         print("PROBE_ENV_CONFLICT", file=sys.stderr)
@@ -944,7 +947,9 @@ def target_contract_probe(argv):
                 "SHERLOCK_EXPECTED_RETURNED_IDENTITY": profile["expected_returned_identity"],
                 "QWEN_BIN": profile["qwen"]["cli"], "SHERLOCK_MAX_RETRIES": "0",
                 "SHERLOCK_RESUME_MAX_ATTEMPTS": "0", "SHERLOCK_UPSTREAM_RETRY": "0",
-                "SHERLOCK_TARGET_PROBE_MODE": "1", "SHERLOCK_PROBE_SEALED_INPUT": str(sealed),
+                "SHERLOCK_TARGET_PROBE_MODE": "1", secret_ref: os.environ[secret_ref],
+                "SHERLOCK_API_KEY": os.environ[secret_ref],
+                "SHERLOCK_PROBE_SEALED_INPUT": str(sealed),
                 "SHERLOCK_PROBE_SETTINGS": str(sealed / "corporate-settings.json"),
                 "SHERLOCK_PROBE_BUDGET": str(sealed / "probe-budget.json"),
                 "SHERLOCK_PROBE_ARM": json.loads((sealed / "input-package.json").read_text(encoding="utf-8")).get("arm", "")})

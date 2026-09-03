@@ -212,3 +212,27 @@ its root with non-replacing mkdir plus durable directory sync rather than
 replacing a raced root. Task 2 was 20/20 and Task 3 23/23. All execution was
 local temporary/stub data: zero provider/network contact, zero real secret
 resolution, and zero real run/corpus mutation.
+
+2026-09-04 RED (Round 4 fresh implementation): added five local regressions
+against `0adb038` before changing production code. `test_target_contract_probe.py`
+ran 32 tests: 28 pass, 1 failure, 3 errors. Audit accepted a fabricated trace
+without a consumed action nonce; it rejects the actual Task 7 `finished` exit
+schema; a gate `TimeoutExpired` escaped without `probe-result.json`; and prepare
+followed a parent symlink far enough to create `outside/probe` before raising
+`NotADirectoryError`. The per-call call-ID/usage forgery regression was already
+rejected. Only temporary local directories, callbacks, and fixture bytes were
+used; no provider, network, secret, real run, or corpus was accessed.
+
+2026-09-04 GREEN (Round 4 partial focused repair): the fresh regression suite
+is 32/32. The production probe no longer has a test-only branch that copies a
+canonical report or writes synthetic request/response, ledger, budget, or
+verdict artifacts; it enters the ordinary v44 runner. Audit now requires a
+durable action-authorization record and nonce token before accepting, consumes
+Task 7's `finished` projection with every exit layer, mints a distinct receipt
+nonce, sums response usage per call, requires identical body/ledger/budget call
+IDs, and recomputes the estimated cost from the authenticated rate snapshot.
+Parent creation descriptor-walks before any temporary directory can be created
+through a symlink and fsyncs each created parent entry; audit catches unexpected
+exceptions and seals one terminal result. Focused controller probe 3/3, Task 2
+20/20, Task 3 23/23, Python compile, shell parse, and `git diff --check` passed.
+All execution was local, fixture-only and credential-free.

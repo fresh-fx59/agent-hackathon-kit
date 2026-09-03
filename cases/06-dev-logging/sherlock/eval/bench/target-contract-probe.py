@@ -182,6 +182,9 @@ def _open_directory_no_follow(path, create=False):
                     raise
                 try:
                     os.mkdir(component, 0o700, dir_fd=fd)
+                    # A created directory is an entry in its parent.  Persist
+                    # that entry before it becomes the next descriptor root.
+                    os.fsync(fd)
                 except FileExistsError:
                     pass
                 next_fd = os.open(component, flags, dir_fd=fd)
@@ -390,9 +393,15 @@ def _profile(args, settings_sha):
 def prepare(args, secret_reader=None):
     """Build a fresh, immutable probe package; `secret_reader` is intentionally unused."""
     root = Path(args.root)
+    # Validate (and, only when missing, create) every parent through a
+    # descriptor walk before tempfile or mkdir can follow a caller alias.
+    try:
+        parent_fd = _open_directory_no_follow(root.parent, create=True)
+        os.close(parent_fd)
+    except (OSError, ProbeFailure) as exc:
+        raise ProbeFailure("TARGET_PROBE_PREPARE", "unsafe root parent") from exc
     if os.path.lexists(root):
         raise ProbeFailure("TARGET_PROBE_PREPARE", "root already exists")
-    root.parent.mkdir(parents=True, exist_ok=True)
     staging = Path(tempfile.mkdtemp(prefix=".target-probe-", dir=root.parent))
     try:
         fixture_dir = staging / "fixture"
@@ -452,6 +461,19 @@ def _consume_nonce(nonce_root, nonce, supplied_hash):
     _atomic_no_replace(nonce_root / (nonce + ".json"), canonical({"nonce": nonce, "manifest_sha256": supplied_hash}) + b"\n")
 
 
+def _record_action_authorization(root, nonce_root, manifest, supplied_hash):
+    """Bind a trace audit to the durable nonce that admitted the run."""
+    token = Path(nonce_root) / (manifest["nonce"] + ".json")
+    raw = safe_read_regular(token)
+    expected = canonical({"nonce": manifest["nonce"], "manifest_sha256": supplied_hash}) + b"\n"
+    if not hmac.compare_digest(raw, expected):
+        raise ProbeFailure("TARGET_PROBE_NOT_AUTHORIZED", "nonce evidence")
+    _atomic_no_replace(Path(root) / "action-authorization.json", canonical({
+        "schema": 1, "nonce": manifest["nonce"], "manifest_sha256": supplied_hash,
+        "nonce_record_sha256": sha256(raw), "nonce_root": str(Path(nonce_root).absolute()),
+    }) + b"\n")
+
+
 def authorize(manifest_path, supplied_hash, nonce_root, action="target_contract_probe", *, consume=True):
     raw = safe_read_regular(manifest_path)
     if not _hex(supplied_hash) or not hmac.compare_digest(sha256(raw), supplied_hash):
@@ -478,6 +500,7 @@ def authorize(manifest_path, supplied_hash, nonce_root, action="target_contract_
     if consume:
         try:
             _consume_nonce(nonce_root, row["nonce"], supplied_hash)
+            _record_action_authorization(Path(manifest_path).parent, nonce_root, row, supplied_hash)
         except ProbeFailure as exc:
             if exc.code == "APPROVAL_REPLAYED":
                 raise
@@ -570,6 +593,8 @@ def run(manifest_path, supplied_hash, nonce_root, *, secret_reader, proxy_starte
         _verify_package(sealed, manifest)
     # All knowable validation precedes the one-way nonce consumption.
         _consume_nonce(nonce_root, manifest["nonce"], supplied_hash)
+        _record_action_authorization(root, nonce_root, manifest, supplied_hash)
+        shutil.copyfile(root / "action-authorization.json", sealed / "action-authorization.json")
         secret = secret_reader(package["target-profile.json"]["secret_ref"])
     # Secret resolution is the only allowed operation before the proxy.  Treat
     # callbacks as hostile: validate the owned snapshot immediately afterwards.
@@ -675,6 +700,20 @@ def _write_result(trace, result):
         return False
 
 
+def _audit_authorization(trace, manifest, raw_manifest):
+    """Require the durable action token that admitted this exact manifest."""
+    row = _strict_json(_asset(Path(trace) / "action-authorization.json", "TARGET_CONTRACT_FAILED")[0])
+    if set(row) != {"schema", "nonce", "manifest_sha256", "nonce_record_sha256", "nonce_root"} or row.get("schema") != 1 \
+            or row.get("nonce") != manifest.get("nonce") or row.get("manifest_sha256") != sha256(raw_manifest) \
+            or not _hex(row.get("nonce_record_sha256")) or not isinstance(row.get("nonce_root"), str):
+        raise ProbeFailure("TARGET_CONTRACT_FAILED", "action authorization")
+    nonce_raw = safe_read_regular(Path(row["nonce_root"]) / (manifest["nonce"] + ".json"))
+    wanted = canonical({"nonce": manifest["nonce"], "manifest_sha256": sha256(raw_manifest)}) + b"\n"
+    if not hmac.compare_digest(nonce_raw, wanted) or not hmac.compare_digest(sha256(nonce_raw), row["nonce_record_sha256"]):
+        raise ProbeFailure("TARGET_CONTRACT_FAILED", "action authorization")
+    return row
+
+
 def _real_gates(trace, report, fixture):
     """Run the bound v44 programs; caller supplied gate summaries are never evidence."""
     tools = HERE.parent.parent / "skills" / "v44" / "tools"
@@ -738,6 +777,7 @@ def audit(trace):
             raise ProbeFailure("TARGET_CONTRACT_FAILED", "attempt result already sealed")
         raw_manifest, _ = _asset(trace / "probe-manifest.json", "TARGET_CONTRACT_FAILED")
         manifest = _strict_json(raw_manifest, PROBE_MANIFEST_KEYS)
+        action_authorization = _audit_authorization(trace, manifest, raw_manifest)
         package = _verify_package(trace, manifest, "TARGET_CONTRACT_FAILED")
         if _iso(manifest["expires_at"]) <= _now():
             raise ProbeFailure("TARGET_CONTRACT_FAILED", "expired")
@@ -754,10 +794,14 @@ def audit(trace):
         # trace, so audit consumes the raw run-verdict output instead.
         verdict_raw, verdict_hash = _asset(trace / "run-verdict.json", "TARGET_CONTRACT_FAILED")
         verdict = _strict_json(verdict_raw)
-        if (verdict.get("schema") != 1 or verdict.get("run_tag") != trace.name
-                or verdict.get("state") != "succeeded" or verdict.get("finished") is not True
-                or verdict.get("successful") is not True or verdict.get("report_correct") is not True
-                or verdict.get("failures") != [] or not isinstance(verdict.get("metrics"), dict)):
+        required_verdict = {"schema", "run_tag", "state", "attempt_exit_code", "driver_exit_code",
+                            "gate_exit_codes", "wrapper_exit_code", "primary_failure", "terminal_observation"}
+        if (set(verdict) != required_verdict or verdict.get("schema") != 1 or verdict.get("run_tag") != trace.name
+                or verdict.get("state") != "finished" or any(type(verdict[key]) is not int or verdict[key] != 0
+                for key in ("attempt_exit_code", "driver_exit_code", "wrapper_exit_code"))
+                or not isinstance(verdict.get("gate_exit_codes"), dict) or set(verdict["gate_exit_codes"]) != set(GATES)
+                or any(type(value) is not int or value != 0 for value in verdict["gate_exit_codes"].values())
+                or verdict.get("primary_failure") is not None or not isinstance(verdict.get("terminal_observation"), str)):
             raise ProbeFailure("TARGET_CONTRACT_FAILED", "task7 verdict")
         ledger_raw, _ = _asset(trace / "ledger.json", "TARGET_CONTRACT_FAILED")
         ledger = _strict_json(ledger_raw)
@@ -769,8 +813,7 @@ def audit(trace):
         calls = ledger.get("provider_calls_observed")
         if type(calls) is not int or calls < 1 or calls > DEFAULT_BUDGET["max_provider_calls"] or \
                 budget["observed"].get("provider_calls") != calls or \
-                budget["observed"].get("prompt_tokens") != ledger["usage"]["prompt_tokens"] or \
-                budget["observed"].get("completion_tokens") != ledger["usage"]["completion_tokens"] or \
+                budget["completed_attempt_ids"] != ledger.get("call_ids") or \
                 not all(isinstance(value, str) and value for value in ledger.get("call_ids", [])) or \
                 len(set(ledger["call_ids"])) != calls or len(ledger["sent_models"]) != calls or len(ledger["returned_identities"]) != calls:
             raise ProbeFailure("TARGET_PROBE_BUDGET")
@@ -794,12 +837,25 @@ def audit(trace):
         if len(request_by_id) != calls or len(response_by_id) != calls or set(request_by_id) != set(ledger["call_ids"]) or set(response_by_id) != set(ledger["call_ids"]):
             raise ProbeFailure("TARGET_PROBE_BUDGET", "body call identity")
         expected_model = package["target-profile.json"]["requested_model"]
+        usage = {"prompt_tokens": 0, "completion_tokens": 0}
         for call_id, sent, returned in zip(ledger["call_ids"], ledger["sent_models"], ledger["returned_identities"]):
             request = request_by_id[call_id]; response = response_by_id[call_id]
             if (set(request) != {"call_id", "model"} or request["model"] != sent or sent != expected_model
                     or set(response) != {"call_id", "returned_identity", "usage"}
-                    or response["returned_identity"] != returned or response["usage"] != ledger["usage"]):
+                    or response["returned_identity"] != returned
+                    or not isinstance(response["usage"], dict) or set(response["usage"]) != set(usage)
+                    or any(type(response["usage"][key]) is not int or response["usage"][key] < 0 for key in usage)):
                 raise ProbeFailure("TARGET_IDENTITY_MISMATCH", "body correlation")
+            for key in usage:
+                usage[key] += response["usage"][key]
+        if usage != ledger["usage"] or budget["observed"].get("prompt_tokens") != usage["prompt_tokens"] \
+                or budget["observed"].get("completion_tokens") != usage["completion_tokens"]:
+            raise ProbeFailure("TARGET_PROBE_BUDGET", "per-call usage")
+        rate = budget["rate_snapshot"]
+        estimated_cost = (usage["prompt_tokens"] * rate["prompt_rub_per_token"]
+                          + usage["completion_tokens"] * rate["completion_rub_per_token"])
+        if budget["projected"]["estimated_cost_rub"] < estimated_cost or estimated_cost > budget["limits"]["max_estimated_cost_rub"]:
+            raise ProbeFailure("TARGET_PROBE_BUDGET", "rate cost")
         identity = audit_identity(package["target-profile.json"]["identity_mode"],
                                   package["target-profile.json"]["expected_returned_identity"],
                                   ledger.get("returned_identities"))
@@ -809,8 +865,11 @@ def audit(trace):
         completed = _now()
         receipt_ttl = dt.timedelta(hours=24) if identity == "provider_pinned_version" else dt.timedelta(minutes=30)
         fixture_manifest = _strict_json(_asset(trace / "fixture-manifest.json", "TARGET_CONTRACT_FAILED")[0])
+        receipt_nonce = secrets.token_hex(32)
+        _atomic_no_replace(trace / "receipt-nonces" / (receipt_nonce + ".json"), canonical({"nonce": receipt_nonce}) + b"\n")
         receipt = {"schema": 1, "accepted": True, "proof_scope": "representative_sample_only",
-                   "created_at": _time_text(completed), "expires_at": _time_text(completed + receipt_ttl), "nonce": manifest["nonce"],
+                   "created_at": _time_text(completed), "expires_at": _time_text(completed + receipt_ttl), "nonce": receipt_nonce,
+                   "action_nonce": manifest["nonce"], "action_authorization_sha256": sha256(canonical(action_authorization)),
                    "target_profile_sha256": manifest["target_profile_sha256"], "probe_manifest_sha256": sha256(raw_manifest),
                    "fixture_manifest_sha256": manifest["fixture_manifest_sha256"],
                    "input_package_sha256": manifest["input_package_sha256"],
@@ -827,9 +886,10 @@ def audit(trace):
                    "probe_gates_sha256": sha256((trace / "probe-gates.json").read_bytes()),
                    "final_report_sha256": report_hash, "ledger_sha256": sha256(ledger_raw),
                    "request_body_tree_sha256": request_tree, "response_body_tree_sha256": response_tree,
-                   "provider_calls_observed": calls, "usage": ledger.get("usage"),
-                   "estimated_cost_rub": budget.get("projected", {}).get("estimated_cost_rub"),
-                   "cost_inputs": {"projected": budget.get("projected"), "rate_snapshot": budget.get("rate_snapshot")},
+                   "provider_calls_observed": calls, "usage": usage,
+                   "estimated_cost_rub": estimated_cost,
+                   "cost_inputs": {"observed_usage": usage, "rate_snapshot": rate,
+                                   "recomputed_estimated_cost_rub": estimated_cost},
                    "rate_snapshot": budget.get("rate_snapshot"), "budget_assurance": "client_pre_dispatch",
                    "task7_verdict_sha256": verdict_hash, "provider_billed_calls": None, "provider_billed_rub": None,
                    "audit_tool_sha256": sha256(Path(__file__).read_bytes())}
@@ -854,6 +914,13 @@ def audit(trace):
         result.update({"failure": exc.code, "detail": str(exc)})
         _write_result(trace, result)
         raise
+    except Exception as exc:
+        for path, digest in reversed(published):
+            _remove_owned(path, digest)
+        failure = ProbeFailure("TARGET_CONTRACT_FAILED", type(exc).__name__)
+        result.update({"failure": failure.code, "detail": str(failure)})
+        _write_result(trace, result)
+        raise failure from exc
 
 
 def main(argv=None):
