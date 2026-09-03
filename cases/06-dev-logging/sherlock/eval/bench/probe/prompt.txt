@@ -1,7 +1,7 @@
 You are working in a blank work tree. The copied corpus is the only evidence.
 
 Create work/report.md as the final deliverable. It must have exactly these four
-level-two finding headings: F-AUTH-EXTERNAL, F-INVENTORY-SERVICE,
+level-two finding headings at column zero: F-AUTH-EXTERNAL, F-INVENTORY-SERVICE,
 F-REPORTED-CONTEXT, and F-TIMELINE-LINK. Each section must have exactly one
 assertion label and use these exact JSON-valued field names: [!PROVEN]
 external_ips and citation_files; [!PROVEN] services, processes, and citation_files;

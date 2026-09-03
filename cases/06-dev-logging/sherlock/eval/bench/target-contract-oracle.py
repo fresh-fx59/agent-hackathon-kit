@@ -5,6 +5,7 @@ import json
 import os
 import re
 import stat
+from datetime import datetime
 from pathlib import Path, PurePosixPath
 
 
@@ -14,8 +15,8 @@ REQUIRED = {
     "F-REPORTED-CONTEXT": ("REPORTED", ("reported_context", "citation_files")),
     "F-TIMELINE-LINK": ("INFERENCE", ("timeline", "citation_files")),
 }
-ANY_HEADING = re.compile(r"^#{1,6}\s+.*$", re.MULTILINE)
-FINDING_HEADING = re.compile(r"^#{1,6}\s+(F-\S+).*?$", re.MULTILINE)
+ANY_HEADING = re.compile(r"^ {0,3}#{1,6}\s+.*$", re.MULTILINE)
+FINDING_HEADING = re.compile(r"^ {0,3}#{1,6}\s+(F-\S+).*?$", re.MULTILINE)
 STRICT_HEADING = re.compile(r"^## (F-[A-Z0-9]+(?:-[A-Z0-9]+)*)$")
 VERDICT = re.compile(r"^## ВЕРДИКТ\s*$", re.MULTILINE)
 FIELD_LINE = re.compile(r"^(?:- \[!([A-Z]+)\] )?([A-Za-z_][A-Za-z0-9_]*)=(.+)$", re.MULTILINE)
@@ -58,9 +59,22 @@ def _sections(text):
     return findings
 
 
+def _visible_markdown(text):
+    """Preserve line positions while excluding fenced code from the tiny grammar."""
+    visible, fenced = [], False
+    for line in text.splitlines(keepends=True):
+        if re.match(r"^ {0,3}(```|~~~)", line):
+            fenced = not fenced
+            visible.append("\n" if line.endswith("\n") else "")
+        elif fenced:
+            visible.append("\n" if line.endswith("\n") else "")
+        else:
+            visible.append(line)
+    return "".join(visible)
+
+
 def _expected_fields(expected):
     timeline = dict(expected["timeline"])
-    timeline["relation"] = "authentication_before_inventory"
     return {
         "F-AUTH-EXTERNAL": {"external_ips": expected["authentication"]["external_ips"],
                             "citation_files": ["Security.jsonl"]},
@@ -72,6 +86,18 @@ def _expected_fields(expected):
         "F-TIMELINE-LINK": {"timeline": timeline,
                             "citation_files": ["Security.jsonl", "System.jsonl"]},
     }
+
+
+def _timeline_valid(timeline):
+    try:
+        left = datetime.strptime(timeline["authentication_first"], "%Y-%m-%dT%H:%M:%SZ")
+        right = datetime.strptime(timeline["inventory_first"], "%Y-%m-%dT%H:%M:%SZ")
+    except (KeyError, TypeError, ValueError):
+        return False
+    relation = ("authentication_before_inventory" if left < right else
+                "authentication_equal_inventory" if left == right else
+                "authentication_after_inventory")
+    return timeline.get("relation") == relation
 
 
 def _field_values(section):
@@ -115,9 +141,11 @@ def _regular_corpus_path(corpus, value):
 
 
 def audit_report(report, corpus, expectations):
-    text = Path(report).read_text(encoding="utf-8", errors="replace")
+    text = _visible_markdown(Path(report).read_text(encoding="utf-8", errors="replace"))
     expected = _load(expectations)
     failures = []
+    if type(expected.get("timeline")) is not dict or not _timeline_valid(expected["timeline"]):
+        failures.append("timeline_expectation_invalid")
     findings = _sections(text)
     ids = [finding[0] for finding in findings]
     if sorted(ids) != sorted(REQUIRED):

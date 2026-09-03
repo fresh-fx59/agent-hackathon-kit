@@ -7,6 +7,7 @@ import os
 import shutil
 import stat
 import tempfile
+from datetime import datetime
 from pathlib import Path, PurePosixPath
 
 
@@ -18,6 +19,7 @@ SHAPE_SCHEMAS = {
     "reported_context": {"file", "line", "message_field"},
     "timeline": {"left_file", "right_file", "time_field"},
 }
+CONTROL_NAMES = {"probe-expectations.json", "probe-fixture-manifest.json"}
 
 
 class ContractError(Exception):
@@ -87,6 +89,35 @@ def _contains(child, parent):
         return False
 
 
+def _samefile(left, right):
+    try:
+        return os.path.samefile(left, right)
+    except OSError:
+        return False
+
+
+def _ancestors(path):
+    current = Path(path)
+    while True:
+        yield current
+        if current.parent == current:
+            return
+        current = current.parent
+
+
+def _destination_conflicts(source_root, destination):
+    """Compare roots by filesystem identity, including case-folded aliases."""
+    existing = Path(destination)
+    while not os.path.lexists(existing):
+        if existing.parent == existing:
+            return False
+        existing = existing.parent
+    # An existing destination ancestor is inside/identical to source if one of
+    # its ancestors is source; it is source's ancestor if it matches any source
+    # ancestor.  samefile is identity-based rather than spelling-based.
+    return any(_samefile(existing_parent, source_root) for existing_parent in _ancestors(existing))
+
+
 def _regular_directory(path, error):
     try:
         mode = os.lstat(path).st_mode
@@ -134,6 +165,22 @@ def _read_regular_bytes(root, relative, error):
             fingerprint(before) != fingerprint(current):
         raise ContractError(error)
     return b"".join(chunks)
+
+
+def _source_identity(root, relative, error):
+    path = root
+    parts = relative.split("/")
+    for index, component in enumerate(parts):
+        path = path / component
+        try:
+            item = os.lstat(path)
+        except OSError as exc:
+            raise ContractError(error) from exc
+        if stat.S_ISLNK(item.st_mode) or (index < len(parts) - 1 and not stat.S_ISDIR(item.st_mode)):
+            raise ContractError(error)
+    if not stat.S_ISREG(item.st_mode):
+        raise ContractError(error)
+    return item.st_dev, item.st_ino, item.st_size, item.st_mtime_ns
 
 
 def _event_data(record):
@@ -192,6 +239,15 @@ def _require_event_string(value):
     return value
 
 
+def _timestamp(value):
+    if type(value) is not str:
+        raise ContractError("PROBE_REQUIRED_SHAPES")
+    try:
+        return datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ")
+    except ValueError as exc:
+        raise ContractError("PROBE_REQUIRED_SHAPES") from exc
+
+
 def _expectations(outputs, shapes):
     _validate_shapes(shapes)
     records = _records(outputs)
@@ -199,6 +255,8 @@ def _expectations(outputs, shapes):
     inventory = shapes["inventory"]
     reported = shapes["reported_context"]
     timeline = shapes["timeline"]
+    if timeline["time_field"] != "System.TimeCreated":
+        raise ContractError("PROBE_REQUIRED_SHAPES")
     try:
         auth_rows = records[auth["file"]]
         inventory_rows = records[inventory["file"]]
@@ -220,10 +278,18 @@ def _expectations(outputs, shapes):
     right_times = [_require_event_string(_event_time(row)) for _, row in timeline_right if _event_time(row)]
     if not (ips and messages and services and processes and left_times and right_times):
         raise ContractError("PROBE_REQUIRED_SHAPES")
+    left_stamped = [(_timestamp(value), value) for value in left_times]
+    right_stamped = [(_timestamp(value), value) for value in right_times]
+    left_instant, authentication_first = min(left_stamped)
+    right_instant, inventory_first = min(right_stamped)
+    relation = ("authentication_before_inventory" if left_instant < right_instant else
+                "authentication_equal_inventory" if left_instant == right_instant else
+                "authentication_after_inventory")
     return {"schema": 1, "authentication": {"external_ips": ips, "messages": messages},
             "inventory": {"services": services, "processes": processes},
             "reported_context": context,
-            "timeline": {"authentication_first": min(left_times), "inventory_first": min(right_times)}}
+            "timeline": {"authentication_first": authentication_first, "inventory_first": inventory_first,
+                         "relation": relation}}
 
 
 def _tree_hash(outputs):
@@ -233,10 +299,15 @@ def _tree_hash(outputs):
     return hasher.hexdigest()
 
 
-def _verify_source_hashes(source, source_hashes):
-    for name, expected_hash in source_hashes.items():
-        if _sha256_bytes(_read_regular_bytes(source, name, "PROBE_SOURCE_CHANGED")) != expected_hash:
+def _verify_source_hashes(source, source_hashes, identities):
+    for name in source_hashes:
+        if _source_identity(source, name, "PROBE_SOURCE_CHANGED") != identities[name]:
             raise ContractError("PROBE_SOURCE_CHANGED")
+
+
+def _verify_snapshot_identities(source, source_hashes, identities):
+    """Last feasible local check; mutation after this boundary needs a producer lock."""
+    _verify_source_hashes(source, source_hashes, identities)
 
 
 def _verify_staging(staging, outputs, expectations_bytes, manifest_bytes, manifest):
@@ -281,11 +352,11 @@ def build_fixture(source, destination, recipe, seed):
     source_root = source_input.resolve()
     destination_root = destination_input.resolve(strict=False)
     if _contains(destination_root, source_root) or _contains(source_root, destination_root) or \
-            os.path.lexists(destination_input):
+            _destination_conflicts(source_root, destination_input) or os.path.lexists(destination_input):
         raise ContractError("PROBE_DESTINATION")
     recipe = _read_recipe(recipe)
     _validate_recipe(recipe)
-    outputs, range_manifest, source_hashes, ranges, destinations = {}, [], {}, [], set()
+    outputs, range_manifest, source_hashes, ranges, destinations, snapshots, identities = {}, [], {}, [], set(), {}, {}
     for item in recipe["ranges"]:
         if type(item) is not dict or set(item) != RANGE_KEYS:
             raise ContractError("PROBE_RANGE_SCHEMA")
@@ -301,14 +372,25 @@ def build_fixture(source, destination, recipe, seed):
     for left in destinations:
         if any(right != left and right.startswith(left + "/") for right in destinations):
             raise ContractError("PROBE_RANGE_DESTINATION")
+        if any(left == control or left.startswith(control + "/") or control.startswith(left + "/")
+               for control in CONTROL_NAMES):
+            raise ContractError("PROBE_RANGE_DESTINATION")
     for item, relative_source, relative_destination in ranges:
-        raw = _read_regular_bytes(source_root, relative_source, "PROBE_RANGE_LINES")
+        if relative_source not in snapshots:
+            before_identity = _source_identity(source_root, relative_source, "PROBE_SOURCE_CHANGED")
+            raw = _read_regular_bytes(source_root, relative_source, "PROBE_RANGE_LINES")
+            after_identity = _source_identity(source_root, relative_source, "PROBE_SOURCE_CHANGED")
+            if before_identity != after_identity:
+                raise ContractError("PROBE_SOURCE_CHANGED")
+            snapshots[relative_source] = raw
+            source_hashes[relative_source] = _sha256_bytes(raw)
+            identities[relative_source] = after_identity
+        raw = snapshots[relative_source]
         lines = raw.splitlines(keepends=True)
         if item["end"] > len(lines):
             raise ContractError("PROBE_RANGE_LINES")
         body = b"".join(lines[item["start"] - 1:item["end"]])
         outputs[relative_destination] = body
-        source_hashes[relative_source] = _sha256_bytes(raw)
         range_manifest.append({"source": relative_source, "source_sha256": source_hashes[relative_source],
                                "start": item["start"], "end": item["end"], "destination": relative_destination,
                                "output_sha256": _sha256_bytes(body),
@@ -332,7 +414,8 @@ def build_fixture(source, destination, recipe, seed):
         (staging / manifest["expectations"]).write_bytes(expectations_bytes)
         (staging / "probe-fixture-manifest.json").write_bytes(manifest_bytes)
         _verify_staging(staging, outputs, expectations_bytes, manifest_bytes, manifest)
-        _verify_source_hashes(source_root, source_hashes)
+        _verify_source_hashes(source_root, source_hashes, identities)
+        _verify_snapshot_identities(source_root, source_hashes, identities)
         try:
             os.mkdir(destination_input)
             claimed_destination = True
