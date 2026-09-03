@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "dataset": "target-contract-representative-v1",
+  "ranges": [
+    {"source": "Security.jsonl", "start": 1, "end": 3, "destination": "Security.jsonl"},
+    {"source": "System.jsonl", "start": 1, "end": 2, "destination": "System.jsonl"}
+  ],
+  "required_shapes": {
+    "authentication": {"file": "Security.jsonl", "ip_field": "IpAddress", "message_field": "Message"},
+    "inventory": {"file": "System.jsonl", "service_field": "ServiceName", "process_field": "ImagePath"},
+    "reported_context": {"file": "Security.jsonl", "line": 2, "message_field": "Message"},
+    "timeline": {"left_file": "Security.jsonl", "right_file": "System.jsonl", "time_field": "System.TimeCreated"}
+  }
+}
