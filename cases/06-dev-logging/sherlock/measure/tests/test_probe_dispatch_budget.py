@@ -1,0 +1,295 @@
+#!/usr/bin/env python3
+"""Paid-probe dispatch envelope: localhost only, never a provider.
+
+Each refusal assertion checks the upstream's real request counter.  A 503 alone
+is not evidence of pre-dispatch safety: it could be a provider response.
+"""
+import json
+import os
+import pathlib
+import subprocess
+import sys
+import tempfile
+import threading
+import time
+import unittest
+import urllib.error
+import urllib.request
+from http.server import BaseHTTPRequestHandler, HTTPServer
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+MEASURE = os.path.dirname(HERE)
+PROXY = os.path.join(MEASURE, "upstream-log-proxy.py")
+
+
+class Upstream(BaseHTTPRequestHandler):
+    def log_message(self, *args):
+        pass
+
+    def do_POST(self):
+        size = int(self.headers.get("Content-Length") or 0)
+        self.rfile.read(size)
+        self.server.requests += 1
+        delay = getattr(self.server, "delay_s", 0)
+        if delay:
+            time.sleep(delay)
+        payload = json.dumps({
+            "model": "fixture-model",
+            "choices": [{"message": {"role": "assistant", "content": "ok"}}],
+            "usage": self.server.usage,
+        }).encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(payload)))
+        self.end_headers()
+        self.wfile.write(payload)
+
+
+def free_port():
+    import socket
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        return sock.getsockname()[1]
+
+
+class DispatchBudget(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.upstream = HTTPServer(("127.0.0.1", free_port()), Upstream)
+        self.upstream.requests = 0
+        self.upstream.delay_s = 0
+        self.upstream.usage = {"prompt_tokens": 10, "completion_tokens": 5}
+        self.up_port = self.upstream.server_port
+        threading.Thread(target=self.upstream.serve_forever, daemon=True).start()
+        self.px_port = free_port()
+        self.process = None
+
+    def tearDown(self):
+        if self.process:
+            self.process.terminate()
+            self.process.wait(timeout=10)
+            self.process.stdout.close()
+            self.process.stderr.close()
+        self.upstream.shutdown()
+        self.upstream.server_close()
+        self.temp.cleanup()
+
+    def _paths(self):
+        root = pathlib.Path(self.temp.name)
+        return root / "action-budget.json", root / "rates.json", root / "state.json"
+
+    def _action(self, limits, run_tag="dispatch-fixture"):
+        return {"schema": 1, "run_tag": run_tag, "limits": limits}
+
+    def _rates(self, run_tag="dispatch-fixture"):
+        return {"schema": 1, "run_tag": run_tag,
+                "effective_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                "source": "fixture",
+                "sha256": "a" * 64,
+                "prompt_rub_per_token": 0.01,
+                "completion_rub_per_token": 0.02}
+
+    def start(self, limits=None, rates=True, action_tag="dispatch-fixture",
+              rate_tag="dispatch-fixture", action_document=None, rate_document=None,
+              keep_controls=False):
+        limits = limits or {"max_provider_calls": 10, "max_prompt_tokens": 1000,
+                            "max_completion_tokens": 1000, "max_wall_time_s": 300,
+                            "max_estimated_cost_rub": 100.0}
+        action, rate, state = self._paths()
+        if not keep_controls:
+            action.write_text(json.dumps(self._action(limits, action_tag)
+                                         if action_document is None else action_document),
+                              encoding="utf-8")
+            if rates is True:
+                rate.write_text(json.dumps(self._rates(rate_tag)
+                                            if rate_document is None else rate_document),
+                                encoding="utf-8")
+        env = dict(os.environ, UPSTREAM_BASE="http://127.0.0.1:%d/v1" % self.up_port,
+                   UPSTREAM_LOG=str(pathlib.Path(self.temp.name) / "ledger.jsonl"),
+                   LISTEN_PORT=str(self.px_port), RUN_TAG="dispatch-fixture",
+                   UPSTREAM_BUDGET_STATE=str(state),
+                   UPSTREAM_ACTION_BUDGET=str(action),
+                   UPSTREAM_RATE_SNAPSHOT=str(rate), UPSTREAM_READ_TIMEOUT="2")
+        self.process = subprocess.Popen([sys.executable, PROXY], env=env,
+                                        stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        for _ in range(100):
+            try:
+                with urllib.request.urlopen("http://127.0.0.1:%d/healthz" % self.px_port,
+                                            timeout=0.2) as response:
+                    response.read()
+                return state
+            except Exception:
+                time.sleep(0.02)
+        out, err = self.process.communicate(timeout=5)
+        self.fail("proxy never came up: %r %r" % (out, err))
+
+    def post(self, max_tokens=10):
+        request = urllib.request.Request(
+            "http://127.0.0.1:%d/v1/chat/completions" % self.px_port,
+            data=json.dumps({"model": "fixture", "max_tokens": max_tokens,
+                             "messages": [{"role": "user", "content": "hello"}]}).encode(),
+            headers={"Content-Type": "application/json"})
+        try:
+            with urllib.request.urlopen(request, timeout=5) as response:
+                return response.status, response.read()
+        except urllib.error.HTTPError as error:
+            return error.code, error.read()
+
+    def assert_refused_without_upstream(self, *, action_document=None, rate_document=None,
+                                        action_tag="dispatch-fixture",
+                                        rate_tag="dispatch-fixture", max_tokens=10,
+                                        reason="RATE_SNAPSHOT_INVALID"):
+        state = self.start(action_document=action_document, rate_document=rate_document,
+                           action_tag=action_tag, rate_tag=rate_tag)
+        status, _ = self.post(max_tokens)
+        self.assertEqual(status, 503)
+        self.assertEqual(self.upstream.requests, 0)
+        self.assertEqual(self.budget(state)["reason"], reason)
+
+    def budget(self, path):
+        for _ in range(100):
+            if path.exists():
+                return json.loads(path.read_text(encoding="utf-8"))
+            time.sleep(0.02)
+        self.fail("action state was not written")
+
+    def test_next_dispatch_crossing_each_limit_is_not_sent(self):
+        fields = ("max_provider_calls", "max_prompt_tokens", "max_completion_tokens",
+                  "max_wall_time_s", "max_estimated_cost_rub")
+        for field in fields:
+            with self.subTest(field=field):
+                _, _, old_state = self._paths()
+                old_state.unlink(missing_ok=True)
+                pathlib.Path(str(old_state) + ".lock").unlink(missing_ok=True)
+                limits = {"max_provider_calls": 10, "max_prompt_tokens": 1000,
+                          "max_completion_tokens": 1000, "max_wall_time_s": 300,
+                          "max_estimated_cost_rub": 100.0}
+                limits[field] = 0 if field != "max_wall_time_s" else 1
+                try:
+                    state = self.start(limits)
+                    status, _ = self.post()
+                    self.assertEqual(status, 503)
+                    self.assertEqual(self.upstream.requests, 0, field)
+                    self.assertEqual(self.budget(state)["reason"], "MAX_" + field.upper())
+                finally:
+                    if self.process:
+                        self.process.terminate(); self.process.wait(timeout=5)
+                        self.process.stdout.close(); self.process.stderr.close(); self.process = None
+                    self.px_port = free_port()
+
+    def test_missing_rate_snapshot_blocks_before_upstream(self):
+        state = self.start(rates=False)
+        status, payload = self.post()
+        self.assertEqual(status, 503)
+        self.assertEqual(self.upstream.requests, 0)
+        self.assertEqual(self.budget(state)["reason"], "RATE_SNAPSHOT_INVALID",
+                         (payload, self.budget(state)))
+
+    def test_provider_overshoot_is_recorded_not_relabelled_as_prevented(self):
+        self.upstream.usage = {"prompt_tokens": 10, "completion_tokens": 110}
+        limits = {"max_provider_calls": 10, "max_prompt_tokens": 1000,
+                  "max_completion_tokens": 100, "max_wall_time_s": 300,
+                  "max_estimated_cost_rub": 100.0}
+        state = self.start(limits)
+        status, _ = self.post(max_tokens=100)
+        self.assertEqual(status, 200)
+        self.assertEqual(self.upstream.requests, 1)
+        for _ in range(100):
+            budget = self.budget(state)
+            if budget.get("observed", {}).get("completion_tokens") == 110:
+                break
+            time.sleep(0.02)
+        self.assertEqual(budget["budget_assurance"], "client_pre_dispatch")
+        self.assertEqual(budget["completed_overshoot"]["completion_tokens"], 10)
+
+    def test_malformed_rate_and_action_controls_never_contact_upstream(self):
+        rates = self._rates()
+        variants = {
+            "rate_boolean": (None, dict(rates, prompt_rub_per_token=True),
+                               "RATE_SNAPSHOT_INVALID"),
+            "rate_nan": (None, dict(rates, prompt_rub_per_token=float("nan")),
+                          "RATE_SNAPSHOT_INVALID"),
+            "rate_infinity": (None, dict(rates, completion_rub_per_token=float("inf")),
+                               "RATE_SNAPSHOT_INVALID"),
+            "rate_unknown": (None, dict(rates, surprise=1), "RATE_SNAPSHOT_INVALID"),
+            "rate_stale": (None, dict(rates, effective_at="2000-01-01T00:00:00Z"),
+                           "RATE_SNAPSHOT_INVALID"),
+            "rate_run_tag": (None, dict(rates, run_tag="another-run"),
+                            "RATE_SNAPSHOT_INVALID"),
+            "action_unknown": (dict(self._action({"max_provider_calls": 10,
+                            "max_prompt_tokens": 1000, "max_completion_tokens": 1000,
+                            "max_wall_time_s": 300, "max_estimated_cost_rub": 100.0}),
+                            surprise=1), None, "ACTION_BUDGET_INVALID"),
+            "action_run_tag": (self._action({"max_provider_calls": 10,
+                            "max_prompt_tokens": 1000, "max_completion_tokens": 1000,
+                            "max_wall_time_s": 300, "max_estimated_cost_rub": 100.0},
+                            "another-run"), None, "ACTION_BUDGET_INVALID"),
+        }
+        for name, (action, rate, reason) in variants.items():
+            with self.subTest(name=name):
+                self.assert_refused_without_upstream(action_document=action,
+                                                      rate_document=rate, reason=reason)
+                self.process.terminate(); self.process.wait(timeout=5)
+                self.process.stdout.close(); self.process.stderr.close(); self.process = None
+                self.px_port = free_port()
+                _, _, old_state = self._paths()
+                old_state.unlink(missing_ok=True)
+                pathlib.Path(str(old_state) + ".lock").unlink(missing_ok=True)
+
+    def test_missing_or_boolean_output_cap_never_contacts_upstream(self):
+        for value in (None, True):
+            with self.subTest(value=value):
+                state = self.start()
+                status, _ = self.post(value)
+                self.assertEqual(status, 503)
+                self.assertEqual(self.upstream.requests, 0)
+                self.assertEqual(self.budget(state)["reason"], "REQUEST_MAX_TOKENS_INVALID")
+                self.process.terminate(); self.process.wait(timeout=5)
+                self.process.stdout.close(); self.process.stderr.close(); self.process = None
+                self.px_port = free_port()
+                _, _, old_state = self._paths()
+                old_state.unlink(missing_ok=True)
+                pathlib.Path(str(old_state) + ".lock").unlink(missing_ok=True)
+
+    def test_concurrent_reservations_allow_only_one_contact(self):
+        state = self.start({"max_provider_calls": 1, "max_prompt_tokens": 1000,
+                            "max_completion_tokens": 1000, "max_wall_time_s": 300,
+                            "max_estimated_cost_rub": 100.0})
+        barrier = threading.Barrier(3)
+        results = []
+        def post_once():
+            barrier.wait(); results.append(self.post()[0])
+        threads = [threading.Thread(target=post_once) for _ in range(2)]
+        for thread in threads: thread.start()
+        barrier.wait()
+        for thread in threads: thread.join(timeout=10)
+        self.assertEqual(sorted(results), [200, 503])
+        self.assertEqual(self.upstream.requests, 1)
+        self.assertEqual(self.budget(state)["projected"]["provider_calls"], 1)
+
+    def test_crash_retains_durable_reservation_for_the_next_proxy(self):
+        limits = {"max_provider_calls": 1, "max_prompt_tokens": 1000,
+                  "max_completion_tokens": 1000, "max_wall_time_s": 300,
+                  "max_estimated_cost_rub": 100.0}
+        state = self.start(limits)
+        self.upstream.delay_s = 2
+        thread = threading.Thread(target=self.post)
+        thread.start()
+        deadline = time.time() + 3
+        while self.upstream.requests != 1 and time.time() < deadline:
+            time.sleep(0.01)
+        self.assertEqual(self.upstream.requests, 1)
+        self.process.terminate(); self.process.wait(timeout=5)
+        self.process.stdout.close(); self.process.stderr.close(); self.process = None
+        thread.join(timeout=6)
+        self.upstream.delay_s = 0
+        self.px_port = free_port()
+        self.start(limits, keep_controls=True)
+        status, _ = self.post()
+        self.assertEqual(status, 503)
+        self.assertEqual(self.upstream.requests, 1)
+        self.assertEqual(self.budget(state)["projected"]["provider_calls"], 1)
+
+
+if __name__ == "__main__":
+    unittest.main(verbosity=2)

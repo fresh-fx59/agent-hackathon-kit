@@ -31,7 +31,9 @@ Set UPSTREAM_BODY_DIR to also keep every request and response body on disk, so a
 finished run can be replayed instead of inferred. See the REPLAYABLE TRACES note
 below for the layout and for what those files contain.
 """
+import datetime
 import errno
+import math
 import fcntl
 import gzip
 import json
@@ -68,6 +70,8 @@ RUN_ATTEMPT = os.environ.get("RUN_ATTEMPT", "")
 RUN_ATTEMPT_FILE = os.environ.get("RUN_ATTEMPT_FILE", "")
 UPSTREAM_INFLIGHT = os.environ.get("UPSTREAM_INFLIGHT", "")
 UPSTREAM_BUDGET_STATE = os.environ.get("UPSTREAM_BUDGET_STATE", "")
+UPSTREAM_ACTION_BUDGET = os.environ.get("UPSTREAM_ACTION_BUDGET", "").strip()
+UPSTREAM_RATE_SNAPSHOT = os.environ.get("UPSTREAM_RATE_SNAPSHOT", "").strip()
 UPSTREAM_EXPECTED_RETURNED_IDENTITY = os.environ.get(
     "UPSTREAM_EXPECTED_RETURNED_IDENTITY", "")
 PROXY_INSTANCE = str(uuid.uuid4())
@@ -372,7 +376,13 @@ _BUDGET_LIMITS = {
     "max_consecutive_provider_failures": _positive_env(
         "UPSTREAM_MAX_CONSECUTIVE_PROVIDER_FAILURES"),
 }
-_BUDGET_ENABLED = bool(UPSTREAM_BUDGET_STATE)
+ACTION_LIMITS = ("max_provider_calls", "max_prompt_tokens", "max_completion_tokens",
+                 "max_wall_time_s", "max_estimated_cost_rub")
+_ACTION_BUDGET_ENABLED = bool(UPSTREAM_ACTION_BUDGET)
+# Schema-1 is the pre-existing controller guard.  Schema-2 is deliberately
+# opt-in: a normal lane must not silently acquire a price input it never
+# declared, and a probe must not accidentally use the byte-only guard.
+_BUDGET_ENABLED = bool(UPSTREAM_BUDGET_STATE) and not _ACTION_BUDGET_ENABLED
 if _BUDGET_ENABLED and (not RUN_TAG or
                         not (UPSTREAM_EXPECTED_RETURNED_IDENTITY or UPSTREAM_ROUTE_FILE) or
                         any(value is None for value in _BUDGET_LIMITS.values())):
@@ -643,6 +653,96 @@ def _strict_object(pairs):
             raise ValueError("duplicate JSON key")
         row[key] = value
     return row
+
+
+def _read_small_regular_json(path, maximum=65536):
+    """Read an immutable, tiny control file without following a symlink."""
+    nofollow = getattr(os, "O_NOFOLLOW", 0)
+    try:
+        before = os.lstat(path)
+        if stat.S_ISLNK(before.st_mode) or not stat.S_ISREG(before.st_mode):
+            raise ValueError("not a regular file")
+        fd = os.open(path, os.O_RDONLY | nofollow)
+        try:
+            opened = os.fstat(fd)
+            if (not stat.S_ISREG(opened.st_mode) or opened.st_size > maximum or
+                    (before.st_dev, before.st_ino) != (opened.st_dev, opened.st_ino)):
+                raise ValueError("control file changed")
+            raw = os.read(fd, maximum + 1)
+            after = os.fstat(fd)
+            if len(raw) > maximum or (opened.st_dev, opened.st_ino, opened.st_size) != (
+                    after.st_dev, after.st_ino, after.st_size):
+                raise ValueError("control file changed")
+        finally:
+            os.close(fd)
+        return json.loads(raw.decode("utf-8"), object_pairs_hook=_strict_object)
+    except (OSError, UnicodeError, ValueError, TypeError, RecursionError) as exc:
+        raise ValueError("invalid control file") from exc
+
+
+def _strict_action_budget(path):
+    row = _read_small_regular_json(path)
+    if type(row) is not dict or set(row) != {"schema", "run_tag", "limits"} or \
+            row.get("schema") != 1 or type(row.get("run_tag")) is not str or \
+            not row["run_tag"] or row["run_tag"] != RUN_TAG:
+        raise ValueError("invalid action budget")
+    limits = row["limits"]
+    if type(limits) is not dict or set(limits) != set(ACTION_LIMITS):
+        raise ValueError("invalid action limits")
+    for name in ACTION_LIMITS:
+        value = limits[name]
+        if type(value) not in (int, float) or not math.isfinite(value) or value < 0:
+            raise ValueError("invalid action limit")
+    return {"schema": 1, "run_tag": RUN_TAG,
+            "limits": {name: limits[name] for name in ACTION_LIMITS}}
+
+
+def _strict_rate_snapshot(path):
+    row = _read_small_regular_json(path)
+    fields = {"schema", "run_tag", "effective_at", "source", "sha256",
+              "prompt_rub_per_token", "completion_rub_per_token"}
+    if type(row) is not dict or set(row) != fields or row.get("schema") != 1 or \
+            type(row.get("run_tag")) is not str or row["run_tag"] != RUN_TAG:
+        raise ValueError("invalid rate snapshot")
+    if any(type(row.get(name)) is not str or not row[name].strip()
+           for name in ("effective_at", "source", "sha256")) or \
+            not re.fullmatch(r"[0-9a-f]{64}", row["sha256"]):
+        raise ValueError("invalid rate snapshot")
+    try:
+        effective = datetime.datetime.fromisoformat(
+            row["effective_at"].replace("Z", "+00:00"))
+        if effective.tzinfo is None:
+            raise ValueError("timezone required")
+        age = time.time() - effective.timestamp()
+    except (TypeError, ValueError, OverflowError, OSError) as exc:
+        raise ValueError("invalid rate snapshot") from exc
+    # A price sheet older than one day is a different price sheet.  A snapshot
+    # noticeably in the future is equally not evidence available at dispatch.
+    if age > 86400 or age < -300:
+        raise ValueError("stale rate snapshot")
+    for name in ("prompt_rub_per_token", "completion_rub_per_token"):
+        value = row[name]
+        if type(value) not in (int, float) or not math.isfinite(value) or value < 0:
+            raise ValueError("invalid rate snapshot")
+    return {name: row[name] for name in fields}
+
+
+_ACTION_BUDGET = None
+_RATE_SNAPSHOT = None
+_ACTION_BUDGET_REASON = None
+if _ACTION_BUDGET_ENABLED:
+    try:
+        if not UPSTREAM_BUDGET_STATE or not RUN_TAG:
+            raise ValueError("action budget requires state and run tag")
+        _ACTION_BUDGET = _strict_action_budget(UPSTREAM_ACTION_BUDGET)
+    except ValueError:
+        _ACTION_BUDGET_REASON = "ACTION_BUDGET_INVALID"
+    try:
+        _RATE_SNAPSHOT = _strict_rate_snapshot(UPSTREAM_RATE_SNAPSHOT)
+    except ValueError:
+        _RATE_SNAPSHOT = None
+        if _ACTION_BUDGET_REASON is None:
+            _ACTION_BUDGET_REASON = "RATE_SNAPSHOT_INVALID"
 
 
 # ======================================================================
@@ -1265,6 +1365,32 @@ def _read_budget():
 
 
 def _budget_shape(row):
+    if _ACTION_BUDGET_ENABLED:
+        counters = ("provider_calls", "prompt_tokens", "completion_tokens",
+                    "wall_time_s", "estimated_cost_rub")
+        observed = ("provider_calls", "prompt_tokens", "completion_tokens")
+        fields = {"schema", "run_tag", "updated_at", "limits", "rate_snapshot",
+                  "budget_assurance", "projected", "observed", "completed_overshoot",
+                  "verdict", "reason"}
+        return (isinstance(row, dict) and set(row) == fields and row.get("schema") == 2 and
+                row.get("run_tag") == RUN_TAG and row.get("limits") ==
+                (_ACTION_BUDGET or {"limits": {name: 1 for name in ACTION_LIMITS}})["limits"] and
+                row.get("rate_snapshot") == _RATE_SNAPSHOT and
+                row.get("budget_assurance") == "client_pre_dispatch" and
+                all(type(row.get(group)) is dict for group in
+                    ("projected", "observed", "completed_overshoot")) and
+                set(row["projected"]) == set(counters) and
+                set(row["observed"]) == set(observed) and
+                set(row["completed_overshoot"]) == set(observed) and
+                all(type(row["projected"][name]) in (int, float) and
+                    not isinstance(row["projected"][name], bool) and
+                    math.isfinite(row["projected"][name]) and row["projected"][name] >= 0
+                    for name in counters) and
+                all(type(row[group][name]) is int and row[group][name] >= 0
+                    for group in ("observed", "completed_overshoot") for name in observed) and
+                row.get("verdict") in ("WITHIN", "EXCEEDED") and
+                (row.get("reason") is None or
+                 (isinstance(row.get("reason"), str) and _REASON_CODE.fullmatch(row["reason"])) ))
     fields = {"schema", "run_tag", "updated_at", "attempts_charged",
               "request_bytes", "consecutive_provider_failures", "limits",
               "verdict", "reason"}
@@ -1300,8 +1426,48 @@ def _write_budget(row):
             pass
 
 
+def _action_initial_budget():
+    return {"schema": 2, "run_tag": RUN_TAG, "updated_at": _budget_timestamp(),
+            "limits": ((_ACTION_BUDGET or {}).get("limits") or
+                       {name: 1 for name in ACTION_LIMITS}),
+            "rate_snapshot": _RATE_SNAPSHOT,
+            "budget_assurance": "client_pre_dispatch",
+            "projected": {"provider_calls": 0, "prompt_tokens": 0,
+                          "completion_tokens": 0, "wall_time_s": 0.0,
+                          "estimated_cost_rub": 0.0},
+            "observed": {"provider_calls": 0, "prompt_tokens": 0,
+                         "completion_tokens": 0},
+            "completed_overshoot": {"provider_calls": 0, "prompt_tokens": 0,
+                                    "completion_tokens": 0},
+            "verdict": "WITHIN", "reason": None}
+
+
+def _initialize_action_budget():
+    """Create schema-2 once; an existing damaged state is unknown, never zero."""
+    if not _ACTION_BUDGET_ENABLED:
+        return
+    lock_path = UPSTREAM_BUDGET_STATE + ".lock"
+    directory = os.path.dirname(os.path.abspath(lock_path))
+    os.makedirs(directory, exist_ok=True)
+    with _BUDGET_LOCK, open(lock_path, "a+", encoding="utf-8") as lock:
+        fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+        try:
+            try:
+                _read_budget()
+            except BudgetUnknown:
+                if os.path.exists(UPSTREAM_BUDGET_STATE):
+                    return
+                _write_budget(_action_initial_budget())
+        finally:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+
+
 def _reconcile_completed(row):
     """Keep durable reservations at least as large as completed paid rows."""
+    if _ACTION_BUDGET_ENABLED:
+        # Projected reservations are deliberately durable across an interrupted
+        # request.  The completed counters are changed only by response usage.
+        return row
     attempts = 0
     request_bytes = 0
     try:
@@ -1334,7 +1500,7 @@ def _reconcile_completed(row):
 
 
 def _budget_update(change):
-    if not _BUDGET_ENABLED:
+    if not (_BUDGET_ENABLED or _ACTION_BUDGET_ENABLED):
         return None
     lock_path = UPSTREAM_BUDGET_STATE + ".lock"
     directory = os.path.dirname(os.path.abspath(lock_path))
@@ -1374,7 +1540,97 @@ def _reserve_budget(request_bytes):
     return row is None or row["verdict"] == "WITHIN"
 
 
+def _estimate_dispatch(body, max_output_tokens, rates):
+    """The conservative pre-contact envelope: zero cache discount, output cap."""
+    if type(max_output_tokens) is not int or isinstance(max_output_tokens, bool) or \
+            max_output_tokens <= 0:
+        raise ValueError("request max_tokens is required")
+    prompt_tokens = estimate_prompt_tokens(body)
+    estimated_cost = (prompt_tokens * rates["prompt_rub_per_token"] +
+                      max_output_tokens * rates["completion_rub_per_token"])
+    if not math.isfinite(estimated_cost) or estimated_cost < 0:
+        raise ValueError("invalid dispatch estimate")
+    return {"provider_calls": 1, "prompt_tokens": prompt_tokens,
+            "completion_tokens": max_output_tokens,
+            "wall_time_s": UPSTREAM_READ_TIMEOUT,
+            "estimated_cost_rub": estimated_cost}
+
+
+def _reserve_dispatch(estimate):
+    """Atomically make a worst-case dispatch reservation before urlopen()."""
+    if not _ACTION_BUDGET_ENABLED:
+        return True
+    if _ACTION_BUDGET_REASON is not None:
+        def unavailable(row):
+            if row["verdict"] == "WITHIN":
+                row.update(verdict="EXCEEDED", reason=_ACTION_BUDGET_REASON)
+            return row
+        _budget_update(unavailable)
+        return False
+    if type(estimate) is not dict or set(estimate) != {
+            "provider_calls", "prompt_tokens", "completion_tokens", "wall_time_s",
+            "estimated_cost_rub"}:
+        raise BudgetUnknown()
+    def reserve(row):
+        if row["verdict"] == "EXCEEDED":
+            return row
+        projected = dict(row["projected"])
+        for name, value in estimate.items():
+            if type(value) not in (int, float) or isinstance(value, bool) or \
+                    not math.isfinite(value) or value < 0:
+                raise BudgetUnknown()
+            projected[name] += value
+        for name in ACTION_LIMITS:
+            counter = name.removeprefix("max_")
+            if projected[counter] > row["limits"][name]:
+                row.update(verdict="EXCEEDED", reason="MAX_" + name.upper())
+                return row
+        # Deliberately never released: an answer lost to a crash may still have
+        # been billed.  Completed usage is a second, honest counter below.
+        row["projected"] = projected
+        return row
+    row = _budget_update(reserve)
+    return row is not None and row["verdict"] == "WITHIN"
+
+
+def _mark_action_refusal(reason):
+    def refuse(row):
+        if row["verdict"] == "WITHIN":
+            row.update(verdict="EXCEEDED", reason=reason)
+        return row
+    _budget_update(refuse)
+
+
+def _record_completed_usage(usage):
+    """Record provider-reported usage without pretending it is a bill receipt."""
+    if not _ACTION_BUDGET_ENABLED:
+        return None
+    if type(usage) is not dict:
+        return None
+    values = {}
+    for name in ("prompt_tokens", "completion_tokens"):
+        value = usage.get(name)
+        if type(value) is not int or isinstance(value, bool) or value < 0:
+            return None
+        values[name] = value
+    def complete(row):
+        observed = dict(row["observed"])
+        observed["provider_calls"] += 1
+        observed["prompt_tokens"] += values["prompt_tokens"]
+        observed["completion_tokens"] += values["completion_tokens"]
+        row["observed"] = observed
+        overshoot = dict(row["completed_overshoot"])
+        for counter in overshoot:
+            limit = row["limits"]["max_" + counter]
+            overshoot[counter] = max(overshoot[counter], observed[counter] - limit, 0)
+        row["completed_overshoot"] = overshoot
+        return row
+    return _budget_update(complete)
+
+
 def _record_budget_result(success):
+    if _ACTION_BUDGET_ENABLED:
+        return None
     def finish(row):
         row["consecutive_provider_failures"] = (
             0 if success else row["consecutive_provider_failures"] + 1)
@@ -1875,6 +2131,26 @@ class Proxy(BaseHTTPRequestHandler):
         if not isinstance(request_max_tokens, int):
             request_max_tokens = None
 
+        # The action envelope is the paid contact boundary.  It judges the
+        # actual serialized bytes and required output cap before route lookup,
+        # credential reads, or a socket open.
+        dispatch_estimate = None
+        if _ACTION_BUDGET_ENABLED:
+            try:
+                if _ACTION_BUDGET_REASON is not None:
+                    if not _reserve_dispatch({}):
+                        self._budget_refusal()
+                        return
+                dispatch_estimate = _estimate_dispatch(body, request_max_tokens,
+                                                       _RATE_SNAPSHOT)
+            except (BudgetUnknown, ValueError, TypeError, KeyError):
+                try:
+                    _mark_action_refusal("REQUEST_MAX_TOKENS_INVALID")
+                except BudgetUnknown:
+                    pass
+                self._budget_refusal()
+                return
+
         # THE WALL. Before the route is read, before the credential is attached,
         # before one byte leaves this box.
         if UPSTREAM_PER_REQUEST_TOKEN_GATE > 0:
@@ -1934,7 +2210,8 @@ class Proxy(BaseHTTPRequestHandler):
                     self._key_refusal(str(exc), key_file)
                     return
             outcome = self._relay_once(sent_body, headers, requested, sent,
-                                       request_max_tokens, discarded, route)
+                                       request_max_tokens, discarded, route,
+                                       dispatch_estimate)
             if outcome == "SUBSTITUTED":
                 discarded += 1
                 continue
@@ -1961,7 +2238,7 @@ class Proxy(BaseHTTPRequestHandler):
             return
 
     def _relay_once(self, body, headers, requested, sent, request_max_tokens,
-                    discarded, route):
+                    discarded, route, dispatch_estimate=None):
         """One upstream call.
 
         Returns "SUBSTITUTED" when the provider answered as the wrong model
@@ -2050,7 +2327,9 @@ class Proxy(BaseHTTPRequestHandler):
             attempt += 1
             t_try = time.time()
             try:
-                if not _reserve_budget(len(body)):
+                allowed = (_reserve_dispatch(dispatch_estimate)
+                           if _ACTION_BUDGET_ENABLED else _reserve_budget(len(body)))
+                if not allowed:
                     self._budget_refusal()
                     return
             except BudgetUnknown:
@@ -2246,6 +2525,7 @@ class Proxy(BaseHTTPRequestHandler):
                   discard_fields = {"discarded_substitution": True,
                                     "substitution_attempt": discarded + 1,
                                     "substitution_retry_exhausted": not retryable}
+              ledger_durable = False
               try:
                   record(**_capture_row(capture), **discard_fields,
                          **window_fields, **route_fields, **clip_fields,
@@ -2267,8 +2547,16 @@ class Proxy(BaseHTTPRequestHandler):
                          deadline_unenforceable=state["deadline_unenforceable"] or None,
                          stream_parse_errors=state["stream_parse_errors"],
                          stream_complete=state["stream_complete"], stream_bytes=state["stream_bytes"])
+                  ledger_durable = True
               except OSError:
                   pass
+              if ledger_durable:
+                  try:
+                      _record_completed_usage(state["usage"])
+                  except BudgetUnknown:
+                      # Reservation remains durable.  Unknown reconciliation is
+                      # not grounds to free it or send another paid request.
+                      pass
               if state["substituted"]:
                   try:
                       resp.close()        # the rest of a discarded stream is waste
@@ -2614,6 +2902,7 @@ class Proxy(BaseHTTPRequestHandler):
 
 
 def main():
+    _initialize_action_budget()
     srv = ThreadingHTTPServer(("127.0.0.1", LISTEN_PORT), Proxy)
     srv.daemon_threads = True
     sys.stderr.write("upstream-log-proxy: 127.0.0.1:%d -> %s (log %s)\n"
