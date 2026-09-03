@@ -20,6 +20,30 @@ MARKER_DIR = ".sherlock"
 MARKER_FILE = "active.json"
 TOTAL_TIMEOUT = 50
 CHILD_TIMEOUT = 24
+# THE INPUT GATE THAT KILLED A RUN BY NOT EXISTING. `read_hook_input()` did a
+# bare `sys.stdin.read()`. As a Stop hook that is right: qwen writes the event
+# and closes the pipe. Called from a SHELL — which SKILL.md asks the model to
+# do, and which v44's own `--gate-tool` escape encourages — stdin is a pipe
+# nobody writes to and nobody closes, so the read never returns.
+#
+# Free acceptance run 20260902T193433Z-v44 died of exactly that: its
+# transcript shows «Command timed out after 600000ms before it could complete.
+# There was no output before it timed out.» on
+# `stopcheck.py --work ... --report ...`, ten minutes of silence that the
+# driver correctly reported as STAGE_STALLED. The arm was the thing that
+# stalled.
+#
+# AND THE EXISTING GUARDS COULD NOT HELP: `TOTAL_TIMEOUT` and the SIGALRM
+# watchdog are both armed in `main()`, AFTER the read. A 50-second budget
+# defended by a watchdog that is not running yet is not a budget. So the fix
+# is in two parts — arm the watchdog FIRST (see `run()`), and constrain the
+# input at the boundary rather than growing logic downstream to cope with it.
+#
+# 2.0s: a real hook's payload is already in the pipe when the process starts,
+# so readiness is immediate; nothing legitimate needs two seconds. A shell
+# invocation has nothing to offer and falls through to the empty event, which
+# is the long-standing «no marker -> allow» path, not a new behaviour.
+STDIN_WAIT_S = 2.0
 MAX_REASON = 220
 MAX_MANIFEST_WORKLISTS = 512
 
@@ -318,7 +342,44 @@ def generated_host_record(host):
     return "# %s\t%s\n" % (HOST_RECORD_NAME, host)
 
 
+def stdin_has_payload(wait_s=STDIN_WAIT_S):
+    """Is there hook input to read, or is this a shell invocation?
+
+    A Stop hook's event is written before the process is even scheduled, so
+    `select` says readable at once. A shell tool call hands over a pipe that
+    will never be written to, and `select` says nothing for the whole wait —
+    which is the answer, not a timeout to be worked around.
+
+    Anything unusual (no select, stdin closed or not selectable, a terminal)
+    reads as «no payload»: the fall-through is the allow path this hook has
+    always taken without a marker, so failing this way is failing open in the
+    direction the docstring at the top of the file already promises.
+    """
+    try:
+        if sys.stdin is None or sys.stdin.closed:
+            return False
+        fd = sys.stdin.fileno()
+    except (AttributeError, OSError, ValueError):
+        return False
+    try:
+        if os.isatty(fd):
+            # A human at a terminal, or a pty-driven session: there is no
+            # hook payload coming, and reading would block on the keyboard.
+            return False
+    except OSError:
+        pass
+    try:
+        import select as _select
+        ready, _, _ = _select.select([fd], [], [], max(0.0, float(wait_s)))
+        return bool(ready)
+    except (ImportError, OSError, ValueError, TypeError):
+        # No usable select: prefer answering over hanging.
+        return False
+
+
 def read_hook_input():
+    if not stdin_has_payload():
+        return {}
     try:
         raw = sys.stdin.read()
         data = json.loads(raw) if raw.strip() else {}
@@ -880,14 +941,20 @@ def resolve_workspace(event):
 
 
 def main():
-    event = read_hook_input()
-    workspace = resolve_workspace(event)
-    if workspace is None:
-        return block(cannot_determine_workspace_reason())
+    # THE WATCHDOG COVERS THE READ, NOT JUST THE WORK. It used to be armed
+    # after `read_hook_input()`, so the one call that could block forever was
+    # the one call it did not protect — see STDIN_WAIT_S. The deadline now
+    # starts before any I/O, and every budget below is measured from it, so
+    # the whole process is bounded by TOTAL_TIMEOUT rather than only its
+    # second half.
     deadline = time.monotonic() + TOTAL_TIMEOUT
     watchdog = arm_watchdog(deadline - time.monotonic())
     retire_path = None
     try:
+        event = read_hook_input()
+        workspace = resolve_workspace(event)
+        if workspace is None:
+            return block(cannot_determine_workspace_reason())
         try:
             decision, reason, retire_path = evaluate_stop(event, workspace, deadline)
         except DeadlineExceeded:
