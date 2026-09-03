@@ -33,6 +33,19 @@ STATUS_BASE = {"schema", "run_tag", "phase", "updated_at", "pid", "attempt",
                "exit_code", "duration_s", "upstream_log", "inflight_path"}
 PROCESS_FIELDS = {"process_start_ticks", "pgid", "boot_id_sha256", "command_sha256"}
 STATUS_ADDITIONS = {"primary_failure"}
+PRIMARY_FAILURE_CODES = frozenset({
+    "ATTRIBUTION_UNAVAILABLE", "LANE_ABORT_UNREADABLE", "LANE_ACCOUNTING_INCOMPLETE",
+    "LANE_AUDIT_FAILED", "NO_PROGRESS", "CLEAR_NOT_EFFECTIVE", "TARGET_REFUSED",
+    "STAGE_STALLED", "WRAPPER_NONZERO", "DRIVER_EXIT", "BUDGET_EXCEEDED",
+    "RATE_SNAPSHOT_INVALID", "RATE_SNAPSHOT_CHANGED", "ACTION_BUDGET_INVALID",
+    "MAX_PROVIDER_CALLS", "MAX_PROMPT_TOKENS", "MAX_COMPLETION_TOKENS",
+    "MAX_WALL_TIME_S", "MAX_ESTIMATED_COST_RUB",
+    "HARNESS_QUALIFICATION_MISSING", "TARGET_PROBE_NOT_AUTHORIZED",
+    "TARGET_PROBE_BUDGET", "TARGET_CONTRACT_FAILED", "TARGET_IDENTITY_MISMATCH",
+    "TARGET_IDENTITY_UNVERIFIABLE", "TARGET_RECEIPT_EXPIRED", "TARGET_RECEIPT_USED",
+    "APPROVAL_REPLAYED", "FULL_RUN_NOT_AUTHORIZED", "INPUTS_INCOMPARABLE",
+    "BILLING_UNKNOWN",
+})
 MANIFEST_KEYS = {"schema", "run_tag", "dataset", "arm", "trace", "commitment",
                  "corpus", "expected", "artifacts", "skill", "target",
                  "target_profile", "input_identity", "health_receipt", "manifest_sha256"}
@@ -282,7 +295,8 @@ def status_projection(held, manifest):
             label(row.get("phase")) is None or
             timestamp(row.get("updated_at")) is None or not uint(row.get("attempt"), True) or
             not uint(row.get("pid"), True) or
-            (row.get("primary_failure") is not None and label(row.get("primary_failure")) is None)):
+            (row.get("primary_failure") is not None and
+             row.get("primary_failure") not in PRIMARY_FAILURE_CODES)):
         return None, ["STATUS_INVALID"], size
     if row["phase"] not in PHASES:
         row = dict(row); row["phase"] = "UNKNOWN"

@@ -14,6 +14,21 @@ STATUS_FIELDS = ("schema", "run_tag", "phase", "updated_at", "pid", "attempt",
                  "process_start_ticks", "pgid", "boot_id_sha256", "command_sha256",
                  "primary_failure")
 TERMINAL_FAILURES = {"RUN_FAILED", "REJECTED"}
+PRIMARY_FAILURE_CODES = frozenset({
+    # Current runner and lane terminal causes.
+    "ATTRIBUTION_UNAVAILABLE", "LANE_ABORT_UNREADABLE", "LANE_ACCOUNTING_INCOMPLETE",
+    "LANE_AUDIT_FAILED", "NO_PROGRESS", "CLEAR_NOT_EFFECTIVE", "TARGET_REFUSED",
+    "STAGE_STALLED", "WRAPPER_NONZERO", "DRIVER_EXIT", "BUDGET_EXCEEDED",
+    "RATE_SNAPSHOT_INVALID", "RATE_SNAPSHOT_CHANGED", "ACTION_BUDGET_INVALID",
+    "MAX_PROVIDER_CALLS", "MAX_PROMPT_TOKENS", "MAX_COMPLETION_TOKENS",
+    "MAX_WALL_TIME_S", "MAX_ESTIMATED_COST_RUB",
+    # Admission and probe failure contract.
+    "HARNESS_QUALIFICATION_MISSING", "TARGET_PROBE_NOT_AUTHORIZED",
+    "TARGET_PROBE_BUDGET", "TARGET_CONTRACT_FAILED", "TARGET_IDENTITY_MISMATCH",
+    "TARGET_IDENTITY_UNVERIFIABLE", "TARGET_RECEIPT_EXPIRED", "TARGET_RECEIPT_USED",
+    "APPROVAL_REPLAYED", "FULL_RUN_NOT_AUTHORIZED", "INPUTS_INCOMPARABLE",
+    "BILLING_UNKNOWN",
+})
 SECRET_MARKERS = re.compile(r"(?:bearer\s+|(?:sk|ghp|glpat|xox[baprs])-|AKIA[0-9A-Z]{16}|-----BEGIN .*PRIVATE KEY-----|(?:password|token|api[_-]?key)\s*[:=])", re.I)
 
 
@@ -36,7 +51,7 @@ def _failure_code(value):
         _safe(value)
     except ValueError:
         return None
-    return value
+    return value if value in PRIMARY_FAILURE_CODES else None
 
 
 def state_event(event: str, *, exit_code=None, reason=None, previous=None) -> dict:
@@ -74,32 +89,45 @@ def _normalize(fields, previous=None):
         row["phase"], exit_code=row["exit_code"], reason=row["reason"],
         previous=previous,
     )
-    supplied = _failure_code(row["primary_failure"])
-    row["primary_failure"] = (
-        terminal["primary_failure"] or supplied
-        if row["phase"] in TERMINAL_FAILURES else None
-    )
+    # A caller may describe a failure in `reason`, but only a closed, recognised
+    # code on the first terminal transition becomes machine-readable state.
+    # Every later observation retains that first cause, including after restart.
+    row["primary_failure"] = terminal["primary_failure"]
     for value in row.values():
         _safe(value)
     return row
 
 
 def write_status(path: str, **fields) -> dict:
-    row = _normalize(fields, previous=_previous_status(path))
     directory = os.path.dirname(os.path.abspath(path))
     os.makedirs(directory, exist_ok=True)
-    fd, temporary = tempfile.mkstemp(prefix=".status.json.", dir=directory)
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
-            json.dump(row, handle, ensure_ascii=False, sort_keys=True)
-            handle.write("\n")
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(temporary, path)
-    finally:
-        if os.path.exists(temporary):
-            os.unlink(temporary)
-    return row
+    # The sidecar survives atomic replacement of status.json, so all coordinated
+    # writers serialize read -> normalize -> replace as one transaction.
+    lock_path = os.path.abspath(path) + ".lock"
+    with open(lock_path, "a+", encoding="utf-8") as lock:
+        fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+        try:
+            row = _normalize(fields, previous=_previous_status(path))
+            temporary = None
+            try:
+                fd, temporary = tempfile.mkstemp(prefix=".status.json.", dir=directory)
+                with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                    json.dump(row, handle, ensure_ascii=False, sort_keys=True)
+                    handle.write("\n")
+                    handle.flush()
+                    os.fsync(handle.fileno())
+                os.replace(temporary, path)
+                directory_fd = os.open(directory, os.O_RDONLY)
+                try:
+                    os.fsync(directory_fd)
+                finally:
+                    os.close(directory_fd)
+            finally:
+                if temporary is not None and os.path.exists(temporary):
+                    os.unlink(temporary)
+            return row
+        finally:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
 
 
 def append_event(path: str, event: str, **fields) -> dict:

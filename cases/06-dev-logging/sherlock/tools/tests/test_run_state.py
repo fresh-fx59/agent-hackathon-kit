@@ -1,7 +1,9 @@
+import fcntl
 import json
 import pathlib
 import subprocess
 import sys
+import threading
 import unittest
 
 MEASURE = pathlib.Path(__file__).resolve().parents[1].parent / "measure"
@@ -158,6 +160,69 @@ class RunStateTests(unittest.TestCase):
 
             self.assertEqual(later["primary_failure"], "NO_PROGRESS")
             self.assertEqual(json.loads(path.read_text())["primary_failure"], "NO_PROGRESS")
+
+    def test_first_terminal_failure_survives_every_later_phase(self):
+        """A later non-terminal observer must not erase the original terminal cause."""
+        import tempfile
+        with tempfile.TemporaryDirectory() as directory:
+            path = pathlib.Path(directory) / "status.json"
+            run_state.write_status(
+                str(path), run_tag="r1", phase="RUN_FAILED", exit_code=9,
+                reason="NO_PROGRESS",
+            )
+            later = run_state.write_status(
+                str(path), run_tag="r1", phase="VERIFYING", reason="ordinary detail",
+            )
+
+            self.assertEqual(later["primary_failure"], "NO_PROGRESS")
+            self.assertEqual(json.loads(path.read_text())["primary_failure"], "NO_PROGRESS")
+
+    def test_status_transaction_holds_a_stable_sidecar_lock(self):
+        """A second writer cannot observe a half-computed status transaction."""
+        import tempfile
+        with tempfile.TemporaryDirectory() as directory:
+            path = pathlib.Path(directory) / "status.json"
+            entered = threading.Event()
+            release = threading.Event()
+            original = run_state._normalize
+
+            def block_normalize(*args, **kwargs):
+                row = original(*args, **kwargs)
+                entered.set()
+                self.assertTrue(release.wait(5), "writer was not released")
+                return row
+
+            from unittest import mock
+            with mock.patch.object(run_state, "_normalize", side_effect=block_normalize):
+                worker = threading.Thread(
+                    target=run_state.write_status,
+                    args=(str(path),), kwargs={"run_tag": "r1", "phase": "RUN_FAILED",
+                                                "reason": "NO_PROGRESS"},
+                )
+                worker.start()
+                self.assertTrue(entered.wait(5), "writer did not enter transaction")
+                lock_path = str(path) + ".lock"
+                with open(lock_path, "a+", encoding="utf-8") as lock:
+                    try:
+                        fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    except BlockingIOError:
+                        held = True
+                    else:
+                        held = False
+                        fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+                release.set()
+                worker.join(5)
+                self.assertFalse(worker.is_alive())
+
+            self.assertTrue(held)
+
+    def test_unrecognized_reason_cannot_become_primary_failure(self):
+        """Caller detail is not an open-ended machine-readable failure vocabulary."""
+        row = run_state.state_event(
+            "RUN_FAILED", exit_code=9, reason="BILLED_999_RUB"
+        )
+
+        self.assertIsNone(row["primary_failure"])
 
     def test_terminal_state_handles_missing_or_malformed_previous_failure(self):
         """Optional predecessor data cannot make the failure projection crash or lie."""

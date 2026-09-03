@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """Wait for a Sherlock trace, verify its report, and explain any failure."""
 import argparse
+import datetime as dt
 import hashlib
 import json
 import math
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import sys
@@ -16,6 +18,19 @@ HERE = Path(__file__).resolve().parent
 STATUS_TOOL = HERE / "bench-status.py"
 TERMINAL = {"ACCEPTED", "REJECTED", "RUN_FAILED", "FINISHED", "FINISHED_UNCHECKED"}
 REQUIRED_GATES = ("citecheck", "triagecheck", "statecheck", "reportcheck")
+PRIMARY_FAILURE_CODES = frozenset({
+    "ATTRIBUTION_UNAVAILABLE", "LANE_ABORT_UNREADABLE", "LANE_ACCOUNTING_INCOMPLETE",
+    "LANE_AUDIT_FAILED", "NO_PROGRESS", "CLEAR_NOT_EFFECTIVE", "TARGET_REFUSED",
+    "STAGE_STALLED", "WRAPPER_NONZERO", "DRIVER_EXIT", "BUDGET_EXCEEDED",
+    "RATE_SNAPSHOT_INVALID", "RATE_SNAPSHOT_CHANGED", "ACTION_BUDGET_INVALID",
+    "MAX_PROVIDER_CALLS", "MAX_PROMPT_TOKENS", "MAX_COMPLETION_TOKENS",
+    "MAX_WALL_TIME_S", "MAX_ESTIMATED_COST_RUB",
+    "HARNESS_QUALIFICATION_MISSING", "TARGET_PROBE_NOT_AUTHORIZED",
+    "TARGET_PROBE_BUDGET", "TARGET_CONTRACT_FAILED", "TARGET_IDENTITY_MISMATCH",
+    "TARGET_IDENTITY_UNVERIFIABLE", "TARGET_RECEIPT_EXPIRED", "TARGET_RECEIPT_USED",
+    "APPROVAL_REPLAYED", "FULL_RUN_NOT_AUTHORIZED", "INPUTS_INCOMPARABLE",
+    "BILLING_UNKNOWN",
+})
 MAX_JSON = 1024 * 1024
 MAX_LEDGER = 64 * 1024 * 1024
 MAX_LEDGER_ROWS = 100000
@@ -168,25 +183,32 @@ def upstream_metrics(trace):
                 if normalized_class in {"compaction", "state_snapshot"}:
                     clipped.append(normalized_class)
             usage = row.get("usage")
-            if not isinstance(usage, dict):
+            if usage is None:
                 continue
-            usage_calls += 1
             prompt_tokens = usage.get("prompt_tokens")
             output_tokens = usage.get("completion_tokens")
-            prompt_tokens = prompt_tokens if type(prompt_tokens) is int and prompt_tokens >= 0 else 0
-            output_tokens = output_tokens if type(output_tokens) is int and output_tokens >= 0 else 0
+            if (not isinstance(usage, dict) or type(prompt_tokens) is not int or
+                    prompt_tokens < 0 or type(output_tokens) is not int or output_tokens < 0):
+                raise ValueError("invalid provider usage counters")
             details = usage.get("prompt_tokens_details")
-            cached_tokens = details.get("cached_tokens") if isinstance(details, dict) else 0
-            cached_tokens = cached_tokens if type(cached_tokens) is int and cached_tokens >= 0 else 0
+            if details is None:
+                cached_tokens = 0
+            elif isinstance(details, dict):
+                cached_tokens = details.get("cached_tokens", 0)
+                if type(cached_tokens) is not int or cached_tokens < 0:
+                    raise ValueError("invalid provider usage counters")
+            else:
+                raise ValueError("invalid provider usage counters")
             completion_details = usage.get("completion_tokens_details")
-            reasoning_tokens = (
-                completion_details.get("reasoning_tokens")
-                if isinstance(completion_details, dict) else 0
-            )
-            reasoning_tokens = (
-                reasoning_tokens
-                if type(reasoning_tokens) is int and reasoning_tokens >= 0 else 0
-            )
+            if completion_details is None:
+                reasoning_tokens = 0
+            elif isinstance(completion_details, dict):
+                reasoning_tokens = completion_details.get("reasoning_tokens", 0)
+                if type(reasoning_tokens) is not int or reasoning_tokens < 0:
+                    raise ValueError("invalid provider usage counters")
+            else:
+                raise ValueError("invalid provider usage counters")
+            usage_calls += 1
             prompt += prompt_tokens
             output += output_tokens
             cached += cached_tokens
@@ -247,6 +269,25 @@ def _exit_code(value):
     return None
 
 
+def _finite_nonnegative(value):
+    return (not isinstance(value, bool) and isinstance(value, (int, float)) and
+            math.isfinite(value) and value >= 0)
+
+
+def _fresh_timestamp(value):
+    """Match the dispatch boundary: UTC, no older than a day or 5m future."""
+    if not isinstance(value, str) or not value:
+        return False
+    try:
+        parsed = dt.datetime.fromisoformat(value.replace("Z", "+00:00"))
+        if parsed.tzinfo is None or parsed.utcoffset() != dt.timedelta(0):
+            return False
+        age = time.time() - parsed.timestamp()
+    except (TypeError, ValueError, OverflowError, OSError):
+        return False
+    return -300 <= age <= 86400
+
+
 def _latest_attempt_exit(trace):
     path = trace / "attempts.jsonl"
     try:
@@ -269,40 +310,72 @@ def _latest_attempt_exit(trace):
 
 
 def _billing_metrics(trace):
-    receipt = _optional_json(trace, "provider-billing-receipt.json")
-    if not isinstance(receipt, dict):
-        return {"provider_billed_calls": None, "provider_billed_cost": None}
-    calls, cost = receipt.get("calls"), receipt.get("cost")
-    if (type(calls) is not int or calls < 0 or isinstance(cost, bool)
-            or not isinstance(cost, (int, float)) or not math.isfinite(cost) or cost < 0):
-        return {"provider_billed_calls": None, "provider_billed_cost": None}
-    return {"provider_billed_calls": calls, "provider_billed_cost": cost}
+    # No provider-verifiable receipt schema or trust root exists yet. Local
+    # files, their hashes, and controller signatures are not provider evidence.
+    return {"provider_billed_calls": None, "provider_billed_cost": None}
 
 
 def _budget_estimate(trace, run_tag):
-    """Return a rate-bound pre-dispatch estimate, never an unproved ledger guess."""
+    """Return only a fresh configured estimate from a complete budget state."""
     budget = _optional_json(trace, "upstream-budget-state.json")
-    if not isinstance(budget, dict) or budget.get("schema") != 2 or budget.get("run_tag") != run_tag:
+    fields = {"schema", "run_tag", "updated_at", "limits", "rate_snapshot",
+              "budget_assurance", "projected", "observed", "completed_overshoot",
+              "observed_usage_unknown", "completed_attempt_ids", "verdict", "reason"}
+    limits = ("max_provider_calls", "max_prompt_tokens", "max_completion_tokens",
+              "max_wall_time_s", "max_estimated_cost_rub")
+    observed = ("provider_calls", "prompt_tokens", "completion_tokens")
+    projected = observed + ("wall_time_s", "estimated_cost_rub")
+    if (not isinstance(budget, dict) or set(budget) != fields or budget.get("schema") != 2
+            or budget.get("run_tag") != run_tag or budget.get("budget_assurance") != "client_pre_dispatch"):
         return None, None
-    projected, snapshot = budget.get("projected"), budget.get("rate_snapshot")
-    if not isinstance(projected, dict) or not isinstance(snapshot, dict):
+    snapshot = budget.get("rate_snapshot")
+    if (not _fresh_timestamp(budget.get("updated_at")) or not isinstance(snapshot, dict)
+            or not isinstance(budget.get("limits"), dict)
+            or set(budget["limits"]) != set(limits)
+            or any(not _finite_nonnegative(budget["limits"].get(name)) for name in limits)
+            or any(type(budget["limits"].get(name)) is not int for name in limits[:3])
+            or any(not isinstance(budget.get(group), dict) for group in
+                   ("projected", "observed", "completed_overshoot"))
+            or set(budget["projected"]) != set(projected)
+            or set(budget["observed"]) != set(observed)
+            or set(budget["completed_overshoot"]) != set(observed)):
         return None, None
-    cost = projected.get("estimated_cost_rub")
-    fields = {"schema", "run_tag", "effective_at", "source", "sha256",
-              "prompt_rub_per_token", "completion_rub_per_token"}
-    if (set(snapshot) != fields or snapshot.get("schema") != 1
+    if (any(not _finite_nonnegative(budget["projected"].get(name)) for name in projected)
+            or any(type(budget["projected"].get(name)) is not int for name in observed)
+            or any(type(budget[group].get(name)) is not int or budget[group][name] < 0
+                   for group in ("observed", "completed_overshoot") for name in observed)
+            or type(budget.get("observed_usage_unknown")) is not int
+            or budget["observed_usage_unknown"] < 0
+            or not isinstance(budget.get("completed_attempt_ids"), list)
+            or len(set(budget["completed_attempt_ids"])) != len(budget["completed_attempt_ids"])
+            or not all(isinstance(item, str) and re.fullmatch(r"[0-9a-f]{32}\.a[1-9][0-9]*", item)
+                       for item in budget["completed_attempt_ids"])
+            or budget["observed"]["provider_calls"] != len(budget["completed_attempt_ids"])
+            or budget["projected"]["provider_calls"] < budget["observed"]["provider_calls"]
+            or budget["observed_usage_unknown"] > budget["observed"]["provider_calls"]
+            or any(budget["completed_overshoot"][name] != max(
+                budget["observed"][name] - budget["limits"]["max_" + name], 0)
+                   for name in observed)
+            or budget.get("verdict") not in {"WITHIN", "EXCEEDED"}
+            or (budget.get("reason") is not None and
+                (not isinstance(budget.get("reason"), str) or
+                 re.fullmatch(r"[A-Z][A-Z0-9_]{0,63}", budget["reason"]) is None))):
+        return None, None
+    cost = budget["projected"]["estimated_cost_rub"]
+    rate_fields = {"schema", "run_tag", "effective_at", "source", "sha256",
+                   "prompt_rub_per_token", "completion_rub_per_token"}
+    if (set(snapshot) != rate_fields or snapshot.get("schema") != 1
             or snapshot.get("run_tag") != run_tag
             or not all(isinstance(snapshot.get(name), str) and snapshot[name]
                        for name in ("effective_at", "source", "sha256"))
-            or not isinstance(cost, (int, float)) or isinstance(cost, bool)
-            or not math.isfinite(cost) or cost < 0):
+            or not _fresh_timestamp(snapshot.get("effective_at"))):
         return None, None
     if any(isinstance(snapshot.get(name), bool)
            or not isinstance(snapshot.get(name), (int, float))
            or not math.isfinite(snapshot[name]) or snapshot[name] < 0
            for name in ("prompt_rub_per_token", "completion_rub_per_token")):
         return None, None
-    unsigned = {name: snapshot[name] for name in fields if name != "sha256"}
+    unsigned = {name: snapshot[name] for name in rate_fields if name != "sha256"}
     digest = hashlib.sha256(json.dumps(
         unsigned, ensure_ascii=False, sort_keys=True, separators=(",", ":")
     ).encode("utf-8")).hexdigest()
@@ -579,8 +652,6 @@ def terminal_verdict(args, status):
     if not isinstance(driver, dict):
         driver = _optional_json(trace, "recovery.json")
     driver_exit_code = _exit_code(driver.get("exit_code")) if isinstance(driver, dict) else None
-    if driver_exit_code is None:
-        driver_exit_code = attempt_exit_code
     exit_layers = {
         "attempt_exit_code": attempt_exit_code,
         "driver_exit_code": driver_exit_code,
@@ -588,10 +659,8 @@ def terminal_verdict(args, status):
         "wrapper_exit_code": _exit_code(
             status.get("wrapper_exit_code", status.get("exit_code"))
         ),
-        "primary_failure": (
-            status.get("primary_failure") if isinstance(status.get("primary_failure"), str)
-            else status.get("reason") if isinstance(status.get("reason"), str) else None
-        ),
+        "primary_failure": (status.get("primary_failure")
+                            if status.get("primary_failure") in PRIMARY_FAILURE_CODES else None),
         "terminal_observation": status.get("phase"),
     }
     metrics = {"gate_exits": gate_exits, "gate_blocking": gate_blocking,
@@ -633,9 +702,6 @@ def render_summary(row):
         "usage_bearing_calls=%s" % metrics.get("usage_bearing_calls"),
         "estimated_cost=%s" % metrics.get("estimated_cost"),
     ]
-    if metrics.get("provider_billed_calls") is not None:
-        lines.append("provider_billed_calls=%s" % metrics["provider_billed_calls"])
-        lines.append("provider_billed_cost=%s" % metrics.get("provider_billed_cost"))
     return "\n".join(lines)
 
 

@@ -161,6 +161,16 @@ class BenchStatusTests(unittest.TestCase):
         self.assertEqual(row["phase"], "RUN_FAILED")
         self.assertEqual(row["primary_failure"], "NO_PROGRESS")
 
+    def test_status_projection_rejects_unknown_primary_failure_vocabulary(self):
+        """Authenticated snapshots cannot turn caller detail into machine semantics."""
+        self.write_status(phase="RUN_FAILED", exit_code=2, reason="ordinary detail",
+                          primary_failure="BILLED_999_RUB")
+
+        row = self.projection()
+
+        self.assertIsNone(row["primary_failure"])
+        self.assertIn("STATUS_INVALID", row["diagnostics"])
+
     def test_tampered_manifest_never_projects_facts(self):
         self.write_status()
         path = self.fx.trace / "run-manifest.json"

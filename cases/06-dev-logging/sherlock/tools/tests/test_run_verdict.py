@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Provider-free contract tests for the Sherlock run verdict wrapper."""
 import importlib.util
+import datetime as dt
 import hashlib
 import json
 from pathlib import Path
@@ -156,9 +157,11 @@ class RunVerdictTests(unittest.TestCase):
             json.dumps(value), encoding="utf-8"
         )
 
-    def write_budget_estimate(self, cost):
+    def write_budget_estimate(self, cost, effective_at=None):
+        now = dt.datetime.now(dt.timezone.utc).replace(microsecond=0)
         snapshot = {
-            "schema": 1, "run_tag": "run-001", "effective_at": "2026-09-03T00:00:00Z",
+            "schema": 1, "run_tag": "run-001",
+            "effective_at": effective_at or now.isoformat().replace("+00:00", "Z"),
             "source": "fixture", "prompt_rub_per_token": 0.01,
             "completion_rub_per_token": 0.02,
         }
@@ -166,8 +169,21 @@ class RunVerdictTests(unittest.TestCase):
             snapshot, ensure_ascii=False, sort_keys=True, separators=(",", ":")
         ).encode("utf-8")).hexdigest()
         (self.fx.trace / "upstream-budget-state.json").write_text(json.dumps({
-            "schema": 2, "run_tag": "run-001", "rate_snapshot": snapshot,
-            "projected": {"estimated_cost_rub": cost},
+            "schema": 2, "run_tag": "run-001",
+            "updated_at": now.isoformat().replace("+00:00", "Z"),
+            "limits": {"max_provider_calls": 10, "max_prompt_tokens": 400000,
+                       "max_completion_tokens": 20000, "max_wall_time_s": 600,
+                       "max_estimated_cost_rub": 15.0},
+            "rate_snapshot": snapshot, "budget_assurance": "client_pre_dispatch",
+            "projected": {"provider_calls": 1, "prompt_tokens": 100,
+                          "completion_tokens": 20, "wall_time_s": 1.0,
+                          "estimated_cost_rub": cost},
+            "observed": {"provider_calls": 0, "prompt_tokens": 0,
+                         "completion_tokens": 0},
+            "observed_usage_unknown": 0, "completed_attempt_ids": [],
+            "completed_overshoot": {"provider_calls": 0, "prompt_tokens": 0,
+                                    "completion_tokens": 0},
+            "verdict": "WITHIN", "reason": None,
         }), encoding="utf-8")
 
     def test_usage_rows_do_not_imply_provider_billing(self):
@@ -212,8 +228,8 @@ class RunVerdictTests(unittest.TestCase):
         self.assertEqual(row["terminal_observation"], "RUN_FAILED")
         self.assertEqual(set(row["gate_exit_codes"]), set(VERDICT_TOOL.REQUIRED_GATES))
 
-    def test_latest_attempt_is_the_driver_result_when_no_separate_receipt_exists(self):
-        """Legacy traces still expose the driver's final attempt without inventing a wrapper exit."""
+    def test_missing_driver_receipt_does_not_collapse_into_attempt_layer(self):
+        """A final attempt is observed evidence, not an invented driver receipt."""
         self.write_status("RUN_FAILED", exit_code=2, reason="WRAPPER_NONZERO",
                           primary_failure="NO_PROGRESS")
         self.write_validity(False, ("driver_failed",))
@@ -227,10 +243,10 @@ class RunVerdictTests(unittest.TestCase):
         self.assertEqual(result.returncode, 1, result.stderr)
         row = json.loads(result.stdout)
         self.assertEqual(row["attempt_exit_code"], 9)
-        self.assertEqual(row["driver_exit_code"], 9)
+        self.assertIsNone(row["driver_exit_code"])
 
-    def test_estimate_and_billing_receipt_are_independent_optional_evidence(self):
-        """A rate estimate and a provider receipt remain separate, nullable claims."""
+    def test_local_billing_receipt_never_manufactures_provider_billing(self):
+        """Until a provider verifier exists, local JSON remains non-provider evidence."""
         self.write_status("ACCEPTED")
         self.write_validity()
         self.write_clean_report_artifacts()
@@ -243,8 +259,8 @@ class RunVerdictTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         metrics = json.loads(result.stdout)["metrics"]
         self.assertEqual(metrics["estimated_cost"], 2.5)
-        self.assertEqual(metrics["provider_billed_calls"], 2)
-        self.assertEqual(metrics["provider_billed_cost"], 7.5)
+        self.assertIsNone(metrics["provider_billed_calls"])
+        self.assertIsNone(metrics["provider_billed_cost"])
 
     def test_estimate_survives_a_call_without_provider_usage_counters(self):
         """A known reservation estimate does not depend on a provider usage response."""
@@ -274,6 +290,59 @@ class RunVerdictTests(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(json.loads(result.stdout)["metrics"]["estimated_cost"], 3.25)
+
+    def test_stale_rate_snapshot_cannot_support_an_estimate(self):
+        """A self-hash is insufficient once the configured rate is stale."""
+        self.write_status("ACCEPTED")
+        self.write_validity()
+        self.write_clean_report_artifacts()
+        self.write_budget_estimate(3.25, effective_at="2000-01-01T00:00:00Z")
+
+        result = self.verdict()
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        metrics = json.loads(result.stdout)["metrics"]
+        self.assertIsNone(metrics["estimated_cost"])
+        self.assertIsNone(metrics["rate_snapshot"])
+
+    def test_future_or_inconsistent_budget_state_cannot_support_an_estimate(self):
+        """Every schema-2 invariant remains required at terminal projection time."""
+        self.write_status("ACCEPTED")
+        self.write_validity()
+        self.write_clean_report_artifacts()
+        for mutation in ("future-rate", "inconsistent-observed", "malformed-reason"):
+            with self.subTest(mutation=mutation):
+                self.write_budget_estimate(3.25)
+                path = self.fx.trace / "upstream-budget-state.json"
+                budget = json.loads(path.read_text(encoding="utf-8"))
+                if mutation == "future-rate":
+                    snapshot = budget["rate_snapshot"]
+                    snapshot["effective_at"] = "2999-01-01T00:00:00Z"
+                    unsigned = {name: value for name, value in snapshot.items() if name != "sha256"}
+                    snapshot["sha256"] = hashlib.sha256(json.dumps(
+                        unsigned, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+                    ).encode("utf-8")).hexdigest()
+                elif mutation == "inconsistent-observed":
+                    budget["observed"]["provider_calls"] = 1
+                else:
+                    budget["reason"] = "ordinary detail"
+                path.write_text(json.dumps(budget), encoding="utf-8")
+
+                result = self.verdict()
+
+                self.assertEqual(result.returncode, 0, result.stderr)
+                metrics = json.loads(result.stdout)["metrics"]
+                self.assertIsNone(metrics["estimated_cost"])
+                self.assertIsNone(metrics["rate_snapshot"])
+
+    def test_malformed_usage_is_not_exact_zero_observation(self):
+        """An empty provider usage object is invalid, not a zero-token counter set."""
+        (self.fx.trace / "upstream-completed.jsonl").write_text(
+            json.dumps({"status": 200, "usage": {}}) + "\n", encoding="utf-8"
+        )
+
+        with self.assertRaises(ValueError):
+            VERDICT_TOOL.upstream_metrics(self.fx.trace)
 
     def test_malformed_optional_cost_evidence_is_null_not_a_crash(self):
         """Optional receipt and estimate corruption cannot manufacture a cost claim."""
