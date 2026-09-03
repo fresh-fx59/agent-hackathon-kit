@@ -31,6 +31,17 @@ class Upstream(BaseHTTPRequestHandler):
         size = int(self.headers.get("Content-Length") or 0)
         self.rfile.read(size)
         self.server.requests += 1
+        if self.server.sse_fragments:
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.end_headers()
+            for fragment, pause in self.server.sse_fragments:
+                try:
+                    self.wfile.write(fragment); self.wfile.flush()
+                except BrokenPipeError:
+                    return
+                time.sleep(pause)
+            return
         status = (self.server.statuses.pop(0) if self.server.statuses else 200)
         delay = getattr(self.server, "delay_s", 0)
         if delay:
@@ -68,6 +79,7 @@ class DispatchBudget(unittest.TestCase):
         self.upstream.delay_s = 0
         self.upstream.drip_s = 0
         self.upstream.statuses = []
+        self.upstream.sse_fragments = []
         self.upstream.usage = {"prompt_tokens": 10, "completion_tokens": 5}
         self.up_port = self.upstream.server_port
         threading.Thread(target=self.upstream.serve_forever, daemon=True).start()
@@ -375,14 +387,40 @@ class DispatchBudget(unittest.TestCase):
         limits = {"max_provider_calls": 2, "max_prompt_tokens": 10000,
                   "max_completion_tokens": 1000, "max_wall_time_s": 300,
                   "max_estimated_cost_rub": 100.0}
-        state = self.start(limits)
+        state = self.start(limits, extra_env={"UPSTREAM_RETRY_MAX": "1"})
         status, _ = self.post()
-        self.assertEqual(status, 503)
-        self.assertEqual(self.upstream.requests, 1)
-        self.assertEqual(self.budget(state)["projected"]["provider_calls"], 1)
+        self.assertEqual(status, 200)
+        self.assertEqual(self.upstream.requests, 2)
+        for _ in range(100):
+            row = self.budget(state)
+            if row["observed"]["provider_calls"] == 2:
+                break
+            time.sleep(0.02)
+        self.assertEqual(row["projected"]["provider_calls"], 2)
+        self.assertEqual(row["observed"]["provider_calls"], 2)
+        ledger = [json.loads(line) for line in
+                  (pathlib.Path(self.temp.name) / "ledger.jsonl").read_text().splitlines()]
+        self.assertEqual(len({row["action_attempt_id"] for row in ledger}), 2)
 
     def test_drip_body_obeys_reserved_end_to_end_deadline(self):
         self.upstream.drip_s = 0.75
+        limits = {"max_provider_calls": 10, "max_prompt_tokens": 10000,
+                  "max_completion_tokens": 1000, "max_wall_time_s": 2,
+                  "max_estimated_cost_rub": 100.0}
+        state = self.start(limits)
+        began = time.monotonic(); status, _ = self.post(); elapsed = time.monotonic() - began
+        self.assertEqual(status, 502)
+        self.assertLess(elapsed, 2.5)
+        self.assertEqual(self.upstream.requests, 1)
+        self.assertEqual(self.budget(state)["projected"]["wall_time_s"], 2.0)
+
+    def test_fragmented_unterminated_sse_cannot_finish_after_action_deadline(self):
+        self.upstream.sse_fragments = [
+            (b'data: {"model":"fixture-model","choices":[', 0.7),
+            (b'{"delta":{"content":"o', 0.7),
+            (b'k"}}]}', 0.7),
+            (b'\n\n', 0),
+        ]
         limits = {"max_provider_calls": 10, "max_prompt_tokens": 10000,
                   "max_completion_tokens": 1000, "max_wall_time_s": 2,
                   "max_estimated_cost_rub": 100.0}
@@ -412,6 +450,40 @@ class DispatchBudget(unittest.TestCase):
         status, _ = self.post()
         self.assertEqual(status, 503)
         self.assertEqual(self.upstream.requests, 1)
+
+    def test_restart_reconciles_every_projected_dimension_before_new_contact(self):
+        limits = {"max_provider_calls": 10, "max_prompt_tokens": 500,
+                  "max_completion_tokens": 15, "max_wall_time_s": 3,
+                  "max_estimated_cost_rub": 5.0}
+        fields = ("prompt_tokens", "completion_tokens", "wall_time_s",
+                  "estimated_cost_rub")
+        for field in fields:
+            with self.subTest(field=field):
+                self.upstream.requests = 0
+                state = self.start(limits)
+                try:
+                    self.assertEqual(self.post()[0], 200)
+                    self.assertEqual(self.upstream.requests, 1)
+                    self.process.terminate(); self.process.wait(timeout=5)
+                    self.process.stdout.close(); self.process.stderr.close(); self.process = None
+                    row = self.budget(state)
+                    self.assertGreater(row["projected"][field], 0)
+                    row["projected"][field] = 0
+                    state.write_text(json.dumps(row), encoding="utf-8")
+                    self.px_port = free_port(); self.start(limits, keep_controls=True)
+                    status, _ = self.post()
+                    self.assertEqual(status, 503)
+                    self.assertEqual(self.upstream.requests, 1)
+                finally:
+                    if self.process:
+                        self.process.terminate(); self.process.wait(timeout=5)
+                        self.process.stdout.close(); self.process.stderr.close(); self.process = None
+                    # Fresh controls/state isolate the next projected dimension.
+                    pathlib.Path(self.temp.name, "state.json").unlink(missing_ok=True)
+                    pathlib.Path(self.temp.name, "state.json.reservations.jsonl").unlink(
+                        missing_ok=True)
+                    pathlib.Path(self.temp.name, "ledger.jsonl").unlink(missing_ok=True)
+                    self.px_port = free_port()
 
     def test_http_error_still_counts_completed_contact_with_unknown_usage(self):
         self.upstream.statuses = [500]
@@ -469,6 +541,39 @@ class DispatchBudget(unittest.TestCase):
         self.assertEqual(status, 503)
         self.assertEqual(self.upstream.requests, 2)
         self.assertEqual(self.budget(state)["projected"]["provider_calls"], 2)
+        self.assertEqual(json.loads(route.read_text(encoding="utf-8"))["model"], "first")
+
+    def test_fallback_success_has_its_own_reservation_and_completion(self):
+        limits = {"max_provider_calls": 3, "max_prompt_tokens": 10000,
+                  "max_completion_tokens": 1000, "max_wall_time_s": 300,
+                  "max_estimated_cost_rub": 100.0}
+        root = pathlib.Path(self.temp.name)
+        base = "http://127.0.0.1:%d/v1" % self.up_port
+        route = root / "route.json"; fallbacks = root / "fallbacks.json"
+        route.write_text(json.dumps({"schema": 1, "base": base, "model": "first",
+                                     "expected_returned_identity": "alpha/alpha-flash-0731",
+                                     "generation": 0}), encoding="utf-8")
+        fallbacks.write_text(json.dumps([{"schema": 1, "base": base, "model": "second",
+                                           "expected_returned_identity": "fixture-model"}]),
+                             encoding="utf-8")
+        state = self.start(limits, extra_env={
+            "UPSTREAM_ROUTE_FILE": str(route), "UPSTREAM_ROUTE_FALLBACKS": str(fallbacks),
+            "UPSTREAM_SUBSTITUTION_RETRY_MAX": "1"})
+        status, _ = self.post()
+        self.assertEqual(status, 200)
+        self.assertEqual(self.upstream.requests, 3)
+        for _ in range(100):
+            row = self.budget(state)
+            if row["observed"]["provider_calls"] == 3:
+                break
+            time.sleep(0.02)
+        self.assertEqual(row["projected"]["provider_calls"], 3)
+        self.assertEqual(row["observed"]["provider_calls"], 3)
+        ledger = [json.loads(line) for line in
+                  (root / "ledger.jsonl").read_text(encoding="utf-8").splitlines()]
+        attempts = [entry["action_attempt_id"] for entry in ledger
+                    if entry.get("action_contact_completed")]
+        self.assertEqual(len(set(attempts)), 3)
 
 
 if __name__ == "__main__":

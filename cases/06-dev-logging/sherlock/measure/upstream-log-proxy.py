@@ -459,8 +459,12 @@ def record(**row):
             fh.write(line + "\n")
             # Completion accounting is allowed only after this append survives
             # the crash window.  JSONL is the action-mode completion journal.
-            fh.flush()
-            os.fsync(fh.fileno())
+            # Schema 1 predates this durable completion journal.  Keep its
+            # writer's latency/I/O contract byte-for-byte; schema 2 alone
+            # makes a ledger row an accounting fact and therefore fsyncs it.
+            if _ACTION_BUDGET_ENABLED:
+                fh.flush()
+                os.fsync(fh.fileno())
 
 
 def estimate_prompt_tokens(body):
@@ -1507,6 +1511,83 @@ def _initialize_action_budget():
             fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
 
 
+def _action_reservation_path():
+    # This is intentionally a separate append-only journal.  State is a
+    # convenient cache of the projected totals, but a crash after admission or
+    # a plausible state rollback must never make an accepted envelope vanish.
+    return UPSTREAM_BUDGET_STATE + ".reservations.jsonl"
+
+
+def _valid_action_estimate(estimate):
+    return (type(estimate) is dict and set(estimate) == {
+            "provider_calls", "prompt_tokens", "completion_tokens", "wall_time_s",
+            "estimated_cost_rub"} and
+            all(type(estimate[name]) is int and estimate[name] >= 0 for name in
+                ("provider_calls", "prompt_tokens", "completion_tokens")) and
+            all(type(estimate[name]) in (int, float) and not isinstance(estimate[name], bool)
+                and math.isfinite(estimate[name]) and estimate[name] >= 0 for name in
+                ("wall_time_s", "estimated_cost_rub")))
+
+
+def _append_action_reservation(reservation_id, estimate):
+    """Durably append an accepted envelope before state or route/key access."""
+    if (type(reservation_id) is not str or not re.fullmatch(r"[0-9a-f]{32}", reservation_id)
+            or not _valid_action_estimate(estimate)):
+        raise BudgetUnknown()
+    path = _action_reservation_path()
+    directory = os.path.dirname(os.path.abspath(path))
+    os.makedirs(directory, exist_ok=True)
+    row = {"schema": 1, "run_tag": RUN_TAG, "action_reservation_id": reservation_id,
+           "action_estimate": estimate}
+    try:
+        with open(path, "a", encoding="utf-8") as target:
+            target.write(json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n")
+            target.flush()
+            os.fsync(target.fileno())
+        directory_fd = os.open(directory, os.O_RDONLY)
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
+    except OSError as exc:
+        raise BudgetUnknown() from exc
+
+
+def _reconcile_action_reservations(row):
+    """Rebuild every projected dimension from the durable admission journal."""
+    totals = {"provider_calls": 0, "prompt_tokens": 0, "completion_tokens": 0,
+              "wall_time_s": 0.0, "estimated_cost_rub": 0.0}
+    seen = set()
+    try:
+        with open(_action_reservation_path(), encoding="utf-8") as source:
+            for line in source:
+                if not line.strip():
+                    continue
+                entry = json.loads(line, object_pairs_hook=_strict_object)
+                if not isinstance(entry, dict) or set(entry) != {
+                        "schema", "run_tag", "action_reservation_id", "action_estimate"} or \
+                        entry.get("schema") != 1 or entry.get("run_tag") != RUN_TAG or \
+                        type(entry.get("action_reservation_id")) is not str or \
+                        not re.fullmatch(r"[0-9a-f]{32}", entry["action_reservation_id"]) or \
+                        entry["action_reservation_id"] in seen or \
+                        not _valid_action_estimate(entry.get("action_estimate")):
+                    raise BudgetUnknown()
+                seen.add(entry["action_reservation_id"])
+                for name, value in entry["action_estimate"].items():
+                    totals[name] += value
+    except FileNotFoundError:
+        if any(row["projected"].values()):
+            raise BudgetUnknown()
+        return row
+    except (OSError, ValueError, TypeError, RecursionError) as exc:
+        raise BudgetUnknown() from exc
+    # The append is ordered before state replacement.  Thus both a crash in
+    # that window and a post-run state edit converge to the journal total; no
+    # projected cap can be reopened by changing just the mutable state file.
+    row["projected"] = totals
+    return row
+
+
 def _reconcile_completed(row):
     """Keep durable reservations at least as large as completed paid rows."""
     if _ACTION_BUDGET_ENABLED:
@@ -1514,6 +1595,7 @@ def _reconcile_completed(row):
         # crash after row fsync but before state replacement is reconciled here;
         # IDs make replay idempotent.  A malformed journal is unknown, never a
         # reason to reopen a paid cap.
+        row = _reconcile_action_reservations(row)
         try:
             with _LOG_LOCK, open(UPSTREAM_LOG, encoding="utf-8") as source:
                 for line in source:
@@ -1646,9 +1728,7 @@ def _reserve_dispatch(estimate):
             return row
         _budget_update(unavailable)
         return False
-    if type(estimate) is not dict or set(estimate) != {
-            "provider_calls", "prompt_tokens", "completion_tokens", "wall_time_s",
-            "estimated_cost_rub"}:
+    if not _valid_action_estimate(estimate):
         raise BudgetUnknown()
     def reserve(row):
         # Re-read under the same lock that commits this admission: a snapshot
@@ -1666,9 +1746,6 @@ def _reserve_dispatch(estimate):
             return row
         projected = dict(row["projected"])
         for name, value in estimate.items():
-            if type(value) not in (int, float) or isinstance(value, bool) or \
-                    not math.isfinite(value) or value < 0:
-                raise BudgetUnknown()
             projected[name] += value
         for name in ACTION_LIMITS:
             counter = name.removeprefix("max_")
@@ -1676,7 +1753,10 @@ def _reserve_dispatch(estimate):
                 row.update(verdict="EXCEEDED", reason="MAX_" + name.upper())
                 return row
         # Deliberately never released: an answer lost to a crash may still have
-        # been billed.  Completed usage is a second, honest counter below.
+        # been billed.  Journal first, then state: a crash between them is
+        # rebuilt on restart rather than reopening even one cap.
+        _append_action_reservation(uuid.uuid4().hex, estimate)
+        # Completed usage is a second, honest counter below.
         row["projected"] = projected
         return row
     row = _budget_update(reserve)
@@ -2335,18 +2415,20 @@ class Proxy(BaseHTTPRequestHandler):
         # landing mid-call cannot make this call send model A to provider B and
         # judge it against identity C.
         discarded = 0
+        reserved_next_turn = False
         while True:
             # A paid turn obtains its durable token before it can even learn a
             # route or credential.  Substitution/fallback returns to this top;
             # ordinary HTTP retries reserve again inside `_relay_once`.
             if _ACTION_BUDGET_ENABLED:
                 try:
-                    if not _reserve_dispatch(dispatch_estimate):
+                    if not reserved_next_turn and not _reserve_dispatch(dispatch_estimate):
                         self._budget_refusal()
                         return
                 except BudgetUnknown:
                     self._budget_refusal()
                     return
+                reserved_next_turn = False
             try:
                 route = _current_route()
             except RouteUnavailable as exc:
@@ -2399,6 +2481,19 @@ class Proxy(BaseHTTPRequestHandler):
             # one; when there is not (and when no fallback list is configured
             # at all) it answers False and we trip exactly as before.
             spent = self._exhausted
+            if _ACTION_BUDGET_ENABLED:
+                # A fallback is a new paid dispatch.  Its durable envelope must
+                # exist before `_advance_route` writes or verifies a route, not
+                # merely before the later socket open.  Keep it conservative if
+                # advance subsequently fails.
+                try:
+                    if not _reserve_dispatch(dispatch_estimate):
+                        self._budget_refusal()
+                        return
+                except BudgetUnknown:
+                    self._budget_refusal()
+                    return
+                reserved_next_turn = True
             if _advance_route(route, discarded + 1, spent["request_id"]):
                 # A FRESH BUDGET ON THE NEW ROUTE. The old route's discards
                 # were the old provider's failure, not this one's.
@@ -2629,6 +2724,16 @@ class Proxy(BaseHTTPRequestHandler):
           try:
               if streaming:
                   self._pump_stream(resp, state, hold, route.expected_identity)
+                  if (_ACTION_BUDGET_ENABLED and state["error"] and
+                          not state["released"]):
+                      payload = json.dumps({"error": {
+                          "message": "proxy: action wall deadline exceeded"}}).encode()
+                      self.send_response(502)
+                      self.send_header("Content-Type", "application/json")
+                      self.send_header("Content-Length", str(len(payload)))
+                      self.end_headers()
+                      self.wfile.write(payload)
+                      state["released"] = True
               else:
                   self._pump_whole(resp, status, state, hold, route.expected_identity)
           finally:
@@ -2995,6 +3100,41 @@ class Proxy(BaseHTTPRequestHandler):
         put back on the long read timeout: a call that has started answering is
         alive and may take as long as it takes.
         """
+        # `HTTPResponse.__iter__` is `readline()`: a fragmented, unterminated
+        # SSE event can make several successful socket reads while it waits for
+        # one newline, resetting a per-read timeout each time.  In action mode
+        # own the buffering and deadline check between bounded raw fragments.
+        if _ACTION_BUDGET_ENABLED:
+            buffered = b""
+            reader = getattr(resp, "read1", None)
+            if not callable(reader):
+                state["error"] = "action_wall_deadline_unenforceable"
+                return
+            while True:
+                try:
+                    _action_remaining_deadline(state, sock)
+                    raw = reader(4096)
+                except TimeoutError:
+                    state["error"] = "action_wall_deadline_exceeded"
+                    return
+                except socket.timeout:
+                    state["error"] = "action_wall_deadline_exceeded"
+                    return
+                except OSError as exc:
+                    if "timed out" in str(exc).lower():
+                        state["error"] = "action_wall_deadline_exceeded"
+                        return
+                    raise
+                if not raw:
+                    if buffered:
+                        yield buffered
+                    return
+                buffered += raw
+                while b"\n" in buffered:
+                    line, buffered = buffered.split(b"\n", 1)
+                    yield line + b"\n"
+            return
+
         it = iter(resp)
         while True:
             try:
@@ -3069,7 +3209,10 @@ class Proxy(BaseHTTPRequestHandler):
                 _action_remaining_deadline(state, sock)
             elif UPSTREAM_FIRST_TOKEN_MS:
                 sock.settimeout(UPSTREAM_FIRST_TOKEN_MS / 1000.0)
-        if not hold:
+        # Action mode delays its 200 until the complete stream is inside the
+        # monotonic reservation.  Once headers are sent a later deadline can
+        # only close a 200 stream, which is not a bounded paid outcome.
+        if not hold and not _ACTION_BUDGET_ENABLED:
             # Byte-for-byte the pre-retry behaviour when the feature is off:
             # headers first, then relay each line as it arrives.
             self._release_head(resp, state)
@@ -3119,7 +3262,8 @@ class Proxy(BaseHTTPRequestHandler):
             # Anything held that is NOT a discard must still be delivered,
             # including a stream that ended, errored or timed out before it
             # ever named a model. Holding is a delay, never a loss.
-            if not state["substituted"]:
+            if (not state["substituted"] and not (_ACTION_BUDGET_ENABLED and
+                                                   state["error"] is not None)):
                 self._release_head(resp, state)
 
 
