@@ -18,8 +18,11 @@ from pathlib import Path
 import secrets
 import shutil
 import stat
+import subprocess
 import sys
 import tempfile
+import math
+import re
 
 
 HERE = Path(__file__).resolve().parent
@@ -53,6 +56,7 @@ def _load(name, filename):
 
 RUN_MANIFEST = _load("sherlock_run_manifest", "run-manifest.py")
 FIXTURE = _load("sherlock_contract_probe_fixture", "contract-probe-fixture.py")
+ORACLE = _load("sherlock_target_contract_oracle", "target-contract-oracle.py")
 
 
 def canonical(value):
@@ -86,7 +90,7 @@ def safe_read_regular(path, limit=1024 * 1024):
         state = os.lstat(path)
     except OSError as exc:
         raise ProbeFailure("TARGET_PROBE_NOT_AUTHORIZED", "missing asset") from exc
-    if not stat.S_ISREG(state.st_mode) or stat.S_ISLNK(state.st_mode) or state.st_size > limit:
+    if not stat.S_ISREG(state.st_mode) or stat.S_ISLNK(state.st_mode) or state.st_nlink != 1 or state.st_size > limit:
         raise ProbeFailure("TARGET_PROBE_NOT_AUTHORIZED", "unsafe asset")
     try:
         with open(path, "rb") as handle:
@@ -106,7 +110,10 @@ def _iso(value):
     if not isinstance(value, str):
         raise ProbeFailure("TARGET_PROBE_NOT_AUTHORIZED", "time")
     try:
-        return dt.datetime.fromisoformat(value.replace("Z", "+00:00"))
+        parsed = dt.datetime.fromisoformat(value.replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            raise ValueError("naive")
+        return parsed
     except ValueError as exc:
         raise ProbeFailure("TARGET_PROBE_NOT_AUTHORIZED", "time") from exc
 
@@ -193,6 +200,10 @@ def _profile(args):
                "skill_sha256": _tree_digest(skill),
                "tool_schema_sha256": qwen_sha, "gate_sha256": _gate_digests(),
                "lane_guard": {"enabled": True}}
+    if args.identity_mode == "provider_pinned_version" and (
+            args.requested_model != args.expected_returned_identity or
+            re.search(r"(?:^|-)\d{6,}(?:$|-)", args.requested_model) is None):
+        raise ProbeFailure("TARGET_PROBE_PREPARE", "pinned identity must be an exact version")
     try:
         return RUN_MANIFEST.validate_target_profile(profile)
     except Exception as exc:
@@ -251,7 +262,7 @@ def _consume_nonce(nonce_root, nonce, supplied_hash):
     _atomic_no_replace(nonce_root / (nonce + ".json"), canonical({"nonce": nonce, "manifest_sha256": supplied_hash}) + b"\n")
 
 
-def authorize(manifest_path, supplied_hash, nonce_root, action="target_contract_probe"):
+def authorize(manifest_path, supplied_hash, nonce_root, action="target_contract_probe", *, consume=True):
     raw = safe_read_regular(manifest_path)
     if not _hex(supplied_hash) or not hmac.compare_digest(sha256(raw), supplied_hash):
         raise ProbeFailure("TARGET_PROBE_NOT_AUTHORIZED", "manifest hash")
@@ -261,12 +272,13 @@ def authorize(manifest_path, supplied_hash, nonce_root, action="target_contract_
     for name in ("target_profile_sha256", "probe_budget_sha256", "fixture_manifest_sha256", "input_package_sha256"):
         if not _hex(row.get(name)):
             raise ProbeFailure("TARGET_PROBE_NOT_AUTHORIZED", "manifest digest")
-    try:
-        _consume_nonce(nonce_root, row["nonce"], supplied_hash)
-    except ProbeFailure as exc:
-        if exc.code == "APPROVAL_REPLAYED":
-            raise
-        raise ProbeFailure("TARGET_PROBE_NOT_AUTHORIZED", "nonce") from exc
+    if consume:
+        try:
+            _consume_nonce(nonce_root, row["nonce"], supplied_hash)
+        except ProbeFailure as exc:
+            if exc.code == "APPROVAL_REPLAYED":
+                raise
+            raise ProbeFailure("TARGET_PROBE_NOT_AUTHORIZED", "nonce") from exc
     return row
 
 
@@ -285,22 +297,48 @@ def _verify_package(root, manifest, code="TARGET_PROBE_NOT_AUTHORIZED"):
         raise ProbeFailure(code, "target profile invalid") from exc
     if values["probe-budget.json"] != DEFAULT_BUDGET:
         raise ProbeFailure(code, "probe budget invalid")
+    fixture_manifest = values["fixture-manifest.json"]
+    if type(fixture_manifest) is not dict or fixture_manifest.get("schema") != 1 or \
+            type(fixture_manifest.get("outputs")) is not dict or \
+            not isinstance(fixture_manifest.get("expectations"), str):
+        raise ProbeFailure(code, "fixture manifest invalid")
+    fixture_root = Path(root) / "fixture"
+    for name, expected in fixture_manifest["outputs"].items():
+        if not isinstance(name, str) or not isinstance(expected, dict) or not _hex(expected.get("sha256")):
+            raise ProbeFailure(code, "fixture manifest invalid")
+        _, actual = _asset(fixture_root / name, code)
+        if not hmac.compare_digest(actual, expected["sha256"]):
+            raise ProbeFailure(code, "fixture changed")
+    expectation = fixture_root / fixture_manifest["expectations"]
+    _, expectation_sha = _asset(expectation, code)
+    if not _hex(fixture_manifest.get("expectations_sha256")) or not hmac.compare_digest(expectation_sha, fixture_manifest["expectations_sha256"]):
+        raise ProbeFailure(code, "fixture expectations changed")
     return values
 
 
 def run(manifest_path, supplied_hash, nonce_root, *, secret_reader, proxy_starter, runner):
     """Cross the only contact boundary after approval and all sealed-byte checks."""
-    manifest = authorize(manifest_path, supplied_hash, nonce_root)
+    manifest = authorize(manifest_path, supplied_hash, nonce_root, consume=False)
     root = Path(manifest_path).parent
     package = _verify_package(root, manifest)
     work = root / "probe-work"
     if os.path.lexists(work):
         raise ProbeFailure("TARGET_PROBE_NOT_AUTHORIZED", "work already exists")
+    # Freeze a private, no-callback-visible copy before one-way approval use.
     work.mkdir(mode=0o700)
+    sealed = work / "sealed-input"
+    sealed.mkdir(mode=0o700)
+    for name in ("target-profile.json", "probe-budget.json", "fixture-manifest.json", "input-package.json"):
+        shutil.copyfile(root / name, sealed / name)
+    shutil.copytree(root / "fixture", sealed / "fixture", symlinks=False)
+    _verify_package(sealed, manifest)
+    # All knowable validation precedes the one-way nonce consumption.
+    _consume_nonce(nonce_root, manifest["nonce"], supplied_hash)
     secret = secret_reader(package["target-profile.json"]["secret_ref"])
-    proxy = proxy_starter(package["target-profile.json"], secret, root / "probe-budget.json")
-    return runner(profile_path=root / "target-profile.json", fixture=root / "fixture",
-                  budget_path=root / "probe-budget.json", work=work, proxy=proxy, retries=0)
+    profile = _strict_json(_asset(sealed / "target-profile.json")[0])
+    proxy = proxy_starter(profile, secret, sealed / "probe-budget.json")
+    return runner(profile_path=sealed / "target-profile.json", fixture=sealed / "fixture",
+                  budget_path=sealed / "probe-budget.json", work=work, proxy=proxy, retries=0)
 
 
 def audit_identity(mode, expected, returned):
@@ -313,6 +351,33 @@ def audit_identity(mode, expected, returned):
     return mode
 
 
+def _finite_number(value):
+    return type(value) in (int, float) and not isinstance(value, bool) and math.isfinite(value) and value >= 0
+
+
+def _strict_budget(row):
+    fields = {"schema", "run_tag", "updated_at", "limits", "rate_snapshot", "budget_assurance",
+              "projected", "observed", "completed_overshoot", "observed_usage_unknown",
+              "completed_attempt_ids", "verdict", "reason"}
+    counters = ("provider_calls", "prompt_tokens", "completion_tokens")
+    limits = ("max_provider_calls", "max_prompt_tokens", "max_completion_tokens", "max_wall_time_s", "max_estimated_cost_rub")
+    if not isinstance(row, dict) or set(row) != fields or row.get("schema") != 2 or \
+            row.get("budget_assurance") != "client_pre_dispatch" or set(row.get("limits", {})) != set(limits) or \
+            not all(_finite_number(row["limits"][key]) for key in limits) or \
+            not isinstance(row.get("rate_snapshot"), dict) or set(row["rate_snapshot"]) != {"effective_at", "source", "sha256"} or \
+            not isinstance(row["rate_snapshot"]["source"], str) or not _hex(row["rate_snapshot"]["sha256"]):
+        raise ProbeFailure("TARGET_PROBE_BUDGET")
+    if any(not isinstance(row.get(group), dict) for group in ("projected", "observed", "completed_overshoot")) or \
+            set(row["projected"]) != set(counters + ("wall_time_s", "estimated_cost_rub")) or \
+            set(row["observed"]) != set(counters) or set(row["completed_overshoot"]) != set(counters) or \
+            not all(_finite_number(row["projected"][key]) for key in row["projected"]) or \
+            not all(type(row[group][key]) is int and row[group][key] >= 0 for group in ("observed", "completed_overshoot") for key in counters):
+        raise ProbeFailure("TARGET_PROBE_BUDGET")
+    if any(row["projected"][key] > row["limits"]["max_" + key] for key in ("provider_calls", "prompt_tokens", "completion_tokens", "wall_time_s", "estimated_cost_rub")):
+        raise ProbeFailure("TARGET_PROBE_BUDGET")
+    return row
+
+
 def _write_result(trace, result):
     path = Path(trace) / "probe-result.json"
     try:
@@ -322,30 +387,79 @@ def _write_result(trace, result):
         pass
 
 
+def _real_gates(trace, report, fixture):
+    """Run the bound v44 programs; caller supplied gate summaries are never evidence."""
+    tools = HERE.parent.parent / "skills" / "v44" / "tools"
+    profile = _strict_json(_asset(Path(trace) / "target-profile.json", "TARGET_CONTRACT_FAILED")[0])
+    for name in GATES:
+        _, digest = _asset(tools / (name + ".py"), "TARGET_CONTRACT_FAILED")
+        if not hmac.compare_digest(digest, profile["gate_sha256"][name]):
+            raise ProbeFailure("TARGET_CONTRACT_FAILED", "bound gate changed")
+    citation = Path(tempfile.mkdtemp(prefix=".probe-citations-"))
+    try:
+        manifest = _strict_json(_asset(Path(trace) / "fixture-manifest.json", "TARGET_CONTRACT_FAILED")[0])
+        for name in manifest["outputs"]:
+            destination = citation / name
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(fixture / name, destination)
+        commands = {
+        "reportcheck": ["python3", str(tools / "reportcheck.py"), str(report), "--json"],
+        "citecheck": ["python3", str(tools / "citecheck.py"), str(report), "--corpus", str(citation), "--require-quote", "--json"],
+        "statecheck": ["python3", str(tools / "statecheck.py"), "--corpus", str(fixture), "--report", str(report), "--json"],
+        }
+        rows = {}
+        for name, command in commands.items():
+            done = subprocess.run(command, text=True, capture_output=True, timeout=30)
+            try:
+                payload = _strict_json(done.stdout.encode("utf-8"))
+            except ProbeFailure as exc:
+                raise ProbeFailure("TARGET_CONTRACT_FAILED", name + " output") from exc
+            if done.returncode != 0 or type(payload.get("blocking")) is not int or payload["blocking"] != 0:
+                raise ProbeFailure("TARGET_CONTRACT_FAILED", name + " blocking")
+            rows[name] = {"returncode": done.returncode, "raw_sha256": sha256(done.stdout.encode()), "payload": payload}
+    # Triage owns worklist state. A normal run must preserve it under trace/work.
+        worklist = Path(trace) / "work" / "worklist.tsv"
+        if not worklist.is_file():
+            raise ProbeFailure("TARGET_CONTRACT_FAILED", "triage worklist missing")
+        done = subprocess.run(["python3", str(tools / "triagecheck.py"), "--worklist", str(worklist),
+                               "--corpus", str(fixture), "--json"], text=True, capture_output=True, timeout=30)
+        payload = _strict_json(done.stdout.encode("utf-8"))
+        if done.returncode != 0 or type(payload.get("blocking")) is not int or payload["blocking"] != 0:
+            raise ProbeFailure("TARGET_CONTRACT_FAILED", "triagecheck blocking")
+        rows["triagecheck"] = {"returncode": done.returncode, "raw_sha256": sha256(done.stdout.encode()), "payload": payload}
+        return rows
+    finally:
+        shutil.rmtree(citation)
+
+
 def audit(trace):
     trace = Path(trace)
     result = {"schema": 1, "accepted": False, "checked_at": _time_text(_now())}
     try:
+        if os.path.lexists(trace / "probe-result.json"):
+            raise ProbeFailure("TARGET_CONTRACT_FAILED", "attempt result already sealed")
         raw_manifest, _ = _asset(trace / "probe-manifest.json", "TARGET_CONTRACT_FAILED")
         manifest = _strict_json(raw_manifest, PROBE_MANIFEST_KEYS)
         package = _verify_package(trace, manifest, "TARGET_CONTRACT_FAILED")
         if _iso(manifest["expires_at"]) <= _now():
             raise ProbeFailure("TARGET_CONTRACT_FAILED", "expired")
-        gates = _strict_json(_asset(trace / "probe-gates.json", "TARGET_CONTRACT_FAILED")[0])
-        if set(gates) != set(GATES) or any(not isinstance(gates[name], dict) or
-                gates[name].get("returncode") != 0 or gates[name].get("blocking") != 0 for name in GATES):
-            raise ProbeFailure("TARGET_CONTRACT_FAILED", "gate failure")
-        oracle = _strict_json(_asset(trace / "probe-oracle.json", "TARGET_CONTRACT_FAILED")[0])
+        report = trace / "final-report.md"
+        fixture = trace / "fixture"
+        oracle = ORACLE.audit_report(report, fixture, fixture / "probe-expectations.json")
         if oracle.get("accepted") is not True:
             raise ProbeFailure("TARGET_CONTRACT_FAILED", "oracle failure")
+        gates = _real_gates(trace, report, fixture)
         exits = _strict_json(_asset(trace / "exit-layers.json", "TARGET_CONTRACT_FAILED")[0])
-        required_exits = {"attempt_exit_code", "driver_exit_code", "wrapper_exit_code", "gate_exit_code", "terminal_observation"}
-        if not required_exits <= set(exits) or any(exits[key] != 0 for key in required_exits - {"terminal_observation"}) or exits["terminal_observation"] != "RUN_SUCCEEDED":
+        required_exits = {"attempt_exit_code", "driver_exit_code", "wrapper_exit_code", "status_exit_code",
+                          "gate_exit_codes", "primary_failure", "terminal_observation"}
+        if set(exits) != required_exits or any(type(exits[key]) is not int or exits[key] != 0
+                for key in ("attempt_exit_code", "driver_exit_code", "wrapper_exit_code", "status_exit_code")) or \
+                not isinstance(exits["gate_exit_codes"], dict) or set(exits["gate_exit_codes"]) != set(GATES) or \
+                any(type(value) is not int or value != 0 for value in exits["gate_exit_codes"].values()) or \
+                exits["primary_failure"] is not None or exits["terminal_observation"] != "RUN_SUCCEEDED":
             raise ProbeFailure("TARGET_CONTRACT_FAILED", "exit layer")
         ledger = _strict_json(_asset(trace / "ledger.json", "TARGET_CONTRACT_FAILED")[0])
-        budget = _strict_json(_asset(trace / "upstream-budget-state.json", "TARGET_CONTRACT_FAILED")[0])
-        if budget.get("schema") != 2 or budget.get("budget_assurance") != "client_pre_dispatch" or not isinstance(budget.get("observed"), dict):
-            raise ProbeFailure("TARGET_PROBE_BUDGET")
+        budget = _strict_budget(_strict_json(_asset(trace / "upstream-budget-state.json", "TARGET_CONTRACT_FAILED")[0]))
         calls = ledger.get("provider_calls_observed")
         if type(calls) is not int or calls < 1 or budget["observed"].get("provider_calls") != calls:
             raise ProbeFailure("TARGET_PROBE_BUDGET")
@@ -355,15 +469,17 @@ def audit(trace):
         request_tree = _tree_digest(trace / "request-bodies")
         response_tree = _tree_digest(trace / "response-bodies")
         report_raw, report_hash = _asset(trace / "final-report.md", "TARGET_CONTRACT_FAILED")
+        completed = _now()
+        receipt_ttl = dt.timedelta(hours=24) if identity == "provider_pinned_version" else dt.timedelta(minutes=30)
         receipt = {"schema": 1, "accepted": True, "proof_scope": "representative_sample_only",
-                   "created_at": _time_text(_now()), "expires_at": manifest["expires_at"], "nonce": manifest["nonce"],
+                   "created_at": _time_text(completed), "expires_at": _time_text(completed + receipt_ttl), "nonce": manifest["nonce"],
                    "target_profile_sha256": manifest["target_profile_sha256"], "probe_manifest_sha256": sha256(raw_manifest),
                    "fixture_manifest_sha256": manifest["fixture_manifest_sha256"],
                    "input_package_sha256": manifest["input_package_sha256"],
                    "requested_model": package["target-profile.json"]["requested_model"],
                    "sent_model": package["target-profile.json"]["requested_model"],
                    "returned_identities": ledger["returned_identities"], "identity_assurance": identity,
-                   "gate_sha256": {name: sha256(canonical(gates[name])) for name in GATES},
+                   "gate_sha256": {name: gates[name]["raw_sha256"] for name in GATES},
                    "final_report_sha256": report_hash, "ledger_sha256": sha256(canonical(ledger)),
                    "request_body_tree_sha256": request_tree, "response_body_tree_sha256": response_tree,
                    "provider_calls_observed": calls, "usage": ledger.get("usage"),
@@ -372,8 +488,11 @@ def audit(trace):
                    "exit_layers": exits, "provider_billed_calls": None, "provider_billed_rub": None,
                    "audit_tool_sha256": sha256(Path(__file__).read_bytes())}
         receipt_path = trace / "target-contract-receipt.json"
+        checksum_path = Path(str(receipt_path) + ".sha256")
+        if os.path.lexists(receipt_path) or os.path.lexists(checksum_path):
+            raise ProbeFailure("TARGET_CONTRACT_FAILED", "receipt transaction already exists")
         _atomic_no_replace(receipt_path, canonical(receipt) + b"\n")
-        _atomic_no_replace(Path(str(receipt_path) + ".sha256"), sha256(receipt_path.read_bytes()).encode("ascii") + b"\n")
+        _atomic_no_replace(checksum_path, sha256(receipt_path.read_bytes()).encode("ascii") + b"\n")
         result.update({"accepted": True, "receipt": str(receipt_path), "identity_assurance": identity})
         _write_result(trace, result)
         return result
@@ -390,9 +509,12 @@ def main(argv=None):
     for name in ("root", "source-corpus", "provider-base-url", "route", "secret-ref", "requested-model",
                  "expected-returned-identity", "identity-mode", "qwen-bin", "arm"):
         prep.add_argument("--" + name, required=True)
+    prep.add_argument("--json", action="store_true")
     auth = sub.add_parser("run")
     auth.add_argument("--manifest", required=True); auth.add_argument("--operator-approved-probe", required=True)
     auth.add_argument("--nonce-root", required=True)
+    auth.add_argument("--runner-command", required=True,
+                      help="sealed runner executable; receives snapshot paths through environment")
     approval = sub.add_parser("authorize")
     approval.add_argument("--manifest", required=True); approval.add_argument("--operator-approved-probe", required=True)
     approval.add_argument("--nonce-root", required=True)
@@ -406,7 +528,27 @@ def main(argv=None):
         elif args.command == "authorize":
             row = authorize(args.manifest, args.operator_approved_probe, args.nonce_root)
         else:
-            raise ProbeFailure("TARGET_PROBE_NOT_AUTHORIZED", "CLI run requires an integrated runner")
+            def secret_reader(reference):
+                value = os.environ.get(reference)
+                if not value:
+                    raise ProbeFailure("TARGET_PROBE_NOT_AUTHORIZED", "secret reference unavailable")
+                return value
+            def proxy_starter(profile, secret, budget):
+                # The normal runner consumes only this sealed route descriptor;
+                # no network is started by this boundary itself.
+                return {"base_url": profile["provider_base_url"], "route": profile["route"],
+                        "secret": secret, "budget_path": str(budget)}
+            def runner(**kwargs):
+                env = dict(os.environ, SHERLOCK_TARGET_PROFILE=str(kwargs["profile_path"]),
+                           SHERLOCK_PROBE_FIXTURE=str(kwargs["fixture"]),
+                           SHERLOCK_PROBE_BUDGET=str(kwargs["budget_path"]),
+                           SHERLOCK_PROBE_WORK=str(kwargs["work"]), SHERLOCK_MAX_RETRIES="0")
+                done = subprocess.run([args.runner_command], env=env, text=True, capture_output=True, timeout=600)
+                if done.returncode:
+                    raise ProbeFailure("TARGET_CONTRACT_FAILED", "runner nonzero")
+                return {"runner_exit_code": done.returncode, "stdout_sha256": sha256(done.stdout.encode())}
+            row = run(args.manifest, args.operator_approved_probe, args.nonce_root,
+                      secret_reader=secret_reader, proxy_starter=proxy_starter, runner=runner)
         print(json.dumps(row, sort_keys=True))
         return 0
     except ProbeFailure as exc:

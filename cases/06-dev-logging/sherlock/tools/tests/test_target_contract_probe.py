@@ -3,6 +3,7 @@
 import hashlib
 import importlib.util
 import json
+import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -165,12 +166,71 @@ class TargetContractProbeTest(unittest.TestCase):
             self.probe.audit(trace)
         self.assertFalse((trace / "target-contract-receipt.json").exists())
 
+    def test_adversarial_review_regressions_fail_closed_before_or_after_contact(self):
+        # These compact cases cover the nine review categories: forged audit,
+        # mutable fixture, nonce burn, aliases, strict budget/exits/identity,
+        # receipt transaction, and the provider-safe CLI contract.
+        self.probe.prepare(self.args)
+        manifest = self.root / "probe-manifest.json"
+        digest = self._sha(manifest)
+        (self.root / "fixture" / "Security.jsonl").write_text("attacker\n")
+        with self.assertRaises(self.probe.ProbeFailure):
+            self.probe.run(manifest, digest, self.root / "nonces", secret_reader=self._tripwire,
+                           proxy_starter=self._tripwire, runner=self._tripwire)
+        self.assertEqual(self.trips, [])
+        # Dependency rejection must not consume approval.
+        (self.root / "fixture" / "Security.jsonl").write_bytes(
+            (self.source / "Security.jsonl").read_bytes())
+        self.probe.authorize(manifest, digest, self.root / "nonces")
+
+        root = self.temp / "forged"
+        args = self.probe.PrepareArgs(**dict(self.args.__dict__, root=root))
+        self.probe.prepare(args)
+        trace = root / "probe-work"; self._accepted_trace(trace)
+        (trace / "final-report.md").write_text("ok\n")
+        with self.assertRaises(self.probe.ProbeFailure):
+            self.probe.audit(trace)
+        self.assertFalse((trace / "target-contract-receipt.json").exists())
+
+    def test_cli_prepare_json_and_run_refusal_never_contact(self):
+        root = self.temp / "cli"
+        command = [sys.executable, str(PROBE_PATH), "prepare", "--root", str(root),
+                   "--source-corpus", str(self.source), "--provider-base-url", "http://127.0.0.1:9",
+                   "--route", "paid-route", "--secret-ref", "SHERLOCK_API_KEY",
+                   "--requested-model", "deepseek-v4-20260901", "--expected-returned-identity",
+                   "deepseek-v4-20260901", "--identity-mode", "provider_pinned_version",
+                   "--qwen-bin", "/usr/bin/true", "--arm", "target", "--json"]
+        done = subprocess.run(command, text=True, capture_output=True)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(json.loads(done.stdout)["root"], str(root))
+
+    def test_cli_run_uses_only_sealed_local_stub_and_disables_retries(self):
+        self.probe.prepare(self.args)
+        marker = self.temp / "runner-marker.json"
+        stub = self.temp / "runner.py"
+        stub.write_text("#!/usr/bin/env python3\nimport json,os\nopen(os.environ['MARKER'],'w').write(json.dumps({k:os.environ[k] for k in ('SHERLOCK_TARGET_PROFILE','SHERLOCK_PROBE_FIXTURE','SHERLOCK_PROBE_BUDGET','SHERLOCK_PROBE_WORK','SHERLOCK_MAX_RETRIES')}))\n")
+        stub.chmod(0o700)
+        env = dict(os.environ, SHERLOCK_API_KEY="test-only", MARKER=str(marker))
+        done = subprocess.run([sys.executable, str(PROBE_PATH), "run", "--manifest", str(self.root / "probe-manifest.json"),
+                               "--operator-approved-probe", self._sha(self.root / "probe-manifest.json"),
+                               "--nonce-root", str(self.root / "nonces"), "--runner-command", str(stub)],
+                              text=True, capture_output=True, env=env)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(json.loads(marker.read_text())["SHERLOCK_MAX_RETRIES"], "0")
+
     def _accepted_trace(self, trace):
         trace.mkdir()
         for name in ("target-profile.json", "probe-budget.json", "fixture-manifest.json",
                      "input-package.json", "probe-manifest.json"):
             shutil.copy2(self.root / name, trace / name)
-        (trace / "final-report.md").write_text("ok\n")
+        shutil.copytree(self.root / "fixture", trace / "fixture")
+        shutil.copy2(ROOT / "tools" / "tests" / "fixtures" / "target-contract-reports" / "canonical.md",
+                     trace / "final-report.md")
+        fixture_test = ROOT / "tools" / "tests" / "test_target_contract_fixture.py"
+        spec = importlib.util.spec_from_file_location("fixture_test_helpers", fixture_test)
+        helpers = importlib.util.module_from_spec(spec); spec.loader.exec_module(helpers)
+        (trace / "work").mkdir()
+        helpers.minimum_ledger(trace / "work", trace / "fixture")
         (trace / "ledger.json").write_text(json.dumps({"provider_calls_observed": 1,
             "usage": {"prompt_tokens": 1, "completion_tokens": 1},
             "returned_identities": ["deepseek-v4-20260901"]}))
@@ -182,11 +242,19 @@ class TargetContractProbeTest(unittest.TestCase):
         (trace / "probe-oracle.json").write_text(json.dumps({"accepted": True}))
         (trace / "exit-layers.json").write_text(json.dumps({"attempt_exit_code": 0,
             "driver_exit_code": 0, "wrapper_exit_code": 0,
-            "gate_exit_code": 0, "terminal_observation": "RUN_SUCCEEDED"}))
+            "status_exit_code": 0, "gate_exit_codes": {name: 0 for name in self.probe.GATES},
+            "primary_failure": None, "terminal_observation": "RUN_SUCCEEDED"}))
         (trace / "upstream-budget-state.json").write_text(json.dumps({"schema": 2,
+            "run_tag": "probe", "updated_at": "2026-09-04T00:00:00Z",
+            "limits": {"max_provider_calls": 10, "max_prompt_tokens": 400000,
+                       "max_completion_tokens": 20000, "max_wall_time_s": 600,
+                       "max_estimated_cost_rub": 15.0},
             "budget_assurance": "client_pre_dispatch", "projected": {"provider_calls": 1,
-            "prompt_tokens": 1, "completion_tokens": 1, "estimated_cost_rub": 0.1},
+            "prompt_tokens": 1, "completion_tokens": 1, "wall_time_s": 1.0, "estimated_cost_rub": 0.1},
             "observed": {"provider_calls": 1, "prompt_tokens": 1, "completion_tokens": 1},
+            "completed_overshoot": {"provider_calls": 0, "prompt_tokens": 0, "completion_tokens": 0},
+            "observed_usage_unknown": 0, "completed_attempt_ids": ["0" * 32 + ".a1"],
+            "verdict": "WITHIN", "reason": None,
             "rate_snapshot": {"effective_at": "2026-09-04T00:00:00Z", "source": "test",
             "sha256": "0" * 64}}))
 
