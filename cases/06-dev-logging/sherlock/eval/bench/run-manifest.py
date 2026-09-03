@@ -6,6 +6,7 @@ import errno
 import fcntl
 import hashlib
 import hmac
+import ipaddress
 import json
 import math
 import os
@@ -22,6 +23,9 @@ SECRET = re.compile(r"(?:bearer\s+|(?:sk|ghp|glpat|xox[baprs])-|AKIA[0-9A-Z]{16}
 IDENTIFIER = re.compile(r"^[A-Za-z0-9_./:@+\[\]-]+$")
 HEX64 = re.compile(r"^[0-9a-f]{64}$")
 GIT_HEX = re.compile(r"^[0-9a-f]{40}(?:[0-9a-f]{24})?$")
+ENV_SECRET_REF = re.compile(r"^[A-Z][A-Z0-9_]{0,127}$")
+HOST_LABEL = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
+BAD_PERCENT = re.compile(r"%(?![0-9A-Fa-f]{2})")
 FORBIDDEN = {"answer-key", "answer_key", "labels", "label", "facts.json",
              "ground-truth", "ground_truth", "attacker-only", "attacker_only"}
 MAX_ID = 128
@@ -39,6 +43,20 @@ TARGET_PROFILE_KEYS = {
     "skill_sha256", "tool_schema_sha256", "gate_sha256", "lane_guard",
 }
 GATE_SHA256_KEYS = {"reportcheck", "citecheck", "statecheck", "triagecheck"}
+INPUT_IDENTITY_KEYS = {
+    "schema", "raw_prompt_sha256", "canonical_prompt_sha256", "source_corpus_sha256",
+    "staged_corpus_sha256", "arm", "arm_commit", "arm_tree", "settings_sha256",
+    "system_prompt_sha256", "tool_schema_sha256", "runner_sha256", "driver_sha256",
+    "proxy_url", "skill_sha256", "skill_tree_sha256", "gate_sha256", "provider",
+    "requested_model", "limits", "cache", "interactive", "qwen", "lane_guard",
+    "target_profile_sha256", "target_profile_canonical_sha256",
+}
+INPUT_IDENTITY_DIGEST_KEYS = {
+    "raw_prompt_sha256", "canonical_prompt_sha256", "source_corpus_sha256",
+    "staged_corpus_sha256", "settings_sha256", "system_prompt_sha256",
+    "tool_schema_sha256", "runner_sha256", "driver_sha256", "skill_sha256",
+    "skill_tree_sha256", "target_profile_sha256", "target_profile_canonical_sha256",
+}
 
 
 class ManifestError(ValueError):
@@ -66,39 +84,100 @@ def canonical_prompt(data, staged_root):
     supplied_root = os.path.abspath(safe_text(staged_root))
     roots = (supplied_root, clean_abs(staged_root))
     for root in dict.fromkeys(roots):
-        data = data.replace(root.encode("utf-8"), b"${CORPUS_ROOT}")
+        data = _replace_path_token(data, root.encode("utf-8"), b"${CORPUS_ROOT}")
     return data
 
 
-def _profile_url(value):
+def _is_path_token_boundary(byte, before):
+    if byte is None:
+        return True
+    boundaries = b" \t\r\n'\"`;,()[]{}<>"
+    return byte in boundaries or (before and byte == ord("="))
+
+
+def _replace_path_token(data, root, replacement):
+    output, cursor = bytearray(), 0
+    while True:
+        start = data.find(root, cursor)
+        if start < 0:
+            output.extend(data[cursor:])
+            return bytes(output)
+        end = start + len(root)
+        before = data[start - 1] if start else None
+        after = data[end] if end < len(data) else None
+        if (_is_path_token_boundary(before, True) and
+                (after == ord("/") or _is_path_token_boundary(after, False))):
+            output.extend(data[cursor:start])
+            output.extend(replacement)
+            cursor = end
+        else:
+            output.extend(data[cursor:end])
+            cursor = end
+
+
+def _profile_url(value, code="E_TARGET_PROFILE_SCHEMA"):
+    if (not isinstance(value, str) or not value or value != value.strip() or
+            any(ord(char) < 0x20 or ord(char) == 0x7f for char in value) or
+            "\\" in value or BAD_PERCENT.search(value)):
+        fail(code, "provider URL is invalid")
     try:
         parts = urlsplit(value)
         port = parts.port
     except (TypeError, ValueError):
-        fail("E_TARGET_PROFILE_SCHEMA", "provider URL is invalid")
+        fail(code, "provider URL is invalid")
     if (parts.scheme.lower() not in ("http", "https") or not parts.hostname or
             parts.username is not None or parts.password is not None or
             parts.query or parts.fragment):
-        fail("E_TARGET_PROFILE_SCHEMA", "provider URL is invalid")
+        fail(code, "provider URL is invalid")
     host = parts.hostname.lower()
-    if ":" in host and not host.startswith("["):
+    if ":" in host:
+        try:
+            ipaddress.IPv6Address(host)
+        except ipaddress.AddressValueError:
+            fail(code, "provider URL is invalid")
         host = "[" + host + "]"
+    elif (len(host) > 253 or any(not HOST_LABEL.fullmatch(label) for label in host.split("."))):
+        fail(code, "provider URL is invalid")
     default = (parts.scheme.lower() == "http" and port == 80) or (
         parts.scheme.lower() == "https" and port == 443)
     netloc = host if default or port is None else "%s:%d" % (host, port)
-    return "%s://%s%s" % (parts.scheme.lower(), netloc, parts.path.rstrip("/"))
+    path = parts.path[:-1] if parts.path.endswith("/") else parts.path
+    return "%s://%s%s" % (parts.scheme.lower(), netloc, path)
 
 
-def _sha256(value):
+def _sha256(value, code="E_TARGET_PROFILE_SCHEMA"):
     if not isinstance(value, str) or not HEX64.fullmatch(value):
-        fail("E_TARGET_PROFILE_SCHEMA", "target profile digest is invalid")
+        fail(code, "digest is invalid")
     return value
 
 
-def _positive_int(value):
+def _positive_int(value, code="E_TARGET_PROFILE_SCHEMA"):
     if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
-        fail("E_TARGET_PROFILE_SCHEMA", "target profile limit is invalid")
+        fail(code, "limit is invalid")
     return value
+
+
+def _exact_object(value, keys, code):
+    if not isinstance(value, dict) or set(value) != keys:
+        fail(code, "object fields are invalid")
+    return value
+
+
+def _control_objects(cache, interactive, qwen, limits, lane_guard, code):
+    _exact_object(cache, {"enabled"}, code)
+    _exact_object(interactive, {"enabled"}, code)
+    _exact_object(qwen, {"cli"}, code)
+    _exact_object(limits, {"requests"}, code)
+    _exact_object(lane_guard, {"enabled"}, code)
+    if not isinstance(cache["enabled"], bool) or not isinstance(interactive["enabled"], bool):
+        fail(code, "control booleans are invalid")
+    if not isinstance(lane_guard["enabled"], bool):
+        fail(code, "lane guard boolean is invalid")
+    try:
+        identity(qwen["cli"])
+    except ManifestError:
+        fail(code, "Qwen control is invalid")
+    _positive_int(limits["requests"], code)
 
 
 def validate_target_profile(value):
@@ -110,13 +189,16 @@ def validate_target_profile(value):
     profile = dict(value)
     profile["provider_base_url"] = _profile_url(value.get("provider_base_url"))
     try:
-        for field in ("route", "secret_ref", "requested_model", "expected_returned_identity"):
+        for field in ("route", "requested_model", "expected_returned_identity"):
             safe_text(value.get(field), "E_TARGET_PROFILE_SCHEMA")
-        identity(value["secret_ref"])
         identity(value["requested_model"])
         identity(value["expected_returned_identity"])
     except ManifestError:
         fail("E_TARGET_PROFILE_SCHEMA", "target profile identity is invalid")
+    if not isinstance(value.get("secret_ref"), str) or not ENV_SECRET_REF.fullmatch(value["secret_ref"]):
+        fail("E_TARGET_PROFILE_SCHEMA", "secret reference must be an environment variable name")
+    if SECRET.search(value["secret_ref"]):
+        fail("E_TARGET_PROFILE_SCHEMA", "secret reference must not contain a credential")
     for field in ("temperature", "top_p"):
         numeric = value.get(field)
         if isinstance(numeric, bool) or not isinstance(numeric, (int, float)) or not math.isfinite(numeric):
@@ -129,19 +211,48 @@ def validate_target_profile(value):
         _sha256(value.get(field))
     for digest_value in value["gate_sha256"].values():
         _sha256(digest_value)
-    for field in ("cache", "interactive", "qwen", "limits", "lane_guard"):
-        if not isinstance(value.get(field), dict):
-            fail("E_TARGET_PROFILE_SCHEMA", "target profile configuration is invalid")
+    _control_objects(value["cache"], value["interactive"], value["qwen"], value["limits"],
+                     value["lane_guard"], "E_TARGET_PROFILE_SCHEMA")
     return profile
 
 
+def validate_input_identity(value):
+    code = "E_INPUT_IDENTITY_SCHEMA"
+    if (not isinstance(value, dict) or set(value) != INPUT_IDENTITY_KEYS or
+            isinstance(value.get("schema"), bool) or value.get("schema") != 1):
+        fail(code, "input identity fields are invalid")
+    for field in INPUT_IDENTITY_DIGEST_KEYS:
+        _sha256(value[field], code)
+    if (not isinstance(value["arm_commit"], str) or not isinstance(value["arm_tree"], str) or
+            not GIT_HEX.fullmatch(value["arm_commit"]) or not GIT_HEX.fullmatch(value["arm_tree"])):
+        fail(code, "arm Git identity is invalid")
+    try:
+        identity(value["arm"])
+        identity(value["provider"])
+        identity(value["requested_model"])
+    except ManifestError:
+        fail(code, "input identity labels are invalid")
+    if _profile_url(value["proxy_url"], code) != value["proxy_url"]:
+        fail(code, "proxy URL is not canonical")
+    if not isinstance(value["gate_sha256"], dict) or set(value["gate_sha256"]) != GATE_SHA256_KEYS:
+        fail(code, "gate digests are invalid")
+    for digest_value in value["gate_sha256"].values():
+        _sha256(digest_value, code)
+    _exact_object(value["limits"], {"max_output_tokens", "session_token_limit", "profile"}, code)
+    _positive_int(value["limits"]["max_output_tokens"], code)
+    _positive_int(value["limits"]["session_token_limit"], code)
+    _control_objects(value["cache"], value["interactive"], value["qwen"],
+                     value["limits"]["profile"], value["lane_guard"], code)
+    return value
+
+
 def compare_inputs(left, right, allowed=()):
-    if not isinstance(left, dict) or not isinstance(right, dict):
-        fail("E_INPUT_IDENTITY_SCHEMA", "inputs to compare must be objects")
+    validate_input_identity(left)
+    validate_input_identity(right)
     allowed = set(allowed)
-    changed = sorted(key for key in set(left) | set(right) if left.get(key) != right.get(key))
+    changed = sorted(key for key in INPUT_IDENTITY_KEYS if left[key] != right[key])
     if ("raw_prompt_sha256" in changed and
-            left.get("canonical_prompt_sha256") == right.get("canonical_prompt_sha256")):
+            left["canonical_prompt_sha256"] == right["canonical_prompt_sha256"]):
         changed.remove("raw_prompt_sha256")
         changed.append("prompt_path_only")
         allowed.add("prompt_path_only")

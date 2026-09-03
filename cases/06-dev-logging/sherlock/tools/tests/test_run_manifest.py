@@ -247,11 +247,81 @@ class RunManifestTests(unittest.TestCase):
         self.assertEqual(row["verdict"], "incomparable")
         self.assertEqual(row["undeclared"], ["settings_sha256"])
 
+    def test_compare_rejects_incomplete_or_malformed_input_identities(self):
+        for left, right in (({"schema": 1, "x": None}, {"schema": 1}),
+                            ({"raw_prompt_sha256": "a" * 64},
+                             {"raw_prompt_sha256": "b" * 64})):
+            with self.subTest(left=left, right=right):
+                with self.assertRaisesRegex(MOD.ManifestError, "E_INPUT_IDENTITY_SCHEMA"):
+                    MOD.compare_inputs(left, right)
+        left = self.valid_manifest()["input_identity"]
+        right = json.loads(json.dumps(left))
+        right["arm_commit"] = None
+        with self.assertRaisesRegex(MOD.ManifestError, "E_INPUT_IDENTITY_SCHEMA"):
+            MOD.compare_inputs(left, right)
+
+    def test_target_profile_secret_ref_accepts_only_environment_references(self):
+        for value in ("sk_live_SYNTHETIC123456", "hf_SYNTHETIC123456",
+                      "pplx-SYNTHETIC123456", "token=synthetic"):
+            with self.subTest(value=value):
+                fx = Fixture(self.root_for("secret-ref-" + value.replace("=", "-")))
+                fx.stage()
+                profile = json.loads(fx.profile.read_text())
+                profile["secret_ref"] = value
+                fx.profile.write_text(json.dumps(profile))
+                with self.assertRaisesRegex(MOD.ManifestError, "E_TARGET_PROFILE_SCHEMA"):
+                    fx.create()
+
+    def test_target_profile_nested_controls_are_exact_and_typed(self):
+        invalid = (
+            ("cache-unknown", "cache", {"enabled": True, "unknown": False}),
+            ("interactive-missing", "interactive", {}),
+            ("qwen-wrong-type", "qwen", {"cli": True}),
+            ("lane-guard-wrong-type", "lane_guard", {"enabled": "true"}),
+            ("limit-zero", "limits", {"requests": 0}),
+            ("limit-negative", "limits", {"requests": -1}),
+            ("limit-float", "limits", {"requests": 1.5}),
+            ("limit-bool", "limits", {"requests": True}),
+            ("limit-null", "limits", {"requests": None}),
+        )
+        for label, field, value in invalid:
+            with self.subTest(label=label):
+                fx = Fixture(self.root_for("nested-" + label))
+                fx.stage()
+                profile = json.loads(fx.profile.read_text())
+                profile[field] = value
+                fx.profile.write_text(json.dumps(profile))
+                with self.assertRaisesRegex(MOD.ManifestError, "E_TARGET_PROFILE_SCHEMA"):
+                    fx.create()
+
+    def test_target_profile_url_is_strict_and_removes_one_trailing_slash(self):
+        profile = json.loads(self.fx.profile.read_text())
+        for value in (" https://example.test/v1", "https://example.test/v1\n",
+                      "https://example.test/%zz", "https://exa_mple.test/v1",
+                      "https://example.test\\v1"):
+            with self.subTest(value=value):
+                candidate = dict(profile)
+                candidate["provider_base_url"] = value
+                with self.assertRaisesRegex(MOD.ManifestError, "E_TARGET_PROFILE_SCHEMA"):
+                    MOD.validate_target_profile(candidate)
+        profile["provider_base_url"] = "HTTPS://EXAMPLE.TEST:443/v1///"
+        self.assertEqual(MOD.validate_target_profile(profile)["provider_base_url"],
+                         "https://example.test/v1//")
+
     def test_canonical_prompt_only_normalizes_staged_root(self):
         a = MOD.canonical_prompt(b"read /tmp/a/corpus/Security.jsonl\n", "/tmp/a/corpus")
         b = MOD.canonical_prompt(b"read /tmp/b/corpus/Security.jsonl\n", "/tmp/b/corpus")
         self.assertEqual(a, b)
         self.assertEqual(a, b"read ${CORPUS_ROOT}/Security.jsonl\n")
+
+    def test_canonical_prompt_does_not_normalize_sibling_prefixes(self):
+        a = MOD.canonical_prompt(b"read /tmp/a/corpus-archive/Security.jsonl\n", "/tmp/a/corpus")
+        b = MOD.canonical_prompt(b"read /tmp/b/corpus-archive/Security.jsonl\n", "/tmp/b/corpus")
+        self.assertEqual(a, b"read /tmp/a/corpus-archive/Security.jsonl\n")
+        self.assertEqual(b, b"read /tmp/b/corpus-archive/Security.jsonl\n")
+        self.assertNotEqual(a, b)
+        self.assertEqual(MOD.canonical_prompt(b"read /tmp/a/corpus:archive\n", "/tmp/a/corpus"),
+                         b"read /tmp/a/corpus:archive\n")
 
     @unittest.skipUnless(os.path.islink("/tmp"), "/tmp is not a system symlink")
     def test_clean_abs_canonicalizes_system_tmp_alias(self):
