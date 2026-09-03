@@ -118,6 +118,8 @@ printf '[{"type":"result","result":"ok","is_error":false,"session_id":"123456789
                                 capture_output=True, text=True, timeout=10)
         self.assertNotEqual(result.returncode, 0)
         self.assertFalse(self.qwen_capture.exists())
+
+
         self.assertEqual(sorted(p.name for p in trace.iterdir()), ["run-manifest.json"])
 
     def test_collision_is_rejected_before_proxy_or_qwen(self):
@@ -963,6 +965,54 @@ os.stat=guarded_stat
         controller = self.fx.controller_dir()
         self.assertEqual(json.loads((controller / "status.json").read_text())["phase"],
                          "BLOCKED_UNKNOWN")
+
+
+class TargetContractProbeControllerTests(unittest.TestCase):
+    def test_probe_mode_has_a_separate_sealed_input_parser(self):
+        """Probe dispatch never falls through to the paid controller config."""
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            result = subprocess.run(["bash", str(CONTROLLER), "--target-contract-probe",
+                                     "--sealed-input", str(root / "missing"),
+                                     "--work", str(root / "work"),
+                                     "--runner-command", "/usr/bin/true"],
+                                    text=True, capture_output=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("PROBE_ARGUMENTS", result.stderr)
+
+    def test_probe_mode_validates_sealed_package_before_runner_start(self):
+        """No runner is selected or spawned for an incomplete sealed input."""
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            sealed = root / "sealed"; sealed.mkdir()
+            work = root / "work"; work.mkdir()
+            result = subprocess.run(["bash", str(CONTROLLER), "--target-contract-probe",
+                                     "--sealed-input", str(sealed), "--work", str(work)],
+                                    text=True, capture_output=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("PROBE_PACKAGE", result.stderr)
+
+    def test_probe_mode_launches_only_the_repository_runner_on_local_transport(self):
+        """The integration path fixes the executable and varies only localhost."""
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary); sealed = root / "sealed"; sealed.mkdir()
+            work = root / "work"; work.mkdir(); (sealed / "fixture").mkdir()
+            (sealed / "fixture" / "one.log").write_text("line\n")
+            (sealed / "target-profile.json").write_text(json.dumps({
+                "provider_base_url": "http://127.0.0.1:9/v1", "route": "fixture",
+                "requested_model": "fixture-model", "expected_returned_identity": "fixture-model",
+                "qwen": {"cli": "/usr/bin/true"}}))
+            (sealed / "probe-budget.json").write_text("{}")
+            (sealed / "input-package.json").write_text("{}")
+            env = dict(os.environ, SHERLOCK_PROBE_TEST_MODE="1", SHERLOCK_API_KEY="fixture-only")
+            result = subprocess.run(["bash", str(CONTROLLER), "--target-contract-probe",
+                                     "--sealed-input", str(sealed), "--work", str(work),
+                                     "--transport-base-url", "http://127.0.0.1:9/v1"],
+                                    text=True, capture_output=True, env=env, timeout=30)
+            trace = work / "runs" / "target-contract-probe"
+            self.assertNotIn("PROBE_UNAVAILABLE", result.stderr)
+            self.assertTrue((trace / "run-manifest.json").is_file())
+            self.assertNotIn("/usr/bin/true", result.args)
 
 
 if __name__ == "__main__":

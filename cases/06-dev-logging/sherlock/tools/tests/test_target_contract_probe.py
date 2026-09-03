@@ -46,7 +46,7 @@ class TargetContractProbeTest(unittest.TestCase):
         manifest = json.loads((self.root / "probe-manifest.json").read_text())
         self.assertEqual(set(manifest), self.probe.PROBE_MANIFEST_KEYS)
         self.assertEqual(manifest["action"], "target_contract_probe")
-        for name in ("target-profile.json", "probe-budget.json", "fixture-manifest.json",
+        for name in ("target-profile.json", "corporate-settings.json", "probe-budget.json", "fixture-manifest.json",
                      "input-package.json", "probe-manifest.json"):
             self.assertTrue((self.root / name).is_file(), name)
         self.assertEqual(result["manifest_sha256"], self._sha(self.root / "probe-manifest.json"))
@@ -204,7 +204,7 @@ class TargetContractProbeTest(unittest.TestCase):
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertEqual(json.loads(done.stdout)["root"], str(root))
 
-    def test_cli_run_uses_only_sealed_local_stub_and_disables_retries(self):
+    def test_cli_run_rejects_runner_substitution_even_for_local_stub(self):
         self.probe.prepare(self.args)
         marker = self.temp / "runner-marker.json"
         stub = self.temp / "runner.py"
@@ -215,31 +215,163 @@ class TargetContractProbeTest(unittest.TestCase):
                                "--operator-approved-probe", self._sha(self.root / "probe-manifest.json"),
                                "--nonce-root", str(self.root / "nonces"), "--runner-command", str(stub)],
                               text=True, capture_output=True, env=env)
-        self.assertEqual(done.returncode, 0, done.stderr)
-        self.assertEqual(json.loads(marker.read_text())["SHERLOCK_MAX_RETRIES"], "0")
+        self.assertNotEqual(done.returncode, 0)
+        self.assertFalse(marker.exists())
 
-    def _accepted_trace(self, trace):
+    def test_manifest_created_at_must_be_aware_and_bound_before_contact(self):
+        self.probe.prepare(self.args)
+        manifest = self.root / "probe-manifest.json"
+        row = json.loads(manifest.read_text())
+        row["created_at"] = "2000-01-01T00:00:00"
+        row["expires_at"] = "2099-01-01T00:00:00Z"
+        manifest.write_bytes(self.probe.canonical(row) + b"\n")
+        with self.assertRaises(self.probe.ProbeFailure):
+            self.probe.run(manifest, self._sha(manifest), self.root / "nonces",
+                           secret_reader=self._tripwire, proxy_starter=self._tripwire, runner=self._tripwire)
+        self.assertEqual(self.trips, [])
+
+    def test_run_rejects_undeclared_fixture_member_before_secret(self):
+        """A sealed fixture is a closed tree, not merely declared leaf hashes."""
+        self.probe.prepare(self.args)
+        (self.root / "fixture" / "undeclared.jsonl").write_text("attacker\n")
+        with self.assertRaises(self.probe.ProbeFailure):
+            self.probe.run(self.root / "probe-manifest.json", self._sha(self.root / "probe-manifest.json"),
+                           self.root / "nonces", secret_reader=self._tripwire,
+                           proxy_starter=self._tripwire, runner=self._tripwire)
+        self.assertEqual(self.trips, [])
+
+    def test_safe_read_rejects_a_parent_symlink(self):
+        """A no-follow leaf check is insufficient when an ancestor aliases it."""
+        source = self.temp / "source"; source.mkdir()
+        (source / "asset.json").write_text("{}\n")
+        alias = self.temp / "alias"
+        alias.symlink_to(source, target_is_directory=True)
+        with self.assertRaises(self.probe.ProbeFailure):
+            self.probe.safe_read_regular(alias / "asset.json")
+
+    def test_nonce_and_publication_reject_parent_symlinks(self):
+        """A parent alias cannot redirect single-use or receipt publication."""
+        self.probe.prepare(self.args)
+        outside = self.temp / "outside"; outside.mkdir()
+        nonce_alias = self.temp / "nonce-alias"; nonce_alias.symlink_to(outside, target_is_directory=True)
+        with self.assertRaises(self.probe.ProbeFailure):
+            self.probe.authorize(self.root / "probe-manifest.json", self._sha(self.root / "probe-manifest.json"), nonce_alias)
+        self.assertEqual(list(outside.iterdir()), [])
+        receipt_alias = self.temp / "receipt-alias"; receipt_alias.symlink_to(outside, target_is_directory=True)
+        with self.assertRaises(self.probe.ProbeFailure):
+            self.probe._atomic_no_replace(receipt_alias / "receipt.json", b"{}\n")
+        self.assertEqual(list(outside.iterdir()), [])
+
+    def test_receipt_checksum_interruption_rolls_back_receipt_and_seals_rejection(self):
+        """An interrupted accepted publication leaves one rejected terminal result."""
+        self.probe.prepare(self.args)
+        trace = self.root / "probe-work"; self._accepted_trace(trace)
+        original = self.probe._atomic_no_replace
+        def interrupt(path, data):
+            if str(path).endswith("target-contract-receipt.json.sha256"):
+                raise self.probe.ProbeFailure("TARGET_CONTRACT_FAILED", "injected checksum interruption")
+            return original(path, data)
+        self.probe._atomic_no_replace = interrupt
+        try:
+            with self.assertRaises(self.probe.ProbeFailure):
+                self.probe.audit(trace)
+        finally:
+            self.probe._atomic_no_replace = original
+        self.assertFalse((trace / "target-contract-receipt.json").exists())
+        self.assertFalse((trace / "target-contract-receipt.json.sha256").exists())
+        self.assertFalse(json.loads((trace / "probe-result.json").read_text())["accepted"])
+
+    def test_precontact_run_refusal_writes_one_terminal_result(self):
+        """Even a malformed manifest leaves an auditable terminal outcome."""
+        self.probe.prepare(self.args)
+        manifest = self.root / "probe-manifest.json"
+        manifest.write_text("{}\n")
+        with self.assertRaises(self.probe.ProbeFailure):
+            self.probe.run(manifest, self._sha(manifest), self.root / "nonces",
+                           secret_reader=self._tripwire, proxy_starter=self._tripwire, runner=self._tripwire)
+        result = self.root / "probe-result.json"
+        self.assertTrue(result.is_file())
+        self.assertFalse(json.loads(result.read_text())["accepted"])
+
+    def test_audit_rejects_forged_budget_identity_and_body_aliases(self):
+        """One trace call has one bounded sent/returned identity and owned bodies."""
+        for mutation in ("budget", "identity", "body-alias"):
+            with self.subTest(mutation=mutation):
+                root = self.temp / ("audit-" + mutation)
+                args = self.probe.PrepareArgs(**dict(self.args.__dict__, root=root))
+                self.probe.prepare(args)
+                trace = root / "probe-work"; self._accepted_trace(trace, root)
+                if mutation == "budget":
+                    budget = json.loads((trace / "upstream-budget-state.json").read_text())
+                    budget["limits"]["max_provider_calls"] = 999
+                    (trace / "upstream-budget-state.json").write_bytes(self.probe.canonical(budget))
+                elif mutation == "identity":
+                    ledger = json.loads((trace / "ledger.json").read_text())
+                    ledger["sent_models"] = ["other-model"]
+                    (trace / "ledger.json").write_bytes(self.probe.canonical(ledger))
+                else:
+                    first = trace / "request-bodies" / "one.json"
+                    os.link(first, trace / "response-bodies" / "alias.json")
+                with self.assertRaises(self.probe.ProbeFailure):
+                    self.probe.audit(trace)
+                self.assertFalse((trace / "target-contract-receipt.json").exists())
+
+    def test_run_revalidates_snapshot_after_secret_callback(self):
+        """A callback cannot substitute bytes after the final pre-contact check."""
+        self.probe.prepare(self.args)
+        observed = []
+        def secret(_reference):
+            sealed = self.root / "probe-work" / "sealed-input" / "target-profile.json"
+            profile = json.loads(sealed.read_text())
+            profile["route"] = "substituted-route"
+            sealed.write_bytes(self.probe.canonical(profile) + b"\n")
+            return "test-only"
+        def proxy(profile, _token, _budget):
+            observed.append(profile["route"])
+            return "localhost-only"
+        with self.assertRaises(self.probe.ProbeFailure):
+            self.probe.run(self.root / "probe-manifest.json", self._sha(self.root / "probe-manifest.json"),
+                           self.root / "nonces", secret_reader=secret, proxy_starter=proxy,
+                           runner=self._tripwire)
+        self.assertEqual(observed, [])
+
+    def test_cli_refuses_arbitrary_runner_command(self):
+        """The paid CLI may select only its sealed controller/runner path."""
+        self.probe.prepare(self.args)
+        done = subprocess.run([sys.executable, str(PROBE_PATH), "run", "--manifest",
+                               str(self.root / "probe-manifest.json"), "--operator-approved-probe",
+                               self._sha(self.root / "probe-manifest.json"), "--nonce-root",
+                               str(self.root / "nonces"), "--runner-command", "/usr/bin/true", "--json"],
+                              text=True, capture_output=True,
+                              env=dict(os.environ, SHERLOCK_API_KEY="test-only"))
+        self.assertNotEqual(done.returncode, 0)
+        self.assertFalse((self.root / "nonces").exists())
+
+    def _accepted_trace(self, trace, source_root=None):
         trace.mkdir()
-        for name in ("target-profile.json", "probe-budget.json", "fixture-manifest.json",
+        source_root = self.root if source_root is None else source_root
+        for name in ("target-profile.json", "corporate-settings.json", "probe-budget.json", "fixture-manifest.json",
                      "input-package.json", "probe-manifest.json"):
-            shutil.copy2(self.root / name, trace / name)
-        shutil.copytree(self.root / "fixture", trace / "fixture")
+            shutil.copy2(source_root / name, trace / name)
+        shutil.copytree(source_root / "fixture", trace / "fixture")
         shutil.copy2(ROOT / "tools" / "tests" / "fixtures" / "target-contract-reports" / "canonical.md",
                      trace / "final-report.md")
         fixture_test = ROOT / "tools" / "tests" / "test_target_contract_fixture.py"
         spec = importlib.util.spec_from_file_location("fixture_test_helpers", fixture_test)
         helpers = importlib.util.module_from_spec(spec); spec.loader.exec_module(helpers)
         (trace / "work").mkdir()
-        helpers.minimum_ledger(trace / "work", trace / "fixture")
+        # The canonical fixture is sealed; generate the v44 worklist from an
+        # isolated gate corpus rather than adding a post-seal fixture leaf.
+        gate_corpus = self.temp / ("gate-corpus-" + source_root.name)
+        shutil.copytree(trace / "fixture", gate_corpus)
+        helpers.minimum_ledger(trace / "work", gate_corpus)
         (trace / "ledger.json").write_text(json.dumps({"provider_calls_observed": 1,
             "usage": {"prompt_tokens": 1, "completion_tokens": 1},
-            "returned_identities": ["deepseek-v4-20260901"]}))
+            "returned_identities": ["deepseek-v4-20260901"],
+            "sent_models": ["deepseek-v4-20260901"], "call_ids": ["call-1"]}))
         (trace / "request-bodies").mkdir(); (trace / "response-bodies").mkdir()
         (trace / "request-bodies" / "one.json").write_text("{}")
         (trace / "response-bodies" / "one.json").write_text("{}")
-        gates = {name: {"returncode": 0, "blocking": 0} for name in self.probe.GATES}
-        (trace / "probe-gates.json").write_text(json.dumps(gates))
-        (trace / "probe-oracle.json").write_text(json.dumps({"accepted": True}))
         (trace / "exit-layers.json").write_text(json.dumps({"attempt_exit_code": 0,
             "driver_exit_code": 0, "wrapper_exit_code": 0,
             "status_exit_code": 0, "gate_exit_codes": {name: 0 for name in self.probe.GATES},

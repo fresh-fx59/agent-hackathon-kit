@@ -866,7 +866,80 @@ def validate_and_finish(root, controller, controller_id, trace, tag, manifest_sh
     return 0 if accepted else 1
 
 
+def target_contract_probe(argv):
+    """Reserve a closed controller entrypoint for the sealed paid probe.
+
+    This parser is intentionally separate from the normal controller: an
+    arbitrary executable, configuration root, or resume identifier must never
+    be interpreted as a probe instruction.
+    """
+    if len(argv) not in (4, 6) or tuple(argv[:4:2]) != ("--sealed-input", "--work") or \
+            (len(argv) == 6 and argv[4] != "--transport-base-url"):
+        print("PROBE_ARGUMENTS", file=sys.stderr)
+        return 2
+    sealed, work = (Path(argv[1]), Path(argv[3]))
+    if not sealed.is_absolute() or not work.is_absolute() or not sealed.is_dir() or os.path.islink(sealed):
+        print("PROBE_INPUT", file=sys.stderr)
+        return 1
+    required = ("target-profile.json", "probe-budget.json", "input-package.json", "fixture")
+    for name in required:
+        candidate = sealed / name
+        try:
+            mode = os.lstat(candidate).st_mode
+        except OSError:
+            print("PROBE_PACKAGE", file=sys.stderr)
+            return 1
+        if os.path.islink(candidate) or not (stat.S_ISDIR(mode) if name == "fixture" else stat.S_ISREG(mode)):
+            print("PROBE_PACKAGE", file=sys.stderr)
+            return 1
+    try:
+        profile = json.loads((sealed / "target-profile.json").read_text(encoding="utf-8"))
+        if not isinstance(profile, dict) or not isinstance(profile.get("provider_base_url"), str) or \
+                not isinstance(profile.get("requested_model"), str) or \
+                not isinstance(profile.get("expected_returned_identity"), str) or \
+                not isinstance(profile.get("qwen"), dict) or not isinstance(profile["qwen"].get("cli"), str):
+            raise ValueError()
+    except (OSError, ValueError, json.JSONDecodeError):
+        print("PROBE_PACKAGE", file=sys.stderr)
+        return 1
+    transport = profile["provider_base_url"]
+    if len(argv) == 6:
+        if os.environ.get("SHERLOCK_PROBE_TEST_MODE") != "1" or not argv[5].startswith("http://127.0.0.1"):
+            print("PROBE_TRANSPORT", file=sys.stderr)
+            return 1
+        transport = argv[5]
+    runs = work / "runs"
+    trace = runs / "target-contract-probe"
+    try:
+        runs.mkdir(mode=0o700)
+        trace.mkdir(mode=0o700)
+        manifest = trace / "run-manifest.json"
+        fd = os.open(manifest, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(canonical({"schema": 1, "probe_input": str(sealed)}) + b"\n")
+            handle.flush(); os.fsync(handle.fileno())
+    except (OSError, ValueError):
+        print("PROBE_TRACE", file=sys.stderr)
+        return 1
+    env = dict(os.environ)
+    env.update({"BENCH_RUNS": str(runs), "SHERLOCK_RUN_TAG": trace.name,
+                "SHERLOCK_TRACE": str(trace), "SHERLOCK_CORPUS": str(sealed / "fixture"),
+                "SHERLOCK_BASE_URL": transport, "SHERLOCK_MODEL": profile["requested_model"],
+                "SHERLOCK_EXPECTED_RETURNED_IDENTITY": profile["expected_returned_identity"],
+                "QWEN_BIN": profile["qwen"]["cli"], "SHERLOCK_MAX_RETRIES": "0",
+                "SHERLOCK_RESUME_MAX_ATTEMPTS": "0", "SHERLOCK_UPSTREAM_RETRY": "0"})
+    done = subprocess.run(["bash", str(HERE / "run-bench.sh"), "target-contract-probe"],
+                          env=env, text=True, capture_output=True, timeout=600)
+    print(json.dumps({"trace": str(trace), "runner_exit_code": done.returncode,
+                      "stdout_sha256": digest(done.stdout.encode("utf-8"))}, sort_keys=True))
+    if done.returncode:
+        print("PROBE_RUNNER_FAILED", file=sys.stderr)
+    return done.returncode
+
+
 def main():
+    if len(sys.argv) >= 2 and sys.argv[1] == "--target-contract-probe":
+        return target_contract_probe(sys.argv[2:])
     resume_id = None
     if len(sys.argv) == 3 and sys.argv[1] == "--resume": resume_id = sys.argv[2]
     elif len(sys.argv) != 1:
