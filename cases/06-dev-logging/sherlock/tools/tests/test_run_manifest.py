@@ -80,6 +80,30 @@ class Fixture:
         self.commitment_key.chmod(0o600)
         self.health = self.root / "health.json"
         self.write_health()
+        self.profile = self._file("target-profile.json", json.dumps({
+            "schema": 1,
+            "provider_base_url": "https://provider.example/v1/",
+            "route": "/chat/completions",
+            "secret_ref": "LINKAPI_API_KEY",
+            "requested_model": "qwen-target",
+            "expected_returned_identity": "qwen-real",
+            "identity_mode": "provider_pinned_version",
+            "temperature": 0,
+            "top_p": 1,
+            "max_output_tokens": 1024,
+            "session_token_limit": 4096,
+            "cache": {"enabled": True},
+            "interactive": {"enabled": False},
+            "qwen": {"cli": "qwen"},
+            "limits": {"requests": 1},
+            "settings_sha256": "1" * 64,
+            "system_prompt_sha256": "2" * 64,
+            "skill_sha256": "3" * 64,
+            "tool_schema_sha256": "4" * 64,
+            "gate_sha256": {"reportcheck": "5" * 64, "citecheck": "6" * 64,
+                            "statecheck": "7" * 64, "triagecheck": "8" * 64},
+            "lane_guard": {"enabled": True},
+        }))
 
     def _file(self, name, text):
         path = self.root / name
@@ -125,6 +149,7 @@ class Fixture:
                 "target_version": "0.21.1", "requested_model": "qwen-target",
                 "provider": "linkapi", "expected_returned_identity": "qwen-real",
                 "lane": "paid", "health_receipt": str(self.health),
+                "target_profile": str(self.profile),
                 "controller_parent": str(self.parent),
                 "commitment_file": str(self.commitment),
                 "commitment_key": str(self.commitment_key),
@@ -148,7 +173,8 @@ class Fixture:
                   ("target-cli", self.target_cli), ("target-version", "0.21.1"),
                   ("requested-model", "qwen-target"), ("provider", "linkapi"),
                   ("expected-returned-identity", "qwen-real"), ("lane", "paid"),
-                  ("health-receipt", self.health), ("controller-parent", self.parent),
+                  ("health-receipt", self.health), ("target-profile", self.profile),
+                  ("controller-parent", self.parent),
                   ("commitment-file", self.commitment),
                   ("commitment-key", self.commitment_key),
                   ("staged-corpus-destination", self.staged))
@@ -189,6 +215,56 @@ class RunManifestTests(unittest.TestCase):
         self.assertNotIn("proof_locations", json.dumps(manifest))
         self.assertEqual(manifest["corpus"]["excluded"]["count"], 0)
         self.assertRegex(manifest["target"]["identity_sha256"], r"^[0-9a-f]{64}$")
+
+    def test_target_profile_is_bound_and_unknown_fields_fail(self):
+        self.fx.stage()
+        manifest = self.fx.create()
+        self.assertEqual(manifest["target_profile"]["sha256"],
+                         hashlib.sha256(self.fx.profile.read_bytes()).hexdigest())
+        profile = json.loads(self.fx.profile.read_text())
+        profile["surprise"] = True
+        self.fx.profile.write_text(json.dumps(profile))
+        with self.assertRaisesRegex(MOD.ManifestError, "E_TARGET_PROFILE_SCHEMA"):
+            self.fx.create(trace=str(self.fx.root / "other-trace"), run_tag="run-002")
+
+    def test_target_profile_requires_a_bounded_secret_reference(self):
+        self.fx.stage()
+        profile = json.loads(self.fx.profile.read_text())
+        profile["secret_ref"] = "x" * 129
+        self.fx.profile.write_text(json.dumps(profile))
+        with self.assertRaisesRegex(MOD.ManifestError, "E_TARGET_PROFILE_SCHEMA"):
+            self.fx.create()
+
+    def test_compare_allows_only_declared_model_fields(self):
+        left = self.valid_manifest()["input_identity"]
+        right = json.loads(json.dumps(left))
+        right["provider"] = "other"
+        right["requested_model"] = "other-model"
+        row = MOD.compare_inputs(left, right, ("provider", "requested_model"))
+        self.assertEqual(row["verdict"], "declared_differences_only")
+        right["settings_sha256"] = "0" * 64
+        row = MOD.compare_inputs(left, right, ("provider", "requested_model"))
+        self.assertEqual(row["verdict"], "incomparable")
+        self.assertEqual(row["undeclared"], ["settings_sha256"])
+
+    def test_canonical_prompt_only_normalizes_staged_root(self):
+        a = MOD.canonical_prompt(b"read /tmp/a/corpus/Security.jsonl\n", "/tmp/a/corpus")
+        b = MOD.canonical_prompt(b"read /tmp/b/corpus/Security.jsonl\n", "/tmp/b/corpus")
+        self.assertEqual(a, b)
+        self.assertEqual(a, b"read ${CORPUS_ROOT}/Security.jsonl\n")
+
+    @unittest.skipUnless(os.path.islink("/tmp"), "/tmp is not a system symlink")
+    def test_clean_abs_canonicalizes_system_tmp_alias(self):
+        self.assertEqual(MOD.clean_abs("/tmp/compare-input.json"),
+                         os.path.realpath("/tmp/compare-input.json"))
+
+    def test_compare_names_raw_path_only_prompt_difference(self):
+        left = self.valid_manifest()["input_identity"]
+        right = json.loads(json.dumps(left))
+        right["raw_prompt_sha256"] = "f" * 64
+        row = MOD.compare_inputs(left, right, ())
+        self.assertEqual(row["verdict"], "declared_differences_only")
+        self.assertEqual(row["differences"], ["prompt_path_only"])
 
     def test_checkers_must_be_owned_by_selected_skill_version(self):
         self.fx.stage()

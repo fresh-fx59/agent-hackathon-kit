@@ -7,6 +7,7 @@ import fcntl
 import hashlib
 import hmac
 import json
+import math
 import os
 from pathlib import Path, PurePosixPath
 import re
@@ -14,11 +15,13 @@ import stat
 import subprocess
 import sys
 import tempfile
+from urllib.parse import urlsplit
 
 SECRET = re.compile(r"(?:bearer\s+|(?:sk|ghp|glpat|xox[baprs])-|AKIA[0-9A-Z]{16}|"
                     r"-----BEGIN .*PRIVATE KEY-----|(?:password|token|api[_-]?key)\s*[:=])", re.I)
 IDENTIFIER = re.compile(r"^[A-Za-z0-9_./:@+\[\]-]+$")
 HEX64 = re.compile(r"^[0-9a-f]{64}$")
+GIT_HEX = re.compile(r"^[0-9a-f]{40}(?:[0-9a-f]{24})?$")
 FORBIDDEN = {"answer-key", "answer_key", "labels", "label", "facts.json",
              "ground-truth", "ground_truth", "attacker-only", "attacker_only"}
 MAX_ID = 128
@@ -28,6 +31,14 @@ MAX_FUTURE_SKEW = 60
 COMMITMENT_PAYLOAD_KEYS = {"schema", "run_tag", "trace_dir", "trace_identity_sha256",
                            "manifest_sha256", "committed_at", "key_id"}
 COMMITMENT_KEYS = COMMITMENT_PAYLOAD_KEYS | {"hmac_sha256"}
+TARGET_PROFILE_KEYS = {
+    "schema", "provider_base_url", "route", "secret_ref", "requested_model",
+    "expected_returned_identity", "identity_mode", "temperature", "top_p",
+    "max_output_tokens", "session_token_limit", "cache", "interactive",
+    "qwen", "limits", "settings_sha256", "system_prompt_sha256",
+    "skill_sha256", "tool_schema_sha256", "gate_sha256", "lane_guard",
+}
+GATE_SHA256_KEYS = {"reportcheck", "citecheck", "statecheck", "triagecheck"}
 
 
 class ManifestError(ValueError):
@@ -47,6 +58,98 @@ def digest(data):
 def canonical(value):
     return json.dumps(value, ensure_ascii=False, sort_keys=True,
                       separators=(",", ":")).encode("utf-8")
+
+
+def canonical_prompt(data, staged_root):
+    if not isinstance(data, bytes):
+        fail("E_PROMPT_FILE", "prompt bytes are invalid")
+    supplied_root = os.path.abspath(safe_text(staged_root))
+    roots = (supplied_root, clean_abs(staged_root))
+    for root in dict.fromkeys(roots):
+        data = data.replace(root.encode("utf-8"), b"${CORPUS_ROOT}")
+    return data
+
+
+def _profile_url(value):
+    try:
+        parts = urlsplit(value)
+        port = parts.port
+    except (TypeError, ValueError):
+        fail("E_TARGET_PROFILE_SCHEMA", "provider URL is invalid")
+    if (parts.scheme.lower() not in ("http", "https") or not parts.hostname or
+            parts.username is not None or parts.password is not None or
+            parts.query or parts.fragment):
+        fail("E_TARGET_PROFILE_SCHEMA", "provider URL is invalid")
+    host = parts.hostname.lower()
+    if ":" in host and not host.startswith("["):
+        host = "[" + host + "]"
+    default = (parts.scheme.lower() == "http" and port == 80) or (
+        parts.scheme.lower() == "https" and port == 443)
+    netloc = host if default or port is None else "%s:%d" % (host, port)
+    return "%s://%s%s" % (parts.scheme.lower(), netloc, parts.path.rstrip("/"))
+
+
+def _sha256(value):
+    if not isinstance(value, str) or not HEX64.fullmatch(value):
+        fail("E_TARGET_PROFILE_SCHEMA", "target profile digest is invalid")
+    return value
+
+
+def _positive_int(value):
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        fail("E_TARGET_PROFILE_SCHEMA", "target profile limit is invalid")
+    return value
+
+
+def validate_target_profile(value):
+    if (not isinstance(value, dict) or set(value) != TARGET_PROFILE_KEYS or
+            isinstance(value.get("schema"), bool) or value.get("schema") != 1):
+        fail("E_TARGET_PROFILE_SCHEMA", "target profile fields are invalid")
+    if value.get("identity_mode") not in ("provider_pinned_version", "alias_unresolved"):
+        fail("E_TARGET_PROFILE_SCHEMA", "identity mode is invalid")
+    profile = dict(value)
+    profile["provider_base_url"] = _profile_url(value.get("provider_base_url"))
+    try:
+        for field in ("route", "secret_ref", "requested_model", "expected_returned_identity"):
+            safe_text(value.get(field), "E_TARGET_PROFILE_SCHEMA")
+        identity(value["secret_ref"])
+        identity(value["requested_model"])
+        identity(value["expected_returned_identity"])
+    except ManifestError:
+        fail("E_TARGET_PROFILE_SCHEMA", "target profile identity is invalid")
+    for field in ("temperature", "top_p"):
+        numeric = value.get(field)
+        if isinstance(numeric, bool) or not isinstance(numeric, (int, float)) or not math.isfinite(numeric):
+            fail("E_TARGET_PROFILE_SCHEMA", "target profile sampling value is invalid")
+    for field in ("max_output_tokens", "session_token_limit"):
+        _positive_int(value.get(field))
+    if not isinstance(value.get("gate_sha256"), dict) or set(value["gate_sha256"]) != GATE_SHA256_KEYS:
+        fail("E_TARGET_PROFILE_SCHEMA", "four gate digests are required")
+    for field in ("settings_sha256", "system_prompt_sha256", "skill_sha256", "tool_schema_sha256"):
+        _sha256(value.get(field))
+    for digest_value in value["gate_sha256"].values():
+        _sha256(digest_value)
+    for field in ("cache", "interactive", "qwen", "limits", "lane_guard"):
+        if not isinstance(value.get(field), dict):
+            fail("E_TARGET_PROFILE_SCHEMA", "target profile configuration is invalid")
+    return profile
+
+
+def compare_inputs(left, right, allowed=()):
+    if not isinstance(left, dict) or not isinstance(right, dict):
+        fail("E_INPUT_IDENTITY_SCHEMA", "inputs to compare must be objects")
+    allowed = set(allowed)
+    changed = sorted(key for key in set(left) | set(right) if left.get(key) != right.get(key))
+    if ("raw_prompt_sha256" in changed and
+            left.get("canonical_prompt_sha256") == right.get("canonical_prompt_sha256")):
+        changed.remove("raw_prompt_sha256")
+        changed.append("prompt_path_only")
+        allowed.add("prompt_path_only")
+    undeclared = sorted(set(changed) - allowed)
+    verdict = "identical" if not changed else (
+        "declared_differences_only" if not undeclared else "incomparable")
+    return {"schema": 1, "verdict": verdict, "differences": changed,
+            "declared": sorted(set(changed) & allowed), "undeclared": undeclared}
 
 
 def now_text():
@@ -80,8 +183,10 @@ def normalized(value, code="E_KEY_PATH"):
 def clean_abs(path):
     path = os.path.abspath(safe_text(path))
     temp = os.path.abspath(tempfile.gettempdir())
-    if path == temp or path.startswith(temp + os.sep):
-        path = os.path.realpath(temp) + path[len(temp):]
+    for temporary_root in (temp, os.path.abspath(os.sep + "tmp")):
+        if path == temporary_root or path.startswith(temporary_root + os.sep):
+            path = os.path.realpath(temporary_root) + path[len(temporary_root):]
+            break
     return path
 
 
@@ -369,6 +474,56 @@ def tree_asset(root):
         commit = None
     return {"path": root, "file_count": len(rows), "sha256": digest(canonical(rows)),
             "git_commit": commit}
+
+
+def _arm_identity(arm):
+    repo = Path(__file__).resolve().parents[5]
+    try:
+        commit = subprocess.check_output(["git", "-C", str(repo), "rev-parse", "HEAD"],
+                                         stderr=subprocess.DEVNULL, text=True).strip()
+        tree = subprocess.check_output(["git", "-C", str(repo), "rev-parse", "HEAD^{tree}"],
+                                       stderr=subprocess.DEVNULL, text=True).strip()
+    except (OSError, subprocess.CalledProcessError):
+        fail("E_ARM_IDENTITY", "arm git identity is unavailable")
+    if not GIT_HEX.fullmatch(commit) or not GIT_HEX.fullmatch(tree):
+        fail("E_ARM_IDENTITY", "arm git identity is invalid")
+    return {"arm": arm, "commit": commit, "tree": tree}
+
+
+def input_identity(prompt_path, staged_root, source, staged, arm, provider, artifacts, skill,
+                   profile, profile_asset):
+    prompt_data, _ = _read_path(prompt_path, "PROMPT_FILE")
+    arm_row = _arm_identity(arm)
+    return {
+        "schema": 1,
+        "raw_prompt_sha256": digest(prompt_data),
+        "canonical_prompt_sha256": digest(canonical_prompt(prompt_data, staged_root)),
+        "source_corpus_sha256": source["manifest_sha256"],
+        "staged_corpus_sha256": staged["manifest_sha256"],
+        "arm": arm_row["arm"],
+        "arm_commit": arm_row["commit"],
+        "arm_tree": arm_row["tree"],
+        "settings_sha256": profile["settings_sha256"],
+        "system_prompt_sha256": profile["system_prompt_sha256"],
+        "tool_schema_sha256": profile["tool_schema_sha256"],
+        "runner_sha256": artifacts["runner"]["sha256"],
+        "driver_sha256": artifacts["scorer"]["sha256"],
+        "proxy_url": profile["provider_base_url"],
+        "skill_sha256": profile["skill_sha256"],
+        "skill_tree_sha256": skill["sha256"],
+        "gate_sha256": profile["gate_sha256"],
+        "provider": provider,
+        "requested_model": profile["requested_model"],
+        "limits": {"max_output_tokens": profile["max_output_tokens"],
+                   "session_token_limit": profile["session_token_limit"],
+                   "profile": profile["limits"]},
+        "cache": profile["cache"],
+        "interactive": profile["interactive"],
+        "qwen": profile["qwen"],
+        "lane_guard": profile["lane_guard"],
+        "target_profile_sha256": profile_asset["sha256"],
+        "target_profile_canonical_sha256": digest(canonical(profile)),
+    }
 
 
 def utc(value):
@@ -785,13 +940,15 @@ def create_manifest(trace, run_tag, dataset, arm, source_corpus, answer_key, ren
                     prompt, skill_root, runner, scorer, triage_checker, stop_checker,
                     citation_checker, target_cli, target_version, requested_model, provider,
                     expected_returned_identity, lane, health_receipt, controller_parent,
-                    commitment_file, commitment_key, staged_corpus_destination, forbid_paths=()):
+                    commitment_file, commitment_key, staged_corpus_destination, target_profile,
+                    forbid_paths=()):
     for value in (run_tag, dataset, arm, target_version, requested_model, provider,
                   expected_returned_identity, lane):
         identity(value)
     paths = (trace, source_corpus, answer_key, renderer, prompt, skill_root, runner, scorer,
              triage_checker, stop_checker, citation_checker, target_cli, health_receipt,
-             controller_parent, commitment_file, commitment_key, staged_corpus_destination)
+             controller_parent, commitment_file, commitment_key, staged_corpus_destination,
+             target_profile)
     for value in paths + tuple(forbid_paths):
         safe_text(value)
     trace, staged = clean_abs(trace), clean_abs(staged_corpus_destination)
@@ -820,6 +977,11 @@ def create_manifest(trace, run_tag, dataset, arm, source_corpus, answer_key, ren
                  "citation_checker": file_asset(citation_checker, "E_CITATION_CHECKER_FILE"),
                  "target_cli": file_asset(target_cli, "E_TARGET_CLI_FILE"),
                  "controller_parent": file_asset(controller_parent, "E_CONTROLLER_PARENT_FILE")}
+    profile_value, profile_asset = load_json(target_profile, "E_TARGET_PROFILE_JSON")
+    profile = validate_target_profile(profile_value)
+    if (profile["requested_model"], profile["expected_returned_identity"]) != (
+            requested_model, expected_returned_identity):
+        fail("E_TARGET_PROFILE_IDENTITY_MISMATCH", "target profile does not match requested identity")
     health = validate_health(health_receipt, lane, provider, requested_model,
                              expected_returned_identity)
     key_bytes, key_id, _ = _commitment_key(key_path)
@@ -829,7 +991,11 @@ def create_manifest(trace, run_tag, dataset, arm, source_corpus, answer_key, ren
     target["identity_sha256"] = digest(canonical(target))
     commitment_path = clean_abs(commitment_file)
     expected_ids = key_ids(key)
-    row = {"schema": 2, "run_tag": run_tag, "dataset": dataset, "arm": arm,
+    skill = tree_asset(skill_root)
+    profile_asset["canonical_sha256"] = digest(canonical(profile))
+    identity_row = input_identity(prompt, staged, source, staged_info, arm, provider, artifacts,
+                                  skill, profile, profile_asset)
+    row = {"schema": 3, "run_tag": run_tag, "dataset": dataset, "arm": arm,
            "trace": {"path": trace, "identity_sha256": digest(trace.encode())},
            "commitment": {"path": commitment_path,
                           "identity_sha256": digest(commitment_path.encode()), "key_id": key_id},
@@ -839,7 +1005,8 @@ def create_manifest(trace, run_tag, dataset, arm, source_corpus, answer_key, ren
                       "excluded": source["excluded"], "forbid_paths": sorted(forbid_paths)},
            "expected": {"ids": expected_ids, "id_count": len(expected_ids),
                         "file_count": len(source["files"])},
-           "artifacts": artifacts, "skill": tree_asset(skill_root), "target": target,
+           "artifacts": artifacts, "skill": skill, "target": target,
+           "target_profile": profile_asset, "input_identity": identity_row,
            "health_receipt": health}
     row["manifest_sha256"] = digest(canonical(row))
     _write_manifest_and_commit(trace, commitment_file, row, key_bytes, key_id)
@@ -858,7 +1025,7 @@ def verify_manifest(trace, commitment_file, commitment_key):
         row = json.loads(data.decode("utf-8"))
     except (UnicodeError, ValueError, TypeError):
         fail("E_MANIFEST_JSON", "run manifest is invalid")
-    if not isinstance(row, dict) or row.get("schema") != 2:
+    if not isinstance(row, dict) or row.get("schema") != 3:
         fail("E_MANIFEST_SCHEMA", "run manifest schema is invalid")
     seal = row.get("manifest_sha256")
     unsigned = dict(row)
@@ -902,6 +1069,17 @@ def verify_manifest(trace, commitment_file, commitment_key):
         current = file_asset(asset["path"], "E_%s_FILE" % name.upper())
         if current["sha256"] != asset.get("sha256"):
             fail("E_%s_DIGEST_MISMATCH" % name.upper(), "bound artifact digest mismatch")
+    profile_row = row.get("target_profile")
+    if not isinstance(profile_row, dict) or not isinstance(profile_row.get("path"), str):
+        fail("E_MANIFEST_SCHEMA", "target profile identity is invalid")
+    profile_value, profile_asset = load_json(profile_row["path"], "E_TARGET_PROFILE_JSON",
+                                             profile_row.get("sha256"),
+                                             "E_TARGET_PROFILE_DIGEST_MISMATCH")
+    profile = validate_target_profile(profile_value)
+    canonical_profile_sha = digest(canonical(profile))
+    if profile_row.get("canonical_sha256") != canonical_profile_sha:
+        fail("E_TARGET_PROFILE_DIGEST_MISMATCH", "target profile canonical digest changed")
+    profile_asset["canonical_sha256"] = canonical_profile_sha
     skill_row = row.get("skill")
     if not isinstance(skill_row, dict) or not isinstance(skill_row.get("path"), str):
         fail("E_MANIFEST_SCHEMA", "skill identity is invalid")
@@ -932,6 +1110,9 @@ def verify_manifest(trace, commitment_file, commitment_key):
     target_seal = target_unsigned.pop("identity_sha256", None)
     if target_seal != digest(canonical(target_unsigned)):
         fail("E_TARGET_IDENTITY_MISMATCH", "target identity digest mismatch")
+    if (profile["requested_model"], profile["expected_returned_identity"]) != (
+            target.get("requested_model"), target.get("expected_returned_identity")):
+        fail("E_TARGET_PROFILE_IDENTITY_MISMATCH", "target profile does not match requested identity")
     health_row = row.get("health_receipt")
     if not isinstance(health_row, dict) or not isinstance(health_row.get("path"), str):
         fail("E_MANIFEST_SCHEMA", "health identity is invalid")
@@ -939,6 +1120,11 @@ def verify_manifest(trace, commitment_file, commitment_key):
                              target.get("requested_model"), target.get("expected_returned_identity"))
     if health["sha256"] != health_row.get("sha256"):
         fail("E_HEALTH_RECEIPT_DIGEST_MISMATCH", "health receipt digest changed")
+    expected_input = input_identity(artifacts["prompt"]["path"], corpus["staged_path"], source,
+                                    staged, row.get("arm"), target.get("provider"), artifacts,
+                                    skill, profile, profile_asset)
+    if row.get("input_identity") != expected_input:
+        fail("E_INPUT_IDENTITY_MISMATCH", "bound canonical inputs changed")
     return row
 
 
@@ -956,7 +1142,7 @@ def parser():
                  "skill-root", "runner", "scorer", "triage-checker", "stop-checker", "citation-checker",
                  "target-cli", "target-version", "requested-model", "provider", "expected-returned-identity",
                  "lane", "health-receipt", "controller-parent", "commitment-file", "commitment-key",
-                 "staged-corpus-destination"):
+                 "staged-corpus-destination", "target-profile"):
         create.add_argument("--" + name, required=True)
     create.add_argument("--forbid-path", action="append", default=[])
     create.add_argument("--json", action="store_true")
@@ -965,6 +1151,11 @@ def parser():
     verify.add_argument("--commitment-file", required=True)
     verify.add_argument("--commitment-key", required=True)
     verify.add_argument("--json", action="store_true")
+    compare = sub.add_parser("compare")
+    compare.add_argument("left")
+    compare.add_argument("right")
+    compare.add_argument("--allow", action="append", default=[])
+    compare.add_argument("--json", action="store_true")
     return ap
 
 
@@ -988,17 +1179,22 @@ def main():
             row = stage_corpus(**values)
         elif command == "create":
             row = create_manifest(**values)
+        elif command == "compare":
+            left, _ = load_json(values["left"], "E_COMPARE_JSON")
+            right, _ = load_json(values["right"], "E_COMPARE_JSON")
+            row = compare_inputs(left.get("input_identity", left),
+                                 right.get("input_identity", right), values["allow"])
         else:
             row = verify_manifest(**values)
     except ManifestError as error:
         print(str(error), file=sys.stderr)
         return 2
-    result = summary(command, row)
+    result = row if command == "compare" else summary(command, row)
     if as_json:
         print(json.dumps(result, ensure_ascii=False, sort_keys=True))
     else:
-        print("%s: %s" % (command.upper(), result.get("manifest_sha256",
-                                                     result.get("staged_manifest_sha256"))))
+        print("%s: %s" % (command.upper(), result.get("verdict", result.get("manifest_sha256",
+                                                                         result.get("staged_manifest_sha256")))))
     return 0
 
 
