@@ -36,7 +36,7 @@ FIXTURE_FILES = {
 
 
 class BenchReplayableTrace(unittest.TestCase):
-    def _run(self, tmp):
+    def _run(self, tmp, arm="v35", retired_marker=False):
         corpus = tmp / "corpus"
         runs = tmp / "runs"
         corpus.mkdir()
@@ -46,14 +46,25 @@ class BenchReplayableTrace(unittest.TestCase):
         prompt.write_text("Investigate {CORPUS} thoroughly.", encoding="utf-8")
 
         fake = tmp / "fake-qwen"
+        marker_code = ""
+        if retired_marker:
+            marker_code = (
+                "assert os.environ.get('SHERLOCK_STRICT_MARKER_LIFECYCLE') == '1'\n"
+                "(root / '.sherlock').mkdir(exist_ok=True)\n"
+                "marker = {'version':36,'active':True,'workspace':str(root),"
+                "'skill_root':str(root / '.qwen/skills/log-rca'),'corpus':str(root / 'corpus'),"
+                "'out':str(root / 'work'),'mode':'single','worklists':['worklist.tsv']}\n"
+                "(root / '.sherlock/completed.json').write_text(json.dumps(marker) + '\\n')\n"
+            )
         fake.write_text(
             "#!/usr/bin/env python3\n"
-            "import json, pathlib\n"
+            "import json, os, pathlib\n"
             "root = pathlib.Path.cwd()\n"
             "(root / 'work').mkdir(exist_ok=True)\n"
             "(root / 'work/report.md').write_text('# report\\n\\nrendered/System.jsonl:1\\n')\n"
             "(root / 'work/worklist.tsv').write_text('# id\\tverdict\\nA001\\tD thing\\n')\n"
             "(root / 'work/rules.tsv').write_text('# rule\\n')\n"
+            + marker_code +
             "print(json.dumps([{'type':'result','session_id':"
             "'44444444-4444-4444-4444-444444444444','is_error':False,"
             "'num_turns':2,'result':'done'}]))\n",
@@ -71,10 +82,22 @@ class BenchReplayableTrace(unittest.TestCase):
             "QWEN_BIN": str(fake),
             "BENCH_RUNS": str(runs),
         })
-        run = subprocess.run(["bash", str(RUNNER), "v35"], env=env,
+        run = subprocess.run(["bash", str(RUNNER), arm], env=env,
                              text=True, capture_output=True, timeout=180)
         trace = next(runs.iterdir())
         return corpus, trace, run
+
+    def test_retired_marker_is_preserved_as_an_inert_trace_receipt(self):
+        with tempfile.TemporaryDirectory() as raw:
+            _corpus, trace, run = self._run(Path(raw), arm="v44", retired_marker=True)
+            marker_path = trace / ".sherlock" / "active.json"
+            self.assertTrue(marker_path.is_file(), run.stdout + run.stderr)
+            marker = json.loads(marker_path.read_text(encoding="utf-8"))
+            self.assertIs(marker["active"], False)
+            self.assertIs(marker["sealed"], True)
+            for field in ("workspace", "out", "corpus", "skill_root"):
+                self.assertTrue(Path(marker[field]).resolve().is_relative_to(trace.resolve()),
+                                (field, marker[field], trace))
 
     def test_trace_is_self_contained_after_the_corpus_disappears(self):
         with tempfile.TemporaryDirectory() as raw:

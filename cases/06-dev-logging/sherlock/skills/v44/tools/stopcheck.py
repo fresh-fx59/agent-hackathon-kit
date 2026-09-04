@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Qwen Stop gate for Sherlock v36.
 
-It is an optional seatbelt: the prose state machine remains the real contract, and
-if there is no valid active marker for this workspace the hook allows Stop.
+It is normally an optional seatbelt. Controlled benchmark runs enable the strict
+marker lifecycle, where a missing marker blocks and a successful Stop preserves
+the exact validated marker before retiring the live copy.
 """
 import io
 import json
@@ -18,6 +19,9 @@ import traceback
 
 MARKER_DIR = ".sherlock"
 MARKER_FILE = "active.json"
+COMPLETED_MARKER_FILE = "completed.json"
+STRICT_MARKER_ENV = "SHERLOCK_STRICT_MARKER_LIFECYCLE"
+MAX_MARKER_BYTES = 65536
 TOTAL_TIMEOUT = 50
 CHILD_TIMEOUT = 24
 # THE INPUT GATE THAT KILLED A RUN BY NOT EXISTING. `read_hook_input()` did a
@@ -767,6 +771,62 @@ def retire(path, workspace, deadline=None):
         check_deadline(deadline)
 
 
+def archive_completed_marker(path, workspace, deadline=None):
+    """Copy the validated marker once, before retirement; never replace a receipt."""
+    if deadline is not None:
+        check_deadline(deadline)
+    marker_dir = os.path.join(workspace, MARKER_DIR)
+    expected = os.path.join(marker_dir, MARKER_FILE)
+    target = os.path.join(marker_dir, COMPLETED_MARKER_FILE)
+    path_real = real(path)
+    if path_real != real(expected) or _has_symlink_ancestry(path_real, workspace):
+        raise ActiveStateError("Sherlock: active marker receipt path is unsafe; rerun logmap MAP step.")
+    flags = os.O_RDONLY
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    try:
+        source_fd = os.open(path, flags)
+        try:
+            if not stat.S_ISREG(os.fstat(source_fd).st_mode):
+                raise ActiveStateError("Sherlock: active marker receipt source is unsafe; rerun logmap MAP step.")
+            payload = os.read(source_fd, MAX_MARKER_BYTES + 1)
+        finally:
+            os.close(source_fd)
+        if not payload or len(payload) > MAX_MARKER_BYTES:
+            raise ActiveStateError("Sherlock: active marker receipt is invalid; rerun logmap MAP step.")
+        parsed = json.loads(payload.decode("utf-8"))
+        if not isinstance(parsed, dict) or parsed.get("active") is not True:
+            raise ActiveStateError("Sherlock: active marker receipt is invalid; rerun logmap MAP step.")
+        out_flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+        if hasattr(os, "O_NOFOLLOW"):
+            out_flags |= os.O_NOFOLLOW
+        target_fd = os.open(target, out_flags, 0o600)
+        try:
+            view = memoryview(payload)
+            while view:
+                written = os.write(target_fd, view)
+                if written <= 0:
+                    raise OSError("short marker receipt write")
+                view = view[written:]
+            os.fsync(target_fd)
+        finally:
+            os.close(target_fd)
+        directory_fd = os.open(marker_dir, os.O_RDONLY)
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
+    except ActiveStateError:
+        raise
+    except (OSError, TypeError, ValueError, UnicodeError) as exc:
+        raise ActiveStateError(
+            "Sherlock: could not preserve the validated active marker receipt (%s); Stop blocked."
+            % type(exc).__name__)
+    if deadline is not None:
+        check_deadline(deadline)
+    return target
+
+
 # ==========================================================================
 # fix 5c — A STUB IS NOT A REPORT, AND MUST NOT REACH DELIVERY
 # ==========================================================================
@@ -846,6 +906,8 @@ def evaluate_stop(event, workspace, deadline):
         return _allow("Sherlock marker ignored: unsafe marker path")
     except ActiveStateError as e:
         return _block(str(e))
+    if not marker and os.environ.get(STRICT_MARKER_ENV) == "1":
+        return _block("Sherlock: controlled run requires an active marker receipt; rerun logmap MAP step.")
     if not marker:
         return _allow()
 
@@ -962,7 +1024,13 @@ def main():
     finally:
         disarm_watchdog(watchdog)
     if decision == "allow" and retire_path:
-        retire(retire_path, workspace)
+        if os.environ.get(STRICT_MARKER_ENV) == "1":
+            try:
+                archive_completed_marker(retire_path, workspace, deadline)
+            except ActiveStateError as e:
+                decision, reason, retire_path = _block(str(e))
+        if decision == "allow":
+            retire(real(retire_path), workspace)
     return block(reason) if decision == "block" else allow(reason)
 
 

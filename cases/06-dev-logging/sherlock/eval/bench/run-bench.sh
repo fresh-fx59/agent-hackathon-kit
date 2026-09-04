@@ -49,6 +49,8 @@ arm_ge() {   # arm_ge <arm> <floor> - true when <arm> is v<floor> or newer
 }
 # <<< ARM VERSION GATE <<<
 arm_num "$ARM" >/dev/null   # abort now, not at the first branch
+STRICT_MARKER_LIFECYCLE=0
+if arm_ge "$ARM" 44; then STRICT_MARKER_LIFECYCLE=1; fi
 # >>> INTERACTIVE LANE >>>
 # THE CORPORATE HARNESS RUNS QWEN INTERACTIVELY (operator, 2026-08-27), so the
 # acceptance gate has to run THAT, not `qwen -p` (CLAUDE.md: a gate must run the
@@ -540,9 +542,15 @@ save_trace() {
     cp -r "$W/work/." "$work_copy/" || return 1
     mv "$work_copy" "$TRACE/work" || return 1
   fi
-  if [ -f "$W/.sherlock/active.json" ]; then
+  marker_source=""
+  if [ "$STRICT_MARKER_LIFECYCLE" = "1" ]; then
+    [ -f "$W/.sherlock/completed.json" ] && marker_source="$W/.sherlock/completed.json"
+  elif [ -f "$W/.sherlock/active.json" ]; then
+    marker_source="$W/.sherlock/active.json"
+  fi
+  if [ -n "$marker_source" ]; then
     mkdir -p "$TRACE/.sherlock"
-    python3 - "$W/.sherlock/active.json" "$TRACE/.sherlock/active.json" "$TRACE" "$CORPUS" "$SKILLS/$ARM" <<'PY'
+    python3 - "$marker_source" "$TRACE/.sherlock/active.json" "$TRACE" "$CORPUS" "$SKILLS/$ARM" <<'PY'
 import json, os, sys, tempfile
 source, target, trace, corpus, skill = sys.argv[1:]
 with open(source, encoding="utf-8") as handle:
@@ -1622,6 +1630,7 @@ run_qwen() {
     --upstream-log "$TRACE.upstream.jsonl" --inflight-path "$TRACE/upstream-inflight.json"
   # key via environment, never argv (visible in ps; this box has a guest account)
   ( cd "$W" && OPENAI_API_KEY="$SHERLOCK_API_KEY" OPENAI_BASE_URL="$BASE_URL" \
+    SHERLOCK_STRICT_MARKER_LIFECYCLE="$STRICT_MARKER_LIFECYCLE" \
     timeout "$TIMEOUT" "$QWEN" --auth-type openai --model "$CLIENT_MODEL" \
       --approval-mode yolo \
       --max-session-turns "$MAX_SESSION_TURNS" \
@@ -1685,6 +1694,7 @@ run_qwen_interactive() {
     HAVE_RESEED_CMD=1
   fi
   ( cd "$W" && OPENAI_API_KEY="$SHERLOCK_API_KEY" OPENAI_BASE_URL="$BASE_URL" \
+    SHERLOCK_STRICT_MARKER_LIFECYCLE="$STRICT_MARKER_LIFECYCLE" \
     timeout "$TIMEOUT" python3 "$MEASURE_DIR/interactive-drive.py" \
       --work "$W/work" --cwd "$W" \
       --prompt "$PROMPT" \

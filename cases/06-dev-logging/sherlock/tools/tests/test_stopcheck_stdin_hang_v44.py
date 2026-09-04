@@ -35,12 +35,17 @@ timeout fires.
 RUN THIS AFTER: it returns a decision within the stdin gate, every time.
 """
 import json
+import contextlib
+import importlib.util
+import io
 import os
 import subprocess
 import sys
+import tempfile
 import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[5]
 SHERLOCK = ROOT / "cases" / "06-dev-logging" / "sherlock"
@@ -51,6 +56,13 @@ STOPCHECK = SHERLOCK / "skills" / VERSION / "tools" / "stopcheck.py"
 # slow box has to come back well inside this. The pre-fix code does not
 # return at all, so any finite bound reproduces the bug.
 HANG_BOUND_S = 30
+
+
+def load_stopcheck():
+    spec = importlib.util.spec_from_file_location("stopcheck_marker_lifecycle_v44", STOPCHECK)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 class StdinGate(unittest.TestCase):
@@ -106,6 +118,70 @@ class StdinGate(unittest.TestCase):
             timeout=HANG_BOUND_S)
         payload = json.loads(proc.stdout.strip().splitlines()[-1])
         self.assertIn(payload.get("decision"), ("allow", "block"))
+
+
+class StrictMarkerLifecycle(unittest.TestCase):
+    """A controlled run may seal only the marker validated by a real Stop."""
+
+    def test_missing_marker_blocks_when_the_runner_requires_a_receipt(self):
+        with tempfile.TemporaryDirectory() as raw:
+            event = json.dumps({"cwd": raw, "hook_event_name": "Stop",
+                                "last_assistant_message": "done"})
+            env = dict(os.environ)
+            env["SHERLOCK_STRICT_MARKER_LIFECYCLE"] = "1"
+            proc = subprocess.run(
+                [sys.executable, str(STOPCHECK)], input=event, env=env,
+                capture_output=True, text=True, timeout=HANG_BOUND_S)
+            payload = json.loads(proc.stdout.strip().splitlines()[-1])
+            self.assertEqual(payload.get("decision"), "block", payload)
+            self.assertIn("active marker", payload.get("reason", ""))
+
+    def test_success_archives_exact_marker_before_retirement(self):
+        stopcheck = load_stopcheck()
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            marker_dir = root / ".sherlock"
+            marker_dir.mkdir()
+            marker = marker_dir / "active.json"
+            original = (json.dumps({
+                "version": 36, "active": True, "workspace": str(root),
+                "skill_root": "skill", "corpus": "corpus", "out": "work",
+                "mode": "single", "worklists": ["worklist.tsv"],
+            }, sort_keys=True) + "\n").encode()
+            marker.write_bytes(original)
+            stopcheck.read_hook_input = lambda: {"cwd": str(root)}
+            stopcheck.evaluate_stop = lambda _event, _workspace, _deadline: (
+                "allow", "Sherlock complete", str(marker))
+            stdout = io.StringIO()
+            with mock.patch.dict(os.environ, {"SHERLOCK_STRICT_MARKER_LIFECYCLE": "1"}), \
+                    contextlib.redirect_stdout(stdout):
+                rc = stopcheck.main()
+            self.assertEqual(rc, 0)
+            self.assertFalse(marker.exists())
+            self.assertEqual((marker_dir / "completed.json").read_bytes(), original)
+
+    def test_existing_archive_blocks_and_keeps_the_active_marker(self):
+        stopcheck = load_stopcheck()
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            marker_dir = root / ".sherlock"
+            marker_dir.mkdir()
+            marker = marker_dir / "active.json"
+            marker.write_text('{"active":true}\n', encoding="utf-8")
+            completed = marker_dir / "completed.json"
+            completed.write_text("forged\n", encoding="utf-8")
+            stopcheck.read_hook_input = lambda: {"cwd": str(root)}
+            stopcheck.evaluate_stop = lambda _event, _workspace, _deadline: (
+                "allow", "Sherlock complete", str(marker))
+            stdout = io.StringIO()
+            with mock.patch.dict(os.environ, {"SHERLOCK_STRICT_MARKER_LIFECYCLE": "1"}), \
+                    contextlib.redirect_stdout(stdout):
+                rc = stopcheck.main()
+            payload = json.loads(stdout.getvalue().strip().splitlines()[-1])
+            self.assertEqual(rc, 0)
+            self.assertEqual(payload.get("decision"), "block", payload)
+            self.assertTrue(marker.exists())
+            self.assertEqual(completed.read_text(encoding="utf-8"), "forged\n")
 
     def test_real_hook_payload_still_read(self):
         """A hook that writes its event and closes must still be parsed.
