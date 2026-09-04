@@ -423,6 +423,10 @@ def contamination(manifest, message, artifact, delivered, work_blobs,
     key = json_object(key_data, "manifest_invalid")
     corpus_text = normalized_text(b"\n".join(corpus_blobs).decode("utf-8", "replace"))
     fingerprints = []
+    corpus_lines = {item.get("path"): item.get("lines")
+                    for item in manifest.get("corpus", {}).get("files", [])
+                    if isinstance(item, dict) and isinstance(item.get("path"), str)
+                    and type(item.get("lines")) is int}
     dataset = normalized_text(key.get("dataset", manifest.get("dataset", "")))
     for defect in key.get("defects", []):
         if not isinstance(defect, dict): continue
@@ -436,6 +440,14 @@ def contamination(manifest, message, artifact, delivered, work_blobs,
             if not isinstance(proof, dict): continue
             path, start, end = proof.get("file"), proof.get("line_start"), proof.get("line_end")
             if path and type(start) is int:
+                last = end if type(end) is int else start
+                # A coordinate inside the bound staged corpus is observable input,
+                # just like text already present in corpus bytes.  Reports must cite
+                # it, and generic checker examples may coincide with it.  Keep
+                # impossible coordinates hidden so planted answer locations cannot
+                # be smuggled through the prompt, skill, settings, or workspace.
+                if 1 <= start <= last <= corpus_lines.get(path, 0):
+                    continue
                 value = "%s:%s%s" % (path, start, ("-%s" % end) if type(end) is int and end != start else "")
                 fingerprints.append(("proof", normalized_text(value), True, "token"))
     for crib in key.get("crib_strings", []):

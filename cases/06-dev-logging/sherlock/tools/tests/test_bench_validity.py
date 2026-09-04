@@ -291,6 +291,13 @@ class BenchValidityTests(unittest.TestCase):
                 self.assertTrue({"settings_pre","settings_saved","staged_corpus","transcript"} <= bound)
                 self.assertNotIn(hidden,json.dumps(row))
 
+    def test_valid_corpus_coordinates_are_observable_not_hidden_answers(self):
+        visible = self.fixture(skill_extra="host/a.log:2", delivered="see host/a.log:2")
+        row = visible.validate()
+        self.assertTrue(row["valid"], row)
+        self.assertFalse(any(hit["category"] == "proof"
+                             for hit in row["contamination"]["hits"]), row)
+
     def test_delivery_divergence_is_fact_and_exact_union_is_checked(self):
         fx=self.fixture(delivered="message block", artifact="file block")
         row=fx.validate(); self.assertTrue(row["delivery"]["divergent"]); self.assertTrue(row["valid"])

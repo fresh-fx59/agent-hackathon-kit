@@ -376,6 +376,29 @@ class LauncherTests(unittest.TestCase):
         self.assertFalse(census["empty_census"])
         self.assertGreater(census["total_records"], 0)
         self.assertTrue(census["groups"], "qualification corpus must exercise statecheck")
+        self.assertEqual(len(census["groups"]), 1,
+                         "qualification answer must not leave a second state group uncovered")
+        with tempfile.TemporaryDirectory(prefix="hq_reference_inventory_") as td:
+            work = Path(td) / "work"
+            work.mkdir()
+            mapped = subprocess.run(
+                [sys.executable, str(SHERLOCK / "skills/v44/tools/logmap.py"),
+                 str(output / "generated-probe-corpus"), "--out", str(work),
+                 "--worklist-cap", "250", "--per-file-cap", "40",
+                 "--rate-cap", "70", "--map-cap", "150000",
+                 "--seed", "20260728", "--jobs", "1"],
+                text=True, capture_output=True, cwd=td)
+            self.assertEqual(mapped.returncode, 0, mapped.stdout + mapped.stderr)
+            refs = {line.split("\t")[3] for line in
+                    (work / "worklist.tsv").read_text(encoding="utf-8").splitlines()
+                    if line and not line.startswith("#")}
+        answer = json.loads((output / "answer-key.json").read_text(encoding="utf-8"))
+        expected = {"%s:%d" % (proof["file"], proof["line_start"])
+                    for defect in answer["defects"]
+                    for proof in defect["proof_locations"]}
+        self.assertTrue(expected <= refs,
+                        "qualification answer proof %r must be in canonical logmap inventory %r"
+                        % (expected, refs))
         head = subprocess.check_output(["git", "-C", str(repo), "rev-parse", "HEAD"],
                                        text=True).strip()
         self.assertEqual((output / "implementation-commit.txt").read_text().strip(), head)
