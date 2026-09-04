@@ -63,7 +63,7 @@ SHORT_VALIDITY = {"schema", "valid", "reasons", "run_tag", "manifest_sha256",
                   "candidate_sha256", "hmac_sha256"}
 FULL_ADDITIONS = {"result_stream_sha256", "upstream_sha256", "work_sha256",
                   "artifact_only", "transport", "usage", "delivery", "inventory",
-                  "identity", "checkers", "contamination"}
+                  "identity", "checkers", "contamination", "terminal", "skill_receipt"}
 
 
 def module(name, path):

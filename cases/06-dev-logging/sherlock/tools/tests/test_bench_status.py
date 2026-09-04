@@ -127,7 +127,11 @@ class BenchStatusTests(unittest.TestCase):
                             self.manifest["target"]["requested_model"].encode()).hexdigest(),
                         "returned_sha256": hashlib.sha256(
                             self.manifest["target"]["expected_returned_identity"].encode()).hexdigest(),
-                        "successful_calls": 1}, "checkers": [], "contamination": {}})
+                        "successful_calls": 1}, "checkers": [], "contamination": {},
+                        "terminal": {"attempts": 1, "duration_s": 1, "exit_code": 0,
+                                     "reasons": []},
+                        "skill_receipt": {"main_requests": 1, "reasons": [],
+                                          "skill_calls": 1, "tool_calls": 1}})
         row.update(updates)
         validity = load("bench_status_validity_writer", SHERLOCK / "eval" / "bench" / "validate-run.py")
         row["hmac_sha256"] = validity.sign(row, self.fx.commitment_key.read_bytes())
