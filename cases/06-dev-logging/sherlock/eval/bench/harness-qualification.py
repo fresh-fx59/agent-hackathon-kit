@@ -317,6 +317,7 @@ def _adapter(case_id: str, root: Path, work: Path):
         command = [str(tool)]
         timeout = MATRIX_TIMEOUT
         env = {"SHERLOCK_CONTROLLER_ROOT": str(controllers), "BENCH_RUNS": str(runs),
+               "SHERLOCK_LANE": "subscription",
                "SHERLOCK_FREE_TEST_COMMAND": "sleep 30", "SHERLOCK_HEALTH_COMMAND": "false",
                "SHERLOCK_TARGET_COMMAND": "false",
                "SHERLOCK_BUDGET_MAX_UPSTREAM_ATTEMPTS": "1",
@@ -913,6 +914,7 @@ def main(argv=None):
             fixture = Path(args.fixtures) if args.fixtures else output.with_suffix(".fixtures")
             if not args.fixtures:
                 _default_fixtures(fixture)
+                fixture = fixture.resolve(strict=True)
             row = run_fault_matrix(fixture)
             fd = os.open(output, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
             with os.fdopen(fd, "wb") as handle:

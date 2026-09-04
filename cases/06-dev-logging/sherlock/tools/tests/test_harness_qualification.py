@@ -68,6 +68,16 @@ class MatrixTests(unittest.TestCase):
         self.assertTrue(all(row["adapter_tools"][item["tool"]] == item["tool_sha256"]
                             for item in row["faults"]))
 
+    def test_cli_default_fixture_survives_an_aliased_output_parent(self):
+        real = self.root / "real"
+        real.mkdir()
+        alias = self.root / "alias"
+        alias.symlink_to(real, target_is_directory=True)
+        output = alias / "fault-matrix.json"
+        with mock.patch("builtins.print"):
+            self.assertEqual(self.qual.main(["matrix", "--output", str(output)]), 0)
+        self.assertEqual(json.loads(output.read_text(encoding="utf-8"))["verdict"], "clean")
+
     def test_caller_executables_and_expected_observations_are_rejected(self):
         root = self.root / "attacker"; root.mkdir()
         executable(root / "accept-all", "#!/bin/sh\nexit 0\n")
