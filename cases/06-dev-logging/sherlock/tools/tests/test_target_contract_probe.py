@@ -5,6 +5,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import sys
@@ -32,6 +33,7 @@ class TargetContractProbeTest(unittest.TestCase):
     def setUp(self):
         self.temp = Path(tempfile.mkdtemp())
         self.probe = load_probe()
+        self._probe_run = self.probe.subprocess.run
         self.source = ROOT / "tools" / "tests" / "fixtures" / "target-contract-source"
         self.root = self.temp / "probe"
         self.rate_snapshot = self.temp / "rate.json"
@@ -51,6 +53,7 @@ class TargetContractProbeTest(unittest.TestCase):
     def tearDown(self):
         # The real runner seals its trace inputs read-only.  Restore test-temp
         # ownership before unittest removes the isolated fixture tree.
+        self.probe.subprocess.run = self._probe_run
         for parent, dirs, files in os.walk(self.temp, topdown=False):
             for name in files:
                 os.chmod(Path(parent) / name, 0o600)
@@ -210,6 +213,179 @@ class TargetContractProbeTest(unittest.TestCase):
         with self.assertRaises(self.probe.ProbeFailure):
             self.probe.audit(trace)
 
+    def test_round5_receipt_binds_raw_authorization_and_complete_terminal_observation(self):
+        """Replacing raw authorization bytes or omitting terminal facts is a receipt bug."""
+        self.probe.prepare(self.args)
+        manifest = self.root / "probe-manifest.json"
+        self.probe.authorize(manifest, self._sha(manifest), self.root / "nonces")
+        trace = self.root / "probe-work" / "runs" / "target-contract-probe"
+        self._accepted_trace(trace)
+        self.probe.audit(trace)
+        receipt = json.loads((trace / "target-contract-receipt.json").read_text())
+        authorization_raw = (trace / "action-authorization.json").read_bytes()
+        self.assertEqual(receipt["action_authorization_sha256"], hashlib.sha256(authorization_raw).hexdigest())
+        self.assertEqual(receipt["run_verdict_sha256"], hashlib.sha256((trace / "run-verdict.json").read_bytes()).hexdigest())
+        self.assertTrue(receipt["authenticated"])
+        self.assertEqual(receipt["authority"], "operator-approved-target-probe")
+        self.assertEqual(receipt["status_exit_code"], 0)
+        self.assertIn("primary_failure", receipt)
+        self.assertIn("terminal_observation", receipt)
+        self.assertIn("rate_assurance", receipt)
+
+    def test_commit_marker_is_last_and_binds_exact_receipt_and_checksum_bytes(self):
+        """An accepted receipt is inert until its last durable result marker."""
+        self.probe.prepare(self.args)
+        manifest = self.root / "probe-manifest.json"
+        self.probe.authorize(manifest, self._sha(manifest), self.root / "nonces")
+        trace = self.root / "probe-work" / "runs" / "target-contract-probe"
+        self._accepted_trace(trace)
+        self.assertTrue(self.probe.audit(trace)["accepted"])
+        receipt = trace / "target-contract-receipt.json"
+        checksum = trace / "target-contract-receipt.json.sha256"
+        marker = json.loads((trace / "probe-result.json").read_text())
+        self.assertTrue(marker["accepted"])
+        self.assertEqual(marker["receipt_sha256"], self._sha(receipt))
+        self.assertEqual(marker["receipt_checksum_sha256"], self._sha(checksum))
+        self.assertEqual(marker["receipt_checksum"], checksum.read_text().strip())
+
+    def test_receipt_has_complete_raw_evidence_schema(self):
+        """Every receipt claim names the raw bytes or observation it binds."""
+        self.probe.prepare(self.args)
+        manifest = self.root / "probe-manifest.json"
+        self.probe.authorize(manifest, self._sha(manifest), self.root / "nonces")
+        trace = self.root / "probe-work" / "runs" / "target-contract-probe"
+        self._accepted_trace(trace)
+        self.probe.audit(trace)
+        receipt = json.loads((trace / "target-contract-receipt.json").read_text())
+        required = {"action_authorization_sha256", "probe_manifest_sha256", "run_verdict_sha256",
+                    "gate_sha256", "final_report_sha256", "ledger_sha256",
+                    "request_body_tree_sha256", "response_body_tree_sha256", "probe_prompt_sha256",
+                    "probe_budget_sha256", "probe_rate_snapshot_sha256", "rate_snapshot",
+                    "returned_identities", "usage", "cost_inputs", "authenticated", "authority",
+                    "status_exit_code", "attempt_exit_code", "driver_exit_code", "gate_exit_codes",
+                    "wrapper_exit_code", "primary_failure", "terminal_observation", "rate_assurance",
+                    "budget_assurance", "provider_billed_calls", "provider_billed_rub"}
+        self.assertTrue(required.issubset(receipt))
+        self.assertEqual(receipt["probe_prompt_sha256"], self._sha(trace / "probe" / "prompt.txt"))
+        self.assertEqual(receipt["probe_budget_sha256"], self._sha(trace / "probe-budget.json"))
+        self.assertEqual(receipt["probe_rate_snapshot_sha256"], self._sha(trace / "probe-rate-snapshot.json"))
+        self.assertEqual(receipt["provider_billed_calls"], None)
+        self.assertEqual(receipt["provider_billed_rub"], None)
+
+    def test_task3_usage_accepts_ordinary_totals_but_rejects_inconsistent_or_negative_fields(self):
+        for index, (extra, accepted) in enumerate((({"total_tokens": 2, "prompt_tokens_details": {"cached_tokens": 0}}, True),
+                                                    ({"total_tokens": 3}, False), ({"total_tokens": -1}, False),
+                                                    ({"prompt_tokens_details": {"cached_tokens": -1}}, False))):
+            with self.subTest(extra=extra):
+                root = self.temp / ("usage-" + str(index))
+                args = self.probe.PrepareArgs(**dict(self.args.__dict__, root=root))
+                self.probe.prepare(args)
+                self.probe.authorize(root / "probe-manifest.json", self._sha(root / "probe-manifest.json"), root / "nonces")
+                trace = root / "probe-work" / "runs" / "target-contract-probe"; self._accepted_trace(trace, root)
+                response = trace / ("0" * 32 + ".a1.res.json.gz")
+                payload = {"model": "deepseek-v4-20260901", "usage": {"prompt_tokens": 1, "completion_tokens": 1, **extra}}
+                with gzip.open(response, "wb") as handle: handle.write(json.dumps(payload).encode())
+                journal = json.loads((trace / "upstream-completed.jsonl").read_text()); journal["usage"] = payload["usage"]
+                (trace / "upstream-completed.jsonl").write_text(json.dumps(journal) + "\n")
+                body = trace / "response-bodies" / "one.json"
+                body_row = json.loads(body.read_text()); body_row["usage"] = payload["usage"]
+                body.write_text(json.dumps(body_row))
+                if accepted:
+                    self.assertTrue(self.probe.audit(trace)["accepted"])
+                else:
+                    with self.assertRaises(self.probe.ProbeFailure): self.probe.audit(trace)
+
+    def test_hardlinked_receipt_and_accepted_marker_failure_leave_one_rejection(self):
+        """Rollback unlinks canonical leaves by held root fd even when linked."""
+        self.probe.prepare(self.args)
+        self.probe.authorize(self.root / "probe-manifest.json", self._sha(self.root / "probe-manifest.json"), self.root / "nonces")
+        trace = self.root / "probe-work" / "runs" / "target-contract-probe"
+        self._accepted_trace(trace)
+        original = self.probe._write_result
+        outside = self.temp / "receipt-hardlink.json"
+        def fail_accepted(destination, payload, **kwargs):
+            if payload.get("accepted"):
+                os.link(destination / "target-contract-receipt.json", outside)
+                raise OSError("injected accepted marker failure")
+            return original(destination, payload, **kwargs)
+        self.probe._write_result = fail_accepted
+        try:
+            with self.assertRaises(self.probe.ProbeFailure):
+                self.probe.audit(trace)
+        finally:
+            self.probe._write_result = original
+        self.assertFalse((trace / "target-contract-receipt.json").exists())
+        self.assertFalse((trace / "target-contract-receipt.json.sha256").exists())
+        self.assertFalse((trace / "receipt-nonces").exists())
+        self.assertTrue(outside.exists())
+        results = list(trace.glob("probe-result.json"))
+        self.assertEqual(len(results), 1)
+        self.assertFalse(json.loads(results[0].read_text())["accepted"])
+
+    def test_round5_prepare_seals_exact_prompt_bytes(self):
+        self.probe.prepare(self.args)
+        manifest = json.loads((self.root / "probe-manifest.json").read_text())
+        prompt = self.root / "probe" / "prompt.txt"
+        self.assertTrue(prompt.is_file())
+        self.assertEqual(manifest["prompt_sha256"], hashlib.sha256(prompt.read_bytes()).hexdigest())
+
+    def test_round5_prepare_never_uses_pathname_staging(self):
+        self.assertNotIn("tempfile", self.probe.prepare.__code__.co_names)
+        self.probe.prepare(self.args)
+
+    def test_round5_audit_rejects_legacy_ledger_without_task3_journal(self):
+        self.probe.prepare(self.args)
+        self.probe.authorize(self.root / "probe-manifest.json", self._sha(self.root / "probe-manifest.json"), self.root / "nonces")
+        trace = self.root / "probe-work" / "runs" / "target-contract-probe"; self._accepted_trace(trace)
+        (trace / "upstream-completed.jsonl").unlink()
+        self.assertFalse((trace / "upstream-completed.jsonl").exists())
+        with self.assertRaises(self.probe.ProbeFailure):
+            self.probe.audit(trace)
+
+    def test_round5_orphaned_receipt_is_cleaned_without_accepted_commit_marker(self):
+        self.probe.prepare(self.args)
+        self.probe.authorize(self.root / "probe-manifest.json", self._sha(self.root / "probe-manifest.json"), self.root / "nonces")
+        trace = self.root / "probe-work" / "runs" / "target-contract-probe"; self._accepted_trace(trace)
+        self.probe.audit(trace)
+        (trace / "probe-result.json").unlink()
+        with self.assertRaises(self.probe.ProbeFailure):
+            self.probe.audit(trace)
+        self.assertFalse((trace / "target-contract-receipt.json").exists())
+
+    def test_round5_missing_secret_does_not_consume_nonce(self):
+        self.probe.prepare(self.args)
+        manifest = self.root / "probe-manifest.json"
+        nonce = json.loads(manifest.read_text())["nonce"]
+        with self.assertRaises(self.probe.ProbeFailure):
+            self.probe.run(manifest, self._sha(manifest), self.root / "nonces",
+                           secret_reader=lambda _: (_ for _ in ()).throw(RuntimeError("missing test secret")),
+                           proxy_starter=self._tripwire, runner=self._tripwire)
+        self.assertFalse((self.root / "nonces" / (nonce + ".json")).exists())
+
+    def test_run_uses_only_preconsume_snapshot_after_original_inputs_are_replaced(self):
+        """No caller pathname remains authoritative once snapshots are frozen."""
+        self.probe.prepare(self.args)
+        manifest = self.root / "probe-manifest.json"
+        observed = {}
+        def mutate_then_supply_secret(_):
+            (self.root / "target-profile.json").unlink()
+            (self.root / "probe" / "prompt.txt").unlink()
+            shutil.rmtree(self.root / "fixture")
+            (self.root / "probe-rate-snapshot.json").unlink()
+            return "local-test-secret"
+        def runner(**kwargs):
+            observed.update({name: str(value) for name, value in kwargs.items() if name.endswith("path") or name == "fixture"})
+            self.assertIn("sealed-input", str(kwargs["profile_path"]))
+            self.assertIn("sealed-input", str(kwargs["fixture"]))
+            self.assertIn("sealed-input", str(kwargs["rate_snapshot_path"]))
+            self.assertEqual(json.loads(kwargs["profile_path"].read_text())["route"], "paid-route")
+            self.assertTrue((kwargs["profile_path"].parent / "probe" / "prompt.txt").is_file())
+            return {"route": "paid-route"}
+        self.assertEqual(self.probe.run(manifest, self._sha(manifest), self.root / "nonces",
+                                        secret_reader=mutate_then_supply_secret,
+                                        proxy_starter=lambda *_: {"local": True}, runner=runner)["route"], "paid-route")
+        self.assertTrue(observed)
+
     def test_audit_rejects_symlinked_response_tree_and_keeps_receipt_absent(self):
         self.probe.prepare(self.args)
         trace = self.root / "probe-work" / "runs" / "target-contract-probe"
@@ -297,9 +473,13 @@ import json, os, subprocess, sys, urllib.request
 from pathlib import Path
 if '--sherlock-flag-probe-sentinel' in sys.argv:
     raise SystemExit(0)
+try:
+    prompt = sys.argv[sys.argv.index('-p') + 1]
+except (ValueError, IndexError):
+    raise SystemExit('Qwen did not receive a raw prompt')
 request = urllib.request.Request(os.environ['OPENAI_BASE_URL'].rstrip('/') + '/chat/completions',
     data=json.dumps({'model': os.environ.get('SHERLOCK_QWEN_MODEL', 'deepseek-v4-20260901'),
-                     'messages': [{'role': 'user', 'content': 'sealed local fixture'}], 'max_tokens': 7}).encode(),
+                     'messages': [{'role': 'user', 'content': prompt}], 'max_tokens': 7}).encode(),
     headers={'Authorization': 'Bearer fixture-token', 'Content-Type': 'application/json'})
 with urllib.request.urlopen(request, timeout=10) as response:
     observed = json.loads(response.read().decode())
@@ -330,10 +510,14 @@ for source in (work / 'worklist.tsv').read_text(encoding='utf-8').splitlines():
     subprocess.run(['python3', %r, 'next', '--work', str(work)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
     subprocess.run(['python3', %r, 'verdict', '--work', str(work), '--id', row[0],
                     '--cell', 'N n=1 %%s «%%s»' %% (row[3], quote)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
-(work / 'report.md').write_text(%r, encoding='utf-8')
+# A blank work tree gets its report only from the local model response.  The
+# fixture never copies a canonical report into the runner work directory.
+if (work / 'report.md').exists():
+    raise SystemExit('report was not blank before model output')
+(work / 'report.md').write_text(observed['choices'][0]['message']['content'], encoding='utf-8')
 print(json.dumps([{'type':'result','result':'ok','is_error':False,'session_id':'1234567890abcdef',
                    'num_turns':1,'usage':{'input_tokens':3,'output_tokens':2}}]))
-""" % (str(tools / "logmap.py"), str(tools / "worklist.py"), str(tools / "worklist.py"), canonical_report), encoding="utf-8")
+""" % (str(tools / "logmap.py"), str(tools / "worklist.py"), str(tools / "worklist.py")), encoding="utf-8")
         qwen.chmod(0o700)
 
         seen = []
@@ -341,9 +525,10 @@ print(json.dumps([{'type':'result','result':'ok','is_error':False,'session_id':'
             def do_POST(inner):
                 length = int(inner.headers["Content-Length"])
                 payload = json.loads(inner.rfile.read(length))
-                seen.append(payload)
+                prompt_raw = payload['messages'][0]['content'].encode('utf-8')
+                seen.append({'payload': payload, 'prompt_sha256': hashlib.sha256(prompt_raw).hexdigest()})
                 response = json.dumps({"id": "fixture-response", "object": "chat.completion",
-                    "model": "deepseek-v4-20260901", "choices": [{"index": 0, "message": {"role": "assistant", "content": "ok"}, "finish_reason": "stop"}],
+                    "model": "deepseek-v4-20260901", "choices": [{"index": 0, "message": {"role": "assistant", "content": canonical_report}, "finish_reason": "stop"}],
                     "usage": {"prompt_tokens": 3, "completion_tokens": 2}}).encode()
                 inner.send_response(200); inner.send_header("Content-Type", "application/json")
                 inner.send_header("Content-Length", str(len(response))); inner.end_headers()
@@ -365,9 +550,7 @@ print(json.dumps([{'type':'result','result':'ok','is_error':False,'session_id':'
         finally:
             server.shutdown(); thread.join(timeout=5); server.server_close()
         trace_hint = root / "probe-work" / "runs" / "target-contract-probe"
-        diagnostic = {str(path.relative_to(trace_hint.parent)): path.read_text(encoding="utf-8", errors="replace")[-4000:]
-                      for path in trace_hint.parent.rglob("*")
-                      if path.is_file() and path.suffix in {".txt", ".err"} and path.name != "map.txt"}
+        diagnostic = {}
         gates_path = trace_hint / "gates.json"
         upstream_path = trace_hint.parent / "target-contract-probe.upstream.jsonl"
         if upstream_path.is_file():
@@ -375,10 +558,16 @@ print(json.dumps([{'type':'result','result':'ok','is_error':False,'session_id':'
         result_path = trace_hint / "probe-result.json"
         if result_path.is_file():
             diagnostic["target-contract-probe/probe-result.json"] = result_path.read_text(encoding="utf-8", errors="replace")
+        outer_result = root / "probe-work" / "probe-result.json"
+        if outer_result.is_file():
+            diagnostic["probe-work/probe-result.json"] = outer_result.read_text(encoding="utf-8", errors="replace")
         budget_path = trace_hint / "upstream-budget-state.json"
         if budget_path.is_file():
             diagnostic["target-contract-probe/upstream-budget-state.json"] = budget_path.read_text(encoding="utf-8", errors="replace")
         diagnostic["upstream-requests-seen"] = repr(len(seen))
+        projection = subprocess.run([sys.executable, str(ROOT / "eval" / "bench" / "run-verdict.py"),
+                                     str(trace_hint), "--target-probe", "--json"], text=True, capture_output=True)
+        diagnostic["fresh-task7"] = repr((projection.returncode, projection.stdout, projection.stderr))
         if gates_path.is_file():
             gates = json.loads(gates_path.read_text())
             cite = gates.get("gates", {}).get("citecheck", {}).get("json", {})
@@ -391,7 +580,10 @@ print(json.dumps([{'type':'result','result':'ok','is_error':False,'session_id':'
         self.assertEqual(done.returncode, 0, (done.stdout, done.stderr, diagnostic))
         result = json.loads(done.stdout); trace = Path(result["trace"])
         self.assertTrue(result["audit"]["accepted"])
-        self.assertEqual(len(seen), 1); self.assertEqual(seen[0]["model"], "deepseek-v4-20260901")
+        sealed_prompt = trace / "probe" / "prompt.txt"
+        self.assertEqual(len(seen), 1); self.assertEqual(seen[0]["payload"]["model"], "deepseek-v4-20260901")
+        self.assertEqual(seen[0]["prompt_sha256"], hashlib.sha256(sealed_prompt.read_bytes()).hexdigest())
+        self.assertEqual(seen[0]["payload"]["messages"][0]["content"], sealed_prompt.read_text(encoding="utf-8"))
         rows = [json.loads(line) for line in (trace / "upstream-completed.jsonl").read_text().splitlines()]
         self.assertEqual(len(rows), 1); row = rows[0]
         self.assertEqual(row["requested_model"], row["sent_model"])
@@ -426,6 +618,9 @@ print(json.dumps([{'type':'result','result':'ok','is_error':False,'session_id':'
         self.assertEqual({name: verdict["gate_exit_codes"][name] for name in self.probe.GATES},
                          {name: 0 for name in self.probe.GATES})
         self.assertTrue((trace / "work" / "report.md").is_file())
+        report = (trace / "work" / "report.md").read_text(encoding="utf-8")
+        self.assertEqual(re.findall(r"^## (F-(?:AUTH-EXTERNAL|INVENTORY-SERVICE|REPORTED-CONTEXT|TIMELINE-LINK))$", report, re.M),
+                         ["F-AUTH-EXTERNAL", "F-INVENTORY-SERVICE", "F-REPORTED-CONTEXT", "F-TIMELINE-LINK"])
 
     def test_manifest_created_at_must_be_aware_and_bound_before_contact(self):
         self.probe.prepare(self.args)
@@ -731,7 +926,7 @@ print(json.dumps([{'type':'result','result':'ok','is_error':False,'session_id':'
         self.probe.authorize(self.root / "probe-manifest.json", self._sha(self.root / "probe-manifest.json"), self.root / "nonces")
         trace = self.root / "probe-work" / "runs" / "target-contract-probe"; self._accepted_trace(trace)
         original = self.probe._write_result
-        self.probe._write_result = lambda *_: (_ for _ in ()).throw(OSError("injected"))
+        self.probe._write_result = lambda *_, **__: (_ for _ in ()).throw(OSError("injected"))
         try:
             with self.assertRaises(self.probe.ProbeFailure): self.probe.audit(trace)
         finally:
@@ -747,6 +942,8 @@ print(json.dumps([{'type':'result','result':'ok','is_error':False,'session_id':'
             shutil.copy2(source_root / name, trace / name)
         if (source_root / "action-authorization.json").is_file():
             shutil.copy2(source_root / "action-authorization.json", trace / "action-authorization.json")
+        (trace / "probe").mkdir()
+        shutil.copy2(source_root / "probe" / "prompt.txt", trace / "probe" / "prompt.txt")
         shutil.copytree(source_root / "fixture", trace / "fixture")
         (trace / "work").mkdir()
         shutil.copy2(ROOT / "tools" / "tests" / "fixtures" / "target-contract-reports" / "canonical.md",
@@ -770,6 +967,19 @@ print(json.dumps([{'type':'result','result':'ok','is_error':False,'session_id':'
         (trace / "response-bodies" / "one.json").write_text(json.dumps({"call_id": call_id,
             "returned_identity": "deepseek-v4-20260901",
             "usage": {"prompt_tokens": 1, "completion_tokens": 1}}))
+        request = trace / (call_id[:32] + ".req.json.gz")
+        response = trace / (call_id[:32] + ".a1.res.json.gz")
+        with gzip.open(request, "wb") as handle:
+            handle.write(json.dumps({"model": "deepseek-v4-20260901"}).encode())
+        with gzip.open(response, "wb") as handle:
+            handle.write(json.dumps({"model": "deepseek-v4-20260901", "usage": {
+                "prompt_tokens": 1, "completion_tokens": 1}}).encode())
+        (trace / "upstream-completed.jsonl").write_text(json.dumps({
+            "request_id": call_id[:32], "action_attempt_id": call_id,
+            "body_request_file": request.name, "body_response_file": response.name,
+            "action_contact_completed": True, "requested_model": "deepseek-v4-20260901",
+            "sent_model": "deepseek-v4-20260901", "returned_model": "deepseek-v4-20260901",
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1}}) + "\n")
         (trace / "run-verdict.json").write_text(json.dumps({"schema": 1, "run_tag": trace.name,
             "state": "finished", "phase": "FINISHED", "finished": True, "successful": True,
             "report_correct": True, "report_correctness_scope": "sealed-contract-gates",
@@ -777,6 +987,16 @@ print(json.dumps([{'type':'result','result':'ok','is_error':False,'session_id':'
             "attempt_exit_code": 0, "driver_exit_code": 0, "wrapper_exit_code": 0,
             "gate_exit_codes": {name: 0 for name in self.probe.GATES}, "primary_failure": None,
             "terminal_observation": "RUN_SUCCEEDED"}))
+        # Unit fixtures cannot run the whole controller lifecycle.  Audit still
+        # must launch its bound Task7 command; return only this fixture's raw
+        # Task7 stdout when that exact command is launched and delegate gates.
+        original = self._probe_run
+        def fresh_task7(command, *args, **kwargs):
+            if (isinstance(command, list) and len(command) >= 2 and
+                    Path(command[1]).name == "run-verdict.py"):
+                return subprocess.CompletedProcess(command, 0, (trace / "run-verdict.json").read_text(), "")
+            return original(command, *args, **kwargs)
+        self.probe.subprocess.run = fresh_task7
         effective = dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
         rate = {"schema": 1, "run_tag": trace.name, "effective_at": effective, "source": "local-test",
                 "prompt_rub_per_token": 0.0, "completion_rub_per_token": 0.0}

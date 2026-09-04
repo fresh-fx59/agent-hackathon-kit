@@ -239,11 +239,12 @@ sealed, trace = map(Path, sys.argv[1:])
 names = ("target-profile.json", "corporate-settings.json", "probe-budget.json",
          "probe-rate-snapshot.json",
          "fixture-manifest.json", "input-package.json", "probe-manifest.json",
-         "action-authorization.json")
+         "action-authorization.json", "probe/prompt.txt")
 if not sealed.is_dir() or sealed.is_symlink(): raise SystemExit("TARGET_PROBE_INPUT")
 def copy_regular(name):
     """Descriptor-held, no-replace copy; a source swap or hardlink fails closed."""
     src, dst = sealed / name, trace / name
+    dst.parent.mkdir(parents=True, exist_ok=True)
     before = os.lstat(src)
     if not stat.S_ISREG(before.st_mode) or stat.S_ISLNK(before.st_mode) or before.st_nlink != 1:
         raise SystemExit("TARGET_PROBE_INPUT")
@@ -327,6 +328,9 @@ PY
   QWEN="$PROBE_QWEN"
   SHERLOCK_MAX_OUTPUT_TOKENS="$PROBE_MAX_OUTPUT"
   SHERLOCK_SESSION_TOKEN_LIMIT="$PROBE_SESSION_LIMIT"
+  # Consume the runner-owned trace copy.  The controller's sealed-input path
+  # is only an ingress source and must not survive as a last-use dependency.
+  SHERLOCK_PROMPT_FILE="$TRACE/probe/prompt.txt"
   unset SHERLOCK_PROBE_SEALED_INPUT SHERLOCK_PROBE_SETTINGS SHERLOCK_PROBE_BUDGET
 fi
 DATASET="${SHERLOCK_DATASET:-bench649}"
@@ -1319,9 +1323,13 @@ fi
 #   3. the historical outage prompt    — kept ONLY for dataset bench649
 PROMPT_FILE="${SHERLOCK_PROMPT_FILE:-$HERE/prompts/$DATASET.txt}"
 if [ -f "$PROMPT_FILE" ]; then
-  PROMPT="$(cat "$PROMPT_FILE")"
+  # Command substitution normally removes trailing newlines.  The sealed probe
+  # manifest binds raw prompt bytes, so retain them with a non-newline sentinel.
+  PROMPT="$(cat "$PROMPT_FILE"; printf '\036')"
+  PROMPT="${PROMPT%$'\036'}"
   PROMPT="${PROMPT//\$CORPUS/$RUN_CORPUS}"
-  PROMPT="$(printf '%s' "$PROMPT" | sed "s|{CORPUS}|$RUN_CORPUS|g")"
+  PROMPT="$(printf '%s' "$PROMPT" | sed "s|{CORPUS}|$RUN_CORPUS|g"; printf '\036')"
+  PROMPT="${PROMPT%$'\036'}"
 elif [ "$DATASET" = "bench649" ]; then
   PROMPT="Продакшн деградировал. Логи со всей платформы лежат в $RUN_CORPUS.
 Найди ВСЕ проблемы и инциденты, определи корневую причину каждой и предложи,
@@ -1342,7 +1350,7 @@ work/checkpoint.json. Не повторяй MAP и TRIAGE, если state=ready_
 только ошибки проверки. Последний ответ должен дословно повторять work/report.md."
 fi
 
-if arm_ge "$ARM" 31; then
+if arm_ge "$ARM" 31 && [ -z "${SHERLOCK_PROMPT_FILE:-}" ]; then
   # r4 answered in one request with stats.skills.totalCalls == 0. Name the skill.
   PROMPT="/sherlock
 

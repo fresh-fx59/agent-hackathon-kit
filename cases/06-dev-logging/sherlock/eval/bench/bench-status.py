@@ -668,7 +668,7 @@ def empty_projection(codes):
 TARGET_PROBE_MANIFEST_KEYS = {"schema", "action", "created_at", "expires_at", "nonce",
                               "target_profile_sha256", "probe_budget_sha256",
                               "fixture_manifest_sha256", "input_package_sha256",
-                              "rate_snapshot_sha256"}
+                              "rate_snapshot_sha256", "prompt_sha256"}
 TARGET_PROBE_AUTH_KEYS = {"schema", "action_nonce", "manifest_raw_sha256",
                           "nonce_record_path", "nonce_record_sha256", "nonce_root",
                           "probe_root", "trace_path", "bench_status_sha256",
@@ -685,6 +685,18 @@ def target_read(held, name):
         if not isinstance(row, dict): raise Unsafe()
         held.check()
         return raw, row
+    except Exception as exc:
+        raise ValueError("TRACE_UNRESOLVED") from exc
+
+
+def target_raw(held, name):
+    """Read one sealed non-JSON target-probe input from the held directory."""
+    try:
+        info = os.stat(name, dir_fd=held.fd, follow_symlinks=False)
+        if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1: raise Unsafe()
+        raw = held.read(name, MAX_JSON)
+        held.check()
+        return raw
     except Exception as exc:
         raise ValueError("TRACE_UNRESOLVED") from exc
 
@@ -710,7 +722,7 @@ def target_external_nonce(path):
 def target_probe_projection(path):
     """Authenticate the separate, one-shot operator target-probe authority."""
     trace = HeldDir(path)
-    root = work = runs = expected = None
+    root = work = runs = expected = prompt = None
     try:
         root_path = MANIFEST.clean_abs(os.path.dirname(os.path.dirname(os.path.dirname(trace.path))))
         if trace.path != os.path.join(root_path, "probe-work", "runs", "target-contract-probe"):
@@ -735,6 +747,9 @@ def target_probe_projection(path):
                             ("input-package.json", "input_package_sha256")):
             raw, _ = target_read(trace, name)
             if not hmac.compare_digest(digest(raw), manifest[field]): raise ValueError("TRACE_UNRESOLVED")
+        prompt = HeldDir.child(trace, "probe")
+        if not hmac.compare_digest(digest(target_raw(prompt, "prompt.txt")), manifest["prompt_sha256"]):
+            raise ValueError("TRACE_UNRESOLVED")
         raw_auth, authorization = target_read(trace, "action-authorization.json")
         if set(authorization) != TARGET_PROBE_AUTH_KEYS or authorization.get("schema") != 1:
             raise ValueError("TRACE_UNRESOLVED")
@@ -765,10 +780,10 @@ def target_probe_projection(path):
                "authenticated": True, "authority": "operator-approved-target-probe",
                "health": "not_applicable", "validity": "not_applicable",
                "diagnostics": []}
-        trace.check(); expected.check(); runs.check(); work.check(); root.check()
+        prompt.check(); trace.check(); expected.check(); runs.check(); work.check(); root.check()
         return row
     finally:
-        for held in (expected, runs, work, root, trace):
+        for held in (prompt, expected, runs, work, root, trace):
             if held is not None:
                 try: held.close()
                 except OSError: pass

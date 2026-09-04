@@ -883,7 +883,7 @@ def target_contract_probe(argv):
         print("PROBE_INPUT", file=sys.stderr)
         return 1
     required = ("target-profile.json", "corporate-settings.json", "probe-budget.json", "probe-rate-snapshot.json",
-                "fixture-manifest.json", "input-package.json", "probe-manifest.json",
+                "fixture-manifest.json", "input-package.json", "probe-manifest.json", "probe/prompt.txt",
                 "action-authorization.json", "fixture")
     for name in required:
         candidate = sealed / name
@@ -990,6 +990,10 @@ def target_contract_probe(argv):
                 "UPSTREAM_READ_TIMEOUT": str(limits["max_wall_time_s"]),
                 "SHERLOCK_API_KEY": os.environ[secret_ref],
                 "SHERLOCK_PROBE_SEALED_INPUT": str(sealed),
+                # The probe question is itself sealed evidence.  Give the
+                # ordinary runner this exact copied file, never its dataset
+                # fallback prompt or an ambient caller override.
+                "SHERLOCK_PROMPT_FILE": str(sealed / "probe" / "prompt.txt"),
                 # The runner first pins these files inside its owned trace and
                 # consumes only those pinned copies.  Do not point the proxy at
                 # the caller-visible sealed package after that boundary.

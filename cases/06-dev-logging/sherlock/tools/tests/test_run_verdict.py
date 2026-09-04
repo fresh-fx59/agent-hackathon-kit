@@ -105,10 +105,13 @@ class RunVerdictTests(unittest.TestCase):
         trace.mkdir(parents=True); nonces = root / "nonces"; nonces.mkdir()
         raw = {}
         for name in ("target-profile.json", "probe-budget.json", "probe-rate-snapshot.json",
-                     "fixture-manifest.json", "input-package.json"):
-            raw[name] = json.dumps({"schema": 1, "name": name}, sort_keys=True,
-                                   separators=(",", ":")).encode()
-            (trace / name).write_bytes(raw[name])
+                     "fixture-manifest.json", "input-package.json", "probe/prompt.txt"):
+            raw[name] = (json.dumps({"schema": 1, "name": name}, sort_keys=True,
+                                    separators=(",", ":")).encode()
+                         if name.endswith(".json") else b"sealed target probe prompt\n")
+            destination = trace / name
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_bytes(raw[name])
         hashes = {name: hashlib.sha256(data).hexdigest() for name, data in raw.items()}
         manifest = {"schema": 1, "action": "target_contract_probe",
                     "created_at": "2026-09-04T00:00:00Z", "expires_at": "2099-01-01T00:00:00Z",
@@ -116,7 +119,8 @@ class RunVerdictTests(unittest.TestCase):
                     "probe_budget_sha256": hashes["probe-budget.json"],
                     "rate_snapshot_sha256": hashes["probe-rate-snapshot.json"],
                     "fixture_manifest_sha256": hashes["fixture-manifest.json"],
-                    "input_package_sha256": hashes["input-package.json"]}
+                    "input_package_sha256": hashes["input-package.json"],
+                    "prompt_sha256": hashes["probe/prompt.txt"]}
         raw_manifest = json.dumps(manifest, sort_keys=True, separators=(",", ":")).encode()
         (trace / "probe-manifest.json").write_bytes(raw_manifest)
         nonce = (json.dumps({"nonce": manifest["nonce"], "manifest_sha256": hashlib.sha256(raw_manifest).hexdigest()},

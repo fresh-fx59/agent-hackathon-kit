@@ -318,6 +318,20 @@ credential, real corpus, or external network was used.
     Ran 20 tests in 0.671s
     OK
 
+2026-09-04 REPAIR CHECKPOINT (post-Round-5 review): reproduced the reviewer
+RED (9 tests: 5 OK, 1 fail, 3 errors) before changing production code. The
+descriptor-held final root now uses `mkdirat` plus O_EXCL relative leaf writes;
+the normal controller exports the sealed prompt and runner preserves its raw
+bytes. A real localhost controller→runner→Task-3-proxy E2E observed the exact
+sealed prompt SHA and a blank report populated solely from the fake Qwen
+response, then passed real Task 7 (1/1, 4.956s). The Task-7 manifest verifier
+now binds `probe/prompt.txt`; its focused authority regressions pass 2/2.
+Audit now freshly invokes its bound Task-7 executable and records its actual
+subprocess exit instead of trusting `run-verdict.json`; unit fixtures intercept
+only that subprocess boundary while the localhost E2E exercises the real one.
+Current focused Round-5 set is 9/9 (2.355s); py_compile, bash syntax, and
+diff-check are green. Full matrix/baseline comparison remains pending.
+
 `py_compile` for probe/status/verdict and focused tests, `bash -n` for
 controller/runner/lane, and `git diff --check` produced no output and exited
 zero.
@@ -452,3 +466,23 @@ keys with all four measured gate exits zero. Exact focused result:
     Ran 1 test in 3.847s
 
     OK
+
+2026-09-04 FINAL RESIDUAL REPAIR: added and observed RED tests for the missing
+commit marker fields and a receipt hardlink added during injected accepted-marker
+failure. Audit now stages receipt/checksum bytes before publication, claims their
+canonical names by descriptor-relative O_EXCL writes, and publishes accepted
+`probe-result.json` last with the exact receipt SHA-256, checksum SHA-256, and
+checksum value. The marker is the sole acceptance commitment. Every managed
+failure unlinks the canonical receipt, checksum, and receipt nonce through the
+held trace-root fd even when the receipt inode has an outside hardlink, then
+writes one rejected marker; orphan receipt/checksum entries are cleaned and
+rejected before a new audit. Receipt checks now explicitly include the raw prompt
+digest and budget assurance; Task 3 usage accepts ordinary nonnegative counters
+and nested details while enforcing total consistency. The runner snapshots all
+sealed caller inputs before nonce use and test mutation/unlink of profile,
+prompt, fixture, and rates reaches only those snapshots. Full provider-free
+verification: probe 49/49; Task 2 fixture 20/20; Task 3 budget 23/23; status
+36/36; Task 7 verdict 41/41; lane 13/13; target controller 4/4; faithful
+localhost E2E 1/1. Persistent controller comparison is current 31/31 and clean
+baseline 31/31 in 10/10/11 batches. Python compile, Bash syntax, and diff check
+were clean. No provider, credential, real corpus, or external network was used.

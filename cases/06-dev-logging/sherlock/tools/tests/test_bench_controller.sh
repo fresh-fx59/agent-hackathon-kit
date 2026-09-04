@@ -992,6 +992,8 @@ class TargetContractProbeControllerTests(unittest.TestCase):
             for name in ("corporate-settings.json", "fixture-manifest.json", "probe-manifest.json",
                          "action-authorization.json"):
                 (sealed / name).write_text("{}")
+            (sealed / "probe").mkdir()
+            (sealed / "probe" / "prompt.txt").write_text("sealed prompt")
             env = dict(os.environ, PROBE_TEST_SECRET="fixture-only", SHERLOCK_FORBIDDEN="1")
             result = subprocess.run(["bash", str(CONTROLLER), "--target-contract-probe",
                                      "--sealed-input", str(sealed), "--work", str(work)],

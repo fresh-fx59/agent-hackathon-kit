@@ -70,10 +70,13 @@ class BenchStatusTests(unittest.TestCase):
         nonce_root = root / "nonce-records"; nonce_root.mkdir()
         raw = {}
         for name in ("target-profile.json", "probe-budget.json", "probe-rate-snapshot.json",
-                     "fixture-manifest.json", "input-package.json"):
+                     "fixture-manifest.json", "input-package.json", "probe/prompt.txt"):
             value = {"schema": 1, "name": name}
-            raw[name] = json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
-            (trace / name).write_bytes(raw[name])
+            raw[name] = (json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
+                         if name.endswith(".json") else b"sealed raw qwen prompt\n")
+            destination = trace / name
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_bytes(raw[name])
         sha = {name: hashlib.sha256(value).hexdigest() for name, value in raw.items()}
         manifest = {
             "schema": 1, "action": "target_contract_probe",
@@ -84,6 +87,7 @@ class BenchStatusTests(unittest.TestCase):
             "fixture_manifest_sha256": sha["fixture-manifest.json"],
             "input_package_sha256": sha["input-package.json"],
             "rate_snapshot_sha256": sha["probe-rate-snapshot.json"],
+            "prompt_sha256": sha["probe/prompt.txt"],
         }
         manifest_raw = json.dumps(manifest, sort_keys=True, separators=(",", ":")).encode()
         (trace / "probe-manifest.json").write_bytes(manifest_raw)
@@ -699,6 +703,14 @@ class BenchStatusTests(unittest.TestCase):
         self.assertEqual(row["health"], "not_applicable")
         self.assertEqual(row["validity"], "not_applicable")
         self.assertEqual(root / "probe-work" / "runs" / "target-contract-probe", trace)
+
+    def test_target_probe_mode_binds_the_sealed_raw_prompt(self):
+        _root, trace = self.stage_target_probe_authority()
+        (trace / "probe" / "prompt.txt").write_bytes(b"replacement prompt\n")
+        result = subprocess.run([sys.executable, str(TOOL), str(trace), "--target-probe", "--json"],
+                                text=True, capture_output=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("TRACE_UNRESOLVED", result.stderr)
 
 
 if __name__ == "__main__":

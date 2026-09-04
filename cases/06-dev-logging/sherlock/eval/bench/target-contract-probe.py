@@ -31,7 +31,7 @@ from urllib.parse import urlparse
 HERE = Path(__file__).resolve().parent
 GATES = ("reportcheck", "citecheck", "statecheck", "triagecheck")
 PROBE_MANIFEST_KEYS = {"schema", "action", "created_at", "expires_at", "nonce",
-                       "target_profile_sha256", "probe_budget_sha256",
+                       "target_profile_sha256", "probe_budget_sha256", "prompt_sha256",
                        "fixture_manifest_sha256", "input_package_sha256", "rate_snapshot_sha256"}
 DEFAULT_BUDGET = {"schema": 2, "max_provider_calls": 10, "max_prompt_tokens": 400000,
                   "max_completion_tokens": 20000, "max_wall_time_s": 600,
@@ -230,6 +230,50 @@ def _atomic_no_replace(path, data):
             os.close(parent_fd)
 
 
+def _write_relative(root_fd, relative, data, code="TARGET_PROBE_PREPARE"):
+    """Publish a sealed leaf below an already-held root, exclusively by fd."""
+    parts = relative.split("/")
+    if not parts or any(part in ("", ".", "..") for part in parts):
+        raise ProbeFailure(code, "unsafe package name")
+    held = os.dup(root_fd)
+    try:
+        for part in parts[:-1]:
+            try: os.mkdir(part, 0o700, dir_fd=held)
+            except FileExistsError: pass
+            next_fd = os.open(part, os.O_RDONLY | os.O_DIRECTORY | getattr(os, "O_NOFOLLOW", 0), dir_fd=held)
+            os.close(held); held = next_fd
+        fd = os.open(parts[-1], os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0),
+                     0o600, dir_fd=held)
+        try:
+            os.write(fd, data); os.fsync(fd)
+        finally: os.close(fd)
+        os.fsync(held)
+    except FileExistsError as exc:
+        raise ProbeFailure(code, "package leaf exists") from exc
+    finally:
+        os.close(held)
+
+
+def _read_relative(root_fd, relative, limit=64 * 1024 * 1024):
+    parts = relative.split("/"); held = os.dup(root_fd)
+    try:
+        for part in parts[:-1]:
+            next_fd = os.open(part, os.O_RDONLY | os.O_DIRECTORY | getattr(os, "O_NOFOLLOW", 0), dir_fd=held)
+            os.close(held); held = next_fd
+        fd = os.open(parts[-1], os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0), dir_fd=held)
+        try:
+            chunks = []; total = 0
+            while True:
+                chunk = os.read(fd, min(65536, limit + 1 - total))
+                if not chunk: break
+                chunks.append(chunk); total += len(chunk)
+                if total > limit: raise ProbeFailure("TARGET_PROBE_PREPARE", "package leaf too large")
+            return b"".join(chunks)
+        finally: os.close(fd)
+    finally:
+        os.close(held)
+
+
 def _remove_owned(path, expected_sha):
     """Rollback only the exact regular leaf published by this transaction."""
     try:
@@ -243,6 +287,45 @@ def _remove_owned(path, expected_sha):
             os.close(parent_fd)
     except (OSError, ProbeFailure):
         return
+
+
+def _unlink_relative(root_fd, relative):
+    """Unlink a canonical managed leaf through the audit's held root fd.
+
+    This deliberately does not inspect link count or content: rollback owns the
+    *directory entry*, not every inode reference an attacker may have made.
+    """
+    parts = relative.split("/")
+    held = os.dup(root_fd)
+    try:
+        for part in parts[:-1]:
+            if part in ("", ".", ".."):
+                return
+            try:
+                next_fd = os.open(part, os.O_RDONLY | os.O_DIRECTORY | getattr(os, "O_NOFOLLOW", 0), dir_fd=held)
+            except FileNotFoundError:
+                return
+            os.close(held); held = next_fd
+        try:
+            os.unlink(parts[-1], dir_fd=held)
+            os.fsync(held)
+        except FileNotFoundError:
+            pass
+    finally:
+        os.close(held)
+
+
+def _remove_receipt_transaction(root_fd, receipt_nonce=None):
+    """Remove every canonical inert publication after a managed failure."""
+    _unlink_relative(root_fd, "target-contract-receipt.json.sha256")
+    _unlink_relative(root_fd, "target-contract-receipt.json")
+    if receipt_nonce is not None:
+        _unlink_relative(root_fd, "receipt-nonces/%s.json" % receipt_nonce)
+    try:
+        os.rmdir("receipt-nonces", dir_fd=root_fd)
+        os.fsync(root_fd)
+    except OSError:
+        pass
 
 
 def _remove_empty_owned_directory(path):
@@ -440,18 +523,20 @@ def prepare(args, secret_reader=None):
     except (OSError, ProbeFailure) as exc:
         raise ProbeFailure("TARGET_PROBE_PREPARE", "rate snapshot") from exc
     root = Path(args.root)
-    # Validate (and, only when missing, create) every parent through a
-    # descriptor walk before tempfile or mkdir can follow a caller alias.
+    # Hold both parent and final root for the whole publication: a caller path
+    # is only a locator, never an authority after this point.
     try:
         parent_fd = _open_directory_no_follow(root.parent, create=True)
-        os.close(parent_fd)
     except (OSError, ProbeFailure) as exc:
         raise ProbeFailure("TARGET_PROBE_PREPARE", "unsafe root parent") from exc
-    if os.path.lexists(root):
-        raise ProbeFailure("TARGET_PROBE_PREPARE", "root already exists")
-    staging = Path(tempfile.mkdtemp(prefix=".target-probe-", dir=root.parent))
     try:
-        fixture_dir = staging / "fixture"
+        try:
+            os.mkdir(root.name, 0o700, dir_fd=parent_fd)
+        except FileExistsError as exc:
+            raise ProbeFailure("TARGET_PROBE_PREPARE", "root already exists") from exc
+        root_fd = os.open(root.name, os.O_RDONLY | os.O_DIRECTORY | getattr(os, "O_NOFOLLOW", 0), dir_fd=parent_fd)
+        os.fsync(parent_fd)
+        fixture_dir = root / "fixture"
         fixture = FIXTURE.build_fixture(args.source_corpus, fixture_dir, HERE / "probe" / "recipe.json", 4401)
         settings_tool = HERE.parent.parent / "measure" / "corporate-settings.py"
         settings_run = subprocess.run(["python3", str(settings_tool), "emit-run", "--max-retries", "0",
@@ -466,6 +551,7 @@ def prepare(args, secret_reader=None):
                  "probe-budget.json": canonical(DEFAULT_BUDGET) + b"\n",
                  "probe-rate-snapshot.json": rate_raw,
                  "fixture-manifest.json": (fixture_dir / "probe-fixture-manifest.json").read_bytes(),
+                 "probe/prompt.txt": (HERE / "probe" / "prompt.txt").read_bytes(),
                  "input-package.json": canonical({"schema": 1, "arm": args.arm,
                      "fixture_tree_sha256": fixture["output_tree_sha256"],
                      "fixture_expectations_sha256": fixture["expectations_sha256"],
@@ -480,7 +566,7 @@ def prepare(args, secret_reader=None):
                      "qwen_sha256": _asset(args.qwen_bin, "TARGET_PROBE_PREPARE")[1],
                      "skill_sha256": _tree_digest(HERE.parent.parent / "skills" / "v44"), "gate_sha256": _gate_digests()}) + b"\n"}
         for name, data in files.items():
-            (staging / name).write_bytes(data)
+            _write_relative(root_fd, name, data)
         created = _now()
         ttl = (dt.timedelta(hours=24) if args.identity_mode == "provider_pinned_version" and
                args.requested_model == args.expected_returned_identity else dt.timedelta(minutes=30))
@@ -490,15 +576,15 @@ def prepare(args, secret_reader=None):
                     "probe_budget_sha256": sha256(files["probe-budget.json"]),
                     "rate_snapshot_sha256": sha256(files["probe-rate-snapshot.json"]),
                     "fixture_manifest_sha256": sha256(files["fixture-manifest.json"]),
-                    "input_package_sha256": sha256(files["input-package.json"])}
-        (staging / "probe-manifest.json").write_bytes(canonical(manifest) + b"\n")
-        # Fixture is part of the sealed package, with its original source bytes only.
-        _publish_package_no_replace(staging, root)
-        staging = None
+                    "input_package_sha256": sha256(files["input-package.json"]),
+                    "prompt_sha256": sha256(files["probe/prompt.txt"])}
+        _write_relative(root_fd, "probe-manifest.json", canonical(manifest) + b"\n")
+        os.fsync(root_fd)
     finally:
-        if staging and staging.exists():
-            shutil.rmtree(staging)
-    return {"root": str(root), "manifest_sha256": sha256((root / "probe-manifest.json").read_bytes())}
+        try: os.close(root_fd)
+        except UnboundLocalError: pass
+        os.close(parent_fd)
+    return {"root": str(root), "manifest_sha256": sha256(safe_read_regular(root / "probe-manifest.json"))}
 
 
 def _consume_nonce(nonce_root, nonce, supplied_hash):
@@ -513,14 +599,32 @@ def _consume_nonce(nonce_root, nonce, supplied_hash):
     _atomic_no_replace(nonce_root / (nonce + ".json"), canonical({"nonce": nonce, "manifest_sha256": supplied_hash}) + b"\n")
 
 
-def _record_action_authorization(root, nonce_root, manifest, supplied_hash):
+def _nonce_is_available(nonce_root, nonce):
+    """Reject a known replay before resolving any secret; consume still races safely."""
+    try:
+        fd = _open_directory_no_follow(nonce_root)
+    except FileNotFoundError:
+        return
+    except (OSError, ProbeFailure) as exc:
+        raise ProbeFailure("TARGET_PROBE_NOT_AUTHORIZED", "nonce root") from exc
+    try:
+        try:
+            os.stat(nonce + ".json", dir_fd=fd, follow_symlinks=False)
+        except FileNotFoundError:
+            return
+        raise ProbeFailure("APPROVAL_REPLAYED", "nonce already consumed")
+    finally:
+        os.close(fd)
+
+
+def _record_action_authorization(root, nonce_root, manifest, supplied_hash, authority_root=None):
     """Bind a trace audit to the durable nonce that admitted the run."""
     token = Path(nonce_root) / (manifest["nonce"] + ".json")
     raw = safe_read_regular(token)
     expected = canonical({"nonce": manifest["nonce"], "manifest_sha256": supplied_hash}) + b"\n"
     if not hmac.compare_digest(raw, expected):
         raise ProbeFailure("TARGET_PROBE_NOT_AUTHORIZED", "nonce evidence")
-    probe_root = Path(root).resolve()
+    probe_root = Path(root if authority_root is None else authority_root).resolve()
     token = token.resolve()
     _atomic_no_replace(Path(root) / "action-authorization.json", canonical({
         "schema": 1, "action_nonce": manifest["nonce"],
@@ -605,6 +709,8 @@ def _verify_package(root, manifest, code="TARGET_PROBE_NOT_AUTHORIZED"):
             any(not _hex(value) for value in package["gate_sha256"].values()):
         raise ProbeFailure(code, "input package invalid")
     fixture_manifest = values["fixture-manifest.json"]
+    if not hmac.compare_digest(_asset(Path(root) / "probe" / "prompt.txt", code)[1], manifest["prompt_sha256"]):
+        raise ProbeFailure(code, "probe prompt changed")
     if type(fixture_manifest) is not dict or fixture_manifest.get("schema") != 1 or \
             type(fixture_manifest.get("outputs")) is not dict or \
             not isinstance(fixture_manifest.get("expectations"), str):
@@ -665,15 +771,19 @@ def run(manifest_path, supplied_hash, nonce_root, *, secret_reader, proxy_starte
         work.mkdir(mode=0o700)
         sealed = work / "sealed-input"
         sealed.mkdir(mode=0o700)
-        for name in ("target-profile.json", "corporate-settings.json", "probe-budget.json", "probe-rate-snapshot.json", "fixture-manifest.json", "input-package.json", "probe-manifest.json"):
+        for name in ("target-profile.json", "corporate-settings.json", "probe-budget.json", "probe-rate-snapshot.json", "fixture-manifest.json", "input-package.json", "probe-manifest.json", "probe/prompt.txt"):
+            (sealed / name).parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(root / name, sealed / name)
         shutil.copytree(root / "fixture", sealed / "fixture", symlinks=False)
         _verify_package(sealed, manifest)
-    # All knowable validation precedes the one-way nonce consumption.
+        _nonce_is_available(nonce_root, manifest["nonce"])
+    # All knowable validation, snapshots, and secret availability precede the
+    # one-way nonce consumption.  Originals are never used after this point.
+        profile = _strict_json(_asset(sealed / "target-profile.json")[0])
+        secret = secret_reader(profile["secret_ref"])
+        _verify_package(sealed, manifest)
         _consume_nonce(nonce_root, manifest["nonce"], supplied_hash)
-        _record_action_authorization(root, nonce_root, manifest, supplied_hash)
-        shutil.copyfile(root / "action-authorization.json", sealed / "action-authorization.json")
-        secret = secret_reader(package["target-profile.json"]["secret_ref"])
+        _record_action_authorization(sealed, nonce_root, manifest, supplied_hash, authority_root=root)
     # Secret resolution is the only allowed operation before the proxy.  Treat
     # callbacks as hostile: validate the owned snapshot immediately afterwards.
         _verify_package(sealed, manifest)
@@ -769,10 +879,13 @@ def _strict_budget(row):
     return row
 
 
-def _write_result(trace, result):
+def _write_result(trace, result, root_fd=None):
     path = Path(trace) / "probe-result.json"
     try:
-        _atomic_no_replace(path, canonical(result) + b"\n")
+        if root_fd is None:
+            _atomic_no_replace(path, canonical(result) + b"\n")
+        else:
+            _write_relative(root_fd, "probe-result.json", canonical(result) + b"\n", "TARGET_CONTRACT_FAILED")
         return True
     except ProbeFailure:
         # A sealed result exists; never overwrite an earlier attempt's observation.
@@ -781,7 +894,8 @@ def _write_result(trace, result):
 
 def _audit_authorization(trace, manifest, raw_manifest):
     """Require the durable action token that admitted this exact manifest."""
-    row = _strict_json(_asset(Path(trace) / "action-authorization.json", "TARGET_CONTRACT_FAILED")[0])
+    raw, _ = _asset(Path(trace) / "action-authorization.json", "TARGET_CONTRACT_FAILED")
+    row = _strict_json(raw)
     required = {"schema", "action_nonce", "manifest_raw_sha256",
                 "nonce_record_path", "nonce_record_sha256", "nonce_root", "probe_root", "trace_path",
                 "bench_status_sha256", "run_verdict_sha256"}
@@ -800,7 +914,7 @@ def _audit_authorization(trace, manifest, raw_manifest):
     wanted = canonical({"nonce": manifest["nonce"], "manifest_sha256": sha256(raw_manifest)}) + b"\n"
     if not hmac.compare_digest(nonce_raw, wanted) or not hmac.compare_digest(sha256(nonce_raw), row["nonce_record_sha256"]):
         raise ProbeFailure("TARGET_CONTRACT_FAILED", "action authorization")
-    return row
+    return row, raw
 
 
 def _real_gates(trace, report, fixture):
@@ -912,9 +1026,7 @@ def _task3_observations(trace):
         if not isinstance(response, dict) or response.get("model") != row["returned_model"]:
             raise ProbeFailure("TARGET_IDENTITY_MISMATCH", "raw response identity")
         usage = response.get("usage")
-        if (not isinstance(usage, dict) or set(usage) != {"prompt_tokens", "completion_tokens"}
-                or any(type(usage[key]) is not int or usage[key] < 0 for key in usage)
-                or row["usage"] != usage):
+        if not _ordinary_usage(usage) or row["usage"] != usage:
             raise ProbeFailure("TARGET_PROBE_BUDGET", "raw response usage")
         rows.append((row, request_hash, response_hash))
     if len({row["action_attempt_id"] for row, _, _ in rows}) != len(rows):
@@ -922,16 +1034,52 @@ def _task3_observations(trace):
     return journal_raw, journal_hash, rows
 
 
+def _ordinary_usage(usage):
+    """Accept normal provider counters without allowing malformed accounting."""
+    if not isinstance(usage, dict) or not {"prompt_tokens", "completion_tokens"}.issubset(usage):
+        return False
+    def counters(value):
+        if isinstance(value, dict):
+            return all(isinstance(key, str) and counters(child) for key, child in value.items())
+        return type(value) is int and value >= 0
+    if not counters(usage):
+        return False
+    total = usage.get("total_tokens")
+    return total is None or total == usage["prompt_tokens"] + usage["completion_tokens"]
+
+
 def audit(trace):
     trace = Path(trace)
     result = {"schema": 1, "accepted": False, "checked_at": _time_text(_now())}
-    published = []
+    receipt_nonce = None
+    trace_fd = _open_directory_no_follow(trace)
     try:
+        receipt_path = trace / "target-contract-receipt.json"
+        checksum_path = Path(str(receipt_path) + ".sha256")
+        # Receipt/checksum are inert staging artefacts.  A previous interrupted
+        # transaction has no commit marker, so remove its canonical names before
+        # refusing this audit; never let it look like an accepted receipt.
+        if (os.path.lexists(receipt_path) or os.path.lexists(checksum_path)) and not os.path.lexists(trace / "probe-result.json"):
+            _remove_receipt_transaction(trace_fd)
+            result.update({"failure": "TARGET_CONTRACT_FAILED", "detail": "orphan receipt transaction"})
+            _write_result(trace, result, root_fd=trace_fd)
+            raise ProbeFailure("TARGET_CONTRACT_FAILED", "orphan receipt transaction")
         if os.path.lexists(trace / "probe-result.json"):
             raise ProbeFailure("TARGET_CONTRACT_FAILED", "attempt result already sealed")
+        # A receipt/checksum has no authority absent the final result marker.
+        # Clear an interrupted, owned transaction before a fresh audit.
+        if os.path.lexists(trace / "target-contract-receipt.json"):
+            descriptor = os.open(trace, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+            try:
+                for name in ("target-contract-receipt.json.sha256", "target-contract-receipt.json"):
+                    try: os.unlink(name, dir_fd=descriptor)
+                    except FileNotFoundError: pass
+                    except OSError as exc: raise ProbeFailure("TARGET_CONTRACT_FAILED", "orphan receipt") from exc
+            finally:
+                os.close(descriptor)
         raw_manifest, _ = _asset(trace / "probe-manifest.json", "TARGET_CONTRACT_FAILED")
         manifest = _strict_json(raw_manifest, PROBE_MANIFEST_KEYS)
-        action_authorization = _audit_authorization(trace, manifest, raw_manifest)
+        action_authorization, action_authorization_raw = _audit_authorization(trace, manifest, raw_manifest)
         package = _verify_package(trace, manifest, "TARGET_CONTRACT_FAILED")
         if _iso(manifest["expires_at"]) <= _now():
             raise ProbeFailure("TARGET_CONTRACT_FAILED", "expired")
@@ -944,10 +1092,15 @@ def audit(trace):
         gates = _real_gates(trace, report, fixture)
         _atomic_no_replace(trace / "probe-oracle.json", canonical(oracle) + b"\n")
         _atomic_no_replace(trace / "probe-gates.json", canonical(gates) + b"\n")
-        # Task 7 owns the terminal projection.  A hand-written list of child
-        # exit codes is not proof that its independent verdict accepted this
-        # trace, so audit consumes the raw run-verdict output instead.
-        verdict_raw, verdict_hash = _asset(trace / "run-verdict.json", "TARGET_CONTRACT_FAILED")
+        # Task 7 is re-run here.  A pre-existing verdict is merely an untrusted
+        # runner artifact, never the audit's authority.
+        status = subprocess.run([sys.executable, str(HERE / "run-verdict.py"), str(trace),
+                                 "--target-probe", "--json"], text=True, capture_output=True, timeout=30)
+        status_exit_code = status.returncode
+        if status.returncode != 0:
+            raise ProbeFailure("TARGET_CONTRACT_FAILED", "fresh Task 7 verdict")
+        verdict_raw = status.stdout.encode("utf-8")
+        verdict_hash = sha256(verdict_raw)
         verdict = _strict_json(verdict_raw)
         required_verdict = {"schema", "run_tag", "state", "phase", "finished", "successful", "report_correct",
                             "report_correctness_scope", "authenticated", "authority", "failures", "metrics",
@@ -976,10 +1129,7 @@ def audit(trace):
                       "sent_models": [row["sent_model"] for row, _, _ in task3_rows],
                       "call_ids": [row["action_attempt_id"] for row, _, _ in task3_rows]}
         else:
-            # Compatibility for previously sealed local tests only.  A real
-            # runner always emits Task 3's completion journal above.
-            ledger_raw, ledger_hash = _asset(trace / "ledger.json", "TARGET_CONTRACT_FAILED")
-            ledger = _strict_json(ledger_raw)
+            raise ProbeFailure("TARGET_CONTRACT_FAILED", "missing Task 3 completion journal")
         budget = _strict_budget(_strict_json(_asset(trace / "upstream-budget-state.json", "TARGET_CONTRACT_FAILED")[0]))
         if set(ledger) != {"provider_calls_observed", "usage", "returned_identities", "sent_models", "call_ids"} or \
                 not isinstance(ledger.get("usage"), dict) or set(ledger["usage"]) != {"prompt_tokens", "completion_tokens"} or \
@@ -1003,6 +1153,17 @@ def audit(trace):
                 requests.append({"call_id": row["action_attempt_id"], "model": row["sent_model"]})
                 responses.append({"call_id": row["action_attempt_id"], "returned_identity": row["returned_model"],
                                   "usage": row["usage"]})
+            # Task 3's gzip journal is the action authority, but the copied
+            # controller body trees are still evidence and must agree exactly.
+            body_tree = trace / "response-bodies"
+            if body_tree.is_dir():
+                try:
+                    body_rows = [_strict_json(_asset(path, "TARGET_CONTRACT_FAILED")[0])
+                                 for path in sorted(body_tree.iterdir())]
+                except OSError as exc:
+                    raise ProbeFailure("TARGET_CONTRACT_FAILED", "response body tree") from exc
+                if body_rows != responses:
+                    raise ProbeFailure("TARGET_IDENTITY_MISMATCH", "body correlation")
         else:
             for directory, destination in ((trace / "request-bodies", requests), (trace / "response-bodies", responses)):
                 try:
@@ -1024,8 +1185,7 @@ def audit(trace):
             if (set(request) != {"call_id", "model"} or request["model"] != sent or sent != expected_model
                     or set(response) != {"call_id", "returned_identity", "usage"}
                     or response["returned_identity"] != returned
-                    or not isinstance(response["usage"], dict) or set(response["usage"]) != set(usage)
-                    or any(type(response["usage"][key]) is not int or response["usage"][key] < 0 for key in usage)):
+                    or not _ordinary_usage(response["usage"])):
                 raise ProbeFailure("TARGET_IDENTITY_MISMATCH", "body correlation")
             for key in usage:
                 usage[key] += response["usage"][key]
@@ -1053,11 +1213,11 @@ def audit(trace):
         receipt_nonce = secrets.token_hex(32)
         receipt_nonce_path = trace / "receipt-nonces" / (receipt_nonce + ".json")
         receipt_nonce_bytes = canonical({"nonce": receipt_nonce}) + b"\n"
-        _atomic_no_replace(receipt_nonce_path, receipt_nonce_bytes)
-        published.append((receipt_nonce_path, sha256(receipt_nonce_bytes)))
+        _write_relative(trace_fd, "receipt-nonces/" + receipt_nonce + ".json", receipt_nonce_bytes,
+                        "TARGET_CONTRACT_FAILED")
         receipt = {"schema": 1, "accepted": True, "proof_scope": "representative_sample_only",
                    "created_at": _time_text(completed), "expires_at": _time_text(completed + receipt_ttl), "nonce": receipt_nonce,
-                   "action_nonce": manifest["nonce"], "action_authorization_sha256": sha256(canonical(action_authorization)),
+                   "action_nonce": manifest["nonce"], "action_authorization_sha256": sha256(action_authorization_raw),
                    "target_profile_sha256": manifest["target_profile_sha256"], "probe_manifest_sha256": sha256(raw_manifest),
                    "fixture_manifest_sha256": manifest["fixture_manifest_sha256"],
                    "input_package_sha256": manifest["input_package_sha256"],
@@ -1066,6 +1226,7 @@ def audit(trace):
                    "fixture_seed": fixture_manifest.get("seed"),
                    "fixture_tree_sha256": package["input-package.json"]["fixture_tree_sha256"],
                    "fixture_report_sha256": package["input-package.json"]["fixture_expectations_sha256"],
+                   "probe_prompt_sha256": _asset(trace / "probe" / "prompt.txt", "TARGET_CONTRACT_FAILED")[1],
                    "requested_model": package["target-profile.json"]["requested_model"],
                    "sent_model": package["target-profile.json"]["requested_model"],
                    "returned_identities": ledger["returned_identities"], "identity_assurance": identity,
@@ -1079,40 +1240,48 @@ def audit(trace):
                    "estimated_cost_rub": estimated_cost,
                    "cost_inputs": {"observed_usage": usage, "rate_snapshot": rate,
                                    "recomputed_estimated_cost_rub": estimated_cost},
-                   "rate_snapshot": budget.get("rate_snapshot"), "budget_assurance": "client_pre_dispatch",
-                   "task7_verdict_sha256": verdict_hash, "provider_billed_calls": None, "provider_billed_rub": None,
+                   "rate_snapshot": budget.get("rate_snapshot"), "budget_assurance": budget["budget_assurance"],
+                   "task7_verdict_sha256": verdict_hash, "run_verdict_sha256": verdict_hash,
+                   "authenticated": verdict["authenticated"], "authority": verdict["authority"],
+                   "attempt_exit_code": verdict["attempt_exit_code"], "driver_exit_code": verdict["driver_exit_code"],
+                   "gate_exit_codes": verdict["gate_exit_codes"], "wrapper_exit_code": verdict["wrapper_exit_code"],
+                   "status_exit_code": status_exit_code, "primary_failure": verdict["primary_failure"],
+                   "terminal_observation": verdict["terminal_observation"],
+                   "rate_assurance": budget["budget_assurance"],
+                   "provider_billed_calls": None, "provider_billed_rub": None,
                    "audit_tool_sha256": sha256(Path(__file__).read_bytes())}
-        receipt_path = trace / "target-contract-receipt.json"
-        checksum_path = Path(str(receipt_path) + ".sha256")
         if os.path.lexists(receipt_path) or os.path.lexists(checksum_path):
             raise ProbeFailure("TARGET_CONTRACT_FAILED", "receipt transaction already exists")
         receipt["checksum_path"] = str(checksum_path)
+        # These bytes are constructed privately before any public name is
+        # claimed.  Receipt and checksum are intentionally not acceptance
+        # markers; the result below is the only commit marker and is last.
         receipt_bytes = canonical(receipt) + b"\n"
         checksum_bytes = sha256(receipt_bytes).encode("ascii") + b"\n"
-        _atomic_no_replace(receipt_path, receipt_bytes)
-        published.append((receipt_path, sha256(receipt_bytes)))
-        _atomic_no_replace(checksum_path, checksum_bytes)
-        published.append((checksum_path, sha256(checksum_bytes)))
-        accepted_result = dict(result, accepted=True, receipt=str(receipt_path), identity_assurance=identity)
-        if not _write_result(trace, accepted_result):
+        _write_relative(trace_fd, "target-contract-receipt.json", receipt_bytes, "TARGET_CONTRACT_FAILED")
+        _write_relative(trace_fd, "target-contract-receipt.json.sha256", checksum_bytes, "TARGET_CONTRACT_FAILED")
+        accepted_result = dict(result, accepted=True, receipt=str(receipt_path), identity_assurance=identity,
+                               receipt_sha256=sha256(receipt_bytes),
+                               receipt_checksum_sha256=sha256(checksum_bytes),
+                               receipt_checksum=checksum_bytes.decode("ascii").strip())
+        if not _write_result(trace, accepted_result, root_fd=trace_fd):
             raise ProbeFailure("TARGET_CONTRACT_FAILED", "terminal result conflict")
+        os.close(trace_fd)
         return accepted_result
     except ProbeFailure as exc:
-        for path, digest in reversed(published):
-            _remove_owned(path, digest)
-        _remove_empty_owned_directory(trace / "receipt-nonces")
+        _remove_receipt_transaction(trace_fd, receipt_nonce)
         result.update({"accepted": False, "failure": exc.code, "detail": str(exc)})
-        try: _write_result(trace, result)
+        try: _write_result(trace, result, root_fd=trace_fd)
         except Exception: pass
+        os.close(trace_fd)
         raise
     except Exception as exc:
-        for path, digest in reversed(published):
-            _remove_owned(path, digest)
-        _remove_empty_owned_directory(trace / "receipt-nonces")
+        _remove_receipt_transaction(trace_fd, receipt_nonce)
         failure = ProbeFailure("TARGET_CONTRACT_FAILED", type(exc).__name__)
         result.update({"accepted": False, "failure": failure.code, "detail": str(failure)})
-        try: _write_result(trace, result)
+        try: _write_result(trace, result, root_fd=trace_fd)
         except Exception: pass
+        os.close(trace_fd)
         raise failure from exc
 
 
