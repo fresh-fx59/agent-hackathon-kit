@@ -142,6 +142,9 @@ cat > "$FREE_TEST" <<EOF
 set -euo pipefail
 OUT=$(printf '%q' "$SUITES")
 ROOT=$(printf '%q' "$SHERLOCK")
+export GIT_CONFIG_COUNT=1
+export GIT_CONFIG_KEY_0=safe.directory
+export GIT_CONFIG_VALUE_0="\$ROOT"
 python3 "\$ROOT/tools/tests/test_run_manifest.py" >"\$OUT/run-manifest.out" 2>&1
 python3 "\$ROOT/tools/tests/test_run_state.py" >"\$OUT/run-state.out" 2>&1
 python3 "\$ROOT/tools/tests/test_run_verdict.py" >"\$OUT/run-verdict.out" 2>&1

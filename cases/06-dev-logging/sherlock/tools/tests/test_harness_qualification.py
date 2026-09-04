@@ -6,6 +6,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import shlex
 import shutil
 import subprocess
 import tempfile
@@ -347,6 +348,10 @@ class LauncherTests(unittest.TestCase):
         self.assertEqual(profile["settings_sha256"], hashlib.sha256(settings.read_bytes()).hexdigest())
         self.assertNotEqual(profile["settings_sha256"], profile["tool_schema_sha256"])
         self.assertTrue((output / "harness-qualification-input.json").is_file())
+        free_test = Path(shlex.split(captured["SHERLOCK_FREE_TEST_COMMAND"])[0]).read_text()
+        self.assertIn("export GIT_CONFIG_COUNT=1", free_test)
+        self.assertIn("export GIT_CONFIG_KEY_0=safe.directory", free_test)
+        self.assertIn('export GIT_CONFIG_VALUE_0="$ROOT"', free_test)
         head = subprocess.check_output(["git", "-C", str(repo), "rev-parse", "HEAD"],
                                        text=True).strip()
         self.assertEqual((output / "implementation-commit.txt").read_text().strip(), head)
