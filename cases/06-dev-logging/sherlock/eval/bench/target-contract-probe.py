@@ -392,15 +392,20 @@ def _tree_digest(path):
     rows = []
     for current, dirs, files in os.walk(root, followlinks=False):
         current_path = Path(current)
-        dirs[:] = sorted(dirs)
-        for name in dirs + sorted(files):
+        directories = sorted(dirs)
+        filenames = sorted(files)
+        for name in directories + filenames:
             child = current_path / name
             mode = os.lstat(child).st_mode
-            relative = child.relative_to(root).as_posix()
             if stat.S_ISLNK(mode) or not (stat.S_ISDIR(mode) or stat.S_ISREG(mode)):
                 raise ProbeFailure("TARGET_CONTRACT_FAILED", "unsafe tree member")
-            if stat.S_ISREG(mode):
-                rows.append([relative, sha256(safe_read_regular(child, 64 * 1024 * 1024))])
+        dirs[:] = directories
+        for name in filenames:
+            child = current_path / name
+            relative = child.relative_to(root).as_posix()
+            if "__pycache__" in Path(relative).parts or name.endswith((".pyc", ".pyo")):
+                continue
+            rows.append([relative, sha256(safe_read_regular(child, 64 * 1024 * 1024))])
     return sha256(canonical(rows))
 
 
