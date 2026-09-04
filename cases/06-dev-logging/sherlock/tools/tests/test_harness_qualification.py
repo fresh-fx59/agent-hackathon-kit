@@ -351,7 +351,9 @@ class LauncherTests(unittest.TestCase):
         free_test = Path(shlex.split(captured["SHERLOCK_FREE_TEST_COMMAND"])[0]).read_text()
         self.assertIn("export GIT_CONFIG_COUNT=1", free_test)
         self.assertIn("export GIT_CONFIG_KEY_0=safe.directory", free_test)
-        self.assertIn('export GIT_CONFIG_VALUE_0="$ROOT"', free_test)
+        self.assertIn("REPO=" + shlex.quote(str(repo.resolve())), free_test)
+        self.assertIn('export GIT_CONFIG_VALUE_0="$REPO"', free_test)
+        self.assertNotIn('export GIT_CONFIG_VALUE_0="$ROOT"', free_test)
         head = subprocess.check_output(["git", "-C", str(repo), "rev-parse", "HEAD"],
                                        text=True).strip()
         self.assertEqual((output / "implementation-commit.txt").read_text().strip(), head)

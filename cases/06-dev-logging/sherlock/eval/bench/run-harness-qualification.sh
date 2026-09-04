@@ -70,6 +70,7 @@ INPUT_PACKAGE="$OUTPUT/input-package.json"
 TARGET_HOME="$OUTPUT/target-home"
 mkdir -m 700 -- "$CORPUS" "$RUNS" "$SUITES" "$TARGET_HOME"
 
+REPO_ROOT="$(git -C "$SHERLOCK" rev-parse --show-toplevel)" || die "repository root unavailable"
 COMMIT="$(git -C "$SHERLOCK" rev-parse HEAD)" || die "repository identity unavailable"
 TREE="$(git -C "$SHERLOCK" rev-parse HEAD^{tree})" || die "repository tree unavailable"
 DIRTY="$(git -C "$SHERLOCK" status --porcelain --untracked-files=no)"
@@ -142,9 +143,10 @@ cat > "$FREE_TEST" <<EOF
 set -euo pipefail
 OUT=$(printf '%q' "$SUITES")
 ROOT=$(printf '%q' "$SHERLOCK")
+REPO=$(printf '%q' "$REPO_ROOT")
 export GIT_CONFIG_COUNT=1
 export GIT_CONFIG_KEY_0=safe.directory
-export GIT_CONFIG_VALUE_0="\$ROOT"
+export GIT_CONFIG_VALUE_0="\$REPO"
 python3 "\$ROOT/tools/tests/test_run_manifest.py" >"\$OUT/run-manifest.out" 2>&1
 python3 "\$ROOT/tools/tests/test_run_state.py" >"\$OUT/run-state.out" 2>&1
 python3 "\$ROOT/tools/tests/test_run_verdict.py" >"\$OUT/run-verdict.out" 2>&1
