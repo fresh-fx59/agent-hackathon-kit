@@ -882,7 +882,9 @@ def target_contract_probe(argv):
     if not sealed.is_absolute() or not work.is_absolute() or not sealed.is_dir() or os.path.islink(sealed):
         print("PROBE_INPUT", file=sys.stderr)
         return 1
-    required = ("target-profile.json", "probe-budget.json", "input-package.json", "fixture")
+    required = ("target-profile.json", "corporate-settings.json", "probe-budget.json", "probe-rate-snapshot.json",
+                "fixture-manifest.json", "input-package.json", "probe-manifest.json",
+                "action-authorization.json", "fixture")
     for name in required:
         candidate = sealed / name
         try:
@@ -915,19 +917,6 @@ def target_contract_probe(argv):
             print("PROBE_TRANSPORT", file=sys.stderr)
             return 1
         transport = argv[5]
-    runs = work / "runs"
-    trace = runs / "target-contract-probe"
-    try:
-        runs.mkdir(mode=0o700)
-        trace.mkdir(mode=0o700)
-        manifest = trace / "run-manifest.json"
-        fd = os.open(manifest, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-        with os.fdopen(fd, "wb") as handle:
-            handle.write(canonical({"schema": 1, "probe_input": str(sealed)}) + b"\n")
-            handle.flush(); os.fsync(handle.fileno())
-    except (OSError, ValueError):
-        print("PROBE_TRACE", file=sys.stderr)
-        return 1
     # The probe is sealed input, not a general purpose bench invocation.  Do
     # not let ambient SHERLOCK switches change the model, prompt, arm, retries,
     # settings, or proxy after approval.
@@ -940,24 +929,121 @@ def target_contract_probe(argv):
     if conflicts:
         print("PROBE_ENV_CONFLICT", file=sys.stderr)
         return 1
+    # Nothing outside the read-only sealed package is touched until all
+    # controller inputs have passed.  In particular an invalid secret/env must
+    # not create a trace that could later be confused for an approved action.
+    runs = work / "runs"
+    trace = runs / "target-contract-probe"
+    try:
+        if os.path.lexists(runs) or os.path.lexists(trace):
+            print("PROBE_TRACE", file=sys.stderr)
+            return 1
+        work_fd = os.open(work, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0))
+        try:
+            os.mkdir("runs", 0o700, dir_fd=work_fd); os.fsync(work_fd)
+        finally:
+            os.close(work_fd)
+        runs_fd = os.open(runs, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0))
+        try:
+            os.mkdir(trace.name, 0o700, dir_fd=runs_fd); os.fsync(runs_fd)
+        finally:
+            os.close(runs_fd)
+        trace_fd = os.open(trace, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0))
+        try: os.fsync(trace_fd)
+        finally: os.close(trace_fd)
+    except (OSError, ValueError):
+        print("PROBE_TRACE", file=sys.stderr)
+        return 1
     env = controlled_environment(allowed_probe_env)
+    try:
+        budget = json.loads((sealed / "probe-budget.json").read_text(encoding="utf-8"))
+        limits = {"max_provider_calls": budget["max_provider_calls"],
+                  "max_prompt_tokens": budget["max_prompt_tokens"],
+                  "max_completion_tokens": budget["max_completion_tokens"],
+                  "max_wall_time_s": budget["max_wall_time_s"],
+                  "max_estimated_cost_rub": budget["max_estimated_cost_rub"]}
+        if any(type(value) not in (int, float) or isinstance(value, bool) or value < 0 for value in limits.values()):
+            raise ValueError()
+        action = trace / "upstream-action-budget.json"
+        atomic_replace(action, canonical({"schema": 1, "run_tag": trace.name, "limits": limits}) + b"\n")
+    except (OSError, ValueError, KeyError, TypeError):
+        print("PROBE_BUDGET", file=sys.stderr)
+        return 1
     env.update({"BENCH_RUNS": str(runs), "SHERLOCK_RUN_TAG": trace.name,
                 "SHERLOCK_TRACE": str(trace), "SHERLOCK_CORPUS": str(sealed / "fixture"),
                 "SHERLOCK_BASE_URL": transport, "SHERLOCK_MODEL": profile["requested_model"],
                 "SHERLOCK_EXPECTED_RETURNED_IDENTITY": profile["expected_returned_identity"],
-                "QWEN_BIN": profile["qwen"]["cli"], "SHERLOCK_MAX_RETRIES": "0",
+                "QWEN_BIN": profile["qwen"]["cli"], "SHERLOCK_MAX_RETRIES": "0", "SHERLOCK_REQUIRE_ATTRIBUTION": "1",
+                "SHERLOCK_BUDGET_MAX_UPSTREAM_ATTEMPTS": str(limits["max_provider_calls"]),
+                "SHERLOCK_BUDGET_MAX_REQUEST_BYTES": str(limits["max_prompt_tokens"] * 4),
+                "SHERLOCK_BUDGET_MAX_WALL_SECONDS": str(limits["max_wall_time_s"]),
+                # This is the lane's retry-safety cap, rather than a sixth
+                # paid-envelope limit.  With retries disabled, one preserves
+                # the intended fail-on-first-provider-failure semantics and
+                # satisfies the proxy's strictly-positive control contract.
+                "SHERLOCK_BUDGET_MAX_CONSECUTIVE_PROVIDER_FAILURES": "1",
                 "SHERLOCK_RESUME_MAX_ATTEMPTS": "0", "SHERLOCK_UPSTREAM_RETRY": "0",
                 "SHERLOCK_TARGET_PROBE_MODE": "1", secret_ref: os.environ[secret_ref],
+                # The proxy reserves its per-dispatch read window.  Bind it to
+                # the same paid envelope rather than inheriting its 1800s
+                # default, which would make a 600s probe impossible to admit.
+                "UPSTREAM_READ_TIMEOUT": str(limits["max_wall_time_s"]),
                 "SHERLOCK_API_KEY": os.environ[secret_ref],
                 "SHERLOCK_PROBE_SEALED_INPUT": str(sealed),
+                # The runner first pins these files inside its owned trace and
+                # consumes only those pinned copies.  Do not point the proxy at
+                # the caller-visible sealed package after that boundary.
                 "SHERLOCK_PROBE_SETTINGS": str(sealed / "corporate-settings.json"),
                 "SHERLOCK_PROBE_BUDGET": str(sealed / "probe-budget.json"),
+                "UPSTREAM_ACTION_BUDGET": str(action), "UPSTREAM_RATE_SNAPSHOT": str(trace / "probe-rate-snapshot.json"),
                 "SHERLOCK_PROBE_ARM": json.loads((sealed / "input-package.json").read_text(encoding="utf-8")).get("arm", "")})
-    done = subprocess.run(["bash", str(HERE / "run-bench.sh"), "v44"],
-                          env=env, text=True, capture_output=True, timeout=600)
+    try:
+        child = subprocess.Popen(["bash", str(HERE / "run-bench.sh"), env["SHERLOCK_PROBE_ARM"]],
+                                 env=env, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                 start_new_session=True)
+        try:
+            proof = proc_snapshot(child.pid, Path("/proc"), leader=True)
+        except Blocked:
+            # macOS has no Linux /proc.  The probe runner only needs this
+            # schema to bind its state rows to the fresh session leader; the
+            # normal controller retains its full /proc attestation path.
+            proof = {"pid": child.pid, "process_start_ticks": 1, "pgid": child.pid,
+                     "boot_id_sha256": digest(b"target-contract-probe"),
+                     "command_sha256": digest(" ".join(child.args).encode("utf-8"))}
+        atomic_replace(trace / "controller-process.json", canonical(proof) + b"\n")
+        stdout, stderr = child.communicate(timeout=600)
+        done = subprocess.CompletedProcess(child.args, child.returncode, stdout, stderr)
+    except (Blocked, OSError, subprocess.TimeoutExpired):
+        try:
+            if 'child' in locals() and child.poll() is None: child.kill(); child.wait(timeout=5)
+        except OSError:
+            pass
+        print("PROBE_RUNNER_START", file=sys.stderr)
+        return 1
+    # Task 7 is the terminal interpreter for the ordinary trace.  Its raw
+    # projection, not a controller-written summary, is what the target-probe
+    # audit later consumes.  Publish it before declaring this runner healthy.
+    if done.returncode == 0:
+        verdict = subprocess.run([sys.executable, str(HERE / "run-verdict.py"), str(trace), "--target-probe", "--json"],
+                                 text=True, capture_output=True, timeout=60)
+        try:
+            verdict_row = json.loads(verdict.stdout)
+            if verdict.returncode != 0 or not isinstance(verdict_row, dict):
+                raise ValueError()
+            verdict_path = trace / "run-verdict.json"
+            fd = os.open(verdict_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), 0o600)
+            with os.fdopen(fd, "wb") as handle:
+                handle.write(verdict.stdout.encode("utf-8")); handle.flush(); os.fsync(handle.fileno())
+            trace_fd = os.open(trace, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0))
+            try: os.fsync(trace_fd)
+            finally: os.close(trace_fd)
+        except (OSError, ValueError, json.JSONDecodeError):
+            print("PROBE_TASK7_FAILED", file=sys.stderr)
+            return 1
     print(json.dumps({"trace": str(trace), "runner_exit_code": done.returncode,
                       "stdout_sha256": digest(done.stdout.encode("utf-8"))}, sort_keys=True))
     if done.returncode:
+        print(done.stderr, file=sys.stderr)
         print("PROBE_RUNNER_FAILED", file=sys.stderr)
     return done.returncode
 

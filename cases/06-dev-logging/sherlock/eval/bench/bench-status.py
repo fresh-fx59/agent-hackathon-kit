@@ -665,6 +665,115 @@ def empty_projection(codes):
             "reason": None, "count": 0}, "delivery": "pending", "diagnostics": codes[:16]}
 
 
+TARGET_PROBE_MANIFEST_KEYS = {"schema", "action", "created_at", "expires_at", "nonce",
+                              "target_profile_sha256", "probe_budget_sha256",
+                              "fixture_manifest_sha256", "input_package_sha256",
+                              "rate_snapshot_sha256"}
+TARGET_PROBE_AUTH_KEYS = {"schema", "action_nonce", "manifest_raw_sha256",
+                          "nonce_record_path", "nonce_record_sha256", "nonce_root",
+                          "probe_root", "trace_path", "bench_status_sha256",
+                          "run_verdict_sha256"}
+
+
+def target_read(held, name):
+    """Read one target-probe input from its held directory, never by pathname."""
+    try:
+        info = os.stat(name, dir_fd=held.fd, follow_symlinks=False)
+        if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1: raise Unsafe()
+        raw = held.read(name, MAX_JSON)
+        row = parse_json(raw)
+        if not isinstance(row, dict): raise Unsafe()
+        held.check()
+        return raw, row
+    except Exception as exc:
+        raise ValueError("TRACE_UNRESOLVED") from exc
+
+
+def target_external_nonce(path):
+    """Hold the nonce parent while proving its exact durable singleton bytes."""
+    try:
+        canonical = MANIFEST.clean_abs(path)
+        if canonical != path or len(path) > 4096: raise Unsafe()
+        parent = HeldDir(os.path.dirname(canonical))
+        try:
+            name = os.path.basename(canonical)
+            info = os.stat(name, dir_fd=parent.fd, follow_symlinks=False)
+            if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1: raise Unsafe()
+            raw = parent.read(name, MAX_JSON); parent.check()
+            return raw
+        finally:
+            parent.close()
+    except Exception as exc:
+        raise ValueError("TRACE_UNRESOLVED") from exc
+
+
+def target_probe_projection(path):
+    """Authenticate the separate, one-shot operator target-probe authority."""
+    trace = HeldDir(path)
+    root = work = runs = expected = None
+    try:
+        root_path = MANIFEST.clean_abs(os.path.dirname(os.path.dirname(os.path.dirname(trace.path))))
+        if trace.path != os.path.join(root_path, "probe-work", "runs", "target-contract-probe"):
+            raise ValueError("TRACE_UNRESOLVED")
+        root = HeldDir(root_path); work = HeldDir.child(root, "probe-work")
+        runs = HeldDir.child(work, "runs"); expected = HeldDir.child(runs, "target-contract-probe")
+        if (expected.identity.st_dev, expected.identity.st_ino) != (trace.identity.st_dev, trace.identity.st_ino):
+            raise ValueError("TRACE_UNRESOLVED")
+        raw_manifest, manifest = target_read(trace, "probe-manifest.json")
+        if (set(manifest) != TARGET_PROBE_MANIFEST_KEYS or manifest.get("schema") != 1 or
+                manifest.get("action") != "target_contract_probe" or
+                not isinstance(manifest.get("nonce"), str) or not re.fullmatch(r"[0-9a-f]{64}", manifest["nonce"]) or
+                timestamp(manifest.get("created_at")) is None or timestamp(manifest.get("expires_at")) is None or
+                timestamp(manifest["expires_at"]) <= timestamp(manifest["created_at"]) or
+                timestamp(manifest["expires_at"]) <= dt.datetime.now(dt.timezone.utc) or
+                not all(is_hex(manifest.get(name)) for name in TARGET_PROBE_MANIFEST_KEYS if name.endswith("_sha256"))):
+            raise ValueError("TRACE_UNRESOLVED")
+        for name, field in (("target-profile.json", "target_profile_sha256"),
+                            ("probe-budget.json", "probe_budget_sha256"),
+                            ("probe-rate-snapshot.json", "rate_snapshot_sha256"),
+                            ("fixture-manifest.json", "fixture_manifest_sha256"),
+                            ("input-package.json", "input_package_sha256")):
+            raw, _ = target_read(trace, name)
+            if not hmac.compare_digest(digest(raw), manifest[field]): raise ValueError("TRACE_UNRESOLVED")
+        raw_auth, authorization = target_read(trace, "action-authorization.json")
+        if set(authorization) != TARGET_PROBE_AUTH_KEYS or authorization.get("schema") != 1:
+            raise ValueError("TRACE_UNRESOLVED")
+        nonce_root = authorization.get("nonce_root"); nonce_path = authorization.get("nonce_record_path")
+        expected_nonce_path = (os.path.join(nonce_root, manifest["nonce"] + ".json")
+                               if isinstance(nonce_root, str) else None)
+        if (authorization.get("action_nonce") != manifest["nonce"] or
+                authorization.get("manifest_raw_sha256") != digest(raw_manifest) or
+                authorization.get("probe_root") != root.path or authorization.get("trace_path") != trace.path or
+                not isinstance(nonce_root, str) or not isinstance(nonce_path, str) or
+                nonce_path != expected_nonce_path or MANIFEST.clean_abs(nonce_root) != nonce_root or
+                MANIFEST.clean_abs(nonce_path) != nonce_path or
+                not all(is_hex(authorization.get(name)) for name in
+                        ("nonce_record_sha256", "bench_status_sha256", "run_verdict_sha256")) or
+                not hmac.compare_digest(authorization["bench_status_sha256"], digest(Path(__file__).read_bytes())) or
+                not hmac.compare_digest(authorization["run_verdict_sha256"], digest((HERE / "run-verdict.py").read_bytes()))):
+            raise ValueError("TRACE_UNRESOLVED")
+        nonce_raw = target_external_nonce(nonce_path)
+        wanted = (json.dumps({"nonce": manifest["nonce"], "manifest_sha256": digest(raw_manifest)},
+                             sort_keys=True, separators=(",", ":")) + "\n").encode("utf-8")
+        if (not hmac.compare_digest(nonce_raw, wanted) or
+                not hmac.compare_digest(digest(nonce_raw), authorization["nonce_record_sha256"])):
+            raise ValueError("TRACE_UNRESOLVED")
+        state, _, _ = status_projection(trace, {"run_tag": "target-contract-probe"})
+        row = {"schema": 1, "selection": "target-probe", "run_tag": "target-contract-probe",
+               "phase": state["phase"] if state else "UNKNOWN",
+               "wrapper_exit_code": state.get("exit_code") if state else None,
+               "authenticated": True, "authority": "operator-approved-target-probe",
+               "health": "not_applicable", "validity": "not_applicable",
+               "diagnostics": []}
+        trace.check(); expected.check(); runs.check(); work.check(); root.check()
+        return row
+    finally:
+        for held in (expected, runs, work, root, trace):
+            if held is not None:
+                try: held.close()
+                except OSError: pass
+
+
 def wrap_path(value):
     value = safe_path(value)
     if value == "?": return ["?"]
@@ -693,15 +802,25 @@ def render(row):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(); parser.add_argument("trace_or_root")
-    parser.add_argument("--commitment-file", required=True); parser.add_argument("--commitment-key", required=True)
+    parser.add_argument("--commitment-file"); parser.add_argument("--commitment-key")
+    parser.add_argument("--target-probe", action="store_true")
     parser.add_argument("--run-tag", action="append"); parser.add_argument("--json", action="store_true")
     args = parser.parse_args(argv)
+    if bool(args.commitment_file) != bool(args.commitment_key):
+        parser.error("commitment file and key must be supplied together")
+    if args.target_probe and (args.commitment_file or args.commitment_key or args.run_tag):
+        parser.error("target-probe is mutually exclusive with commitment authority")
+    if not args.target_probe and not args.commitment_file:
+        parser.error("commitment file and key are required outside target-probe mode")
     run_tag_supplied = args.run_tag is not None
     if run_tag_supplied and len(args.run_tag) != 1:
         sys.stderr.write("TRACE_UNRESOLVED\n"); return 2
     args.run_tag = args.run_tag[0] if args.run_tag else None
     held = parent = child = root = None
     try:
+        if args.target_probe:
+            row = target_probe_projection(args.trace_or_root)
+            sys.stdout.write(json.dumps(row, sort_keys=True) + "\n" if args.json else render(row)); return 0
         path = MANIFEST.clean_abs(args.trace_or_root); held = HeldDir(path); kind = held.kind("run-manifest.json")
         if run_tag_supplied:
             parent, child, manifest, key = link_auth(path, args.run_tag, args.commitment_file,

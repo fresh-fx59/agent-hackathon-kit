@@ -62,6 +62,49 @@ class BenchStatusTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         return json.loads(result.stdout)
 
+    def stage_target_probe_authority(self):
+        """Build the smallest real target-probe authority graph, without HMACs."""
+        root = Path(self.temp.name) / "target-probe-root"
+        trace = root / "probe-work" / "runs" / "target-contract-probe"
+        trace.mkdir(parents=True)
+        nonce_root = root / "nonce-records"; nonce_root.mkdir()
+        raw = {}
+        for name in ("target-profile.json", "probe-budget.json", "probe-rate-snapshot.json",
+                     "fixture-manifest.json", "input-package.json"):
+            value = {"schema": 1, "name": name}
+            raw[name] = json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
+            (trace / name).write_bytes(raw[name])
+        sha = {name: hashlib.sha256(value).hexdigest() for name, value in raw.items()}
+        manifest = {
+            "schema": 1, "action": "target_contract_probe",
+            "created_at": "2026-09-04T00:00:00Z", "expires_at": "2099-01-01T00:00:00Z",
+            "nonce": "a" * 64,
+            "target_profile_sha256": sha["target-profile.json"],
+            "probe_budget_sha256": sha["probe-budget.json"],
+            "fixture_manifest_sha256": sha["fixture-manifest.json"],
+            "input_package_sha256": sha["input-package.json"],
+            "rate_snapshot_sha256": sha["probe-rate-snapshot.json"],
+        }
+        manifest_raw = json.dumps(manifest, sort_keys=True, separators=(",", ":")).encode()
+        (trace / "probe-manifest.json").write_bytes(manifest_raw)
+        nonce_path = nonce_root / ("a" * 64 + ".json")
+        nonce_raw = (json.dumps({"nonce": manifest["nonce"], "manifest_sha256": hashlib.sha256(manifest_raw).hexdigest()},
+                                sort_keys=True, separators=(",", ":")) + "\n").encode()
+        nonce_path.write_bytes(nonce_raw)
+        authorization = {
+            "schema": 1, "action_nonce": manifest["nonce"],
+            "manifest_raw_sha256": hashlib.sha256(manifest_raw).hexdigest(),
+            "nonce_record_path": os.path.realpath(nonce_path),
+            "nonce_record_sha256": hashlib.sha256(nonce_raw).hexdigest(),
+            "nonce_root": os.path.realpath(nonce_root), "probe_root": os.path.realpath(root),
+            "trace_path": os.path.realpath(trace),
+            "bench_status_sha256": hashlib.sha256(TOOL.read_bytes()).hexdigest(),
+            "run_verdict_sha256": hashlib.sha256((SHERLOCK / "eval" / "bench" / "run-verdict.py").read_bytes()).hexdigest(),
+        }
+        (trace / "action-authorization.json").write_text(
+            json.dumps(authorization, sort_keys=True, separators=(",", ":")), encoding="utf-8")
+        return root, trace
+
     def write_validity(self, valid=True, reasons=(), full=False, **updates):
         row = {"schema": 1, "valid": valid, "reasons": list(reasons),
                "run_tag": "run-001", "manifest_sha256": self.manifest["manifest_sha256"],
@@ -643,6 +686,19 @@ class BenchStatusTests(unittest.TestCase):
         self.assertGreaterEqual(len(result.stdout.splitlines()), 4)
         self.assertTrue(all(len(line) <= 100 for line in result.stdout.splitlines()))
         self.assertEqual(before, {p.name: p.read_bytes() for p in self.fx.trace.iterdir()})
+
+    def test_target_probe_mode_accepts_only_the_canonical_nonce_bound_authority(self):
+        root, trace = self.stage_target_probe_authority()
+        result = subprocess.run([sys.executable, str(TOOL), str(trace), "--target-probe", "--json"],
+                                text=True, capture_output=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        row = json.loads(result.stdout)
+        self.assertEqual(row["selection"], "target-probe")
+        self.assertTrue(row["authenticated"])
+        self.assertEqual(row["authority"], "operator-approved-target-probe")
+        self.assertEqual(row["health"], "not_applicable")
+        self.assertEqual(row["validity"], "not_applicable")
+        self.assertEqual(root / "probe-work" / "runs" / "target-contract-probe", trace)
 
 
 if __name__ == "__main__":

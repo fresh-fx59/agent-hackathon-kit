@@ -21,6 +21,7 @@ import re
 import subprocess
 import tempfile
 import threading
+import datetime
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -56,7 +57,8 @@ class StubProvider:
                 except ValueError:
                     seen.append({"unparseable": True})
                 out = json.dumps({"model": "DeepSeek-V4-Flash",
-                                  "choices": [{"message": {"content": "ok"}}]}
+                                  "choices": [{"message": {"content": "ok"}}],
+                                  "usage": {"prompt_tokens": 1, "completion_tokens": 1}}
                                  ).encode("utf-8")
                 self.send_response(200)
                 self.send_header("content-type", "application/json")
@@ -97,7 +99,7 @@ export LANE_BASE_URL LANE_CLIENT_MODEL
 python3 -c '
 import json, os, sys, urllib.request
 url = os.environ["LANE_BASE_URL"].rstrip("/") + "/chat/completions"
-body = json.dumps({"model": os.environ["LANE_CLIENT_MODEL"], "messages": []}).encode()
+body = json.dumps({"model": os.environ["LANE_CLIENT_MODEL"], "messages": [], "max_tokens": 1}).encode()
 req = urllib.request.Request(url, data=body,
                              headers={"Content-Type": "application/json"})
 try:
@@ -117,7 +119,8 @@ class TheLanePutsTheProxyInThePath(unittest.TestCase):
         log = os.path.join(d, "upstream.jsonl")
         e = dict(os.environ)
         e.update({"LANE": LANE, "UP_BASE": prov.url, "LOG_PATH": log,
-                  "THE_MODEL": model})
+                  "THE_MODEL": model, "INFLIGHT_PATH": os.path.join(d, "inflight.json"),
+                  "ATTEMPT_PATH": os.path.join(d, "attempt")})
         e.update(env or {})
         p = subprocess.run(["bash", "-c", DRIVER], capture_output=True,
                            text=True, env=e, timeout=90)
@@ -147,6 +150,36 @@ class TheLanePutsTheProxyInThePath(unittest.TestCase):
         self.assertEqual(rows[0]["requested_model"], "deepseek-v4-flash")
         self.assertEqual(rows[0]["sent_model"], "[SP]deepseek-v4-flash")
         self.assertEqual(rows[0]["returned_model"], "DeepSeek-V4-Flash")
+
+    def test_action_budget_and_rate_snapshot_reach_the_real_proxy(self):
+        """The lane's explicit `env` must not discard Task 3's two files."""
+        with tempfile.TemporaryDirectory() as temporary:
+            root = os.path.abspath(temporary)
+            action = os.path.join(root, "action.json")
+            rate = os.path.join(root, "rate.json")
+            state = os.path.join(root, "upstream-budget-state.json")
+            with open(action, "w", encoding="utf-8") as handle:
+                json.dump({"schema": 1, "run_tag": "run-tag", "limits": {
+                    "max_provider_calls": 2, "max_prompt_tokens": 1000,
+                    "max_completion_tokens": 1000, "max_wall_time_s": 1800,
+                    "max_estimated_cost_rub": 1}}, handle)
+            snapshot = {"schema": 1, "run_tag": "run-tag", "effective_at": datetime.datetime.now(
+                datetime.timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z"),
+                        "source": "local-fixture", "prompt_rub_per_token": 0.0,
+                        "completion_rub_per_token": 0.0}
+            import hashlib
+            snapshot["sha256"] = hashlib.sha256(json.dumps(snapshot, ensure_ascii=False,
+                sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+            with open(rate, "w", encoding="utf-8") as handle: json.dump(snapshot, handle)
+            _out, _seen, rows, _p = self.drive("qwen3-coder-plus", {
+                "SHERLOCK_REQUIRE_ATTRIBUTION": "1", "SHERLOCK_EXPECTED_RETURNED_IDENTITY": "DeepSeek-V4-Flash",
+                "SHERLOCK_BUDGET_MAX_UPSTREAM_ATTEMPTS": "2", "SHERLOCK_BUDGET_MAX_REQUEST_BYTES": "100000",
+                "SHERLOCK_BUDGET_MAX_WALL_SECONDS": "1800", "SHERLOCK_BUDGET_MAX_CONSECUTIVE_PROVIDER_FAILURES": "2",
+                "UPSTREAM_ACTION_BUDGET": action, "UPSTREAM_RATE_SNAPSHOT": rate,
+                "UPSTREAM_BUDGET_STATE": state, "SHERLOCK_SUBSTITUTION_RETRY": "0",
+                "SHERLOCK_GENERATION_WINDOW_S": "1"})
+            self.assertEqual(len(rows), 1, (rows, _p.stdout, _p.stderr))
+            self.assertIn("action_attempt_id", rows[0], rows)
 
     def test_an_unprefixed_model_is_left_alone(self):
         # SHERLOCK_SUBSTITUTION_RETRY=0 because this stub always answers as

@@ -236,3 +236,219 @@ through a symlink and fsyncs each created parent entry; audit catches unexpected
 exceptions and seals one terminal result. Focused controller probe 3/3, Task 2
 20/20, Task 3 23/23, Python compile, shell parse, and `git diff --check` passed.
 All execution was local, fixture-only and credential-free.
+
+2026-09-04 RED (Round 5 final repair): added three provider-free regressions
+before production edits. The focused suite ran 35 tests: 32 passed, one failed,
+and two errored. A faithful Task 3-shaped `upstream-completed.jsonl` plus real
+gzip request/response members and the full 19-key Task 7 projection were
+rejected at the invented verdict subset. An undeclared ambient `SHERLOCK_*`
+control consumed the approval nonce before refusal. An injected terminal-result
+publication error escaped and left the receipt transaction unrolled back.
+Fixtures used only temporary files, inert strings, and local code; no provider,
+network, credential, real run, or corpus access occurred.
+
+2026-09-04 GREEN (Round 5 partial repair): `test_target_contract_probe.py`
+is 35/35. Audit now accepts and validates Task 3's completion JSONL joined to
+the proxy's gzip request/response captures, checking request/action IDs, sent
+and returned identity, per-call usage, and recomputed cost; it requires the
+complete 19-field Task 7 terminal projection rather than an invented exact
+subset. Ambient controller controls reject before nonce creation, and an
+injected terminal-publication failure rolls back receipt, checksum, and receipt
+nonce. The controller probe suite is 4/4 and adds a no-trace-on-ambient-conflict
+test; `run-bench.sh` now preserves Task 3 raw capture files with the completion
+journal. `python3 -m py_compile` was not applicable to the Bash controller;
+the remaining Round 5 controller→runner action-budget/rate path is blocked by
+Task 3's lane launcher dropping both required environment variables before it
+executes the proxy. All tests used only temporary local fixtures and no network,
+provider, credential, real run, or corpus mutation.
+
+2026-09-04 GREEN (Round 5 approved lane boundary): the isolated Task 3
+lane/proxy test is green and the full lane suite is 13/13. The strict launcher
+now explicitly conveys the action-budget and rate-snapshot paths into its proxy
+`env` invocation, with no proxy semantic change; a faithful localhost OpenAI
+stub proves the proxy creates an `action_attempt_id` only when both files reach
+it. The source `env` process already inherited those variables, so the original
+RED fixture needed a valid `max_tokens`, fresh self-hashed rate, and sufficient
+wall cap before its intended action admission could be exercised; this was
+corrected rather than misreported as a transport loss. Task 2 fixture is 20/20
+and Task 3 dispatch budget is 23/23. All runs were localhost/provider-free and
+used no real credential, corpus, or external network.
+
+2026-09-04 RED/GREEN (Round 5 rate-interface correction): the amended
+contract supplied an explicit operator rate-card input after the prior scope
+had no non-fabricated source. A new local regression rejects a malformed
+seven-field Task 3 rate snapshot before the probe root exists, then accepts the
+fresh self-hashed `target-contract-probe` snapshot and verifies its sealed
+manifest hash. `prepare --rate-snapshot` now preserves the exact raw bytes as
+`probe-rate-snapshot.json`; package, authorization, controller assets, derived
+Task 3 action budget, proxy environment, and receipt bind it. Focused probe is
+36/36 and controller probe is 4/4. All fixture values were local zero-rate
+configuration only; no provider, credential, real corpus, or network access
+occurred.
+
+2026-09-04 PARTIAL (Round 5 runner boundary): the controller now invokes the
+sealed arm, and the normal runner pins its copied profile, fixture, model,
+Qwen executable, rate snapshot and settings bytes before Qwen can run; it also
+keeps the strict Task 3 budget controls and invokes the real Task 7 generator.
+Shell parse, controller probe 4/4 and focused probe 36/36 remained green. The
+end-to-end green path is still blocked: a direct target-controller trace has no
+normal controller commitment/validity authority, so the unmodified Task 7
+generator correctly emits `AUTHORITY_UNCONTROLLED` and cannot produce the
+required successful 19-field verdict. No report, capture, ledger or verdict was
+fabricated to hide that authority gap; no provider, credential, real corpus or
+external network was used.
+
+2026-09-04 VERIFICATION (controller comparison): the controller suite was
+executed in bounded class batches because the environment cuts a single command
+at about 30 seconds. Current branch: persistent controller 31/31 passed in
+10/10/11 batches (8.792s, 28.643s, 15.954s) and target-probe controller 4/4
+passed (0.185s). Clean `wt-v42-baseline`: the matching persistent controller
+31/31 passed in 10/10/11 batches (8.296s, 28.856s, 15.392s). In both trees,
+and only in both trees, the legacy ControlledRunner group has the same four
+known failures: `test_controlled_mode_requires_both_identity_values`,
+`test_collision_is_rejected_before_proxy_or_qwen`,
+`test_every_state_row_uses_one_runner_proof_and_qwen_gets_no_caps`, and
+`test_strict_proxy_failure_is_terminal_before_qwen`; controller presence is
+green. Thus no new controller-suite failure was introduced. No provider,
+credential, real corpus, or external network was used.
+
+2026-09-04 VERIFICATION (fixture/build hygiene):
+
+    ----------------------------------------------------------------------
+    Ran 20 tests in 0.671s
+    OK
+
+`py_compile` for probe/status/verdict and focused tests, `bash -n` for
+controller/runner/lane, and `git diff --check` produced no output and exited
+zero.
+
+2026-09-04 RED (Round 5 target-probe authority): a new provider-free
+`bench-status` regression stages the canonical probe trace, exact copied
+manifest, path-bound authorization, and durable external nonce record, then
+requires `--target-probe --json` to authenticate it without a controller
+commitment. It failed as intended (CLI required `--commitment-file` and
+`--commitment-key`), documenting the missing sealed target-probe authority
+boundary before its implementation. No provider, network, credential, or real
+corpus was accessed.
+
+2026-09-04 GREEN (Round 5 target-probe authority): `bench-status TRACE
+--target-probe --json` now holds the deterministic probe-root/trace path and
+rejects any noncanonical, symlinked, hardlinked, expired, hash-mismatched, or
+nonce-mismatched authority graph. It authenticates the exact copied probe
+manifest, profile/budget/rate/fixture/package raw hashes, bound verifier hashes,
+and external durable nonce bytes; it reports target-probe selection with health
+and full-run validity explicitly not applicable. `run-verdict` has the matching
+mutually exclusive target-probe mode and accepts only the separate
+`operator-approved-target-probe` authority while retaining candidate, ACCEPTED,
+four-gate, replay, report, lane, ledger/usage, and zero-exit-layer checks.
+The target controller creates no dummy `run-manifest`, copies only real sealed
+probe inputs, and invokes Task 7 in this mode. Focused status 35/35, verdict
+41/41, target-probe 37/37, controller-target 4/4, and Task 3 lane 13/13 passed;
+shell parse, Python compile, and diff check passed. The historical full normal
+controller baseline currently fails its first controlled-runner fixtures before
+the target code: their fake Qwen writes `QWEN_CAPTURE` during the existing
+flag-preflight invocation, before controlled-trace validation, and supplies no
+upstream ledger. This was observed with target mode `0` and is not suppressed by
+the target probe. All target tests were temporary local fixtures only, without
+provider, credential, real corpus, or network access.
+
+2026-09-04 RED/GREEN (Round 5 target authorization binding): the authorization
+record now binds the canonical probe root and trace path, exact raw manifest
+hash and action nonce, durable nonce-record path/root/raw hash, and the
+`bench-status.py` and `run-verdict.py` bytes. The sealed input package and
+authorization/audit checks revalidate those program bindings before nonce
+consumption and at audit. The new focused binding regression was first RED
+(missing `action_nonce`), then GREEN (1/1). Legacy alternate trace fixtures
+remain intentionally incompatible with the canonical target-probe authority;
+no provider, network, credential, or real corpus was accessed.
+
+2026-09-04 GREEN (Round 5 target authorization fixture migration): migrated
+legacy provider-free audit fixtures to the canonical
+`probe-work/runs/target-contract-probe` trace layout required by the sealed
+authorization record, including parent creation in the helper. Full target
+contract suite is green: 37/37. No provider, network, credential, or real
+corpus was accessed.
+
+2026-09-04 RED→GREEN (Round 5 final provider-free E2E): the new faithful
+target-contract fixture first reached the real controller, runner, Task 3 proxy
+and localhost OpenAI stub but correctly stopped at `пустой рабочий список`;
+the two-line sealed corpus has no mapper candidate. The fixture now creates two
+truthful normal worklist rows addressed to the canonical report's coverage
+lines and closes them through the real cursor, rather than changing production
+gates or copying a report. The next REDs were equally useful: a close-delimited
+stub response exposed the real proxy's action deadline behavior (fixed in the
+fixture by sending its OpenAI-compatible Content-Length), canonical coverage
+required `Security.jsonl:3`, and Task 7 correctly refused unmeasured
+driver/wrapper exit layers. The ordinary runner now records its actual final
+Qwen exit in `recovery.json` and its successful terminal status as exit code
+zero, enabling Task 7 to judge those three real layers. The local stub returns
+the exact Task 3 response-usage shape (`prompt_tokens`, `completion_tokens`),
+which the target audit joins to the proxy's gzip capture without a fabricated
+ledger. Exact focused result:
+
+    .
+    ----------------------------------------------------------------------
+    Ran 1 test in 3.538s
+
+    OK
+
+2026-09-04 VERIFICATION (Round 5 focused suites): exact outputs:
+
+    ......................................
+    ----------------------------------------------------------------------
+    Ran 38 tests in 10.155s
+    OK
+
+    ...................................
+    ----------------------------------------------------------------------
+    Ran 35 tests in 6.147s
+    OK
+
+    .........................................
+    ----------------------------------------------------------------------
+    Ran 41 tests in 7.255s
+    OK
+
+    ----------------------------------------------------------------------
+    Ran 13 tests in 9.343s
+    OK
+
+These are respectively target-contract probe, bench status, Task 7 verdict,
+and Task 3 upstream-lane tests. No provider, credential, real corpus, or
+external network was used.
+
+The test asserts controller rc=0 and accepted audit; one sealed-Qwen
+OpenAI-compatible call reaches localhost; Task 3's real completion JSONL,
+request/response gzip bodies, common `request_id.a1`, requested/sent/returned
+identity, exact schema-2 five-limit budget and pinned rate snapshot; four real
+clean gate outputs; and the real 19-key Task 7 successful
+`operator-approved-target-probe` verdict. The report is read directly from the
+normal runner path `TRACE/work/report.md`; production code does not copy the
+canonical report or fabricate proxy capture, ledger, budget, or verdict. No
+provider, real secret, external network, or real corpus was used.
+
+2026-09-04 FINAL VERIFICATION (Round 5): the final provider-free matrix passed:
+Task 2 fixture 20/20 (0.671s); Task 3 dispatch-budget 23/23 (23.916s);
+target-contract probe 38/38 (10.215s); target-probe controller 4/4 (0.185s);
+bench status 35/35 (6.238s); Task 7 verdict 41/41 (7.304s); and Task 3 lane
+13/13 (9.417s). The E2E itself passed 1/1 in 3.847s. `py_compile` for probe,
+status and verdict, `bash -n` for controller/runner/lane, and `git diff --check`
+all exited zero with no output. A scoped debug scan found no test-mode/bypass
+flag (`SHERLOCK_PROBE_TEST_MODE` / `PROBE_TEST_MODE`) and no production report,
+capture, ledger, or verdict fabrication. The bounded current-vs-clean controller
+comparison retained only the four pre-existing documented ControlledRunner
+fixture failures in both trees; current persistent 31/31 and target controller
+4/4 are green. No provider, real secret, external network, or real corpus was
+used.
+
+2026-09-04 VERIFICATION (Round 5 final E2E assertion strengthening): added
+explicit checks that both Task 3 gzip bodies decode to the actual sent model and
+returned model/usage, that the probe's persisted oracle accepts and its four
+real gate records are present, and that Task 7 has exactly its 19 authority
+keys with all four measured gate exits zero. Exact focused result:
+
+    .
+    ----------------------------------------------------------------------
+    Ran 1 test in 3.847s
+
+    OK

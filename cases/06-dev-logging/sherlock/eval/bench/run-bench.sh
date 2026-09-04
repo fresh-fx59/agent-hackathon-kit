@@ -16,6 +16,7 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SKILLS="$(cd "$HERE/../.." && pwd)/skills"
 QWEN="${QWEN_BIN:-$HOME/.local/bin/qwen}"
 ARM="${1:-unknown}"
+TARGET_PROBE_MODE="${SHERLOCK_TARGET_PROBE_MODE:-0}"
 # Target-contract probe mode uses the ordinary v44 runner.  It never fabricates
 # a report, capture, ledger, budget, or verdict: those are only valid when
 # emitted by the Task 3 proxy and Task 7 terminal verifier below.
@@ -186,9 +187,9 @@ if [ -n "${SHERLOCK_RUN_TAG:-}" ] || [ -n "${SHERLOCK_TRACE:-}" ]; then
   CONTROLLED=1
   STAMP="$SHERLOCK_RUN_TAG"
   TRACE="$SHERLOCK_TRACE"
-  python3 - "$RUNS" "$STAMP" "$TRACE" <<'PY' || exit 2
+  python3 - "$RUNS" "$STAMP" "$TRACE" "$TARGET_PROBE_MODE" <<'PY' || exit 2
 import os, re, stat, sys
-runs, tag, trace = sys.argv[1:]
+runs, tag, trace, target_probe = sys.argv[1:]
 if not os.path.isabs(runs) or not os.path.isabs(trace):
     raise SystemExit("controlled run paths must be absolute")
 if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,95}", tag) or tag in (".", ".."):
@@ -204,11 +205,22 @@ except OSError as exc:
     raise SystemExit("controlled trace missing: %s" % exc)
 if not stat.S_ISDIR(mode) or stat.S_ISLNK(mode):
     raise SystemExit("controlled trace must be a no-symlink directory")
-if os.listdir(trace) != ["run-manifest.json"]:
-    raise SystemExit("controlled trace collision before launch")
-manifest = os.lstat(os.path.join(trace, "run-manifest.json")).st_mode
-if not stat.S_ISREG(manifest) or stat.S_ISLNK(manifest):
-    raise SystemExit("run-manifest.json must be a regular no-symlink file")
+if target_probe == "1":
+    # The controller writes this Task 3 authorization before the runner starts.
+    # Any other entry means a reused or attacker-populated trace.
+    entries = sorted(os.listdir(trace))
+    if entries not in (["upstream-action-budget.json"], ["controller-process.json", "upstream-action-budget.json"]):
+        raise SystemExit("target probe trace collision before launch")
+    for name in entries:
+        state = os.lstat(os.path.join(trace, name)).st_mode
+        if not stat.S_ISREG(state) or stat.S_ISLNK(state):
+            raise SystemExit("target probe authorization is unsafe")
+else:
+    if os.listdir(trace) != ["run-manifest.json"]:
+        raise SystemExit("controlled trace collision before launch")
+    manifest = os.lstat(os.path.join(trace, "run-manifest.json")).st_mode
+    if not stat.S_ISREG(manifest) or stat.S_ISLNK(manifest):
+        raise SystemExit("run-manifest.json must be a regular no-symlink file")
 PY
 else
   mkdir -p "$RUNS"
@@ -225,18 +237,97 @@ import os, shutil, stat, sys
 from pathlib import Path
 sealed, trace = map(Path, sys.argv[1:])
 names = ("target-profile.json", "corporate-settings.json", "probe-budget.json",
+         "probe-rate-snapshot.json",
          "fixture-manifest.json", "input-package.json", "probe-manifest.json",
          "action-authorization.json")
 if not sealed.is_dir() or sealed.is_symlink(): raise SystemExit("TARGET_PROBE_INPUT")
-for name in names:
+def copy_regular(name):
+    """Descriptor-held, no-replace copy; a source swap or hardlink fails closed."""
     src, dst = sealed / name, trace / name
-    mode = os.lstat(src).st_mode
-    if not stat.S_ISREG(mode) or stat.S_ISLNK(mode) or dst.exists(): raise SystemExit("TARGET_PROBE_INPUT")
-    shutil.copyfile(src, dst)
+    before = os.lstat(src)
+    if not stat.S_ISREG(before.st_mode) or stat.S_ISLNK(before.st_mode) or before.st_nlink != 1:
+        raise SystemExit("TARGET_PROBE_INPUT")
+    fd = os.open(src, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+    try:
+        opened = os.fstat(fd)
+        if (opened.st_dev, opened.st_ino, opened.st_nlink) != (before.st_dev, before.st_ino, 1):
+            raise SystemExit("TARGET_PROBE_INPUT")
+        out = os.open(dst, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), 0o600)
+        try:
+            while True:
+                block = os.read(fd, 1024 * 1024)
+                if not block: break
+                os.write(out, block)
+            os.fsync(out)
+        finally: os.close(out)
+        after = os.fstat(fd)
+        if (after.st_dev, after.st_ino, after.st_nlink) != (opened.st_dev, opened.st_ino, 1):
+            raise SystemExit("TARGET_PROBE_INPUT")
+    finally: os.close(fd)
+for name in names:
+    copy_regular(name)
 fixture = sealed / "fixture"
 if not fixture.is_dir() or fixture.is_symlink() or (trace / "fixture").exists(): raise SystemExit("TARGET_PROBE_INPUT")
 shutil.copytree(fixture, trace / "fixture", symlinks=False)
 PY
+fi
+# A target probe is not a normal controlled run with a few knobs.  It has one
+# immutable package and must use the package copied into this trace, rather than
+# re-reading an ambient setting, profile, fixture, or rate file later.  The
+# controller passes the source only so this runner can make that owned copy;
+# after this point the Qwen child receives no source-package pathname.
+if [ "$TARGET_PROBE_MODE" = "1" ]; then
+  PROBE_VALUES="$(python3 - "$TRACE" "$ARM" <<'PY'
+import json, os, stat, sys
+from pathlib import Path
+trace, arm = map(Path, sys.argv[1:3])
+arm = str(arm)
+def regular(name):
+    path = trace / name
+    mode = os.lstat(path).st_mode
+    if not stat.S_ISREG(mode) or stat.S_ISLNK(mode): raise ValueError(name)
+    with open(path, encoding="utf-8") as handle: return json.load(handle)
+profile = regular("target-profile.json")
+package = regular("input-package.json")
+budget = regular("probe-budget.json")
+settings = trace / "corporate-settings.json"
+rates = trace / "probe-rate-snapshot.json"
+fixture = trace / "fixture"
+if (not isinstance(profile, dict) or not isinstance(package, dict) or
+        package.get("arm") != arm or not isinstance(profile.get("qwen"), dict) or
+        not all(isinstance(profile.get(key), str) and profile[key] for key in
+                ("provider_base_url", "requested_model", "expected_returned_identity")) or
+        not isinstance(profile["qwen"].get("cli"), str) or not profile["qwen"]["cli"] or
+        type(profile.get("max_output_tokens")) is not int or profile["max_output_tokens"] <= 0 or
+        type(profile.get("session_token_limit")) is not int or profile["session_token_limit"] <= 0 or
+        not isinstance(budget, dict) or not settings.is_file() or settings.is_symlink() or
+        not rates.is_file() or rates.is_symlink() or not fixture.is_dir() or fixture.is_symlink()):
+    raise ValueError("target probe package")
+print(profile["provider_base_url"])
+print(profile["requested_model"])
+print(profile["expected_returned_identity"])
+print(profile["qwen"]["cli"])
+print(profile["max_output_tokens"])
+print(profile["session_token_limit"])
+PY
+)" || { echo "✗ target probe package is not usable" >&2; exit 2; }
+  PROBE_BASE_URL="$(printf '%s\n' "$PROBE_VALUES" | sed -n '1p')"
+  PROBE_MODEL="$(printf '%s\n' "$PROBE_VALUES" | sed -n '2p')"
+  PROBE_EXPECTED="$(printf '%s\n' "$PROBE_VALUES" | sed -n '3p')"
+  PROBE_QWEN="$(printf '%s\n' "$PROBE_VALUES" | sed -n '4p')"
+  PROBE_MAX_OUTPUT="$(printf '%s\n' "$PROBE_VALUES" | sed -n '5p')"
+  PROBE_SESSION_LIMIT="$(printf '%s\n' "$PROBE_VALUES" | sed -n '6p')"
+  [ -n "$PROBE_BASE_URL" ] && [ -n "$PROBE_MODEL" ] && [ -n "$PROBE_EXPECTED" ] && [ -n "$PROBE_QWEN" ] || {
+    echo "✗ target probe package is incomplete" >&2; exit 2;
+  }
+  CORPUS="$TRACE/fixture"
+  BASE_URL="$PROBE_BASE_URL"
+  MODEL="$PROBE_MODEL"
+  EXPECTED_RETURNED_IDENTITY="$PROBE_EXPECTED"
+  QWEN="$PROBE_QWEN"
+  SHERLOCK_MAX_OUTPUT_TOKENS="$PROBE_MAX_OUTPUT"
+  SHERLOCK_SESSION_TOKEN_LIMIT="$PROBE_SESSION_LIMIT"
+  unset SHERLOCK_PROBE_SEALED_INPUT SHERLOCK_PROBE_SETTINGS SHERLOCK_PROBE_BUDGET
 fi
 DATASET="${SHERLOCK_DATASET:-bench649}"
 MEASURE_DIR="$(cd "$HERE/../../measure" && pwd)"
@@ -372,6 +463,13 @@ PY
     cp "$TRACE.upstream.jsonl" "$TRACE/upstream-completed.jsonl" || return 1
   else
     : > "$TRACE/upstream-completed.jsonl"
+  fi
+  # Task 3's JSONL names every raw capture by basename.  Keep that immutable
+  # evidence with the trace so the target-contract audit can join each paid
+  # action to the exact request/response bytes rather than trust a summary.
+  if [ -d "$TRACE.upstream.bodies" ]; then
+    [ ! -e "$TRACE/upstream-bodies" ] || return 1
+    cp -R "$TRACE.upstream.bodies" "$TRACE/upstream-bodies" || return 1
   fi
   sync || return 1
   python3 - "$TRACE" "$STAMP" "${QWEN_RC:-}" "$(( $(date +%s) - START ))" <<'PY' || return 1
@@ -689,6 +787,23 @@ print("replay reproduced the recorded gate exits")'
   rm -rf "$W"
   W=""
 }
+wait_for_lane_drain() {
+  # A Qwen child can exit immediately after receiving a complete HTTP body,
+  # while the proxy is still fsyncing its final ledger/budget updates.  Do not
+  # kill that in-flight completion and audit a half-written row as the final
+  # trace.  A stuck marker remains a later integrity failure; it never becomes
+  # permission to wait forever.
+  local waited=0
+  local inflight="$TRACE/upstream-inflight.json"
+  while [ -e "$inflight" ] && [ "$waited" -lt 300 ]; do
+    sleep 0.1
+    waited=$((waited + 1))
+  done
+  [ ! -e "$inflight" ] || {
+    echo "  ⚠ upstream lane: timed out waiting for final ledger completion" >&2
+    return 1
+  }
+}
 on_exit() {
   local rc="$1"
   trap - EXIT
@@ -704,6 +819,9 @@ trap 'on_exit $?' EXIT
 [ -d "$CORPUS" ] || { echo "✗ corpus not found: $CORPUS" >&2; exit 1; }
 : "${SHERLOCK_API_KEY:?set SHERLOCK_API_KEY}"
 W="$(mktemp -d "${TMPDIR:-/tmp}/bench-XXXXXX")"
+# save_trace is also reached by an early lane-start refusal.  Give that path a
+# real duration origin before any fallible setup runs.
+START="$(date +%s)"
 # Qwen Code only grants file tools access to its project workspace. Giving the
 # prompt an absolute corpus path outside that workspace produces a one-turn
 # refusal, even under yolo. Stage a private read-only-in-practice copy instead
@@ -711,6 +829,38 @@ W="$(mktemp -d "${TMPDIR:-/tmp}/bench-XXXXXX")"
 RUN_CORPUS="$W/corpus"
 mkdir -p "$RUN_CORPUS"
 cp -a "$CORPUS/." "$RUN_CORPUS/"
+# A target fixture packages its expectation and fixture-manifest alongside the
+# log leaves so the later audit can bind them.  They are control evidence, not
+# source logs: the ordinary four gates must score the same declared output set
+# that produced the canonical Task 2 report.  This edits only the runner-owned
+# staging copy; both the sealed trace fixture and its manifest remain intact.
+if [ "$TARGET_PROBE_MODE" = "1" ]; then
+  python3 - "$TRACE/fixture-manifest.json" "$RUN_CORPUS" <<'PY' || exit 2
+import json, os, stat, sys
+manifest_path, corpus = sys.argv[1:]
+try:
+    manifest = json.load(open(manifest_path, encoding="utf-8"))
+    outputs = manifest["outputs"]
+    if (type(outputs) is not dict or not outputs or
+            any(type(name) is not str or "/" in name or name in (".", "..")
+                for name in outputs)):
+        raise ValueError()
+    actual = set(os.listdir(corpus))
+    wanted = set(outputs)
+    if not wanted.issubset(actual):
+        raise ValueError()
+    for name in actual - wanted:
+        path = os.path.join(corpus, name)
+        mode = os.lstat(path).st_mode
+        if not stat.S_ISREG(mode) or stat.S_ISLNK(mode):
+            raise ValueError()
+        os.unlink(path)
+    if set(os.listdir(corpus)) != wanted:
+        raise ValueError()
+except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError):
+    raise SystemExit("TARGET_PROBE_CORPUS")
+PY
+fi
 if arm_ge "$ARM" 30; then
   mkdir -p "$W/work"
   if [ -n "${SHERLOCK_SEED_WORK:-}" ]; then
@@ -1008,12 +1158,42 @@ if [ "${SHERLOCK_TARGET_AUTOCOMPACT:-0}" != "1" ]; then
   EMIT_ARGS="$EMIT_ARGS --no-auto-compact"
 fi
 # shellcheck disable=SC2086
-python3 "$MEASURE_DIR/corporate-settings.py" emit-run \
-  --window "$([ "$CTX_WINDOW" != "0" ] && echo "$CTX_WINDOW" || echo 262000)" \
-  --max-tokens "$MAX_OUT" \
-  --session-token-limit "$SESSION_TOKEN_LIMIT" \
-  --timeout "$REQUEST_TIMEOUT_MS" --max-retries "$MAX_RETRIES" \
-  $MUTE_ARGS $EMIT_ARGS > "$W/.qwen/settings.json" || exit 1
+if [ "$TARGET_PROBE_MODE" = "1" ]; then
+  # The bytes below were hashed into the approved profile.  A private
+  # descriptor-opened copy is the only settings file Qwen can observe.
+  python3 - "$TRACE/corporate-settings.json" "$W/.qwen/settings.json" <<'PY' || exit 1
+import os, stat, sys
+source, target = sys.argv[1:]
+fd = os.open(source, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+try:
+    mode = os.fstat(fd).st_mode
+    if not stat.S_ISREG(mode): raise ValueError("settings source")
+    data = b""
+    while True:
+        block = os.read(fd, 65536)
+        if not block: break
+        data += block
+finally:
+    os.close(fd)
+try:
+    import json
+    json.loads(data.decode("utf-8"))
+except Exception as exc:
+    raise SystemExit("target probe settings are invalid") from exc
+out = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+try:
+    os.write(out, data); os.fsync(out)
+finally:
+    os.close(out)
+PY
+else
+  python3 "$MEASURE_DIR/corporate-settings.py" emit-run \
+    --window "$([ "$CTX_WINDOW" != "0" ] && echo "$CTX_WINDOW" || echo 262000)" \
+    --max-tokens "$MAX_OUT" \
+    --session-token-limit "$SESSION_TOKEN_LIMIT" \
+    --timeout "$REQUEST_TIMEOUT_MS" --max-retries "$MAX_RETRIES" \
+    $MUTE_ARGS $EMIT_ARGS > "$W/.qwen/settings.json" || exit 1
+fi
 
 # Seal the exact target settings before the target can observe or mutate them.
 python3 - "$W/.qwen/settings.json" "$TRACE/qwen-settings-pre.json" <<'PY' || exit 1
@@ -1266,7 +1446,7 @@ if ! upstream_lane_start "$BASE_URL" "$TRACE.upstream.jsonl" "$STAMP" "$MODEL" \
 fi
 BASE_URL="$LANE_BASE_URL"
 CLIENT_MODEL="$LANE_CLIENT_MODEL"
-if [ "$CONTROLLED" = 1 ]; then
+if [ "$CONTROLLED" = 1 ] && [ "$TARGET_PROBE_MODE" != "1" ]; then
   unset SHERLOCK_BUDGET_MAX_UPSTREAM_ATTEMPTS \
     SHERLOCK_BUDGET_MAX_REQUEST_BYTES \
     SHERLOCK_BUDGET_MAX_WALL_SECONDS \
@@ -1479,12 +1659,17 @@ while RESUME_SESSION="$(broken_session "$QWEN_RC")" \
   if run_qwen "$RESUME_ATTEMPTS" --resume "$RESUME_SESSION" -p "The previous attempt ended without delivering the report. Continue the same investigation from saved state. Do not restart mapping and do not describe what you are about to do: call the tools, write the verdicts back, and write work/report.md. Your final message must be the report itself."; then QWEN_RC=0; else QWEN_RC=$?; fi
 done
 fi   # SHERLOCK_INTERACTIVE
-python3 - "$TRACE/recovery.json" "$RESUME_ATTEMPTS" "$RESUME_SESSION" <<'PY'
+python3 - "$TRACE/recovery.json" "$RESUME_ATTEMPTS" "$RESUME_SESSION" "$QWEN_RC" <<'PY'
 import json, sys
 with open(sys.argv[1], "w", encoding="utf-8") as fh:
-    json.dump({"resume_attempts": int(sys.argv[2]), "session_id": sys.argv[3]}, fh)
+    # The terminal interpreter consumes this as its driver layer.  Record the
+    # real final qwen exit rather than leaving a successful ordinary runner
+    # indistinguishable from a missing driver result.
+    json.dump({"resume_attempts": int(sys.argv[2]), "session_id": sys.argv[3],
+               "exit_code": int(sys.argv[4])}, fh)
     fh.write("\n")
 PY
+wait_for_lane_drain || true
 save_trace
 # LANE INTEGRITY, AND WHY IT OUTRANKS EVERY OTHER VERDICT BELOW. The v37 full
 # run scored, gated and reported normally while linkapi had answered 93 of its
@@ -1627,9 +1812,9 @@ fi
 [ "$RC" -eq 4 ] && FAILED_PHASE=REJECTED || FAILED_PHASE=RUN_FAILED
 if [ "$RC" -eq 0 ]; then
   state_set --run-tag "$STAMP" --phase "$TERMINAL_PHASE" --dataset "$DATASET" --arm "$ARM" --trace-dir "$TRACE" \
-    --attempt "$RESUME_ATTEMPTS" --session-id "${LAST_SESSION:-$RESUME_SESSION}" --upstream-log "$TRACE.upstream.jsonl"
+    --attempt "$RESUME_ATTEMPTS" --session-id "${LAST_SESSION:-$RESUME_SESSION}" --exit-code 0 --upstream-log "$TRACE.upstream.jsonl"
   state_event "$TERMINAL_PHASE" --run-tag "$STAMP" --phase "$TERMINAL_PHASE" --dataset "$DATASET" --arm "$ARM" --trace-dir "$TRACE" \
-    --attempt "$RESUME_ATTEMPTS" --session-id "${LAST_SESSION:-$RESUME_SESSION}" --upstream-log "$TRACE.upstream.jsonl"
+    --attempt "$RESUME_ATTEMPTS" --session-id "${LAST_SESSION:-$RESUME_SESSION}" --exit-code 0 --upstream-log "$TRACE.upstream.jsonl"
   TERMINAL_WRITTEN=1
 else
   state_set --run-tag "$STAMP" --phase "$FAILED_PHASE" --dataset "$DATASET" --arm "$ARM" --trace-dir "$TRACE" \

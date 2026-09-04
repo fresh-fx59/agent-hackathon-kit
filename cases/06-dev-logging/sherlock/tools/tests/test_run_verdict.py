@@ -4,6 +4,7 @@ import importlib.util
 import datetime as dt
 import hashlib
 import json
+import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -97,6 +98,56 @@ class RunVerdictTests(unittest.TestCase):
             *extra,
         ]
         return subprocess.run(command, text=True, capture_output=True)
+
+    def stage_target_probe_trace(self):
+        root = Path(self.temp.name) / "target-root"
+        trace = root / "probe-work" / "runs" / "target-contract-probe"
+        trace.mkdir(parents=True); nonces = root / "nonces"; nonces.mkdir()
+        raw = {}
+        for name in ("target-profile.json", "probe-budget.json", "probe-rate-snapshot.json",
+                     "fixture-manifest.json", "input-package.json"):
+            raw[name] = json.dumps({"schema": 1, "name": name}, sort_keys=True,
+                                   separators=(",", ":")).encode()
+            (trace / name).write_bytes(raw[name])
+        hashes = {name: hashlib.sha256(data).hexdigest() for name, data in raw.items()}
+        manifest = {"schema": 1, "action": "target_contract_probe",
+                    "created_at": "2026-09-04T00:00:00Z", "expires_at": "2099-01-01T00:00:00Z",
+                    "nonce": "b" * 64, "target_profile_sha256": hashes["target-profile.json"],
+                    "probe_budget_sha256": hashes["probe-budget.json"],
+                    "rate_snapshot_sha256": hashes["probe-rate-snapshot.json"],
+                    "fixture_manifest_sha256": hashes["fixture-manifest.json"],
+                    "input_package_sha256": hashes["input-package.json"]}
+        raw_manifest = json.dumps(manifest, sort_keys=True, separators=(",", ":")).encode()
+        (trace / "probe-manifest.json").write_bytes(raw_manifest)
+        nonce = (json.dumps({"nonce": manifest["nonce"], "manifest_sha256": hashlib.sha256(raw_manifest).hexdigest()},
+                            sort_keys=True, separators=(",", ":")) + "\n").encode()
+        nonce_path = nonces / (manifest["nonce"] + ".json"); nonce_path.write_bytes(nonce)
+        auth = {"schema": 1, "action_nonce": manifest["nonce"],
+                "manifest_raw_sha256": hashlib.sha256(raw_manifest).hexdigest(),
+                "nonce_record_path": os.path.realpath(nonce_path),
+                "nonce_record_sha256": hashlib.sha256(nonce).hexdigest(),
+                "nonce_root": os.path.realpath(nonces), "probe_root": os.path.realpath(root),
+                "trace_path": os.path.realpath(trace),
+                "bench_status_sha256": hashlib.sha256((SHERLOCK / "eval" / "bench" / "bench-status.py").read_bytes()).hexdigest(),
+                "run_verdict_sha256": hashlib.sha256(TOOL.read_bytes()).hexdigest()}
+        (trace / "action-authorization.json").write_text(json.dumps(auth, sort_keys=True, separators=(",", ":")))
+        status = {"schema": 1, "run_tag": "target-contract-probe", "phase": "ACCEPTED",
+                  "updated_at": "2026-09-04T00:00:00Z", "pid": None, "attempt": 1,
+                  "dataset": "fixture", "arm": "v44", "trace_dir": str(trace), "detail": None,
+                  "session_id": None, "reason": None, "exit_code": 0, "duration_s": 1,
+                  "upstream_log": None, "inflight_path": None}
+        (trace / "status.json").write_text(json.dumps(status))
+        (trace / "candidate.json").write_text("{}")
+        (trace / "gates.json").write_text(json.dumps({"schema": 1, "verdict": "clean", "arm_intact": True,
+            "gates": {name: {"exit_code": 0, "blocking": 0} for name in VERDICT_TOOL.REQUIRED_GATES}}))
+        (trace / "lane-integrity.json").write_text(json.dumps({"schema": 1, "verdict": "clean", "reason": None, "detail": None}))
+        work = trace / "work"; work.mkdir(); (work / "report.md").write_text("# report\n")
+        replay = trace / "replay.sh"; replay.write_text("#!/usr/bin/env bash\nexit 0\n"); replay.chmod(0o755)
+        (trace / "attempts.jsonl").write_text(json.dumps({"attempt": 1, "exit_code": 0}) + "\n")
+        (trace / "driver-result.json").write_text(json.dumps({"exit_code": 0}))
+        (trace / "upstream-completed.jsonl").write_text(json.dumps({"status": 200, "request_max_tokens": 1,
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1}}) + "\n")
+        return trace
 
     def copied_tool_tree(self):
         """Copy only the local verifier tree for dependency-boundary attacks."""
@@ -1080,6 +1131,19 @@ class RunVerdictTests(unittest.TestCase):
         self.assertEqual(result.returncode, 1, result.stderr)
         self.assertIn("UPSTREAM_LEDGER_INVALID", row["failures"])
         self.assertIn("REPAIR_UPSTREAM_LEDGER", {item["code"] for item in row["improvements"]})
+
+    def test_target_probe_authority_accepts_the_real_terminal_contract_without_validity(self):
+        trace = self.stage_target_probe_trace()
+        result = subprocess.run([sys.executable, str(TOOL), str(trace), "--target-probe", "--json"],
+                                text=True, capture_output=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        row = json.loads(result.stdout)
+        self.assertTrue(row["authenticated"])
+        self.assertEqual(row["authority"], "operator-approved-target-probe")
+        self.assertTrue(row["successful"])
+        self.assertEqual(row["attempt_exit_code"], 0)
+        self.assertEqual(row["driver_exit_code"], 0)
+        self.assertEqual(row["wrapper_exit_code"], 0)
 
 
 if __name__ == "__main__":

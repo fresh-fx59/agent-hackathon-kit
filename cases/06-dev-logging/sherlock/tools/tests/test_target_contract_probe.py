@@ -11,6 +11,9 @@ import sys
 import tempfile
 import unittest
 import datetime as dt
+import gzip
+import http.server
+import threading
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -31,14 +34,29 @@ class TargetContractProbeTest(unittest.TestCase):
         self.probe = load_probe()
         self.source = ROOT / "tools" / "tests" / "fixtures" / "target-contract-source"
         self.root = self.temp / "probe"
+        self.rate_snapshot = self.temp / "rate.json"
+        rate = {"schema": 1, "run_tag": "target-contract-probe",
+                "effective_at": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z"),
+                "source": "local-fixture", "prompt_rub_per_token": 0.0, "completion_rub_per_token": 0.0}
+        rate["sha256"] = self._sha_bytes(self.probe.canonical(rate))
+        self.rate_snapshot.write_text(json.dumps(rate), encoding="utf-8")
         self.args = self.probe.PrepareArgs(
             root=self.root, source_corpus=self.source, provider_base_url="http://127.0.0.1:9",
             route="paid-route", secret_ref="SHERLOCK_API_KEY", requested_model="deepseek-v4-20260901",
             expected_returned_identity="deepseek-v4-20260901",
             identity_mode="provider_pinned_version", qwen_bin="/usr/bin/true", arm="target",
+            rate_snapshot=self.rate_snapshot,
         )
 
     def tearDown(self):
+        # The real runner seals its trace inputs read-only.  Restore test-temp
+        # ownership before unittest removes the isolated fixture tree.
+        for parent, dirs, files in os.walk(self.temp, topdown=False):
+            for name in files:
+                os.chmod(Path(parent) / name, 0o600)
+            for name in dirs:
+                os.chmod(Path(parent) / name, 0o700)
+            os.chmod(parent, 0o700)
         shutil.rmtree(self.temp)
 
     def test_prepare_is_secret_free_and_seals_exact_manifest_assets(self):
@@ -47,12 +65,26 @@ class TargetContractProbeTest(unittest.TestCase):
         manifest = json.loads((self.root / "probe-manifest.json").read_text())
         self.assertEqual(set(manifest), self.probe.PROBE_MANIFEST_KEYS)
         self.assertEqual(manifest["action"], "target_contract_probe")
-        for name in ("target-profile.json", "corporate-settings.json", "probe-budget.json", "fixture-manifest.json",
+        for name in ("target-profile.json", "corporate-settings.json", "probe-budget.json", "probe-rate-snapshot.json", "fixture-manifest.json",
                      "input-package.json", "probe-manifest.json"):
             self.assertTrue((self.root / name).is_file(), name)
         self.assertEqual(result["manifest_sha256"], self._sha(self.root / "probe-manifest.json"))
         with self.assertRaises(self.probe.ProbeFailure):
             self.probe.prepare(self.args)
+
+    def test_rate_snapshot_is_validated_before_root_creation_and_bound_in_manifest(self):
+        self.rate_snapshot.write_text('{"schema":1}\n', encoding="utf-8")
+        with self.assertRaises(self.probe.ProbeFailure):
+            self.probe.prepare(self.args)
+        self.assertFalse(self.root.exists())
+        rate = {"schema": 1, "run_tag": "target-contract-probe",
+                "effective_at": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z"),
+                "source": "local-fixture", "prompt_rub_per_token": 0.0, "completion_rub_per_token": 0.0}
+        rate["sha256"] = self._sha_bytes(self.probe.canonical(rate))
+        self.rate_snapshot.write_text(json.dumps(rate), encoding="utf-8")
+        self.probe.prepare(self.args)
+        manifest = json.loads((self.root / "probe-manifest.json").read_text())
+        self.assertEqual(manifest["rate_snapshot_sha256"], self._sha(self.root / "probe-rate-snapshot.json"))
 
     def test_authorize_binds_raw_bytes_action_expiry_and_single_use_nonce(self):
         self.probe.prepare(self.args)
@@ -62,6 +94,24 @@ class TargetContractProbeTest(unittest.TestCase):
         self.assertEqual(row["action"], "target_contract_probe")
         with self.assertRaisesRegex(self.probe.ProbeFailure, "APPROVAL_REPLAYED"):
             self.probe.authorize(manifest, digest, self.root / "nonces")
+
+    def test_authorization_binds_canonical_trace_programs_and_exact_nonce_record(self):
+        self.probe.prepare(self.args)
+        manifest = self.root / "probe-manifest.json"
+        digest = self._sha(manifest)
+        nonce_root = self.root / "nonces"
+        self.probe.authorize(manifest, digest, nonce_root)
+        auth = json.loads((self.root / "action-authorization.json").read_text())
+        self.assertEqual(auth["action_nonce"], json.loads(manifest.read_text())["nonce"])
+        self.assertEqual(auth["manifest_raw_sha256"], digest)
+        self.assertEqual(auth["probe_root"], str(self.root.resolve()))
+        self.assertEqual(auth["trace_path"], str((self.root / "probe-work" / "runs" / "target-contract-probe").resolve()))
+        nonce_path = nonce_root / (auth["action_nonce"] + ".json")
+        self.assertEqual(auth["nonce_record_path"], str(nonce_path.resolve()))
+        self.assertEqual(auth["nonce_record_sha256"], self._sha(nonce_path))
+        self.assertEqual(auth["nonce_root"], str(nonce_root.resolve()))
+        self.assertEqual(auth["bench_status_sha256"], self._sha(BENCH / "bench-status.py"))
+        self.assertEqual(auth["run_verdict_sha256"], self._sha(BENCH / "run-verdict.py"))
 
     def test_concurrent_authorization_consumes_nonce_exactly_once(self):
         self.probe.prepare(self.args)
@@ -139,8 +189,8 @@ class TargetContractProbeTest(unittest.TestCase):
 
     def test_audit_failure_writes_result_but_never_receipt(self):
         self.probe.prepare(self.args)
-        trace = self.root / "probe-work"
-        trace.mkdir()
+        trace = self.root / "probe-work" / "runs" / "target-contract-probe"
+        trace.mkdir(parents=True)
         with self.assertRaises(self.probe.ProbeFailure):
             self.probe.audit(trace)
         self.assertTrue((trace / "probe-result.json").is_file())
@@ -150,7 +200,7 @@ class TargetContractProbeTest(unittest.TestCase):
         self.probe.prepare(self.args)
         self.probe.authorize(self.root / "probe-manifest.json",
                              self._sha(self.root / "probe-manifest.json"), self.root / "nonces")
-        trace = self.root / "probe-work"
+        trace = self.root / "probe-work" / "runs" / "target-contract-probe"
         self._accepted_trace(trace)
         result = self.probe.audit(trace)
         receipt = trace / "target-contract-receipt.json"
@@ -162,7 +212,7 @@ class TargetContractProbeTest(unittest.TestCase):
 
     def test_audit_rejects_symlinked_response_tree_and_keeps_receipt_absent(self):
         self.probe.prepare(self.args)
-        trace = self.root / "probe-work"
+        trace = self.root / "probe-work" / "runs" / "target-contract-probe"
         self._accepted_trace(trace)
         (trace / "response-bodies" / "alias.json").symlink_to(trace / "response-bodies" / "one.json")
         with self.assertRaises(self.probe.ProbeFailure):
@@ -190,7 +240,7 @@ class TargetContractProbeTest(unittest.TestCase):
         args = self.probe.PrepareArgs(**dict(self.args.__dict__, root=root))
         self.probe.prepare(args)
         trace = root / "probe-work"; self._accepted_trace(trace)
-        (trace / "final-report.md").write_text("ok\n")
+        (trace / "work" / "report.md").write_text("ok\n")
         with self.assertRaises(self.probe.ProbeFailure):
             self.probe.audit(trace)
         self.assertFalse((trace / "target-contract-receipt.json").exists())
@@ -202,7 +252,7 @@ class TargetContractProbeTest(unittest.TestCase):
                    "--route", "paid-route", "--secret-ref", "SHERLOCK_API_KEY",
                    "--requested-model", "deepseek-v4-20260901", "--expected-returned-identity",
                    "deepseek-v4-20260901", "--identity-mode", "provider_pinned_version",
-                   "--qwen-bin", "/usr/bin/true", "--arm", "target", "--json"]
+                   "--qwen-bin", "/usr/bin/true", "--arm", "target", "--rate-snapshot", str(self.rate_snapshot), "--json"]
         done = subprocess.run(command, text=True, capture_output=True)
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertEqual(json.loads(done.stdout)["root"], str(root))
@@ -233,8 +283,149 @@ class TargetContractProbeTest(unittest.TestCase):
         self.assertNotEqual(done.returncode, 0)
         self.assertNotIn("TARGET_PROBE_TEST_MODE_REQUIRED", done.stderr)
         trace = self.root / "probe-work" / "runs" / "target-contract-probe"
-        self.assertTrue((trace / "run-manifest.json").is_file())
-        self.assertFalse((trace / "final-report.md").exists())
+        self.assertFalse((trace / "run-manifest.json").exists())
+        self.assertFalse((trace / "work" / "report.md").exists())
+
+    def test_provider_free_e2e_uses_real_runner_lane_proxy_and_task7(self):
+        """One local call crosses the same sealed path as a paid target probe."""
+        canonical_report = (ROOT / "tools" / "tests" / "fixtures" /
+                            "target-contract-reports" / "canonical.md").read_text(encoding="utf-8")
+        qwen = self.temp / "sealed-local-qwen.py"
+        tools = ROOT / "skills" / "v44" / "tools"
+        qwen.write_text("""#!/usr/bin/env python3
+import json, os, subprocess, sys, urllib.request
+from pathlib import Path
+if '--sherlock-flag-probe-sentinel' in sys.argv:
+    raise SystemExit(0)
+request = urllib.request.Request(os.environ['OPENAI_BASE_URL'].rstrip('/') + '/chat/completions',
+    data=json.dumps({'model': os.environ.get('SHERLOCK_QWEN_MODEL', 'deepseek-v4-20260901'),
+                     'messages': [{'role': 'user', 'content': 'sealed local fixture'}], 'max_tokens': 7}).encode(),
+    headers={'Authorization': 'Bearer fixture-token', 'Content-Type': 'application/json'})
+with urllib.request.urlopen(request, timeout=10) as response:
+    observed = json.loads(response.read().decode())
+assert observed['model'] == 'deepseek-v4-20260901', observed
+work, corpus = Path('work'), Path('corpus')
+work.mkdir(exist_ok=True)
+subprocess.run(['python3', %r, str(corpus), '--out', str(work), '--worklist-cap', '10', '--rate-cap', '0', '--jobs', '1'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
+(work / 'rules.tsv').write_text('', encoding='utf-8')
+# The two-line contract corpus has no statistically rare mapper candidate.  A
+# Qwen run nevertheless has to leave a normal, inspectable ledger: seed one
+# finding from the sealed source, then use the real cursor for its only write.
+# This is fixture output, not runner-provided evidence or a canonical report
+# copy; the row's address and quote are verified by the real generic gates.
+if not [line for line in (work / 'worklist.tsv').read_text(encoding='utf-8').splitlines()
+        if line and not line.startswith('#')]:
+    security = (corpus / 'Security.jsonl').read_text(encoding='utf-8').splitlines()[2]
+    system = (corpus / 'System.jsonl').read_text(encoding='utf-8').splitlines()[0]
+    (work / 'worklist.tsv').write_text(
+        '# id\\tвердикт\\tось\\tссылка\\tчастота\\tзапись\\n'
+        'g1\\t?\\trare\\tSecurity.jsonl:3\\tn=1\\t' + security + '\\n'
+        'g2\\t?\\trare\\tSystem.jsonl:1\\tn=1\\t' + system + '\\n', encoding='utf-8')
+for source in (work / 'worklist.tsv').read_text(encoding='utf-8').splitlines():
+    if not source or source.startswith('#'):
+        continue
+    row = source.split('\\t')
+    path, line = row[3].rsplit(':', 1)
+    quote = (corpus / path).read_text(encoding='utf-8').splitlines()[int(line) - 1]
+    subprocess.run(['python3', %r, 'next', '--work', str(work)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
+    subprocess.run(['python3', %r, 'verdict', '--work', str(work), '--id', row[0],
+                    '--cell', 'N n=1 %%s «%%s»' %% (row[3], quote)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
+(work / 'report.md').write_text(%r, encoding='utf-8')
+print(json.dumps([{'type':'result','result':'ok','is_error':False,'session_id':'1234567890abcdef',
+                   'num_turns':1,'usage':{'input_tokens':3,'output_tokens':2}}]))
+""" % (str(tools / "logmap.py"), str(tools / "worklist.py"), str(tools / "worklist.py"), canonical_report), encoding="utf-8")
+        qwen.chmod(0o700)
+
+        seen = []
+        class Upstream(http.server.BaseHTTPRequestHandler):
+            def do_POST(inner):
+                length = int(inner.headers["Content-Length"])
+                payload = json.loads(inner.rfile.read(length))
+                seen.append(payload)
+                response = json.dumps({"id": "fixture-response", "object": "chat.completion",
+                    "model": "deepseek-v4-20260901", "choices": [{"index": 0, "message": {"role": "assistant", "content": "ok"}, "finish_reason": "stop"}],
+                    "usage": {"prompt_tokens": 3, "completion_tokens": 2}}).encode()
+                inner.send_response(200); inner.send_header("Content-Type", "application/json")
+                inner.send_header("Content-Length", str(len(response))); inner.end_headers()
+                inner.wfile.write(response)
+            def log_message(inner, *_args):
+                pass
+        server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Upstream)
+        thread = threading.Thread(target=server.serve_forever, daemon=True); thread.start()
+        try:
+            root = (self.temp / "e2e").resolve()
+            args = self.probe.PrepareArgs(**dict(self.args.__dict__, root=root, qwen_bin=str(qwen), arm="v44",
+                provider_base_url="http://127.0.0.1:%d/v1" % server.server_port))
+            self.probe.prepare(args)
+            manifest = root / "probe-manifest.json"
+            done = subprocess.run([sys.executable, str(PROBE_PATH), "run", "--manifest", str(manifest),
+                "--operator-approved-probe", self._sha(manifest), "--nonce-root", str(root / "nonces"),
+                "--transport-base-url", "http://127.0.0.1:%d/v1" % server.server_port, "--json"],
+                text=True, capture_output=True, timeout=120, env=dict(os.environ, SHERLOCK_API_KEY="fixture-token"))
+        finally:
+            server.shutdown(); thread.join(timeout=5); server.server_close()
+        trace_hint = root / "probe-work" / "runs" / "target-contract-probe"
+        diagnostic = {str(path.relative_to(trace_hint.parent)): path.read_text(encoding="utf-8", errors="replace")[-4000:]
+                      for path in trace_hint.parent.rglob("*")
+                      if path.is_file() and path.suffix in {".txt", ".err"} and path.name != "map.txt"}
+        gates_path = trace_hint / "gates.json"
+        upstream_path = trace_hint.parent / "target-contract-probe.upstream.jsonl"
+        if upstream_path.is_file():
+            diagnostic["target-contract-probe.upstream.jsonl"] = upstream_path.read_text(encoding="utf-8", errors="replace")
+        result_path = trace_hint / "probe-result.json"
+        if result_path.is_file():
+            diagnostic["target-contract-probe/probe-result.json"] = result_path.read_text(encoding="utf-8", errors="replace")
+        budget_path = trace_hint / "upstream-budget-state.json"
+        if budget_path.is_file():
+            diagnostic["target-contract-probe/upstream-budget-state.json"] = budget_path.read_text(encoding="utf-8", errors="replace")
+        diagnostic["upstream-requests-seen"] = repr(len(seen))
+        if gates_path.is_file():
+            gates = json.loads(gates_path.read_text())
+            cite = gates.get("gates", {}).get("citecheck", {}).get("json", {})
+            diagnostic["target-contract-probe/citecheck-summary.json"] = json.dumps({
+                key: cite.get(key) for key in ("blocking", "defects", "ledger", "summary", "outcomes", "report_evidence")}, ensure_ascii=False)
+            diagnostic["target-contract-probe/gates-summary.json"] = json.dumps({
+                "verdict": gates.get("verdict"),
+                **{name: {"exit_code": row.get("exit_code"), "blocking": row.get("blocking")}
+                for name, row in gates.get("gates", {}).items()}}, ensure_ascii=False)
+        self.assertEqual(done.returncode, 0, (done.stdout, done.stderr, diagnostic))
+        result = json.loads(done.stdout); trace = Path(result["trace"])
+        self.assertTrue(result["audit"]["accepted"])
+        self.assertEqual(len(seen), 1); self.assertEqual(seen[0]["model"], "deepseek-v4-20260901")
+        rows = [json.loads(line) for line in (trace / "upstream-completed.jsonl").read_text().splitlines()]
+        self.assertEqual(len(rows), 1); row = rows[0]
+        self.assertEqual(row["requested_model"], row["sent_model"])
+        self.assertEqual(row["sent_model"], row["returned_model"])
+        self.assertRegex(row["action_attempt_id"], row["request_id"] + r"\.a1")
+        self.assertTrue((trace / "upstream-bodies" / row["body_request_file"]).is_file())
+        self.assertTrue((trace / "upstream-bodies" / row["body_response_file"]).is_file())
+        with gzip.open(trace / "upstream-bodies" / row["body_request_file"], "rt") as handle:
+            self.assertEqual(json.load(handle)["model"], "deepseek-v4-20260901")
+        with gzip.open(trace / "upstream-bodies" / row["body_response_file"], "rt") as handle:
+            response = json.load(handle)
+        self.assertEqual(response["model"], row["returned_model"])
+        self.assertEqual(response["usage"], {"prompt_tokens": 3, "completion_tokens": 2})
+        budget = json.loads((trace / "upstream-budget-state.json").read_text())
+        self.assertEqual(budget["schema"], 2)
+        self.assertEqual(budget["limits"], {key: self.probe.DEFAULT_BUDGET[key] for key in (
+            "max_provider_calls", "max_prompt_tokens", "max_completion_tokens", "max_wall_time_s", "max_estimated_cost_rub")})
+        self.assertEqual(budget["rate_snapshot"], json.loads((trace / "probe-rate-snapshot.json").read_text()))
+        # The legacy failure cap protects the lane's retry loop; it is not a
+        # paid-envelope limit and so must not appear in schema-2's five limits.
+        self.assertEqual(budget["limits"].get("max_consecutive_provider_failures"), None)
+        gate_outputs = json.loads((trace / "gates.json").read_text())
+        self.assertEqual(set(gate_outputs["gates"]), set(self.probe.GATES))
+        self.assertEqual(set(json.loads((trace / "probe-gates.json").read_text())), set(self.probe.GATES))
+        self.assertTrue(json.loads((trace / "probe-oracle.json").read_text())["accepted"])
+        verdict = json.loads((trace / "run-verdict.json").read_text())
+        self.assertEqual(set(verdict), {"schema", "run_tag", "state", "phase", "finished", "successful",
+                         "report_correct", "report_correctness_scope", "authenticated", "authority", "failures",
+                         "metrics", "improvements", "attempt_exit_code", "driver_exit_code", "wrapper_exit_code",
+                         "gate_exit_codes", "primary_failure", "terminal_observation"})
+        self.assertTrue(verdict["successful"]); self.assertEqual(verdict["authority"], "operator-approved-target-probe")
+        self.assertEqual({name: verdict["gate_exit_codes"][name] for name in self.probe.GATES},
+                         {name: 0 for name in self.probe.GATES})
+        self.assertTrue((trace / "work" / "report.md").is_file())
 
     def test_manifest_created_at_must_be_aware_and_bound_before_contact(self):
         self.probe.prepare(self.args)
@@ -283,7 +474,7 @@ class TargetContractProbeTest(unittest.TestCase):
     def test_receipt_checksum_interruption_rolls_back_receipt_and_seals_rejection(self):
         """An interrupted accepted publication leaves one rejected terminal result."""
         self.probe.prepare(self.args)
-        trace = self.root / "probe-work"; self._accepted_trace(trace)
+        trace = self.root / "probe-work" / "runs" / "target-contract-probe"; self._accepted_trace(trace)
         original = self.probe._atomic_no_replace
         def interrupt(path, data):
             if str(path).endswith("target-contract-receipt.json.sha256"):
@@ -404,7 +595,7 @@ class TargetContractProbeTest(unittest.TestCase):
     def test_audit_correlates_actual_body_rows_and_task7_verdict(self):
         """Ledger summaries cannot replace the raw request/response evidence."""
         self.probe.prepare(self.args)
-        trace = self.root / "probe-work"; self._accepted_trace(trace)
+        trace = self.root / "probe-work" / "runs" / "target-contract-probe"; self._accepted_trace(trace)
         (trace / "run-verdict.json").write_text(json.dumps({"schema": 1, "run_tag": trace.name,
             "state": "succeeded", "finished": True, "successful": True,
             "report_correct": True, "failures": [], "metrics": {}}))
@@ -434,7 +625,7 @@ class TargetContractProbeTest(unittest.TestCase):
             self.probe.audit(trace)
         self.probe.authorize(self.root / "probe-manifest.json",
                              self._sha(self.root / "probe-manifest.json"), self.root / "nonces")
-        trace = self.root / "probe-work-authorized"
+        trace = self.root / "probe-work" / "runs" / "target-contract-probe"
         self._accepted_trace(trace)
         result = self.probe.audit(trace)
         receipt = json.loads((trace / "target-contract-receipt.json").read_text())
@@ -445,10 +636,13 @@ class TargetContractProbeTest(unittest.TestCase):
         self.probe.prepare(self.args)
         self.probe.authorize(self.root / "probe-manifest.json",
                              self._sha(self.root / "probe-manifest.json"), self.root / "nonces")
-        trace = self.root / "probe-work"
+        trace = self.root / "probe-work" / "runs" / "target-contract-probe"
         self._accepted_trace(trace)
         (trace / "run-verdict.json").write_text(json.dumps({
-            "schema": 1, "run_tag": trace.name, "state": "finished",
+            "schema": 1, "run_tag": trace.name, "state": "finished", "phase": "FINISHED",
+            "finished": True, "successful": True, "report_correct": True,
+            "report_correctness_scope": "sealed-contract-gates", "authenticated": True, "authority": "operator-approved-target-probe",
+            "failures": [], "metrics": {}, "improvements": [],
             "attempt_exit_code": 0, "driver_exit_code": 0,
             "gate_exit_codes": {name: 0 for name in self.probe.GATES},
             "wrapper_exit_code": 0, "primary_failure": None,
@@ -460,7 +654,7 @@ class TargetContractProbeTest(unittest.TestCase):
         self.probe.prepare(self.args)
         self.probe.authorize(self.root / "probe-manifest.json",
                              self._sha(self.root / "probe-manifest.json"), self.root / "nonces")
-        trace = self.root / "probe-work"; self._accepted_trace(trace)
+        trace = self.root / "probe-work" / "runs" / "target-contract-probe"; self._accepted_trace(trace)
         # A forged aggregate is never a substitute for the per-call capture.
         body = json.loads((trace / "response-bodies" / "one.json").read_text())
         body["call_id"] = "f" * 32 + ".a1"
@@ -479,7 +673,7 @@ class TargetContractProbeTest(unittest.TestCase):
 
     def test_audit_timeout_still_emits_exactly_one_terminal_result(self):
         self.probe.prepare(self.args)
-        trace = self.root / "probe-work"; self._accepted_trace(trace)
+        trace = self.root / "probe-work" / "runs" / "target-contract-probe"; self._accepted_trace(trace)
         original = self.probe.subprocess.run
         self.probe.subprocess.run = lambda *a, **kw: (_ for _ in ()).throw(subprocess.TimeoutExpired(a[0], 1))
         try:
@@ -490,21 +684,76 @@ class TargetContractProbeTest(unittest.TestCase):
         self.assertTrue((trace / "probe-result.json").is_file())
         self.assertFalse((self.root / "nonces").exists())
 
+    # Round 5: actual producer schemas and one-way state-machine boundaries.
+    def test_round5_audit_consumes_task3_jsonl_gzip_and_actual_task7_projection(self):
+        self.probe.prepare(self.args)
+        self.probe.authorize(self.root / "probe-manifest.json", self._sha(self.root / "probe-manifest.json"), self.root / "nonces")
+        trace = self.root / "probe-work" / "runs" / "target-contract-probe"; self._accepted_trace(trace)
+        (trace / "ledger.json").unlink()
+        request_id = "0" * 32
+        request, response = trace / (request_id + ".req.json.gz"), trace / (request_id + ".a1.res.json.gz")
+        with gzip.open(request, "wb") as handle:
+            handle.write(json.dumps({"model": "deepseek-v4-20260901"}).encode())
+        with gzip.open(response, "wb") as handle:
+            handle.write(json.dumps({"model": "deepseek-v4-20260901", "usage": {"prompt_tokens": 1, "completion_tokens": 1}}).encode())
+        (trace / "upstream-completed.jsonl").write_text(json.dumps({
+            "request_id": request_id, "action_attempt_id": request_id + ".a1",
+            "body_request_file": request.name, "body_response_file": response.name,
+            "action_contact_completed": True,
+            "requested_model": "deepseek-v4-20260901", "sent_model": "deepseek-v4-20260901",
+            "returned_model": "deepseek-v4-20260901", "usage": {"prompt_tokens": 1, "completion_tokens": 1},
+        }) + "\n")
+        actual = {"schema": 1, "run_tag": trace.name, "state": "finished", "phase": "FINISHED",
+                  "finished": True, "successful": True, "report_correct": True,
+                  "report_correctness_scope": "sealed-contract-gates", "authenticated": True,
+                  "authority": "operator-approved-target-probe", "failures": [], "metrics": {}, "improvements": [],
+                  "attempt_exit_code": 0, "driver_exit_code": 0,
+                  "gate_exit_codes": {name: 0 for name in self.probe.GATES}, "wrapper_exit_code": 0,
+                  "primary_failure": None, "terminal_observation": "FINISHED"}
+        (trace / "run-verdict.json").write_text(json.dumps(actual))
+        self.assertTrue(self.probe.audit(trace)["accepted"])
+
+    def test_round5_ambient_conflict_is_refused_before_nonce_consumption(self):
+        self.probe.prepare(self.args)
+        manifest = self.root / "probe-manifest.json"; old = os.environ.get("SHERLOCK_FORBIDDEN")
+        os.environ["SHERLOCK_FORBIDDEN"] = "1"
+        try:
+            with self.assertRaises(self.probe.ProbeFailure):
+                self.probe.run(manifest, self._sha(manifest), self.root / "nonces",
+                               secret_reader=self._tripwire, proxy_starter=self._tripwire, runner=self._tripwire)
+        finally:
+            if old is None: os.environ.pop("SHERLOCK_FORBIDDEN", None)
+            else: os.environ["SHERLOCK_FORBIDDEN"] = old
+        self.assertFalse((self.root / "nonces").exists())
+
+    def test_round5_failed_publication_has_only_rejected_result_and_no_receipt_nonce(self):
+        self.probe.prepare(self.args)
+        self.probe.authorize(self.root / "probe-manifest.json", self._sha(self.root / "probe-manifest.json"), self.root / "nonces")
+        trace = self.root / "probe-work" / "runs" / "target-contract-probe"; self._accepted_trace(trace)
+        original = self.probe._write_result
+        self.probe._write_result = lambda *_: (_ for _ in ()).throw(OSError("injected"))
+        try:
+            with self.assertRaises(self.probe.ProbeFailure): self.probe.audit(trace)
+        finally:
+            self.probe._write_result = original
+        self.assertFalse((trace / "target-contract-receipt.json").exists())
+        self.assertFalse((trace / "receipt-nonces").exists())
+
     def _accepted_trace(self, trace, source_root=None):
-        trace.mkdir()
+        trace.mkdir(parents=True)
         source_root = self.root if source_root is None else source_root
-        for name in ("target-profile.json", "corporate-settings.json", "probe-budget.json", "fixture-manifest.json",
+        for name in ("target-profile.json", "corporate-settings.json", "probe-budget.json", "probe-rate-snapshot.json", "fixture-manifest.json",
                      "input-package.json", "probe-manifest.json"):
             shutil.copy2(source_root / name, trace / name)
         if (source_root / "action-authorization.json").is_file():
             shutil.copy2(source_root / "action-authorization.json", trace / "action-authorization.json")
         shutil.copytree(source_root / "fixture", trace / "fixture")
+        (trace / "work").mkdir()
         shutil.copy2(ROOT / "tools" / "tests" / "fixtures" / "target-contract-reports" / "canonical.md",
-                     trace / "final-report.md")
+                     trace / "work" / "report.md")
         fixture_test = ROOT / "tools" / "tests" / "test_target_contract_fixture.py"
         spec = importlib.util.spec_from_file_location("fixture_test_helpers", fixture_test)
         helpers = importlib.util.module_from_spec(spec); spec.loader.exec_module(helpers)
-        (trace / "work").mkdir()
         # The canonical fixture is sealed; generate the v44 worklist from an
         # isolated gate corpus rather than adding a post-seal fixture leaf.
         gate_corpus = trace.parent / ("gate-corpus-" + trace.name)
@@ -522,9 +771,12 @@ class TargetContractProbeTest(unittest.TestCase):
             "returned_identity": "deepseek-v4-20260901",
             "usage": {"prompt_tokens": 1, "completion_tokens": 1}}))
         (trace / "run-verdict.json").write_text(json.dumps({"schema": 1, "run_tag": trace.name,
-            "state": "finished", "attempt_exit_code": 0, "driver_exit_code": 0,
-            "wrapper_exit_code": 0, "gate_exit_codes": {name: 0 for name in self.probe.GATES},
-            "primary_failure": None, "terminal_observation": "RUN_SUCCEEDED"}))
+            "state": "finished", "phase": "FINISHED", "finished": True, "successful": True,
+            "report_correct": True, "report_correctness_scope": "sealed-contract-gates",
+            "authenticated": True, "authority": "operator-approved-target-probe", "failures": [], "metrics": {}, "improvements": [],
+            "attempt_exit_code": 0, "driver_exit_code": 0, "wrapper_exit_code": 0,
+            "gate_exit_codes": {name: 0 for name in self.probe.GATES}, "primary_failure": None,
+            "terminal_observation": "RUN_SUCCEEDED"}))
         effective = dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
         rate = {"schema": 1, "run_tag": trace.name, "effective_at": effective, "source": "local-test",
                 "prompt_rub_per_token": 0.0, "completion_rub_per_token": 0.0}

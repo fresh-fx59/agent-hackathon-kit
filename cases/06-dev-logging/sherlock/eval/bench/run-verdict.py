@@ -56,16 +56,13 @@ def status_projection(args):
                 or Path(value.get("trace_dir", "")).resolve() != trace):
             raise ValueError("TRACE_UNRESOLVED")
         return value
-    command = [
-        sys.executable,
-        str(STATUS_TOOL),
-        args.trace,
-        "--commitment-file",
-        args.commitment_file,
-        "--commitment-key",
-        args.commitment_key,
-        "--json",
-    ]
+    command = [sys.executable, str(STATUS_TOOL), args.trace]
+    if args.target_probe:
+        command.append("--target-probe")
+    else:
+        command.extend(["--commitment-file", args.commitment_file,
+                        "--commitment-key", args.commitment_key])
+    command.append("--json")
     try:
         result = subprocess.run(command, text=True, capture_output=True, timeout=30)
     except subprocess.TimeoutExpired as exc:
@@ -74,6 +71,8 @@ def status_projection(args):
         raise ValueError("TRACE_UNRESOLVED")
     value = json.loads(result.stdout)
     if not isinstance(value, dict):
+        raise ValueError("TRACE_UNRESOLVED")
+    if args.target_probe and value.get("selection") != "target-probe":
         raise ValueError("TRACE_UNRESOLVED")
     return value
 
@@ -407,8 +406,13 @@ def terminal_verdict(args, status):
             read_json(trace / "candidate.json")
         except (OSError, UnicodeError, ValueError, json.JSONDecodeError):
             failures.append("CANDIDATE_MISSING")
+    elif args.target_probe:
+        try:
+            read_json(trace / "candidate.json")
+        except (OSError, UnicodeError, ValueError, json.JSONDecodeError):
+            failures.append("CANDIDATE_MISSING")
     validity = status.get("validity")
-    if (args.authenticated
+    if (args.authenticated and not args.target_probe
             and (not isinstance(validity, dict) or validity.get("state") != "accepted")):
         failures.append("VALIDITY_NOT_ACCEPTED")
     try:
@@ -483,6 +487,9 @@ def terminal_verdict(args, status):
         failures.append("UPSTREAM_LEDGER_INVALID")
     if clipped:
         failures.append("COMPACTION_OUTPUT_CLIPPED")
+    if args.target_probe and (ledger_metrics.get("provider_calls_observed", 0) < 1
+                              or ledger_metrics.get("usage_bearing_calls", 0) < 1):
+        failures.append("UPSTREAM_USAGE_MISSING")
     report_integrity_failures = {
         "AUTHORITY_UNCONTROLLED",
         "CANDIDATE_MISSING",
@@ -677,6 +684,9 @@ def terminal_verdict(args, status):
                             if status.get("primary_failure") in PRIMARY_FAILURE_CODES else None),
         "terminal_observation": status.get("phase"),
     }
+    if args.target_probe and any(exit_layers[name] != 0 for name in
+                                 ("attempt_exit_code", "driver_exit_code", "wrapper_exit_code")):
+        failures.append("EXIT_LAYER_NONZERO")
     metrics = {"gate_exits": gate_exits, "gate_blocking": gate_blocking,
                "replay_exit": replay_exit}
     metrics.update(ledger_metrics)
@@ -685,6 +695,8 @@ def terminal_verdict(args, status):
     metrics["rate_snapshot"] = rate_snapshot
     metrics["rate_assurance"] = "configured_unverified" if estimate is not None else None
     metrics.update(_billing_metrics(trace))
+    if args.target_probe:
+        successful = status.get("phase") == "ACCEPTED" and not failures and report_correct
     return {
         "schema": 1,
         "run_tag": status.get("run_tag"),
@@ -753,6 +765,8 @@ def main(argv=None):
     parser.add_argument("trace", help="run trace directory")
     parser.add_argument("--commitment-file", help="override controller commitment ledger")
     parser.add_argument("--commitment-key", help="override controller HMAC key")
+    parser.add_argument("--target-probe", action="store_true",
+                        help="verify the separately authorized target-contract probe")
     parser.add_argument("--json", action="store_true", help="emit one JSON object")
     parser.add_argument("--wait", action="store_true", help="poll until terminal or timeout")
     parser.add_argument("--poll-seconds", type=float, default=2.0)
@@ -762,10 +776,14 @@ def main(argv=None):
         parser.error("poll and timeout seconds must be positive")
     if bool(args.commitment_file) != bool(args.commitment_key):
         parser.error("commitment file and key must be supplied together")
+    if args.target_probe and (args.commitment_file or args.commitment_key):
+        parser.error("target-probe is mutually exclusive with commitment authority")
     manifest_path = Path(args.trace).resolve() / "run-manifest.json"
-    args.authenticated = bool(args.commitment_file) or os.path.lexists(manifest_path)
-    args.authority = "controller-hmac" if args.authenticated else "uncontrolled-local"
-    if args.authenticated and not args.commitment_file:
+    args.authenticated = (True if args.target_probe
+                          else bool(args.commitment_file) or os.path.lexists(manifest_path))
+    args.authority = ("operator-approved-target-probe" if args.target_probe
+                      else "controller-hmac" if args.authenticated else "uncontrolled-local")
+    if args.authenticated and not args.target_probe and not args.commitment_file:
         try:
             args.commitment_file, args.commitment_key = discover_controller_authority(args.trace)
         except (OSError, UnicodeError, ValueError, json.JSONDecodeError):

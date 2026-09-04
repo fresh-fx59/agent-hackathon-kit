@@ -26,6 +26,15 @@ def executable(path, body):
     path.chmod(0o755)
 
 
+def probe_rate_snapshot(root):
+    row = {"schema": 1, "run_tag": "target-contract-probe",
+           "effective_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+           "source": "local-fixture", "prompt_rub_per_token": 0.0,
+           "completion_rub_per_token": 0.0}
+    row["sha256"] = hashlib.sha256(json.dumps(row, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    (root / "probe-rate-snapshot.json").write_text(json.dumps(row), encoding="utf-8")
+
+
 class ControlledRunnerTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -968,6 +977,29 @@ os.stat=guarded_stat
 
 
 class TargetContractProbeControllerTests(unittest.TestCase):
+    def test_probe_preflight_rejects_ambient_control_before_trace_creation(self):
+        """A rejected controller environment cannot leave a runnable trace."""
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary); sealed = root / "sealed"; sealed.mkdir()
+            work = root / "work"; work.mkdir(); (sealed / "fixture").mkdir()
+            (sealed / "target-profile.json").write_text(json.dumps({
+                "provider_base_url": "http://127.0.0.1:9/v1", "route": "fixture",
+                "requested_model": "fixture-model", "expected_returned_identity": "fixture-model",
+                "secret_ref": "PROBE_TEST_SECRET", "qwen": {"cli": "/usr/bin/true"}}))
+            (sealed / "probe-budget.json").write_text("{}")
+            probe_rate_snapshot(sealed)
+            (sealed / "input-package.json").write_text("{}")
+            for name in ("corporate-settings.json", "fixture-manifest.json", "probe-manifest.json",
+                         "action-authorization.json"):
+                (sealed / name).write_text("{}")
+            env = dict(os.environ, PROBE_TEST_SECRET="fixture-only", SHERLOCK_FORBIDDEN="1")
+            result = subprocess.run(["bash", str(CONTROLLER), "--target-contract-probe",
+                                     "--sealed-input", str(sealed), "--work", str(work)],
+                                    text=True, capture_output=True, env=env)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("PROBE_ENV_CONFLICT", result.stderr)
+            self.assertFalse((work / "runs").exists())
+
     def test_probe_mode_has_a_separate_sealed_input_parser(self):
         """Probe dispatch never falls through to the paid controller config."""
         with tempfile.TemporaryDirectory() as temporary:
@@ -1001,17 +1033,18 @@ class TargetContractProbeControllerTests(unittest.TestCase):
             (sealed / "target-profile.json").write_text(json.dumps({
                 "provider_base_url": "http://127.0.0.1:9/v1", "route": "fixture",
                 "requested_model": "fixture-model", "expected_returned_identity": "fixture-model",
-                "qwen": {"cli": "/usr/bin/true"}}))
+                "secret_ref": "PROBE_TEST_SECRET", "qwen": {"cli": "/usr/bin/true"}}))
             (sealed / "probe-budget.json").write_text("{}")
+            probe_rate_snapshot(sealed)
             (sealed / "input-package.json").write_text("{}")
-            env = dict(os.environ, SHERLOCK_PROBE_TEST_MODE="1", SHERLOCK_API_KEY="fixture-only")
+            env = dict(os.environ, PROBE_TEST_SECRET="fixture-only")
             result = subprocess.run(["bash", str(CONTROLLER), "--target-contract-probe",
                                      "--sealed-input", str(sealed), "--work", str(work),
                                      "--transport-base-url", "http://127.0.0.1:9/v1"],
                                     text=True, capture_output=True, env=env, timeout=30)
             trace = work / "runs" / "target-contract-probe"
             self.assertNotIn("PROBE_UNAVAILABLE", result.stderr)
-            self.assertTrue((trace / "run-manifest.json").is_file())
+            self.assertFalse((trace / "run-manifest.json").exists())
             self.assertNotIn("/usr/bin/true", result.args)
 
 

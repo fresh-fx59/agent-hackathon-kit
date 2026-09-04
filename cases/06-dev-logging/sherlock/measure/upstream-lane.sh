@@ -198,6 +198,7 @@ upstream_lane_start() {
   # the note in run-bench.sh. Every caller of this helper already knows $model.
   local expected="${SHERLOCK_EXPECTED_RETURNED_IDENTITY:-$model}"
   local -a budget_env=()
+  local -a action_env=()
 
   # Defaults are the safe ones, so every early return below is already correct.
   LANE_BASE_URL="$up_base"
@@ -339,6 +340,15 @@ PY
       "UPSTREAM_MAX_WALL_SECONDS=$SHERLOCK_BUDGET_MAX_WALL_SECONDS"
       "UPSTREAM_MAX_CONSECUTIVE_PROVIDER_FAILURES=$SHERLOCK_BUDGET_MAX_CONSECUTIVE_PROVIDER_FAILURES"
     )
+    # The action envelope is a pair of sealed file descriptors expressed as
+    # paths.  Spell them into the proxy's explicit environment rather than
+    # relying on inherited process state: the target probe's paid admission is
+    # invalid if either the budget or its rate snapshot disappears at this
+    # last launcher boundary.
+    action_env=(
+      "UPSTREAM_ACTION_BUDGET=${UPSTREAM_ACTION_BUDGET:-}"
+      "UPSTREAM_RATE_SNAPSHOT=${UPSTREAM_RATE_SNAPSHOT:-}"
+    )
   fi
 
   if [ "$strict" = 1 ]; then
@@ -353,7 +363,7 @@ PY
       UPSTREAM_FIRST_TOKEN_MS="${SHERLOCK_UPSTREAM_FIRST_TOKEN_MS:-240000}" \
       UPSTREAM_RETRY_BASE_MS="${SHERLOCK_UPSTREAM_RETRY_BASE_MS:-2000}" \
       UPSTREAM_GENERATION_WINDOW_S="${SHERLOCK_GENERATION_WINDOW_S:--1}" \
-      UPSTREAM_BODY_DIR="$body_dir" "${lane_env[@]}" "${budget_env[@]}" \
+      UPSTREAM_BODY_DIR="$body_dir" "${lane_env[@]}" "${budget_env[@]}" "${action_env[@]}" \
       python3 "$proxy" >/dev/null 2>>"${log_path%.jsonl}.proxy.err" &
   else
     # Bash 3.2 treats an empty-array expansion as unbound under `set -u`.
