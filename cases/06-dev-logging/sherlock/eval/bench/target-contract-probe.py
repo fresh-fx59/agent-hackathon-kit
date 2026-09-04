@@ -33,9 +33,13 @@ GATES = ("reportcheck", "citecheck", "statecheck", "triagecheck")
 PROBE_MANIFEST_KEYS = {"schema", "action", "created_at", "expires_at", "nonce",
                        "target_profile_sha256", "probe_budget_sha256", "prompt_sha256",
                        "fixture_manifest_sha256", "input_package_sha256", "rate_snapshot_sha256"}
-DEFAULT_BUDGET = {"schema": 2, "max_provider_calls": 2, "max_prompt_tokens": 400000,
-                  "max_completion_tokens": 40000, "max_wall_time_s": 600,
-                  "max_estimated_cost_rub": 15.0}
+PROBE_MAX_PROVIDER_CALLS = 6
+PROBE_MAX_OUTPUT_TOKENS = 20000
+PROBE_SESSION_TOKEN_LIMIT = 230000
+DEFAULT_BUDGET = {"schema": 2, "max_provider_calls": PROBE_MAX_PROVIDER_CALLS,
+                  "max_prompt_tokens": PROBE_MAX_PROVIDER_CALLS * PROBE_SESSION_TOKEN_LIMIT,
+                  "max_completion_tokens": PROBE_MAX_PROVIDER_CALLS * PROBE_MAX_OUTPUT_TOKENS,
+                  "max_wall_time_s": 600, "max_estimated_cost_rub": 55.0}
 
 
 class ProbeFailure(ValueError):
@@ -478,9 +482,10 @@ def _profile(args, settings_sha):
                "requested_model": args.requested_model,
                "expected_returned_identity": args.expected_returned_identity,
                "identity_mode": args.identity_mode, "temperature": 0, "top_p": 1,
-               "max_output_tokens": 20000, "session_token_limit": 230000,
+               "max_output_tokens": PROBE_MAX_OUTPUT_TOKENS,
+               "session_token_limit": PROBE_SESSION_TOKEN_LIMIT,
                "cache": {"enabled": False}, "interactive": {"enabled": False},
-               "qwen": {"cli": str(qwen)}, "limits": {"requests": 10},
+               "qwen": {"cli": str(qwen)}, "limits": {"requests": PROBE_MAX_PROVIDER_CALLS},
                "settings_sha256": settings_sha,
                "system_prompt_sha256": sha256((skill / "SKILL.md").read_bytes()),
                "skill_sha256": _tree_digest(skill),
@@ -545,6 +550,8 @@ def prepare(args, secret_reader=None):
         fixture = FIXTURE.build_fixture(args.source_corpus, fixture_dir, HERE / "probe" / "recipe.json", 4401)
         settings_tool = HERE.parent.parent / "measure" / "corporate-settings.py"
         settings_run = subprocess.run(["python3", str(settings_tool), "emit-run", "--max-retries", "0",
+                                       "--max-tokens", str(PROBE_MAX_OUTPUT_TOKENS),
+                                       "--session-token-limit", str(PROBE_SESSION_TOKEN_LIMIT),
                                        "--skill-directory", str(HERE.parent.parent / "skills" / "v44")],
                                       text=True, capture_output=True, timeout=30)
         if settings_run.returncode:
