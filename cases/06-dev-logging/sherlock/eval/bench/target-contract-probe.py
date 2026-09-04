@@ -33,8 +33,8 @@ GATES = ("reportcheck", "citecheck", "statecheck", "triagecheck")
 PROBE_MANIFEST_KEYS = {"schema", "action", "created_at", "expires_at", "nonce",
                        "target_profile_sha256", "probe_budget_sha256", "prompt_sha256",
                        "fixture_manifest_sha256", "input_package_sha256", "rate_snapshot_sha256"}
-DEFAULT_BUDGET = {"schema": 2, "max_provider_calls": 10, "max_prompt_tokens": 400000,
-                  "max_completion_tokens": 20000, "max_wall_time_s": 600,
+DEFAULT_BUDGET = {"schema": 2, "max_provider_calls": 2, "max_prompt_tokens": 400000,
+                  "max_completion_tokens": 40000, "max_wall_time_s": 600,
                   "max_estimated_cost_rub": 15.0}
 
 

@@ -1035,6 +1035,12 @@ def target_contract_probe(argv):
                   "max_estimated_cost_rub": budget["max_estimated_cost_rub"]}
         if any(type(value) not in (int, float) or isinstance(value, bool) or value < 0 for value in limits.values()):
             raise ValueError()
+        if type(limits["max_provider_calls"]) is not int or limits["max_provider_calls"] <= 0:
+            raise ValueError()
+        per_dispatch_timeout = (limits["max_wall_time_s"] /
+                                limits["max_provider_calls"])
+        if per_dispatch_timeout <= 0:
+            raise ValueError()
         action = trace / "upstream-action-budget.json"
         atomic_replace(action, canonical({"schema": 1, "run_tag": trace.name, "limits": limits}) + b"\n")
     except (OSError, ValueError, KeyError, TypeError):
@@ -1055,10 +1061,10 @@ def target_contract_probe(argv):
                 "SHERLOCK_BUDGET_MAX_CONSECUTIVE_PROVIDER_FAILURES": "1",
                 "SHERLOCK_RESUME_MAX_ATTEMPTS": "0", "SHERLOCK_UPSTREAM_RETRY": "0",
                 "SHERLOCK_TARGET_PROBE_MODE": "1", secret_ref: os.environ[secret_ref],
-                # The proxy reserves its per-dispatch read window.  Bind it to
-                # the same paid envelope rather than inheriting its 1800s
-                # default, which would make a 600s probe impossible to admit.
-                "UPSTREAM_READ_TIMEOUT": str(limits["max_wall_time_s"]),
+                # The proxy reserves this timeout for every paid dispatch.
+                # Divide the aggregate wall envelope across its declared calls;
+                # assigning the whole envelope to each call admits only one.
+                "UPSTREAM_READ_TIMEOUT": str(per_dispatch_timeout),
                 "SHERLOCK_API_KEY": os.environ[secret_ref],
                 "SHERLOCK_PROBE_SEALED_INPUT": str(sealed),
                 # The probe question is itself sealed evidence.  Give the

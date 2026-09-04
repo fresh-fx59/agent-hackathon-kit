@@ -601,6 +601,11 @@ print(json.dumps([{'type':'result','result':'ok','is_error':False,'session_id':'
         self.assertEqual(budget["schema"], 2)
         self.assertEqual(budget["limits"], {key: self.probe.DEFAULT_BUDGET[key] for key in (
             "max_provider_calls", "max_prompt_tokens", "max_completion_tokens", "max_wall_time_s", "max_estimated_cost_rub")})
+        profile = json.loads((trace / "target-profile.json").read_text())
+        self.assertGreaterEqual(budget["limits"]["max_completion_tokens"],
+                                2 * profile["max_output_tokens"])
+        self.assertLessEqual(2 * budget["projected"]["wall_time_s"],
+                             budget["limits"]["max_wall_time_s"])
         self.assertEqual(budget["rate_snapshot"], json.loads((trace / "probe-rate-snapshot.json").read_text()))
         # The legacy failure cap protects the lane's retry loop; it is not a
         # paid-envelope limit and so must not appear in schema-2's five limits.
@@ -1003,8 +1008,8 @@ print(json.dumps([{'type':'result','result':'ok','is_error':False,'session_id':'
         rate["sha256"] = self._sha_bytes(self.probe.canonical(rate))
         (trace / "upstream-budget-state.json").write_text(json.dumps({"schema": 2,
             "run_tag": trace.name, "updated_at": effective,
-            "limits": {"max_provider_calls": 10, "max_prompt_tokens": 400000,
-                       "max_completion_tokens": 20000, "max_wall_time_s": 600,
+            "limits": {"max_provider_calls": 2, "max_prompt_tokens": 400000,
+                       "max_completion_tokens": 40000, "max_wall_time_s": 600,
                        "max_estimated_cost_rub": 15.0},
             "budget_assurance": "client_pre_dispatch", "projected": {"provider_calls": 1,
             "prompt_tokens": 1, "completion_tokens": 1, "wall_time_s": 1.0, "estimated_cost_rub": 0.1},
