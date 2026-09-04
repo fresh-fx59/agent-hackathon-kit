@@ -1066,7 +1066,10 @@ def _apply_route_model(body, route):
                 requested = obj["model"]
                 obj["model"] = route.model
                 sent = route.model
-                out = json.dumps(obj, ensure_ascii=False).encode("utf-8")
+                dump_options = {"ensure_ascii": False}
+                if _ACTION_BUDGET_ENABLED:
+                    dump_options["separators"] = (",", ":")
+                out = json.dumps(obj, **dump_options).encode("utf-8")
         except Exception:
             pass
     if requested is None:
@@ -2375,6 +2378,13 @@ class Proxy(BaseHTTPRequestHandler):
                     if not _reserve_dispatch({}):
                         self._budget_refusal()
                         return
+                # Use the same compact representation that route rewriting
+                # emits.  Otherwise json.dumps' default separator spaces can
+                # grow a large compact client request by many kilobytes after
+                # its pre-route reservation, falsely tripping the 256-byte
+                # model-growth wall before any provider contact.
+                body = json.dumps(parsed_request, ensure_ascii=False,
+                                  separators=(",", ":")).encode("utf-8")
                 dispatch_estimate = _estimate_dispatch(body, request_max_tokens,
                                                        _RATE_SNAPSHOT)
             except (BudgetUnknown, ValueError, TypeError, KeyError):

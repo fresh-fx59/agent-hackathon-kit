@@ -45,6 +45,7 @@ class Stub(BaseHTTPRequestHandler):
         body = self.rfile.read(n)
         self.server.seen.append({"path": self.path,
                                  "auth": self.headers.get("Authorization"),
+                                 "raw_body": body,
                                  "body": json.loads(body or b"{}")})
         mode = self.server.mode
         # Simulate a provider BURST: fail the next N calls, then behave. This is
@@ -661,6 +662,15 @@ class ItCanRestoreTheProviderAlias(ProxyCase):
         self.assertEqual(body["tools"], [1, 2])
         self.assertEqual(body["messages"][0]["content"], "hi")
         self.assertIs(body["stream"], False)
+
+    def test_non_action_model_rewrite_keeps_the_existing_json_encoding(self):
+        self.start_rewriting("json_toolcall", "[SP]deepseek-v4-flash")
+        request = {"model": "deepseek-v4-flash", "messages": [{"role": "user",
+                   "content": "hi"}], "tools": [1, 2], "stream": False}
+        self.post(request)
+        expected = dict(request)
+        expected["model"] = "[SP]deepseek-v4-flash"
+        self.assertEqual(self.srv.seen[0]["raw_body"], json.dumps(expected).encode())
 
     def test_without_the_env_var_the_model_is_left_alone(self):
         """Default must stay a pass-through proxy."""

@@ -382,6 +382,32 @@ class DispatchBudget(unittest.TestCase):
         self.assertEqual(self.upstream.requests, 0)
         self.assertEqual(self.budget(state)["reason"], "MAX_MAX_PROMPT_TOKENS")
 
+    def test_compact_large_request_is_not_reformatted_past_reserved_envelope(self):
+        payload = {
+            "model": "fixture-model",
+            "max_tokens": 10,
+            "messages": [{"role": "user", "content": "hello"}],
+            "tools": [
+                {"type": "function", "function": {
+                    "name": "tool_%d" % index,
+                    "description": "fixture",
+                    "parameters": {"type": "object", "properties": {
+                        "value": {"type": "string"}}},
+                }} for index in range(200)
+            ],
+        }
+        raw = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+        limits = {"max_provider_calls": 10,
+                  "max_prompt_tokens": len(raw) + 256,
+                  "max_completion_tokens": 1000,
+                  "max_wall_time_s": 300,
+                  "max_estimated_cost_rub": 100000.0}
+        state = self.start(limits, extra_env={"UPSTREAM_MODEL": "fixture-model"})
+        status, _ = self.post_raw(raw)
+        self.assertEqual(status, 200)
+        self.assertEqual(self.upstream.requests, 1)
+        self.assertEqual(self.budget(state)["verdict"], "WITHIN")
+
     def test_retry_needs_a_second_reservation_before_second_contact(self):
         self.upstream.statuses = [503, 200]
         limits = {"max_provider_calls": 2, "max_prompt_tokens": 10000,
