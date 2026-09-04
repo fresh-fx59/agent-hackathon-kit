@@ -224,7 +224,9 @@ import pathlib, stat, sys
 root=pathlib.Path(sys.argv[1]); found=[]
 for path in root.iterdir():
     mode=path.lstat().st_mode
-    if stat.S_ISDIR(mode) and not stat.S_ISLNK(mode): found.append(path)
+    manifest=path/'run-manifest.json'
+    if (stat.S_ISDIR(mode) and not stat.S_ISLNK(mode) and manifest.is_file()
+            and not manifest.is_symlink()): found.append(path)
 if len(found) != 1: raise SystemExit("expected exactly one controller trace")
 print(found[0])
 PY

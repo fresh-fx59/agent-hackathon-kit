@@ -318,7 +318,10 @@ class LauncherTests(unittest.TestCase):
             root=pathlib.Path(os.environ['SHERLOCK_CONTROLLER_ROOT']).parent
             keep=[n for n in os.environ if n.startswith('SHERLOCK_') or n.startswith('GIT_CONFIG_') or n in ('BENCH_RUNS','QWEN_BIN')]
             (root/'captured-env.json').write_text(json.dumps({n:os.environ[n] for n in keep},sort_keys=True))
-            (pathlib.Path(os.environ['BENCH_RUNS'])/'run-fixed').mkdir()
+            runs=pathlib.Path(os.environ['BENCH_RUNS'])
+            (runs/'run-fixed').mkdir()
+            (runs/'run-fixed'/'run-manifest.json').write_text('{}\\n')
+            (runs/'run-fixed.upstream.bodies').mkdir()
             PY
             """))
         subprocess.run(["git", "init", "-q", str(repo)], check=True)
