@@ -20,6 +20,7 @@ import threading
 ROOT = Path(__file__).resolve().parents[2]
 BENCH = ROOT / "eval" / "bench"
 PROBE_PATH = BENCH / "target-contract-probe.py"
+TRUE_BIN = shutil.which("true") or "/usr/bin/true"
 
 
 def load_probe():
@@ -46,7 +47,7 @@ class TargetContractProbeTest(unittest.TestCase):
             root=self.root, source_corpus=self.source, provider_base_url="http://127.0.0.1:9",
             route="paid-route", secret_ref="SHERLOCK_API_KEY", requested_model="deepseek-v4-20260901",
             expected_returned_identity="deepseek-v4-20260901",
-            identity_mode="provider_pinned_version", qwen_bin="/usr/bin/true", arm="target",
+            identity_mode="provider_pinned_version", qwen_bin=TRUE_BIN, arm="target",
             rate_snapshot=self.rate_snapshot,
         )
 
@@ -456,7 +457,7 @@ class TargetContractProbeTest(unittest.TestCase):
                    "--route", "paid-route", "--secret-ref", "SHERLOCK_API_KEY",
                    "--requested-model", "deepseek-v4-20260901", "--expected-returned-identity",
                    "deepseek-v4-20260901", "--identity-mode", "provider_pinned_version",
-                   "--qwen-bin", "/usr/bin/true", "--arm", "target", "--rate-snapshot", str(self.rate_snapshot), "--json"]
+                   "--qwen-bin", TRUE_BIN, "--arm", "target", "--rate-snapshot", str(self.rate_snapshot), "--json"]
         done = subprocess.run(command, text=True, capture_output=True)
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertEqual(json.loads(done.stdout)["root"], str(root))
