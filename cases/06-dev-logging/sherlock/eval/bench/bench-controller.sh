@@ -42,6 +42,7 @@ RUNTIME_ENV_ALLOW = {
     "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "http_proxy", "https_proxy", "no_proxy",
     "SSL_CERT_FILE", "SSL_CERT_DIR", "NODE_EXTRA_CA_CERTS",
 }
+FREE_TEST_ENV_ALLOW = {*RUNTIME_ENV_ALLOW}
 HEALTH_ENV_ALLOW = {*RUNTIME_ENV_ALLOW, "SHERLOCK_API_KEY"}
 TARGET_ENV_ALLOW = {
     *RUNTIME_ENV_ALLOW,
@@ -689,7 +690,8 @@ def run_fresh(root, runs, controller_id, controller, key_path, key, limits, lock
     atomic_replace(controller / "controller-identity.json", canonical(identity) + b"\n")
     persist(controller, controller_id, "FIXING", tag)
     persist(controller, controller_id, "TESTING", tag)
-    free = subprocess.run(os.environ["SHERLOCK_FREE_TEST_COMMAND"], shell=True)
+    free = subprocess.run(os.environ["SHERLOCK_FREE_TEST_COMMAND"], shell=True,
+                          env=controlled_environment(FREE_TEST_ENV_ALLOW))
     if free.returncode:
         persist(controller, controller_id, "BLOCKED", tag, reason="FREE_TEST_FAILED"); return 1
     try: controller_proof = proc_snapshot(os.getpid(), proc_root, controller=True)

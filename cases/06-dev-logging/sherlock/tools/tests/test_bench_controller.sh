@@ -580,6 +580,40 @@ os.stat=guarded_stat
         self.assertEqual([(item["size_kb"],item["attempt"]) for item in receipt["history"]],
                          [(100,1),(250,1),(400,1)])
 
+    def test_free_test_environment_is_runtime_allowlisted_without_secrets(self):
+        capture=self.fx.base/"free-test-environment.json"
+        probe=self.fx.base/"capture-free-test-environment.py"
+        probe.write_text(
+            "import json,os,sys\n"
+            "json.dump(dict(os.environ),open(sys.argv[1],'w',encoding='utf-8'))\n",
+            encoding="utf-8")
+        runtime={
+            "HOME":str(self.fx.base/"free-home"), "LANG":"C", "LANGUAGE":"en",
+            "LC_ALL":"C", "LC_CTYPE":"C", "TMPDIR":str(self.fx.base/"free-tmp"),
+            "TEMP":str(self.fx.base/"free-temp"), "TMP":str(self.fx.base/"free-tmp-short"),
+            "TZ":"UTC", "HTTP_PROXY":"http://127.0.0.1:1",
+            "HTTPS_PROXY":"http://127.0.0.1:2", "NO_PROXY":"localhost",
+            "http_proxy":"http://127.0.0.1:3", "https_proxy":"http://127.0.0.1:4",
+            "no_proxy":"127.0.0.1", "SSL_CERT_FILE":str(self.fx.base/"cert.pem"),
+            "SSL_CERT_DIR":str(self.fx.base/"certs"),
+            "NODE_EXTRA_CA_CERTS":str(self.fx.base/"node-cert.pem"),
+        }
+        command="%s %s %s" % tuple(map(shlex.quote,
+            (sys.executable,str(probe),str(capture))))
+        env=self.fx.env(**runtime,SHERLOCK_FREE_TEST_COMMAND=command,
+                        SHERLOCK_API_KEY="fixture-api-key-must-not-cross",
+                        JUDGE_API_KEY="fixture-judge-secret",
+                        ARBITRARY_SECRET_SENTINEL="must-not-cross")
+        result=self.fx.run(env=env)
+        self.assertEqual(result.returncode,0,(result.stdout,result.stderr))
+        child=json.loads(capture.read_text())
+        self.assertEqual({name:child.get(name) for name in runtime},runtime)
+        permitted=set(runtime)|{"PATH","PWD","SHLVL","_","__CF_USER_TEXT_ENCODING"}
+        self.assertEqual(set(child)-permitted,set(),set(child)-permitted)
+        self.assertNotIn("SHERLOCK_API_KEY",child)
+        self.assertNotIn("JUDGE_API_KEY",child)
+        self.assertNotIn("ARBITRARY_SECRET_SENTINEL",child)
+
     def test_health_environment_is_allowlisted_and_forces_subagents_off(self):
         env=self.fx.env(SHERLOCK_ALLOW_SUBAGENT="1",JUDGE_API_KEY="fixture-judge-secret",
                         ARBITRARY_SECRET_SENTINEL="must-not-cross")
