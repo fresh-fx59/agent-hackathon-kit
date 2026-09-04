@@ -312,7 +312,7 @@ class LauncherTests(unittest.TestCase):
             python3 - <<'PY'
             import json, os, pathlib
             root=pathlib.Path(os.environ['SHERLOCK_CONTROLLER_ROOT']).parent
-            keep=[n for n in os.environ if n.startswith('SHERLOCK_') or n in ('BENCH_RUNS','QWEN_BIN')]
+            keep=[n for n in os.environ if n.startswith('SHERLOCK_') or n.startswith('GIT_CONFIG_') or n in ('BENCH_RUNS','QWEN_BIN')]
             (root/'captured-env.json').write_text(json.dumps({n:os.environ[n] for n in keep},sort_keys=True))
             (pathlib.Path(os.environ['BENCH_RUNS'])/'run-fixed').mkdir()
             PY
@@ -354,6 +354,9 @@ class LauncherTests(unittest.TestCase):
         self.assertIn("REPO=" + shlex.quote(str(repo.resolve())), free_test)
         self.assertIn('export GIT_CONFIG_VALUE_0="$REPO"', free_test)
         self.assertNotIn('export GIT_CONFIG_VALUE_0="$ROOT"', free_test)
+        self.assertEqual(captured["GIT_CONFIG_COUNT"], "1")
+        self.assertEqual(captured["GIT_CONFIG_KEY_0"], "safe.directory")
+        self.assertEqual(captured["GIT_CONFIG_VALUE_0"], str(repo.resolve()))
         head = subprocess.check_output(["git", "-C", str(repo), "rev-parse", "HEAD"],
                                        text=True).strip()
         self.assertEqual((output / "implementation-commit.txt").read_text().strip(), head)
