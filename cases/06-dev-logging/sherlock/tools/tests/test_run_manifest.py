@@ -738,6 +738,38 @@ class RunManifestTests(unittest.TestCase):
                 fx = Fixture(self.root_for(code.lower())); fx.stage(); fx.write_health(**updates)
                 with self.assertRaisesRegex(MOD.ManifestError, code): fx.create()
 
+    def test_verification_uses_authenticated_commit_time_for_health_freshness(self):
+        self.fx.stage()
+        self.fx.create()
+        real_datetime = dt.datetime
+        verified_later = real_datetime.now(dt.timezone.utc) + dt.timedelta(minutes=20)
+
+        class LaterDatetime(real_datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return verified_later if tz is not None else verified_later.replace(tzinfo=None)
+
+        with mock.patch.object(MOD.dt, "datetime", LaterDatetime):
+            self.fx.verify()
+
+    def test_authenticated_commit_time_must_fall_inside_health_window(self):
+        now = dt.datetime.now(dt.timezone.utc)
+        cases = (("expired", now + dt.timedelta(minutes=11), "E_HEALTH_STALE"),
+                 ("before-check", now - dt.timedelta(minutes=3), "E_HEALTH_FUTURE"))
+        for name, committed_at, code in cases:
+            with self.subTest(name=name):
+                fx = Fixture(self.root_for("commit-time-" + name)); fx.stage(); fx.create()
+                row = json.loads(fx.commitment.read_text(encoding="utf-8"))
+                row["committed_at"] = committed_at.isoformat().replace("+00:00", "Z")
+                payload = dict(row); payload.pop("hmac_sha256")
+                row["hmac_sha256"] = hmac.new(
+                    fx.commitment_key.read_bytes(),
+                    json.dumps(payload, ensure_ascii=False, sort_keys=True,
+                               separators=(",", ":")).encode(), hashlib.sha256).hexdigest()
+                fx.commitment.write_text(json.dumps(row) + "\n", encoding="utf-8")
+                with self.assertRaisesRegex(MOD.ManifestError, code):
+                    fx.verify()
+
     def test_malformed_key_schema_has_stable_errors(self):
         cases = (({"files": None}, "E_KEY_FILES"),
                  ({"files": [None]}, "E_KEY_FILE_ENTRY"),

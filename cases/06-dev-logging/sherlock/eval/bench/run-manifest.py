@@ -666,7 +666,7 @@ def utc(value):
     return parsed
 
 
-def validate_health(path, lane, provider, requested_model, returned_identity):
+def validate_health(path, lane, provider, requested_model, returned_identity, reference_time=None):
     row, asset = load_json(path, "E_HEALTH_JSON")
     if isinstance(row.get("schema"), bool) or row.get("schema") != 1:
         fail("E_HEALTH_SCHEMA", "unsupported health receipt schema")
@@ -675,10 +675,13 @@ def validate_health(path, lane, provider, requested_model, returned_identity):
             identity(value)
         except ManifestError:
             fail("E_HEALTH_IDENTITY", "health identity must be a bounded label")
-    checked, expires, now = utc(row.get("checked_at")), utc(row.get("expires_at")), dt.datetime.now(dt.timezone.utc)
-    if checked > now + dt.timedelta(seconds=MAX_FUTURE_SKEW):
+    checked, expires = utc(row.get("checked_at")), utc(row.get("expires_at"))
+    reference = reference_time or dt.datetime.now(dt.timezone.utc)
+    if not isinstance(reference, dt.datetime) or reference.tzinfo is None or reference.utcoffset() != dt.timedelta(0):
+        fail("E_HEALTH_TIME", "health reference time must be UTC")
+    if checked > reference + dt.timedelta(seconds=MAX_FUTURE_SKEW):
         fail("E_HEALTH_FUTURE", "health check time exceeds clock skew")
-    if now - checked > dt.timedelta(seconds=MAX_HEALTH_SECONDS) or expires <= now:
+    if reference - checked > dt.timedelta(seconds=MAX_HEALTH_SECONDS) or expires <= reference:
         fail("E_HEALTH_STALE", "health receipt is stale")
     if expires <= checked or expires - checked > dt.timedelta(seconds=MAX_HEALTH_SECONDS):
         fail("E_HEALTH_LIFETIME", "health receipt lifetime exceeds 15 minutes")
@@ -1061,7 +1064,7 @@ def _verify_commitment(path, row, trace, key, key_id):
     if (commitment["trace_dir"], commitment["trace_identity_sha256"],
             commitment["manifest_sha256"]) != expected:
         fail("E_COMMITMENT_MISMATCH", "external manifest commitment does not match")
-    return canonical_path
+    return canonical_path, commitment
 
 
 def create_manifest(trace, run_tag, dataset, arm, source_corpus, answer_key, renderer,
@@ -1179,7 +1182,7 @@ def verify_manifest(trace, commitment_file, commitment_key):
     key_bytes, key_id, _ = _commitment_key(key_path)
     if commitment.get("key_id") != key_id:
         fail("E_COMMITMENT_AUTH", "external manifest commitment authentication failed")
-    _verify_commitment(commitment_file, row, trace, key_bytes, key_id)
+    _, authenticated_commitment = _verify_commitment(commitment_file, row, trace, key_bytes, key_id)
     artifacts = row.get("artifacts")
     if not isinstance(artifacts, dict):
         fail("E_MANIFEST_SCHEMA", "artifact inventory is invalid")
@@ -1245,7 +1248,8 @@ def verify_manifest(trace, commitment_file, commitment_key):
     if not isinstance(health_row, dict) or not isinstance(health_row.get("path"), str):
         fail("E_MANIFEST_SCHEMA", "health identity is invalid")
     health = validate_health(health_row["path"], target.get("lane"), target.get("provider"),
-                             target.get("requested_model"), target.get("expected_returned_identity"))
+                             target.get("requested_model"), target.get("expected_returned_identity"),
+                             utc(authenticated_commitment["committed_at"]))
     if health["sha256"] != health_row.get("sha256"):
         fail("E_HEALTH_RECEIPT_DIGEST_MISMATCH", "health receipt digest changed")
     expected_input = input_identity(artifacts["prompt"]["path"], corpus["staged_path"], source,
