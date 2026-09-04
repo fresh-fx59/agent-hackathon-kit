@@ -185,8 +185,13 @@ class ValidityFixture:
     def write_candidate(self, **updates):
         row={"schema":1,"run_tag":"run-001","result_stream":"out.json","work_root":"work",
              "artifact":"work/report.md","upstream_completed":"upstream-completed.jsonl",
-             "transport":{"exit_code":None,"status":"success","duration_s":None},
-             "usage":{"turns":2,"input_tokens":10,"output_tokens":5}}
+             "transport":{"exit_code":0,"status":"success","duration_s":7},
+             # Match the exact object emitted by run-bench.sh.  The old helper
+             # silently omitted both fields added in 69c5a11, so every test
+             # exercised a candidate shape that production never writes.
+             "stats":self.result.get("stats"),
+             "usage":{"turns":2,"input_tokens":10,"output_tokens":5,
+                      "errored":False}}
         row.update(updates)
         (self.trace / "candidate.json").write_text(json.dumps(row), encoding="utf-8")
 
@@ -226,8 +231,9 @@ class BenchValidityTests(unittest.TestCase):
         self.assertFalse(fx.ledger.exists())
         fx=self.fixture(delivered="", artifact="surviving report")
         fx.result.update({"is_error":True,"error":"provider failed","result":"", "usage":{}}); fx.write_result()
-        fx.write_candidate(transport={"exit_code":None,"status":"error","duration_s":None},
-                           usage={"turns":None,"input_tokens":None,"output_tokens":None})
+        fx.write_candidate(transport={"exit_code":0,"status":"error","duration_s":7},
+                           usage={"turns":None,"input_tokens":None,"output_tokens":None,
+                                  "errored":True})
         fx.write_upstream([{"run_tag":"run-001","returned_model":None,"status":502}])
         row=fx.validate(); self.assertFalse(row["valid"]); self.assertTrue(row["artifact_only"])
         self.assertIsNone(row["usage"]["input_tokens"]); self.assertFalse(fx.ledger.exists())
@@ -403,6 +409,33 @@ class BenchValidityTests(unittest.TestCase):
                          text=True,capture_output=True)
         self.assertEqual(p.returncode,1,p.stderr); self.assertEqual(p.stderr,"")
         self.assertIn("candidate_invalid",json.loads(p.stdout)["reasons"]); self.assertNotIn("Traceback",p.stdout)
+
+    def test_real_candidate_metadata_is_typed_and_fail_closed(self):
+        fx=self.fixture(); row=fx.validate()
+        self.assertTrue(row["valid"], row)
+        for updates in ({"stats": []},
+                        {"usage":{"turns":2,"input_tokens":10,"output_tokens":5,
+                                  "errored":1}}):
+            with self.subTest(updates=updates):
+                fx=self.fixture(); fx.write_candidate(**updates)
+                row=fx.validate()
+                self.assertFalse(row["valid"])
+                self.assertIn("candidate_invalid", row["reasons"])
+        fx=self.fixture()
+        forged=dict(fx.result["stats"])
+        forged["tools"]={"totalCalls":999}
+        fx.write_candidate(stats=forged)
+        row=fx.validate()
+        self.assertFalse(row["valid"])
+        self.assertIn("candidate_metadata_mismatch", row["reasons"])
+        for transport in ({"exit_code":2,"status":"success","duration_s":7},
+                          {"exit_code":0,"status":"success","duration_s":6},
+                          {"exit_code":0,"status":"error","duration_s":7}):
+            with self.subTest(transport=transport):
+                fx=self.fixture(); fx.write_candidate(transport=transport)
+                row=fx.validate()
+                self.assertFalse(row["valid"])
+                self.assertIn("candidate_metadata_mismatch", row["reasons"])
 
     def test_real_v28_helpers_expose_required_inventory_contract(self):
         stop=load_path("real_stop",SHERLOCK/"skills/v28/tools/stopcheck.py")

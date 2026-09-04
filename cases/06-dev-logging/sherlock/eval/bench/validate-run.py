@@ -19,9 +19,10 @@ import unicodedata
 HERE = Path(__file__).resolve().parent
 SHERLOCK = HERE.parents[1]
 CANDIDATE_KEYS = {"schema", "run_tag", "result_stream", "work_root", "artifact",
-                  "upstream_completed", "transport", "usage"}
+                  "upstream_completed", "transport", "stats", "usage"}
 TRANSPORT_KEYS = {"exit_code", "status", "duration_s"}
-USAGE_KEYS = {"turns", "input_tokens", "output_tokens"}
+USAGE_KEYS = {"turns", "input_tokens", "output_tokens", "errored"}
+USAGE_NUMBER_KEYS = {"turns", "input_tokens", "output_tokens"}
 MAX_JSON = 1024 * 1024
 MAX_STREAM = 64 * 1024 * 1024
 MAX_STDERR = 64 * 1024
@@ -127,11 +128,15 @@ def load_candidate(trace_fd, manifest):
         fail("candidate_invalid")
     if not isinstance(usage, dict) or set(usage) != USAGE_KEYS:
         fail("candidate_invalid")
+    if row.get("stats") is not None and not isinstance(row.get("stats"), dict):
+        fail("candidate_invalid")
     if transport["status"] not in (None, "success", "error"):
         fail("candidate_invalid")
     bounded_number(transport["exit_code"], True); bounded_number(transport["duration_s"])
-    for key in USAGE_KEYS:
+    for key in USAGE_NUMBER_KEYS:
         bounded_number(usage[key], True)
+    if type(usage["errored"]) is not bool:
+        fail("candidate_invalid")
     return row, data
 
 MIN_MAIN_REQUESTS = 2
@@ -231,18 +236,23 @@ def result_facts(data, candidate):
         fail("result_stream_invalid")
     api_error = message.lstrip().startswith("[API Error") or ("[API Error" in message and len(message) < 400)
     status = "error" if final.get("is_error") is True or api_error else "success"
-    derived = {"status": status,
-               "exit_code": final.get("exit_code") if type(final.get("exit_code")) is int else None,
-               "duration_s": final.get("duration_s") if isinstance(final.get("duration_s"), (int, float)) else None}
     usage = final.get("usage") if isinstance(final.get("usage"), dict) else {}
     derived_usage = {"turns": final.get("num_turns") if type(final.get("num_turns")) is int else None,
                      "input_tokens": usage.get("input_tokens") if type(usage.get("input_tokens")) is int else None,
                      "output_tokens": usage.get("output_tokens") if type(usage.get("output_tokens")) is int else None}
-    for group, actual in ((candidate["transport"], derived), (candidate["usage"], derived_usage)):
-        for key, value in group.items():
-            if value is not None and value != actual.get(key):
-                fail("candidate_metadata_mismatch")
-    return final, message, derived, derived_usage
+    # Qwen owns result status, usage, and stats.  The shell runner owns exit and
+    # duration, which are reconciled against attempts.jsonl below; Qwen's result
+    # object normally has neither field.  Comparing all runner transport fields
+    # to the result made every real candidate added in 69c5a11 impossible.
+    if candidate["transport"]["status"] != status:
+        fail("candidate_metadata_mismatch")
+    for key, value in candidate["usage"].items():
+        expected = status == "error" if key == "errored" else derived_usage.get(key)
+        if value is not None and value != expected:
+            fail("candidate_metadata_mismatch")
+    if candidate["stats"] != final.get("stats"):
+        fail("candidate_metadata_mismatch")
+    return final, message, dict(candidate["transport"]), derived_usage
 
 def scan_tree(root_fd, excluded=(), destination=None):
     rows, blobs = [], []
@@ -481,7 +491,7 @@ def validate_fresh(trace, trace_fd, manifest, candidate, candidate_data):
     artifact_only = transport["status"] != "success" and bool(artifact.strip())
     if transport["status"] != "success": reasons.append("transport_failed")
     if artifact_only:
-        usage = {key: None for key in USAGE_KEYS}
+        usage = {key: None for key in USAGE_NUMBER_KEYS}
     try:
         receipts = [json.loads(line) for line in upstream_data.decode("utf-8").splitlines() if line.strip()]
         if not all(isinstance(row, dict) for row in receipts): raise ValueError
@@ -549,6 +559,11 @@ def validate_fresh(trace, trace_fd, manifest, candidate, candidate_data):
         reasons.append("inventory_target_failed")
     receipt = skill_receipt(final)
     terminal = terminal_receipt(trace_fd)
+    if terminal["exit_code"] != "unknown" and transport["exit_code"] != terminal["exit_code"]:
+        fail("candidate_metadata_mismatch")
+    if (transport["duration_s"] is not None and terminal["duration_s"] is not None
+            and transport["duration_s"] < terminal["duration_s"]):
+        fail("candidate_metadata_mismatch")
     reasons.extend(terminal["reasons"])
     reasons.extend(receipt["reasons"])
     contamination_row = contamination(manifest, message, artifact, delivered, work_blobs,
