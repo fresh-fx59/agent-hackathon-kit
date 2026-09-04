@@ -296,7 +296,10 @@ class LauncherTests(unittest.TestCase):
             #!/usr/bin/env python3
             import json,sys
             assert sys.argv[1] == 'emit-run'
-            print(json.dumps({'schema':1,'fixed':True},sort_keys=True,separators=(',',':')))
+            value=int(sys.argv[sys.argv.index('--session-token-limit')+1])
+            print(json.dumps({'schema':1,'fixed':True,
+                              'model':{'sessionTokenLimit':value}},
+                             sort_keys=True,separators=(',',':')))
             """))
         executable(bench / "harness-qualification.py", textwrap.dedent("""\
             #!/usr/bin/env python3
@@ -344,7 +347,13 @@ class LauncherTests(unittest.TestCase):
         settings = output / "corporate-settings.json"
         package = output / "input-package.json"
         profile = json.loads((output / "target-profile.json").read_text())
+        settings_row = json.loads(settings.read_text())
+        budget = json.loads((output / "probe-budget.json").read_text())
         self.assertTrue(settings.is_file()); self.assertTrue(package.is_file())
+        self.assertEqual(settings_row["model"]["sessionTokenLimit"], 230000)
+        self.assertEqual(profile["session_token_limit"], 230000)
+        self.assertEqual(budget["session_token_limit"], 230000)
+        self.assertEqual(captured["SHERLOCK_SESSION_TOKEN_LIMIT"], "230000")
         self.assertEqual(profile["settings_sha256"], hashlib.sha256(settings.read_bytes()).hexdigest())
         self.assertNotEqual(profile["settings_sha256"], profile["tool_schema_sha256"])
         self.assertTrue((output / "harness-qualification-input.json").is_file())

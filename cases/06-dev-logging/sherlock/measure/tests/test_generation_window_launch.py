@@ -50,6 +50,7 @@ has its own regression in TheFalsifiedEscapeIsNoLongerALaunchTicket, and every
 launching case asserts that NEITHER refusal appeared.
 """
 import importlib.util
+import json
 import os
 import sys
 import unittest
@@ -378,6 +379,24 @@ class ThePaidLauncherAllowsTheNewVariablesThrough(unittest.TestCase):
                     # a paid launcher at all.
                     "SHERLOCK_SESSION_TOKEN_LIMIT"):
             self.assertIn(var, allow, "%s is scrubbed by the paid launcher" % var)
+
+
+class EarlyBudgetRefusalPreservesItsCause(Rig, unittest.TestCase):
+    def test_cleanup_does_not_mask_a_pre_arm_budget_refusal(self):
+        _argv, result = self.go({
+            "SHERLOCK_CONTEXT_WINDOW": "262000",
+            "SHERLOCK_MAX_OUTPUT_TOKENS": "32000",
+            "SHERLOCK_SESSION_TOKEN_LIMIT": "262000",
+            "SHERLOCK_GENERATION_WINDOW_S": "3600",
+            "SHERLOCK_OUTPUT_TOKENS_PER_S": "20",
+            "SHERLOCK_TTFT_RESERVE_S": "120",
+        })
+        combined = result.stdout + result.stderr
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("backstop itself permits an illegal request", combined)
+        self.assertNotIn("unbound variable", combined)
+        with open(os.path.join(self.trace(), "status.json"), encoding="utf-8") as handle:
+            self.assertEqual(json.load(handle)["phase"], "RUN_FAILED")
 
 
 if __name__ == "__main__":

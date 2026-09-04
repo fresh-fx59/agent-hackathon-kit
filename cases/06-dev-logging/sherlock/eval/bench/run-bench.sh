@@ -438,6 +438,7 @@ MEASURE_DIR="$(cd "$HERE/../../measure" && pwd)"
 STATE_TOOL="$MEASURE_DIR/run_state.py"
 ATTEMPT_FILE="$TRACE/current-attempt"
 W=""
+ARM_HOME=""
 TERMINAL_WRITTEN=0
 PROOF_PID="" PROOF_START="" PROOF_PGID="" PROOF_BOOT="" PROOF_COMMAND=""
 state_set() {
@@ -1196,7 +1197,6 @@ fi
 # `user` level, so the coupling is a startup error rather than a silent hole.
 # ARM_HOME is resolved here, above the settings write, and reused by the
 # install block below.
-ARM_HOME=""
 MUTE_ARGS=""
 if [ "$ARM" != "none" ]; then
   ARM_HOME="${SHERLOCK_ARM_HOME:-$HOME/.qwen/skills/log-rca}"

@@ -78,7 +78,7 @@ printf '%s\n' "$COMMIT" > "$OUTPUT/implementation-commit.txt"
 printf '%s\n' "$DIRTY" > "$OUTPUT/implementation-dirty.txt"
 "$QWEN_PATH" --version > "$OUTPUT/qwen-version.txt" || die "qwen version unavailable"
 python3 "$SETTINGS_TOOL" emit-run --window 262000 --max-tokens 32000 \
-  --session-token-limit 262000 --timeout 900000 --max-retries 0 \
+  --session-token-limit 230000 --timeout 900000 --max-retries 0 \
   --skill-directory "$TARGET_HOME/.qwen/skills" --exclude-tool agent \
   --no-auto-compact > "$SETTINGS" || die "corporate settings generation failed"
 python3 - "$CORPUS" "$ANSWER" "$PROMPT" "$TOOL_SCHEMA" "$ARM" "$RENDERER" "$TARGET_PROFILE" "$COMMIT" "$TREE" "$SHERLOCK" "$SETTINGS" "$BUDGET" "$INPUT_PACKAGE" "$QWEN_PATH" <<'PY'
@@ -118,7 +118,7 @@ profile_row={"schema":1,"provider_base_url":"http://127.0.0.1:8317/v1",
  "route":"/chat/completions","secret_ref":"SHERLOCK_API_KEY",
  "requested_model":"gpt-5.5","expected_returned_identity":"gpt-5.5",
  "identity_mode":"provider_pinned_version","temperature":0,"top_p":1,
- "max_output_tokens":32000,"session_token_limit":262000,"cache":{"enabled":True},
+ "max_output_tokens":32000,"session_token_limit":230000,"cache":{"enabled":True},
  "interactive":{"enabled":True},"qwen":{"cli":str(qwen)},"limits":{"requests":512},
  "settings_sha256":sha(settings),"system_prompt_sha256":sha(prompt),
  "skill_sha256":sha(sherlock/'skills/v44/SKILL.md'),"tool_schema_sha256":sha(schema),
@@ -127,7 +127,7 @@ profile.write_text(json.dumps(profile_row,sort_keys=True,separators=(",",":"))+"
 budget_row={"schema":1,"max_upstream_attempts":512,"max_request_bytes":536870912,
             "max_wall_seconds":4500,"max_consecutive_provider_failures":3,
             "context_window":262000,"max_output_tokens":32000,
-            "session_token_limit":262000,"request_timeout_ms":900000}
+            "session_token_limit":230000,"request_timeout_ms":900000}
 budget.write_text(json.dumps(budget_row,sort_keys=True,separators=(",",":"))+"\n")
 package_row={"schema":1,"arm":"v44","implementation_commit":commit,
              "implementation_tree":tree,"corpus_sha256":sha(sample),
@@ -197,7 +197,7 @@ CONTROLLER_ENV=(
   "SHERLOCK_LANE=subscription" "SHERLOCK_TARGET_VERSION=$(tr -d '\r\n' < "$OUTPUT/qwen-version.txt")"
   "QWEN_BIN=$QWEN_PATH" "SHERLOCK_CONTEXT_WINDOW=262000" "SHERLOCK_MAX_OUTPUT_TOKENS=32000"
   "SHERLOCK_GENERATION_WINDOW_S=3600" "SHERLOCK_OUTPUT_TOKENS_PER_S=20"
-  "SHERLOCK_TTFT_RESERVE_S=120" "SHERLOCK_SESSION_TOKEN_LIMIT=262000"
+  "SHERLOCK_TTFT_RESERVE_S=120" "SHERLOCK_SESSION_TOKEN_LIMIT=230000"
   "SHERLOCK_REQUEST_TIMEOUT_MS=900000" "SHERLOCK_TIMEOUT=4200"
   "SHERLOCK_MAX_RETRIES=0" "SHERLOCK_RESUME_MAX_ATTEMPTS=0"
   "SHERLOCK_ALLOW_SUBAGENT=0" "SHERLOCK_TARGET_AUTOCOMPACT=0"
