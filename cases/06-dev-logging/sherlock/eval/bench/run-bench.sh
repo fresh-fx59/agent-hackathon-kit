@@ -171,11 +171,6 @@ qwen_flag_preflight() {
     exit 1
   fi
 }
-if [ -x "$QWEN" ] || command -v "$QWEN" >/dev/null 2>&1; then
-  qwen_flag_preflight --max-session-turns "$MAX_SESSION_TURNS"
-  qwen_flag_preflight --max-tool-calls "$MAX_TOOL_CALLS"
-  qwen_flag_preflight --max-wall-time "${MAX_WALL_TIME_S}s"
-fi
 echo "▶ budgets: --max-session-turns $MAX_SESSION_TURNS  --max-wall-time ${MAX_WALL_TIME_S}s  --max-tool-calls $MAX_TOOL_CALLS  QWEN_CODE_WORKFLOW_AGENT_MAX_TURNS=$WORKFLOW_AGENT_MAX_TURNS  (outer timeout ${TIMEOUT}s)"
 RUNS="${BENCH_RUNS:-$HERE/runs}"
 CONTROLLED=0
@@ -227,6 +222,111 @@ else
   STAMP="$(date -u +%Y%m%dT%H%M%SZ)-$ARM"
   TRACE="$RUNS/$STAMP"
   mkdir -p "$TRACE"
+fi
+# A paid lane cannot become a subscription lane by omitting its admission path.
+# The controller passes this fixed value; direct controlled invocations fail safe.
+RUN_LANE="${SHERLOCK_LANE:-paid}"
+if [ "$CONTROLLED" = "1" ] && [ "$TARGET_PROBE_MODE" != "1" ] && [ "$RUN_LANE" = "paid" ] \
+    && [ -z "${SHERLOCK_PAID_ADMISSION_MANIFEST:-}" ]; then
+  echo "✗ controlled paid run requires consumed paid admission" >&2
+  exit 2
+fi
+if [ "$CONTROLLED" = "1" ] && [ "$TARGET_PROBE_MODE" != "1" ] && [ -n "${SHERLOCK_PAID_ADMISSION_MANIFEST:-}" ]; then
+  : "${SHERLOCK_TARGET_PROFILE:?paid admission omitted target profile}"
+  : "${SHERLOCK_SETTINGS:?paid admission omitted settings}"
+  : "${SHERLOCK_INPUT_PACKAGE:?paid admission omitted input package}"
+  : "${SHERLOCK_RUN_BUDGET:?paid admission omitted run budget}"
+  FULL_PROFILE_VALUES="$(python3 - "$SHERLOCK_TARGET_PROFILE" "$SHERLOCK_SETTINGS" \
+    "$SHERLOCK_INPUT_PACKAGE" "$SHERLOCK_RUN_BUDGET" \
+    "$SHERLOCK_PAID_ADMISSION_MANIFEST" "$TRACE" <<'PY'
+import hashlib, json, os, stat, sys
+from pathlib import Path
+profile_path, settings_path, inputs_path, budget_path, manifest_path, trace = map(Path, sys.argv[1:])
+def regular(path):
+    if not path.is_absolute() or path.resolve(strict=True) != path:
+        raise SystemExit("PAID_INPUT_INVALID")
+    before = path.lstat()
+    if not stat.S_ISREG(before.st_mode) or stat.S_ISLNK(before.st_mode) or before.st_nlink != 1:
+        raise SystemExit("PAID_INPUT_INVALID")
+    fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+    try:
+        opened = os.fstat(fd); chunks = []; size = 0
+        if (opened.st_dev, opened.st_ino, opened.st_nlink) != (before.st_dev, before.st_ino, 1):
+            raise SystemExit("PAID_INPUT_INVALID")
+        while True:
+            block = os.read(fd, 1024 * 1024)
+            if not block: break
+            size += len(block)
+            if size > 16 * 1024 * 1024: raise SystemExit("PAID_INPUT_INVALID")
+            chunks.append(block)
+        after = os.fstat(fd)
+        if (after.st_dev, after.st_ino, after.st_nlink, after.st_size, after.st_mtime_ns) != (
+                opened.st_dev, opened.st_ino, 1, opened.st_size, opened.st_mtime_ns):
+            raise SystemExit("PAID_INPUT_INVALID")
+        data = b"".join(chunks)
+    finally: os.close(fd)
+    return data
+def object_from(data):
+    def unique(pairs):
+        out = {}
+        for key, value in pairs:
+            if key in out: raise ValueError("duplicate")
+            out[key] = value
+        return out
+    return json.loads(data.decode("utf-8"), object_pairs_hook=unique,
+                      parse_constant=lambda value: (_ for _ in ()).throw(ValueError(value)))
+def sha(data): return hashlib.sha256(data).hexdigest()
+profile_raw, settings_raw = regular(profile_path), regular(settings_path)
+inputs_raw, budget_raw, manifest_raw = regular(inputs_path), regular(budget_path), regular(manifest_path)
+paid_path = manifest_path.parent / "paid-admission.json"
+paid_raw = regular(paid_path)
+profile, budget = object_from(profile_raw), object_from(budget_raw)
+action, paid = object_from(manifest_raw), object_from(paid_raw)
+if (paid.get("schema") != 1 or paid.get("accepted") is not True
+        or paid.get("consumed") is not True or paid.get("action") != "full_paid_run"
+        or paid.get("manifest_sha256") != sha(manifest_raw)
+        or Path(paid.get("manifest", "")).resolve() != manifest_path.resolve()):
+    raise SystemExit("FULL_RUN_NOT_AUTHORIZED")
+for path, field, raw in ((profile_path, "target_profile_sha256", profile_raw),
+                         (inputs_path, "full_input_package_sha256", inputs_raw),
+                         (budget_path, "full_run_budget_sha256", budget_raw)):
+    if action.get(field) != sha(raw): raise SystemExit("INPUTS_INCOMPARABLE")
+if profile.get("settings_sha256") != sha(settings_raw): raise SystemExit("INPUTS_INCOMPARABLE")
+checks = (("SHERLOCK_BASE_URL", "provider_base_url"), ("SHERLOCK_MODEL", "requested_model"),
+          ("SHERLOCK_EXPECTED_RETURNED_IDENTITY", "expected_returned_identity"),
+          ("QWEN_BIN", ("qwen", "cli")), ("SHERLOCK_MAX_OUTPUT_TOKENS", "max_output_tokens"),
+          ("SHERLOCK_SESSION_TOKEN_LIMIT", "session_token_limit"))
+for env_name, field in checks:
+    value = profile
+    for part in (field if isinstance(field, tuple) else (field,)):
+        value = value.get(part) if isinstance(value, dict) else None
+    if value in (None, "") or (env_name in os.environ and os.environ[env_name] != str(value)):
+        raise SystemExit("TARGET_PROFILE_MISMATCH")
+if budget.get("max_output_tokens") != profile["max_output_tokens"] or budget.get("session_token_limit") != profile["session_token_limit"]:
+    raise SystemExit("INPUTS_INCOMPARABLE")
+def copy_once(destination, data):
+    fd = os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), 0o600)
+    try: os.write(fd, data); os.fsync(fd)
+    finally: os.close(fd)
+for name, data in (("target-profile.json", profile_raw), ("corporate-settings.json", settings_raw),
+                   ("full-input-package.json", inputs_raw), ("full-run-budget.json", budget_raw),
+                   ("paid-admission-manifest.json", manifest_raw), ("paid-admission.json", paid_raw)):
+    copy_once(trace / name, data)
+print(profile["provider_base_url"]); print(profile["requested_model"])
+print(profile["expected_returned_identity"]); print(profile["qwen"]["cli"])
+print(profile["max_output_tokens"]); print(profile["session_token_limit"])
+print(budget["context_window"]); print(budget["request_timeout_ms"])
+PY
+)" || exit 2
+  BASE_URL="$(printf '%s\n' "$FULL_PROFILE_VALUES" | sed -n '1p')"
+  MODEL="$(printf '%s\n' "$FULL_PROFILE_VALUES" | sed -n '2p')"
+  EXPECTED_RETURNED_IDENTITY="$(printf '%s\n' "$FULL_PROFILE_VALUES" | sed -n '3p')"
+  QWEN="$(printf '%s\n' "$FULL_PROFILE_VALUES" | sed -n '4p')"
+  export SHERLOCK_MAX_OUTPUT_TOKENS="$(printf '%s\n' "$FULL_PROFILE_VALUES" | sed -n '5p')"
+  export SHERLOCK_SESSION_TOKEN_LIMIT="$(printf '%s\n' "$FULL_PROFILE_VALUES" | sed -n '6p')"
+  export SHERLOCK_CONTEXT_WINDOW="$(printf '%s\n' "$FULL_PROFILE_VALUES" | sed -n '7p')"
+  export SHERLOCK_REQUEST_TIMEOUT_MS="$(printf '%s\n' "$FULL_PROFILE_VALUES" | sed -n '8p')"
+  export SHERLOCK_MODEL="$MODEL" SHERLOCK_EXPECTED_RETURNED_IDENTITY="$EXPECTED_RETURNED_IDENTITY"
 fi
 # The target probe uses the same runner, but its audit needs the exact approved
 # package alongside the real trace.  Copy it only after controlled-trace
@@ -1162,7 +1262,7 @@ if [ "${SHERLOCK_TARGET_AUTOCOMPACT:-0}" != "1" ]; then
   EMIT_ARGS="$EMIT_ARGS --no-auto-compact"
 fi
 # shellcheck disable=SC2086
-if [ "$TARGET_PROBE_MODE" = "1" ]; then
+if [ "$TARGET_PROBE_MODE" = "1" ] || [ -n "${SHERLOCK_PAID_ADMISSION_MANIFEST:-}" ]; then
   # The bytes below were hashed into the approved profile.  A private
   # descriptor-opened copy is the only settings file Qwen can observe.
   python3 - "$TRACE/corporate-settings.json" "$W/.qwen/settings.json" <<'PY' || exit 1
@@ -1393,7 +1493,7 @@ python3 - "$TRACE/run-inputs.json" "$CORPUS_SOURCE" "$RUN_CORPUS" "$PROMPT_SHA" 
   "$MAX_SESSION_TURNS" "$MAX_WALL_TIME_S" "$MAX_TOOL_CALLS" "$WORKFLOW_AGENT_MAX_TURNS" "$TIMEOUT" \
   "$GEN_WINDOW_S" "$OUTPUT_TOKENS_PER_S" "$TTFT_RESERVE_S" "$MAX_OUT" "$GEN_FITTING" \
   "$SESSION_TOKEN_LIMIT" "$CTX_WINDOW" "$MEASURE_DIR" <<'PY'
-import json, sys
+import json, hashlib, os, sys
 sys.path.insert(0, sys.argv[-1])
 from lane_guard import COMPACTION_SUMMARY_RESERVE
 (target, corpus_source, staged_root, prompt_sha, arm_commit, arm,
@@ -1429,7 +1529,12 @@ with open(target, "w", encoding="utf-8") as fh:
                    "compaction_summary_reserve": COMPACTION_SUMMARY_RESERVE,
                    "session_token_limit": int(session_token_limit),
                    "context_window": int(context_window),
-                   "proof_file": "output-budget-proof.txt"}},
+                   "proof_file": "output-budget-proof.txt"},
+               "requested_model": os.environ.get("SHERLOCK_MODEL"),
+               "proxy_sent_model": os.environ.get("SHERLOCK_MODEL"),
+               "returned_identity_rule": os.environ.get("SHERLOCK_EXPECTED_RETURNED_IDENTITY"),
+               "target_profile_sha256": hashlib.sha256(open(os.environ["SHERLOCK_TARGET_PROFILE"], "rb").read()).hexdigest() if os.environ.get("SHERLOCK_TARGET_PROFILE") else None,
+               "action_budget_sha256": hashlib.sha256(open(os.environ["SHERLOCK_RUN_BUDGET"], "rb").read()).hexdigest() if os.environ.get("SHERLOCK_RUN_BUDGET") else None},
               fh, ensure_ascii=False, sort_keys=True)
     fh.write("\n")
 PY
@@ -1454,6 +1559,13 @@ if ! upstream_lane_start "$BASE_URL" "$TRACE.upstream.jsonl" "$STAMP" "$MODEL" \
 fi
 BASE_URL="$LANE_BASE_URL"
 CLIENT_MODEL="$LANE_CLIENT_MODEL"
+# Only inspect the target CLI after the strict upstream lane exists.  A refused
+# lane must leave the target counter at zero.
+if [ -x "$QWEN" ] || command -v "$QWEN" >/dev/null 2>&1; then
+  qwen_flag_preflight --max-session-turns "$MAX_SESSION_TURNS"
+  qwen_flag_preflight --max-tool-calls "$MAX_TOOL_CALLS"
+  qwen_flag_preflight --max-wall-time "${MAX_WALL_TIME_S}s"
+fi
 if [ "$CONTROLLED" = 1 ] && [ "$TARGET_PROBE_MODE" != "1" ]; then
   unset SHERLOCK_BUDGET_MAX_UPSTREAM_ATTEMPTS \
     SHERLOCK_BUDGET_MAX_REQUEST_BYTES \
@@ -1816,7 +1928,34 @@ else
   TERMINAL_PHASE=FINISHED_UNCHECKED
 fi
 # RC 4 is "the gates ran and refused it" — REJECTED says that; RUN_FAILED would
-# blur it into "the run fell over".
+# blur it into "the run fell over". Compute it after final-result persistence,
+# because an evidence-write failure changes RC to 6.
+# Only the final exit ladder may call a paid run accepted. In particular, lane
+# integrity and seal failures are evaluated after Qwen and the four gates.
+if [ -f "$TRACE/paid-admission.json" ] && [ ! -e "$TRACE/run-result.json" ]; then
+  python3 - "$TRACE" "$STAMP" "${QWEN_RC:-}" "$RC" "$GATE_VERDICT" \
+    "$TERMINAL_PHASE" "$LANE_BREACH" <<'PY' || RC=6
+import hashlib, json, os, sys
+trace, run_tag, qwen_rc, wrapper_rc, gate_verdict, terminal_phase, lane_breach = sys.argv[1:]
+accepted = wrapper_rc == "0" and terminal_phase == "ACCEPTED" and not lane_breach
+row = {"schema": 1, "run_tag": run_tag,
+       "result": "accepted" if accepted else "failed_or_rejected",
+       "qwen_exit_code": int(qwen_rc) if qwen_rc.lstrip("-").isdigit() else None,
+       "wrapper_exit_code": int(wrapper_rc), "terminal_phase": terminal_phase,
+       "gate_verdict": gate_verdict or None,
+       "lane_integrity": "clean" if not lane_breach else lane_breach,
+       "paid_admission_sha256": hashlib.sha256(open(os.path.join(trace, "paid-admission.json"), "rb").read()).hexdigest(),
+       "paid_admission_manifest_sha256": hashlib.sha256(open(os.path.join(trace, "paid-admission-manifest.json"), "rb").read()).hexdigest()}
+target = os.path.join(trace, "run-result.json")
+fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+with os.fdopen(fd, "w", encoding="utf-8") as handle:
+    json.dump(row, handle, ensure_ascii=False, sort_keys=True, separators=(",", ":")); handle.write("\n")
+    handle.flush(); os.fsync(handle.fileno())
+directory = os.open(trace, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+try: os.fsync(directory)
+finally: os.close(directory)
+PY
+fi
 [ "$RC" -eq 4 ] && FAILED_PHASE=REJECTED || FAILED_PHASE=RUN_FAILED
 if [ "$RC" -eq 0 ]; then
   state_set --run-tag "$STAMP" --phase "$TERMINAL_PHASE" --dataset "$DATASET" --arm "$ARM" --trace-dir "$TRACE" \

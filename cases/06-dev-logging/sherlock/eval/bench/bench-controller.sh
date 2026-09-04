@@ -46,7 +46,7 @@ FREE_TEST_ENV_ALLOW = {*RUNTIME_ENV_ALLOW}
 HEALTH_ENV_ALLOW = {*RUNTIME_ENV_ALLOW, "SHERLOCK_API_KEY"}
 TARGET_ENV_ALLOW = {
     *RUNTIME_ENV_ALLOW,
-    "BENCH_RUNS", "QWEN_BIN", "SHERLOCK_API_KEY", "SHERLOCK_BASE_URL",
+    "BENCH_RUNS", "QWEN_BIN", "SHERLOCK_API_KEY", "SHERLOCK_BASE_URL", "SHERLOCK_LANE",
     "SHERLOCK_CONTEXT_WINDOW", "SHERLOCK_MAX_OUTPUT_TOKENS", "SHERLOCK_DATASET", "SHERLOCK_EXPECTED_RETURNED_IDENTITY",
     # The lane's measured generation window and throughput (fix 9). Not on this
     # allowlist means silently scrubbed, which would disarm the launch check on
@@ -673,6 +673,9 @@ def target_environment(tag, trace, staged_corpus, limits):
     env.update({"SHERLOCK_RUN_TAG": tag, "SHERLOCK_TRACE": str(trace),
                 "SHERLOCK_CORPUS": str(staged_corpus),
                 "SHERLOCK_REQUIRE_ATTRIBUTION": "1", "SHERLOCK_ALLOW_SUBAGENT": "0"})
+    for name in ("SHERLOCK_TARGET_PROFILE", "SHERLOCK_SETTINGS", "SHERLOCK_INPUT_PACKAGE",
+                 "SHERLOCK_RUN_BUDGET", "SHERLOCK_PAID_ADMISSION_MANIFEST"):
+        if name in os.environ: env[name] = os.environ[name]
     for field, name in LIMIT_ENV.items(): env[name] = str(limits[field])
     return env
 
@@ -689,6 +692,65 @@ def run_fresh(root, runs, controller_id, controller, key_path, key, limits, lock
     identity = {"schema": 1, "controller_id": controller_id, "parent_trace": str(controller)}
     atomic_replace(controller / "controller-identity.json", canonical(identity) + b"\n")
     persist(controller, controller_id, "FIXING", tag)
+    # Full paid lanes must be admitted before any child, health check, secret,
+    # proxy, or target process is created.
+    lane = os.environ.get("SHERLOCK_LANE", "paid")
+    if lane == "paid":
+        admission = os.environ.get("SHERLOCK_PAID_ADMISSION_MANIFEST", "")
+        approved = os.environ.get("SHERLOCK_OPERATOR_APPROVED_FULL", "")
+        tool = os.environ.get("SHERLOCK_PAID_ADMISSION_TOOL", str(HERE / "paid-admission.py"))
+        if not admission or not approved:
+            persist(controller, controller_id, "BLOCKED", tag, reason="FULL_RUN_NOT_AUTHORIZED"); return 1
+        result = run_tool(tool, ["consume", "--manifest", admission,
+                                 "--operator-approved-full", approved],
+                          env=controlled_environment(FREE_TEST_ENV_ALLOW))
+        if result.returncode:
+            persist(controller, controller_id, "BLOCKED", tag, reason="FULL_RUN_NOT_AUTHORIZED"); return 1
+        try:
+            admitted = json.loads(result.stdout)
+            if (admitted.get("schema") != 1 or admitted.get("accepted") is not True
+                    or admitted.get("action") != "full_paid_run"
+                    or admitted.get("manifest_sha256") != approved
+                    or Path(admitted.get("manifest", "")).resolve() != Path(admission).resolve()):
+                raise ValueError()
+            for name, key in (("SHERLOCK_TARGET_PROFILE", "target_profile"),
+                              ("SHERLOCK_SETTINGS", "settings"),
+                              ("SHERLOCK_INPUT_PACKAGE", "full_input_package"),
+                              ("SHERLOCK_RUN_BUDGET", "full_run_budget")):
+                value = admitted[key]
+                if not isinstance(value, str) or not Path(value).is_file(): raise ValueError()
+                os.environ[name] = value
+            profile = read_object(Path(os.environ["SHERLOCK_TARGET_PROFILE"]))
+            profile_bindings = {
+                "SHERLOCK_BASE_URL": profile.get("provider_base_url"),
+                "SHERLOCK_PROVIDER": profile.get("route"),
+                "SHERLOCK_MODEL": profile.get("requested_model"),
+                "SHERLOCK_EXPECTED_RETURNED_IDENTITY": profile.get("expected_returned_identity"),
+                "SHERLOCK_MAX_OUTPUT_TOKENS": profile.get("max_output_tokens"),
+                "SHERLOCK_SESSION_TOKEN_LIMIT": profile.get("session_token_limit"),
+            }
+            for name, value in profile_bindings.items():
+                if ((not isinstance(value, str) or not value) if name not in (
+                        "SHERLOCK_MAX_OUTPUT_TOKENS", "SHERLOCK_SESSION_TOKEN_LIMIT")
+                        else (type(value) is not int or value <= 0)):
+                    raise ValueError()
+                expected = str(value)
+                supplied = os.environ.get(name)
+                if supplied is not None and supplied != expected:
+                    raise ValueError()
+                os.environ[name] = expected
+            os.environ["SHERLOCK_LANE"] = "paid"
+            full_budget = read_object(Path(os.environ["SHERLOCK_RUN_BUDGET"]))
+            expected_budget = {"schema", *LIMIT_NAMES, "context_window", "max_output_tokens",
+                               "session_token_limit", "request_timeout_ms"}
+            if (set(full_budget) != expected_budget or full_budget.get("schema") != 1
+                    or any(type(full_budget.get(name)) is not int or full_budget[name] <= 0
+                           for name in expected_budget - {"schema"})):
+                raise ValueError()
+            limits = {name: full_budget[name] for name in LIMIT_NAMES}
+            os.environ["SHERLOCK_PAID_ADMISSION_MANIFEST"] = admitted["manifest"]
+        except (ValueError, KeyError, TypeError, json.JSONDecodeError):
+            persist(controller, controller_id, "BLOCKED", tag, reason="FULL_RUN_NOT_AUTHORIZED"); return 1
     persist(controller, controller_id, "TESTING", tag)
     free = subprocess.run(os.environ["SHERLOCK_FREE_TEST_COMMAND"], shell=True,
                           env=controlled_environment(FREE_TEST_ENV_ALLOW))
@@ -702,7 +764,6 @@ def run_fresh(root, runs, controller_id, controller, key_path, key, limits, lock
     trace.mkdir(mode=0o700)
     persist(controller, controller_id, "HEALTH_CHECKING", tag)
     health = controller / "health-receipt.json"
-    lane = os.environ.get("SHERLOCK_LANE", "paid")
     provider = os.environ.get("SHERLOCK_PROVIDER", "linkapi")
     model = os.environ.get("SHERLOCK_MODEL", "")
     identity_name = os.environ.get("SHERLOCK_EXPECTED_RETURNED_IDENTITY", "")
@@ -743,6 +804,7 @@ def run_fresh(root, runs, controller_id, controller, key_path, key, limits, lock
         ("triage-checker", os.environ.get("SHERLOCK_TRIAGE_CHECKER", "")),
         ("stop-checker", os.environ.get("SHERLOCK_STOP_CHECKER", "")),
         ("citation-checker", os.environ.get("SHERLOCK_CITATION_CHECKER", "")),
+        ("target-profile", os.environ.get("SHERLOCK_TARGET_PROFILE", "")),
         ("target-cli", os.environ.get("QWEN_BIN", "")),
         ("target-version", os.environ.get("SHERLOCK_TARGET_VERSION", "")),
         ("requested-model", model), ("provider", provider),

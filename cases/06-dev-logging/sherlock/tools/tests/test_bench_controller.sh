@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path
 import shlex
+import shutil
 import signal
 import stat
 import subprocess
@@ -76,7 +77,9 @@ printf '[{"type":"result","result":"ok","is_error":false,"session_id":"123456789
             "BENCH_RUNS": str(self.runs),
             "SHERLOCK_RUN_TAG": trace.name,
             "SHERLOCK_TRACE": str(trace),
-            "SHERLOCK_REQUIRE_ATTRIBUTION": "1",
+            "SHERLOCK_REQUIRE_ATTRIBUTION": "0",
+            "SHERLOCK_UPSTREAM_LOG": "0",
+            "SHERLOCK_LANE": "subscription",
             "SHERLOCK_BUDGET_MAX_UPSTREAM_ATTEMPTS": "10",
             "SHERLOCK_BUDGET_MAX_REQUEST_BYTES": "100000",
             "SHERLOCK_BUDGET_MAX_WALL_SECONDS": "30",
@@ -93,6 +96,7 @@ printf '[{"type":"result","result":"ok","is_error":false,"session_id":"123456789
         })
         env.update(updates)
         return env
+
 
     def start_and_prove(self, trace, **updates):
         process = subprocess.Popen(["bash", str(RUNNER), "none"], env=self.env(trace, **updates),
@@ -154,13 +158,64 @@ printf '[{"type":"result","result":"ok","is_error":false,"session_id":"123456789
     def test_strict_proxy_failure_is_terminal_before_qwen(self):
         trace = self.trace()
         process, proof = self.start_and_prove(
-            trace, UPSTREAM_LANE_PROXY=str(self.root / "missing-proxy"))
+            trace, UPSTREAM_LANE_PROXY=str(self.root / "missing-proxy"),
+            SHERLOCK_REQUIRE_ATTRIBUTION="1", SHERLOCK_UPSTREAM_LOG="1")
         process.communicate(timeout=20)
         self.assertNotEqual(process.returncode, 0)
         self.assertFalse(self.qwen_capture.exists())
         status = json.loads((trace / "status.json").read_text(encoding="utf-8"))
         self.assertEqual(status["phase"], "RUN_FAILED")
         self.assertEqual({key: status.get(key) for key in proof}, proof)
+
+    def test_paid_runner_consumes_and_persists_exact_admitted_bundle(self):
+        trace = self.trace(); admitted = self.root / "admitted"; admitted.mkdir()
+        def write(name, value):
+            path = admitted / name
+            path.write_text(json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n")
+            return path
+        settings = write("corporate-settings.json", {"model": {"name": "fixture-model"}})
+        settings_sha = hashlib.sha256(settings.read_bytes()).hexdigest()
+        profile = write("target-profile.json", {"provider_base_url": "http://127.0.0.1:9/v1",
+            "requested_model": "fixture-model", "expected_returned_identity": "expected-model",
+            "max_output_tokens": 32768, "session_token_limit": 220000,
+            "settings_sha256": settings_sha, "qwen": {"cli": str(self.qwen)}})
+        inputs = write("full-input-package.json", {"schema": 1})
+        budget = write("full-run-budget.json", {"schema": 1, "max_upstream_attempts": 10,
+            "max_request_bytes": 100000, "max_wall_seconds": 30,
+            "max_consecutive_provider_failures": 3, "context_window": 200000,
+            "max_output_tokens": 32768, "session_token_limit": 220000,
+            "request_timeout_ms": 900000})
+        sha = lambda path: hashlib.sha256(path.read_bytes()).hexdigest()
+        manifest = write("paid-admission-manifest.json", {"target_profile_sha256": sha(profile),
+            "full_input_package_sha256": sha(inputs), "full_run_budget_sha256": sha(budget)})
+        write("paid-admission.json", {"schema": 1, "accepted": True, "consumed": True,
+            "action": "full_paid_run", "manifest": str(manifest), "manifest_sha256": sha(manifest)})
+        process, _proof = self.start_and_prove(trace, SHERLOCK_LANE="paid",
+            SHERLOCK_MODEL="fixture-model",
+            SHERLOCK_PAID_ADMISSION_MANIFEST=str(manifest), SHERLOCK_TARGET_PROFILE=str(profile),
+            SHERLOCK_SETTINGS=str(settings), SHERLOCK_INPUT_PACKAGE=str(inputs),
+            SHERLOCK_RUN_BUDGET=str(budget), SHERLOCK_MAX_OUTPUT_TOKENS="32768",
+            SHERLOCK_SESSION_TOKEN_LIMIT="220000", SHERLOCK_PER_REQUEST_TOKEN_GATE="262000")
+        stdout, stderr = process.communicate(timeout=30)
+        self.assertEqual(process.returncode, 0, (stdout, stderr))
+        for name in ("paid-admission-manifest.json", "paid-admission.json",
+                     "target-profile.json", "corporate-settings.json", "full-input-package.json",
+                     "full-run-budget.json", "run-result.json"):
+            self.assertTrue((trace / name).is_file(), name)
+        self.assertEqual((trace / "corporate-settings.json").read_bytes(), settings.read_bytes())
+        result = json.loads((trace / "run-result.json").read_text())
+        self.assertEqual((result["result"], result["wrapper_exit_code"],
+                          result["terminal_phase"], result["lane_integrity"]),
+                         ("failed_or_rejected", 0, "FINISHED_UNCHECKED", "clean"))
+
+    def test_controlled_paid_runner_refuses_without_consumed_admission(self):
+        trace = self.trace()
+        result = subprocess.run(["bash", str(RUNNER), "none"],
+            env=self.env(trace, SHERLOCK_LANE="paid"), capture_output=True, text=True,
+            timeout=10)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("paid admission", result.stderr)
+        self.assertFalse(self.qwen_capture.exists())
 
 
 class ControllerPresenceTests(unittest.TestCase):
@@ -441,7 +496,7 @@ printf '{{"schema":1}}\\n' > "$SHERLOCK_TRACE/candidate.json"
             "SHERLOCK_MODEL": "fixture-model",
             "SHERLOCK_PROVIDER": "fixture-provider",
             "SHERLOCK_EXPECTED_RETURNED_IDENTITY": "fixture-returned",
-            "SHERLOCK_LANE": "paid",
+            "SHERLOCK_LANE": "subscription",
             "SHERLOCK_BASE_URL": "http://127.0.0.1:9/v1",
             "SHERLOCK_API_KEY": "fixture-api-key",
             "FAKE_VALIDITY": "true",
@@ -1008,6 +1063,99 @@ os.stat=guarded_stat
         controller = self.fx.controller_dir()
         self.assertEqual(json.loads((controller / "status.json").read_text())["phase"],
                          "BLOCKED_UNKNOWN")
+
+
+class PaidAdmissionOrderingTests(unittest.TestCase):
+    def test_every_admission_refusal_precedes_all_contact_tripwires(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve(); runs = root / "runs"; runs.mkdir()
+            counters = root / "counters"
+            trip = "printf x >> %s; exit 0" % counters
+            manifest = root / "paid-admission-manifest.json"; manifest.write_text("{}\n")
+            tool = root / "admission.py"
+            env = dict(os.environ, SHERLOCK_LANE="paid",
+                       SHERLOCK_CONTROLLER_ROOT=str(root / "controller"), BENCH_RUNS=str(runs),
+                       SHERLOCK_FREE_TEST_COMMAND=trip, SHERLOCK_HEALTH_COMMAND=trip,
+                       SHERLOCK_TARGET_COMMAND=trip, SHERLOCK_PAID_ADMISSION_TOOL=str(tool),
+                       SHERLOCK_PAID_ADMISSION_MANIFEST=str(manifest),
+                       SHERLOCK_OPERATOR_APPROVED_FULL="0" * 64)
+            for name in ("SHERLOCK_BUDGET_MAX_UPSTREAM_ATTEMPTS", "SHERLOCK_BUDGET_MAX_REQUEST_BYTES",
+                         "SHERLOCK_BUDGET_MAX_WALL_SECONDS", "SHERLOCK_BUDGET_MAX_CONSECUTIVE_PROVIDER_FAILURES"):
+                env[name] = "1"
+            failures = ("HARNESS_QUALIFICATION_MISSING", "TARGET_PROBE_NOT_AUTHORIZED",
+                        "TARGET_RECEIPT_EXPIRED", "TARGET_RECEIPT_USED", "APPROVAL_REPLAYED",
+                        "FULL_RUN_NOT_AUTHORIZED", "INPUTS_INCOMPARABLE")
+            for failure in failures:
+                with self.subTest(failure=failure):
+                    tool.write_text("#!/usr/bin/env python3\nimport sys\nprint(%r,file=sys.stderr)\nraise SystemExit(1)\n" % failure)
+                    controller = Path(env["SHERLOCK_CONTROLLER_ROOT"])
+                    if controller.exists(): shutil.rmtree(controller)
+                    result = subprocess.run(["bash", str(CONTROLLER)], env=env,
+                                            capture_output=True, text=True, timeout=20)
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertFalse(counters.exists())
+                    self.assertNotIn("Traceback", result.stdout + result.stderr)
+
+    def test_accepted_admission_is_parsed_without_exposing_secrets(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve(); runs = root / "runs"; runs.mkdir()
+            manifest = root / "paid-admission-manifest.json"; manifest.write_text("{}\n")
+            assets = {}
+            profile = {"schema": 1, "provider_base_url": "https://approved.invalid/v1",
+                "route": "approved-route", "requested_model": "approved-model",
+                "expected_returned_identity": "approved-returned", "max_output_tokens": 32000,
+                "session_token_limit": 262000}
+            assets["target-profile.json"] = root / "target-profile.json"
+            assets["target-profile.json"].write_text(json.dumps(profile) + "\n")
+            for name in ("corporate-settings.json", "full-input-package.json"):
+                assets[name] = root / name; assets[name].write_text("{}\n")
+            budget = root / "full-run-budget.json"
+            budget.write_text(json.dumps({"schema": 1, "max_upstream_attempts": 7,
+                "max_request_bytes": 7000, "max_wall_seconds": 70,
+                "max_consecutive_provider_failures": 2, "context_window": 262000,
+                "max_output_tokens": 32000, "session_token_limit": 262000,
+                "request_timeout_ms": 900000}) + "\n")
+            capture = root / "admission-env.json"; tool = root / "admission.py"
+            approval = "0" * 64
+            accepted = {"schema": 1, "accepted": True, "action": "full_paid_run",
+                "manifest": str(manifest), "manifest_sha256": approval,
+                "target_profile": str(assets["target-profile.json"]),
+                "settings": str(assets["corporate-settings.json"]),
+                "full_input_package": str(assets["full-input-package.json"]),
+                "full_run_budget": str(budget)}
+            tool.write_text("#!/usr/bin/env python3\nimport json,os\n"
+                "json.dump(sorted(os.environ),open(%r,'w'))\nprint(%r)\n" %
+                (str(capture), json.dumps(accepted, separators=(",", ":"))))
+            free = root / "free-ran"
+            env = dict(os.environ, SHERLOCK_LANE="paid", SHERLOCK_API_KEY="must-not-leak",
+                SHERLOCK_CONTROLLER_ROOT=str(root / "controller"), BENCH_RUNS=str(runs),
+                SHERLOCK_HEALTH_COMMAND="true", SHERLOCK_TARGET_COMMAND="true",
+                SHERLOCK_PAID_ADMISSION_TOOL=str(tool),
+                SHERLOCK_PAID_ADMISSION_MANIFEST=str(manifest),
+                SHERLOCK_OPERATOR_APPROVED_FULL=approval,
+                SHERLOCK_FREE_TEST_COMMAND="touch %s; exit 1" % shlex.quote(str(free)))
+            for name in ("SHERLOCK_BUDGET_MAX_UPSTREAM_ATTEMPTS", "SHERLOCK_BUDGET_MAX_REQUEST_BYTES",
+                         "SHERLOCK_BUDGET_MAX_WALL_SECONDS", "SHERLOCK_BUDGET_MAX_CONSECUTIVE_PROVIDER_FAILURES"):
+                env[name] = "1"
+            result = subprocess.run(["bash", str(CONTROLLER)], env=env,
+                                    capture_output=True, text=True, timeout=20)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertTrue(free.is_file(), result.stdout + result.stderr + "\n" +
+                "\n".join(path.read_text() for path in (root / "controller").glob("controller-*/status.json")))
+            names = json.loads(capture.read_text())
+            self.assertNotIn("SHERLOCK_API_KEY", names)
+            self.assertNotIn("SHERLOCK_OPERATOR_APPROVED_FULL", names)
+
+            shutil.rmtree(root / "controller")
+            free.unlink()
+            contacts = root / "post-admission-contact"
+            mismatched = dict(env, SHERLOCK_MODEL="wrong-model",
+                SHERLOCK_FREE_TEST_COMMAND="printf x >> %s" % shlex.quote(str(contacts)),
+                SHERLOCK_HEALTH_COMMAND="printf x >> %s" % shlex.quote(str(contacts)))
+            result = subprocess.run(["bash", str(CONTROLLER)], env=mismatched,
+                                    capture_output=True, text=True, timeout=20)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertFalse(contacts.exists(), result.stdout + result.stderr)
 
 
 class TargetContractProbeControllerTests(unittest.TestCase):
