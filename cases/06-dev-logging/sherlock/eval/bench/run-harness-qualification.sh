@@ -86,8 +86,15 @@ import hashlib, json, os, pathlib, stat, sys
 corpus, answer, prompt, schema, arm, renderer, profile = map(pathlib.Path, sys.argv[1:8])
 commit, tree, sherlock_text = sys.argv[8:11]; sherlock = pathlib.Path(sherlock_text)
 settings, budget, package, qwen = map(pathlib.Path, sys.argv[11:15])
-data = b"2026-09-04T00:00:00Z INFO qualification probe id=HQ-001 status=healthy\n"
-sample = corpus / "qualification.log"; sample.write_bytes(data)
+event = {"Event":{"System":{
+    "Provider":{"#attributes":{"Name":"Service Control Manager"}},
+    "EventID":{"#attributes":{"Qualifiers":16384},"#text":7045},
+    "TimeCreated":{"#attributes":{"SystemTime":"2026-09-04T00:00:00Z"}},
+    "Security":{"#attributes":{"UserID":"S-1-5-18"}}},
+    "EventData":{"ServiceName":"SherlockQualificationHealthy",
+                 "ImagePath":"C:\\Windows\\System32\\svchost.exe -k qualification"}}}
+data = (json.dumps(event,sort_keys=True,separators=(",",":"))+"\n").encode()
+sample = corpus / "System.jsonl"; sample.write_bytes(data)
 key = {"dataset":"harness-qualification","files":[{"path":sample.name,
        "on_disk_bytes":len(data),"lines":data.count(b'\n'),
        "sha256":hashlib.sha256(data).hexdigest()}],

@@ -9,6 +9,7 @@ from pathlib import Path
 import shlex
 import shutil
 import subprocess
+import sys
 import tempfile
 import textwrap
 import time
@@ -366,6 +367,15 @@ class LauncherTests(unittest.TestCase):
         self.assertEqual(captured["GIT_CONFIG_COUNT"], "1")
         self.assertEqual(captured["GIT_CONFIG_KEY_0"], "safe.directory")
         self.assertEqual(captured["GIT_CONFIG_VALUE_0"], str(repo.resolve()))
+        state = subprocess.run(
+            [sys.executable, str(SHERLOCK / "skills/v44/tools/statecheck.py"),
+             "--corpus", str(output / "generated-probe-corpus"), "--json"],
+            text=True, capture_output=True)
+        self.assertEqual(state.returncode, 4, state.stdout + state.stderr)
+        census = json.loads(state.stdout)
+        self.assertFalse(census["empty_census"])
+        self.assertGreater(census["total_records"], 0)
+        self.assertTrue(census["groups"], "qualification corpus must exercise statecheck")
         head = subprocess.check_output(["git", "-C", str(repo), "rev-parse", "HEAD"],
                                        text=True).strip()
         self.assertEqual((output / "implementation-commit.txt").read_text().strip(), head)
