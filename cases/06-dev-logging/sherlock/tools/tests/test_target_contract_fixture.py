@@ -165,6 +165,39 @@ class TargetContractFixtureTest(unittest.TestCase):
         self.assertEqual(source_before, {name: self._file_hash(self.source / name)
                                          for name in source_before})
 
+    def test_selector_skips_nonmatching_rows_and_records_original_lines(self):
+        source = self._source_copy("selector-source")
+        irrelevant = '{"Event":{"System":{"TimeCreated":{"#attributes":{"SystemTime":"2026-08-30T09:00:00.123456Z"}}},"EventData":{"Data":"irrelevant"}}}\n'
+        for name in ("Security.jsonl", "System.jsonl"):
+            path = source / name
+            path.write_text(irrelevant + irrelevant + path.read_text(encoding="utf-8"), encoding="utf-8")
+        recipe = self._recipe_value()
+        recipe["ranges"] = [
+            {"source": "Security.jsonl", "destination": "Security.jsonl",
+             "select": {"count": 3, "required_event_data_fields": ["IpAddress", "TargetUserName"]}},
+            {"source": "System.jsonl", "destination": "System.jsonl",
+             "select": {"count": 2, "required_event_data_fields": ["ServiceName", "ImagePath"]}},
+        ]
+        recipe["required_shapes"]["authentication"]["message_field"] = "TargetUserName"
+        recipe["required_shapes"]["reported_context"]["message_field"] = "TargetUserName"
+        manifest = FIXTURE.build_fixture(source, self.one, recipe, 4401)
+        self.assertEqual(manifest["outputs"]["Security.jsonl"]["lines"], [3, 4, 5])
+        self.assertEqual(manifest["outputs"]["System.jsonl"]["lines"], [3, 4])
+        self.assertEqual((self.one / "Security.jsonl").read_bytes(),
+                         (self.source / "Security.jsonl").read_bytes())
+        expected = json.loads((self.one / "probe-expectations.json").read_text(encoding="utf-8"))
+        self.assertEqual(expected["reported_context"], "svc-remote")
+
+    def test_selector_rejects_when_valid_shape_count_is_not_met(self):
+        source = self._source_copy("selector-missing-source")
+        recipe = self._recipe_value()
+        recipe["ranges"][0] = {
+            "source": "Security.jsonl", "destination": "Security.jsonl",
+            "select": {"count": 4, "required_event_data_fields": ["IpAddress", "TargetUserName"]},
+        }
+        with self.assertRaisesRegex(FIXTURE.ContractError, "PROBE_RANGE_SELECTION"):
+            FIXTURE.build_fixture(source, self.one, recipe, 4401)
+
     def test_broken_report_has_exactly_five_expected_defect_classes(self):
         manifest = FIXTURE.build_fixture(self.source, self.one, self.recipe, 4401)
         result = run_contract_checks(self.broken, self.one,
@@ -260,7 +293,8 @@ class TargetContractFixtureTest(unittest.TestCase):
             bad_recipes.append((field, recipe))
         for value in (True, "1", 1.5, 0):
             recipe = self._recipe_value()
-            recipe["ranges"][0]["start"] = value
+            recipe["ranges"][0] = {"source": "Security.jsonl", "start": value, "end": 3,
+                                   "destination": "Security.jsonl"}
             bad_recipes.append(("start-%r" % value, recipe))
         for value in (True, "4401", 1.5):
             recipe = self._recipe_value()
@@ -268,6 +302,15 @@ class TargetContractFixtureTest(unittest.TestCase):
         recipe = self._recipe_value()
         recipe["required_shapes"]["authentication"]["extra"] = "x"
         bad_recipes.append(("extra-shape-key", recipe))
+        for case, selector in (
+                ("selector-bool-count", {"count": True, "required_event_data_fields": ["IpAddress"]}),
+                ("selector-empty-fields", {"count": 1, "required_event_data_fields": []}),
+                ("selector-duplicate-fields", {"count": 1,
+                                               "required_event_data_fields": ["IpAddress", "IpAddress"]}),
+                ("selector-non-string-field", {"count": 1, "required_event_data_fields": [{}]})):
+            recipe = self._recipe_value()
+            recipe["ranges"][0]["select"] = selector
+            bad_recipes.append((case, recipe))
         recipe = self._recipe_value()
         recipe["ranges"][1]["destination"] = "Security.jsonl"
         bad_recipes.append(("canonical-collision", recipe))
@@ -446,24 +489,23 @@ class TargetContractFixtureTest(unittest.TestCase):
                 FIXTURE.build_fixture(source, self.temp / "restored-metadata-out", self.recipe, 4401)
 
     def test_round_two_timeline_relation_is_validated_and_derived(self):
-        cases = (("earlier", "09", "03", False), ("equal", "10", "00", False),
-                 ("later", "11", "03", True))
-        for name, hour, minute, accepted in cases:
+        cases = (("earlier", "09", "03", "authentication_after_inventory"),
+                 ("equal", "10", "00", "authentication_equal_inventory"),
+                 ("later", "11", "03", "authentication_before_inventory"))
+        for name, hour, minute, relation in cases:
             with self.subTest(name=name):
                 source = self._source_copy("timeline-" + name)
                 system = source / "System.jsonl"
                 system.write_text(system.read_text(encoding="utf-8").replace("T10:03", "T%s:%s" % (hour, minute)).
                                   replace("T10:04", "T%s:%s" % (hour, "01" if minute == "00" else "04")), encoding="utf-8")
                 destination = self.temp / ("timeline-out-" + name)
-                if not accepted:
-                    with self.assertRaises(FIXTURE.ContractError):
-                        FIXTURE.build_fixture(source, destination, self.recipe, 4401)
-                    continue
                 manifest = FIXTURE.build_fixture(source, destination, self.recipe, 4401)
                 expectation_path = destination / manifest["expectations"]
                 expectation = json.loads(expectation_path.read_text(encoding="utf-8"))
-                self.assertEqual(expectation["timeline"]["relation"], "authentication_before_inventory")
-                expectation["timeline"]["relation"] = "authentication_after_inventory"
+                self.assertEqual(expectation["timeline"]["relation"], relation)
+                expectation["timeline"]["relation"] = next(
+                    value for value in ("authentication_before_inventory", "authentication_equal_inventory",
+                                        "authentication_after_inventory") if value != relation)
                 expectation_path.write_text(json.dumps(expectation), encoding="utf-8")
                 self.assertFalse(ORACLE.audit_report(self.canonical, destination, expectation_path)["accepted"])
         malformed = self._source_copy("timeline-malformed")

@@ -13,6 +13,8 @@ from pathlib import Path, PurePosixPath
 
 RECIPE_KEYS = {"schema", "dataset", "ranges", "required_shapes"}
 RANGE_KEYS = {"source", "start", "end", "destination"}
+SELECT_RANGE_KEYS = {"source", "select", "destination"}
+SELECT_KEYS = {"count", "required_event_data_fields"}
 SHAPE_SCHEMAS = {
     "authentication": {"file", "ip_field", "message_field"},
     "inventory": {"file", "service_field", "process_field"},
@@ -20,7 +22,6 @@ SHAPE_SCHEMAS = {
     "timeline": {"left_file", "right_file", "time_field"},
 }
 CONTROL_NAMES = {"probe-expectations.json", "probe-fixture-manifest.json"}
-TIMELINE_RELATION = "authentication_before_inventory"
 
 
 class ContractError(Exception):
@@ -251,10 +252,45 @@ def _require_event_string(value):
 def _timestamp(value):
     if type(value) is not str:
         raise ContractError("PROBE_REQUIRED_SHAPES")
-    try:
-        return datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ")
-    except ValueError as exc:
-        raise ContractError("PROBE_REQUIRED_SHAPES") from exc
+    for form in ("%Y-%m-%dT%H:%M:%SZ", "%Y-%m-%dT%H:%M:%S.%fZ"):
+        try:
+            return datetime.strptime(value, form)
+        except ValueError:
+            pass
+    raise ContractError("PROBE_REQUIRED_SHAPES")
+
+
+def _validate_selector(selector):
+    if type(selector) is not dict or set(selector) != SELECT_KEYS or \
+            type(selector.get("count")) is not int or selector["count"] < 1 or \
+            type(selector.get("required_event_data_fields")) is not list or \
+            not selector["required_event_data_fields"]:
+        raise ContractError("PROBE_RANGE_SCHEMA")
+    fields = selector["required_event_data_fields"]
+    for field in fields:
+        _nonempty_string(field, "PROBE_RANGE_SCHEMA")
+    if len(set(fields)) != len(fields):
+        raise ContractError("PROBE_RANGE_SCHEMA")
+
+
+def _selected_lines(raw, selector):
+    selected = []
+    for number, encoded in enumerate(raw.splitlines(keepends=True), 1):
+        if not encoded.strip():
+            raise ContractError("PROBE_SOURCE_JSONL")
+        try:
+            row = _strict_json(encoded.decode("utf-8"))
+        except (UnicodeDecodeError, ValueError) as exc:
+            raise ContractError("PROBE_SOURCE_JSONL") from exc
+        if type(row) is not dict:
+            raise ContractError("PROBE_SOURCE_JSONL")
+        data = _event_data(row)
+        if type(data) is dict and all(type(data.get(field)) is str and data[field]
+                                      for field in selector["required_event_data_fields"]):
+            selected.append((number, encoded))
+    if len(selected) < selector["count"]:
+        raise ContractError("PROBE_RANGE_SELECTION")
+    return selected[:selector["count"]]
 
 
 def _expectations(outputs, shapes):
@@ -294,8 +330,6 @@ def _expectations(outputs, shapes):
     relation = ("authentication_before_inventory" if left_instant < right_instant else
                 "authentication_equal_inventory" if left_instant == right_instant else
                 "authentication_after_inventory")
-    if relation != TIMELINE_RELATION:
-        raise ContractError("PROBE_REQUIRED_SHAPES")
     return {"schema": 1, "authentication": {"external_ips": ips, "messages": messages},
             "inventory": {"services": services, "processes": processes},
             "reported_context": context,
@@ -371,13 +405,16 @@ def build_fixture(source, destination, recipe, seed):
     _validate_recipe(recipe)
     outputs, range_manifest, source_hashes, ranges, destinations, snapshots, identities = {}, [], {}, [], set(), {}, {}
     for item in recipe["ranges"]:
-        if type(item) is not dict or set(item) != RANGE_KEYS:
+        if type(item) is not dict or set(item) not in (RANGE_KEYS, SELECT_RANGE_KEYS):
             raise ContractError("PROBE_RANGE_SCHEMA")
         relative_source = _canonical_relative(item["source"], "PROBE_RANGE_PATH")
         relative_destination = _canonical_relative(item["destination"], "PROBE_RANGE_PATH")
-        if type(item["start"]) is not int or type(item["end"]) is not int or item["start"] < 1 or \
-                item["end"] < item["start"]:
-            raise ContractError("PROBE_RANGE_LINES")
+        if set(item) == RANGE_KEYS:
+            if type(item["start"]) is not int or type(item["end"]) is not int or item["start"] < 1 or \
+                    item["end"] < item["start"]:
+                raise ContractError("PROBE_RANGE_LINES")
+        else:
+            _validate_selector(item["select"])
         if relative_destination in destinations:
             raise ContractError("PROBE_RANGE_DESTINATION")
         destinations.add(relative_destination)
@@ -400,14 +437,23 @@ def build_fixture(source, destination, recipe, seed):
             identities[relative_source] = after_identity
         raw = snapshots[relative_source]
         lines = raw.splitlines(keepends=True)
-        if item["end"] > len(lines):
-            raise ContractError("PROBE_RANGE_LINES")
-        body = b"".join(lines[item["start"] - 1:item["end"]])
+        if set(item) == RANGE_KEYS:
+            if item["end"] > len(lines):
+                raise ContractError("PROBE_RANGE_LINES")
+            selected = list(enumerate(lines[item["start"] - 1:item["end"]], item["start"]))
+        else:
+            selected = _selected_lines(raw, item["select"])
+        body = b"".join(encoded for _, encoded in selected)
+        source_lines = [number for number, _ in selected]
         outputs[relative_destination] = body
-        range_manifest.append({"source": relative_source, "source_sha256": source_hashes[relative_source],
-                               "start": item["start"], "end": item["end"], "destination": relative_destination,
-                               "output_sha256": _sha256_bytes(body),
-                               "lines": list(range(item["start"], item["end"] + 1))})
+        row = {"source": relative_source, "source_sha256": source_hashes[relative_source],
+               "destination": relative_destination, "output_sha256": _sha256_bytes(body),
+               "lines": source_lines}
+        if set(item) == RANGE_KEYS:
+            row.update({"start": item["start"], "end": item["end"]})
+        else:
+            row["select"] = item["select"]
+        range_manifest.append(row)
     expectations_bytes = _json_bytes(_expectations(outputs, recipe["required_shapes"]))
     manifest = {"schema": 1, "dataset": recipe["dataset"], "seed": seed,
                 "recipe_sha256": _sha256_bytes(_json_bytes(recipe)), "source_sha256": source_hashes,

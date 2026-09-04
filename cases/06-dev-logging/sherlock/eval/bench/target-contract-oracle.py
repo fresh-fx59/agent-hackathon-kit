@@ -15,7 +15,6 @@ REQUIRED = {
     "F-REPORTED-CONTEXT": ("REPORTED", ("reported_context", "citation_files")),
     "F-TIMELINE-LINK": ("INFERENCE", ("timeline", "citation_files")),
 }
-TIMELINE_RELATION = "authentication_before_inventory"
 HEADING = re.compile(r"^( {0,3})(#{1,6})[ \t]+(.*?)[ \t]*$", re.MULTILINE)
 SETEXT_HEADING = re.compile(
     r"^( {0,3})(?=\S)(.*?\S)[ \t]*\r?\n {0,3}(=+|-+)[ \t]*(?:\r?\n|$)", re.MULTILINE)
@@ -120,15 +119,24 @@ def _expected_fields(expected):
 
 
 def _timeline_valid(timeline):
+    def stamped(value):
+        if type(value) is not str:
+            raise ValueError
+        for form in ("%Y-%m-%dT%H:%M:%SZ", "%Y-%m-%dT%H:%M:%S.%fZ"):
+            try:
+                return datetime.strptime(value, form)
+            except ValueError:
+                pass
+        raise ValueError
     try:
-        left = datetime.strptime(timeline["authentication_first"], "%Y-%m-%dT%H:%M:%SZ")
-        right = datetime.strptime(timeline["inventory_first"], "%Y-%m-%dT%H:%M:%SZ")
+        left = stamped(timeline["authentication_first"])
+        right = stamped(timeline["inventory_first"])
     except (KeyError, TypeError, ValueError):
         return False
     relation = ("authentication_before_inventory" if left < right else
                 "authentication_equal_inventory" if left == right else
                 "authentication_after_inventory")
-    return relation == TIMELINE_RELATION and timeline.get("relation") == TIMELINE_RELATION
+    return timeline.get("relation") == relation
 
 
 def _field_values(section):

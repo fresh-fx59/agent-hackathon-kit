@@ -15,9 +15,9 @@ citation_files=["System.jsonl"]
 
 ## F-REPORTED-CONTEXT
 
-- [!REPORTED] reported_context="reported by endpoint team"
+- [!REPORTED] reported_context="svc-remote"
 citation_files=["Security.jsonl"]
-«"Message":"reported by endpoint team"» — Security.jsonl:2.
+«"TargetUserName":"svc-remote"» — Security.jsonl:2.
 
 ## F-TIMELINE-LINK
 
