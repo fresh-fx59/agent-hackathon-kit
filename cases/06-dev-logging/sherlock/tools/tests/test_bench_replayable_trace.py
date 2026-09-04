@@ -13,10 +13,13 @@ runner, lets it delete its workspace, then RENAMES THE SOURCE CORPUS AWAY and
 makes it unreadable before replaying. Anything that still works cannot be
 reconstructing.
 """
+import hashlib
 import json
 import os
 import subprocess
 import tempfile
+import threading
+import time
 import unittest
 from pathlib import Path
 
@@ -36,7 +39,7 @@ FIXTURE_FILES = {
 
 
 class BenchReplayableTrace(unittest.TestCase):
-    def _run(self, tmp, arm="v35", retired_marker=False):
+    def _run(self, tmp, arm="v35", retired_marker=False, controlled_settings=None):
         corpus = tmp / "corpus"
         runs = tmp / "runs"
         corpus.mkdir()
@@ -82,10 +85,65 @@ class BenchReplayableTrace(unittest.TestCase):
             "QWEN_BIN": str(fake),
             "BENCH_RUNS": str(runs),
         })
+        controlled_trace = None
+        if controlled_settings is not None:
+            runs.mkdir()
+            trace = runs / "controlled-subscription"
+            trace.mkdir()
+            (trace / "run-manifest.json").write_text(json.dumps({
+                "input_identity": {
+                    "settings_sha256": hashlib.sha256(controlled_settings).hexdigest(),
+                },
+            }) + "\n", encoding="utf-8")
+            settings = tmp / "approved-settings.json"
+            settings.write_bytes(controlled_settings)
+            env.update({
+                "SHERLOCK_RUN_TAG": trace.name,
+                "SHERLOCK_TRACE": str(trace),
+                "SHERLOCK_LANE": "subscription",
+                "SHERLOCK_SETTINGS": str(settings),
+            })
+            controlled_trace = trace
+        publisher = None
+        if controlled_trace is not None:
+            def publish_controller_proof():
+                ready = controlled_trace / ".runner-ready"
+                for _ in range(500):
+                    if ready.is_file():
+                        (controlled_trace / "controller-process.json").write_text(json.dumps({
+                            "pid": 1, "process_start_ticks": 1, "pgid": 1,
+                            "boot_id_sha256": "0" * 64,
+                            "command_sha256": "1" * 64,
+                        }) + "\n", encoding="utf-8")
+                        return
+                    time.sleep(0.01)
+            publisher = threading.Thread(target=publish_controller_proof)
+            publisher.start()
         run = subprocess.run(["bash", str(RUNNER), arm], env=env,
                              text=True, capture_output=True, timeout=180)
+        if publisher is not None:
+            publisher.join(timeout=1)
         trace = next(runs.iterdir())
         return corpus, trace, run
+
+    def test_controlled_subscription_seals_and_uses_the_approved_settings(self):
+        with tempfile.TemporaryDirectory() as raw:
+            approved = subprocess.check_output([
+                "python3", str(SHERLOCK / "measure" / "corporate-settings.py"),
+                "emit-run", "--window", "262000", "--max-tokens", "32000",
+                "--session-token-limit", "230000", "--timeout", "900000",
+                "--max-retries", "0", "--skill-directory", str(Path(raw) / "skills"),
+                "--exclude-tool", "agent", "--no-auto-compact",
+            ])
+            _corpus, trace, run = self._run(
+                Path(raw).resolve(), arm="v44", retired_marker=True,
+                controlled_settings=approved)
+            self.assertEqual((trace / "corporate-settings.json").read_bytes(), approved,
+                             run.stdout + run.stderr)
+            self.assertTrue((trace / "qwen-settings-pre.json").is_file(),
+                            run.stdout + run.stderr)
+            self.assertEqual((trace / "qwen-settings-pre.json").read_bytes(), approved,
+                             run.stdout + run.stderr)
 
     def test_retired_marker_is_preserved_as_an_inert_trace_receipt(self):
         with tempfile.TemporaryDirectory() as raw:

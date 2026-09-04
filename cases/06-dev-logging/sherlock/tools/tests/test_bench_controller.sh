@@ -47,6 +47,8 @@ class ControlledRunnerTests(unittest.TestCase):
         (self.corpus / "one.log").write_text("line\n", encoding="utf-8")
         self.prompt = self.root / "prompt.txt"
         self.prompt.write_text("inspect {CORPUS}\n", encoding="utf-8")
+        self.settings = self.root / "approved-subscription-settings.json"
+        self.settings.write_text("{}\n", encoding="utf-8")
         self.qwen_capture = self.root / "qwen-env.json"
         self.qwen = self.root / "fake-qwen"
         executable(self.qwen, """
@@ -68,7 +70,11 @@ printf '[{"type":"result","result":"ok","is_error":false,"session_id":"123456789
     def trace(self, tag="controlled-001"):
         trace = self.runs / tag
         trace.mkdir()
-        (trace / "run-manifest.json").write_text('{"sealed":true}\n', encoding="utf-8")
+        settings_sha = hashlib.sha256(self.settings.read_bytes()).hexdigest()
+        (trace / "run-manifest.json").write_text(json.dumps({
+            "sealed": True,
+            "input_identity": {"settings_sha256": settings_sha},
+        }) + "\n", encoding="utf-8")
         return trace
 
     def env(self, trace, **updates):
@@ -80,6 +86,7 @@ printf '[{"type":"result","result":"ok","is_error":false,"session_id":"123456789
             "SHERLOCK_REQUIRE_ATTRIBUTION": "0",
             "SHERLOCK_UPSTREAM_LOG": "0",
             "SHERLOCK_LANE": "subscription",
+            "SHERLOCK_SETTINGS": str(self.settings),
             "SHERLOCK_BUDGET_MAX_UPSTREAM_ATTEMPTS": "10",
             "SHERLOCK_BUDGET_MAX_REQUEST_BYTES": "100000",
             "SHERLOCK_BUDGET_MAX_WALL_SECONDS": "30",

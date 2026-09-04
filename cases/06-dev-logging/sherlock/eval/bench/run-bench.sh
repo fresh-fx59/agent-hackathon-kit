@@ -330,6 +330,71 @@ PY
   export SHERLOCK_REQUEST_TIMEOUT_MS="$(printf '%s\n' "$FULL_PROFILE_VALUES" | sed -n '8p')"
   export SHERLOCK_MODEL="$MODEL" SHERLOCK_EXPECTED_RETURNED_IDENTITY="$EXPECTED_RETURNED_IDENTITY"
 fi
+# A controlled subscription qualification is model-specific evidence, so its
+# exact approved settings are an input, not a set of values to regenerate.  The
+# controller already binds their digest into run-manifest.json.  Seal those
+# bytes into the trace before Qwen can observe them, and verify that binding
+# here so the later qualification audit does not have to trust an ambient path.
+if [ "$CONTROLLED" = "1" ] && [ "$TARGET_PROBE_MODE" != "1" ] \
+    && [ "$RUN_LANE" = "subscription" ]; then
+  : "${SHERLOCK_SETTINGS:?controlled subscription omitted settings}"
+  python3 - "$SHERLOCK_SETTINGS" "$TRACE/corporate-settings.json" \
+    "$TRACE/run-manifest.json" <<'PY' || exit 2
+import hashlib, json, os, stat, sys
+source, target, manifest_path = sys.argv[1:]
+def regular(path):
+    if not os.path.isabs(path) or os.path.realpath(path) != os.path.normpath(path):
+        raise SystemExit("SUBSCRIPTION_SETTINGS_INVALID")
+    before = os.lstat(path)
+    if not stat.S_ISREG(before.st_mode) or stat.S_ISLNK(before.st_mode) or before.st_nlink != 1:
+        raise SystemExit("SUBSCRIPTION_SETTINGS_INVALID")
+    fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+    try:
+        opened = os.fstat(fd)
+        if (opened.st_dev, opened.st_ino, opened.st_nlink) != (before.st_dev, before.st_ino, 1):
+            raise SystemExit("SUBSCRIPTION_SETTINGS_INVALID")
+        chunks, size = [], 0
+        while True:
+            block = os.read(fd, 65536)
+            if not block: break
+            size += len(block)
+            if size > 16 * 1024 * 1024: raise SystemExit("SUBSCRIPTION_SETTINGS_INVALID")
+            chunks.append(block)
+        after = os.fstat(fd)
+        if (after.st_dev, after.st_ino, after.st_nlink, after.st_size, after.st_mtime_ns) != (
+                opened.st_dev, opened.st_ino, 1, opened.st_size, opened.st_mtime_ns):
+            raise SystemExit("SUBSCRIPTION_SETTINGS_INVALID")
+        return b"".join(chunks)
+    finally:
+        os.close(fd)
+def object_from(data):
+    def unique(pairs):
+        out = {}
+        for key, value in pairs:
+            if key in out: raise ValueError("duplicate")
+            out[key] = value
+        return out
+    return json.loads(data.decode("utf-8"), object_pairs_hook=unique,
+                      parse_constant=lambda value: (_ for _ in ()).throw(ValueError(value)))
+try:
+    data, manifest_raw = regular(source), regular(manifest_path)
+    settings, manifest = object_from(data), object_from(manifest_raw)
+    expected = manifest["input_identity"]["settings_sha256"]
+except (OSError, UnicodeError, ValueError, KeyError, TypeError) as exc:
+    raise SystemExit("SUBSCRIPTION_SETTINGS_INVALID") from exc
+if (not isinstance(settings, dict) or not isinstance(expected, str)
+        or hashlib.sha256(data).hexdigest() != expected):
+    raise SystemExit("SUBSCRIPTION_SETTINGS_MISMATCH")
+out = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), 0o600)
+try:
+    os.write(out, data); os.fsync(out)
+finally:
+    os.close(out)
+directory = os.open(os.path.dirname(target), os.O_RDONLY)
+try: os.fsync(directory)
+finally: os.close(directory)
+PY
+fi
 # The target probe uses the same runner, but its audit needs the exact approved
 # package alongside the real trace.  Copy it only after controlled-trace
 # ownership has been verified; no report or proxy evidence is synthesized.
@@ -1270,7 +1335,8 @@ if [ "${SHERLOCK_TARGET_AUTOCOMPACT:-0}" != "1" ]; then
   EMIT_ARGS="$EMIT_ARGS --no-auto-compact"
 fi
 # shellcheck disable=SC2086
-if [ "$TARGET_PROBE_MODE" = "1" ] || [ -n "${SHERLOCK_PAID_ADMISSION_MANIFEST:-}" ]; then
+if [ "$TARGET_PROBE_MODE" = "1" ] || [ -n "${SHERLOCK_PAID_ADMISSION_MANIFEST:-}" ] \
+    || { [ "$CONTROLLED" = "1" ] && [ "$RUN_LANE" = "subscription" ]; }; then
   # The bytes below were hashed into the approved profile.  A private
   # descriptor-opened copy is the only settings file Qwen can observe.
   python3 - "$TRACE/corporate-settings.json" "$W/.qwen/settings.json" <<'PY' || exit 1
