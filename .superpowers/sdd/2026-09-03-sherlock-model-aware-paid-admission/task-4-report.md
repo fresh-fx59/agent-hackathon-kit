@@ -486,3 +486,16 @@ verification: probe 49/49; Task 2 fixture 20/20; Task 3 budget 23/23; status
 localhost E2E 1/1. Persistent controller comparison is current 31/31 and clean
 baseline 31/31 in 10/10/11 batches. Python compile, Bash syntax, and diff check
 were clean. No provider, credential, real corpus, or external network was used.
+
+2026-09-04 ACCEPTANCE: the first independent repair review passed the core
+suites but returned evidence-only FIX after invoking the shell-wrapped
+controller harness from the wrong working directory. A second read-only review
+used the required Sherlock working directory and ran each blocker class as
+narrow selectors. Required Round 5 cases passed 20/20; extra replay-order,
+raw-body-forgery, parent-replacement, and approval-order cases passed 8/8.
+Current PersistentControllerTests passed 10/10, 10/10, and 11/11; the clean
+baseline matched 10/10, 10/10, and 11/11; current target controller passed 4/4.
+The reviewer inspected the production paths and found no critical, important,
+or minor issue. Final verdict: PASS. Task 4 is complete at `c71bd7f`; no
+provider, network, real secret, paid probe, full paid run, or real corpus was
+used.
