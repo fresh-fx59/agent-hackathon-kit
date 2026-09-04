@@ -11,6 +11,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 
 
@@ -121,6 +122,7 @@ def discover_controller_authority(trace):
 
 
 def replay(trace):
+    trace = Path(trace)
     script = trace / "replay.sh"
     if script.is_symlink() or not script.is_file():
         return None
@@ -142,15 +144,38 @@ def replay(trace):
         "LC_ALL": "C",
     }
     try:
-        result = subprocess.run(
-            [bash, str(script)],
-            cwd=trace,
-            env=environment,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            timeout=1800,
-        )
-    except (OSError, subprocess.TimeoutExpired):
+        # Replayers are authenticated programs, but the gate programs they run
+        # may have non-gating maintenance side effects.  triagecheck, for
+        # example, refreshes an existing checkpoint.json.  Never execute those
+        # programs inside the evidence tree whose terminal seal we are proving.
+        with tempfile.TemporaryDirectory(prefix="sherlock-verdict-replay-") as raw:
+            scratch = Path(raw) / "trace"
+            scratch.mkdir()
+            for name in ("replay.sh", "gates.json"):
+                source = trace / name
+                if source.exists():
+                    if source.is_symlink() or not source.is_file():
+                        return None
+                    shutil.copy2(source, scratch / name)
+            for name in ("staged-corpus", "gate-tools", "reference", "work"):
+                source = trace / name
+                if not source.exists():
+                    continue
+                if source.is_symlink() or not source.is_dir():
+                    return None
+                for entry in source.rglob("*"):
+                    if entry.is_symlink() or (not entry.is_dir() and not entry.is_file()):
+                        return None
+                shutil.copytree(source, scratch / name)
+            result = subprocess.run(
+                [bash, str(scratch / "replay.sh")],
+                cwd=scratch,
+                env=environment,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=1800,
+            )
+    except (OSError, shutil.Error, subprocess.TimeoutExpired):
         return None
     return result.returncode
 

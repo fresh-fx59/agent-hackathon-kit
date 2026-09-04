@@ -601,6 +601,22 @@ class RunVerdictTests(unittest.TestCase):
         self.assertEqual(command[0], nixos_bash)
         self.assertIn("/run/current-system/sw/bin", environment["PATH"].split(":"))
 
+    def test_replay_cannot_mutate_the_authenticated_trace(self):
+        """Checker side effects must land in scratch space, never sealed evidence."""
+        self.write_clean_report_artifacts()
+        checkpoint = self.fx.trace / "work" / "checkpoint.json"
+        checkpoint.write_bytes(b'{"state":"authenticated"}\n')
+        replay = self.fx.trace / "replay.sh"
+        replay.write_text(
+            "#!/usr/bin/env bash\nprintf '%s\\n' '{\"state\":\"mutated\"}' > work/checkpoint.json\n",
+            encoding="utf-8")
+        replay.chmod(0o755)
+
+        result = VERDICT_TOOL.replay(self.fx.trace)
+
+        self.assertEqual(result, 0)
+        self.assertEqual(checkpoint.read_bytes(), b'{"state":"authenticated"}\n')
+
     def test_trace_only_discovers_and_authenticates_manifest_authority(self):
         """Catches forcing the operator to recover authority paths already in the manifest."""
         self.write_status("ACCEPTED")
