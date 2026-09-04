@@ -298,6 +298,22 @@ class BenchValidityTests(unittest.TestCase):
         self.assertFalse(any(hit["category"] == "proof"
                              for hit in row["contamination"]["hits"]), row)
 
+    def test_v44_triage_json_stdout_stays_one_document_during_checkpoint_refresh(self):
+        with tempfile.TemporaryDirectory(prefix="triage-json-channel-") as td:
+            root = Path(td); work = root / "work"; corpus = root / "corpus"
+            work.mkdir(); corpus.mkdir()
+            (work / "worklist.tsv").write_text("# id\tverdict\n", encoding="utf-8")
+            (work / "checkpoint.json").write_text("{}\n", encoding="utf-8")
+            done = subprocess.run(
+                [sys.executable, str(SHERLOCK / "skills/v44/tools/triagecheck.py"),
+                 "--worklist", str(work / "worklist.tsv"),
+                 "--rules", str(work / "rules.tsv"), "--corpus", str(corpus), "--json"],
+                text=True, capture_output=True)
+            parsed = json.loads(done.stdout)
+            self.assertIn("blocking", parsed)
+            self.assertNotIn("checkpoint", done.stdout)
+            self.assertIn("checkpoint", done.stderr)
+
     def test_delivery_divergence_is_fact_and_exact_union_is_checked(self):
         fx=self.fixture(delivered="message block", artifact="file block")
         row=fx.validate(); self.assertTrue(row["delivery"]["divergent"]); self.assertTrue(row["valid"])

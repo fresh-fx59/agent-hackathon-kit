@@ -1309,7 +1309,10 @@ def main(argv=None):
     exit_code = 1 if d["blocking"] else 0
     message = maybe_refresh_checkpoint(args.worklist, args.refresh_checkpoint)
     if message:
-        sys.stdout.write(message + "\n")
+        # Machine callers parse stdout as one JSON document.  Keep the
+        # checkpoint side-effect visible without corrupting that channel.
+        stream = sys.stderr if args.json else sys.stdout
+        stream.write(message + "\n")
     return exit_code
 
 
