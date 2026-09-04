@@ -50,6 +50,7 @@ try:
 finally:
     os.close(fd)
 PY
+OUTPUT="$(CDPATH= cd -- "$OUTPUT" && pwd -P)"
 
 EVENTS="$OUTPUT/stage-events.jsonl"
 MATRIX="$OUTPUT/fault-matrix.json"
@@ -188,6 +189,7 @@ CONTROLLER_ENV=(
   "PATH=$(dirname "$PYTHON_PATH"):/usr/bin:/bin:/usr/sbin:/sbin" "HOME=$TARGET_HOME" "SHERLOCK_API_KEY=$SHERLOCK_API_KEY"
   "GIT_CONFIG_COUNT=1" "GIT_CONFIG_KEY_0=safe.directory" "GIT_CONFIG_VALUE_0=$REPO_ROOT"
   "SHERLOCK_CONTROLLER_ROOT=$CONTROLLER_ROOT" "BENCH_RUNS=$RUNS"
+  "SHERLOCK_LEDGER=$OUTPUT/quality.jsonl"
   "SHERLOCK_FREE_TEST_COMMAND=$(printf '%q' "$FREE_TEST")"
   "SHERLOCK_HEALTH_COMMAND=$(printf '%q' "$HEALTH")"
   "SHERLOCK_TARGET_COMMAND=$(printf '%q' "$RUNNER") v44"

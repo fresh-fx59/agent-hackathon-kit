@@ -343,7 +343,7 @@ class LauncherTests(unittest.TestCase):
                      "SHERLOCK_STOP_CHECKER", "SHERLOCK_CITATION_CHECKER", "QWEN_BIN",
                      "SHERLOCK_BUDGET_MAX_UPSTREAM_ATTEMPTS", "SHERLOCK_CONTEXT_WINDOW",
                      "SHERLOCK_RENDERER", "SHERLOCK_TARGET_PROFILE",
-                     "SHERLOCK_SETTINGS", "SHERLOCK_INPUT_PACKAGE"):
+                     "SHERLOCK_SETTINGS", "SHERLOCK_INPUT_PACKAGE", "SHERLOCK_LEDGER"):
             self.assertIn(name, captured)
         settings = output / "corporate-settings.json"
         package = output / "input-package.json"
@@ -367,6 +367,7 @@ class LauncherTests(unittest.TestCase):
         self.assertEqual(captured["GIT_CONFIG_COUNT"], "1")
         self.assertEqual(captured["GIT_CONFIG_KEY_0"], "safe.directory")
         self.assertEqual(captured["GIT_CONFIG_VALUE_0"], str(repo.resolve()))
+        self.assertEqual(captured["SHERLOCK_LEDGER"], str((output / "quality.jsonl").resolve()))
         state = subprocess.run(
             [sys.executable, str(SHERLOCK / "skills/v44/tools/statecheck.py"),
              "--corpus", str(output / "generated-probe-corpus"), "--json"],

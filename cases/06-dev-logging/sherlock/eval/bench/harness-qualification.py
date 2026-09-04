@@ -317,6 +317,7 @@ def _adapter(case_id: str, root: Path, work: Path):
         command = [str(tool)]
         timeout = MATRIX_TIMEOUT
         env = {"SHERLOCK_CONTROLLER_ROOT": str(controllers), "BENCH_RUNS": str(runs),
+               "SHERLOCK_LEDGER": str(work / "quality.jsonl"),
                "SHERLOCK_LANE": "subscription",
                "SHERLOCK_FREE_TEST_COMMAND": "sleep 30", "SHERLOCK_HEALTH_COMMAND": "false",
                "SHERLOCK_TARGET_COMMAND": "false",

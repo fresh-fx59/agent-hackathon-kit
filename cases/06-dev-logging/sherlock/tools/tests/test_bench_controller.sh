@@ -611,6 +611,14 @@ os.stat=guarded_stat
         self.assertEqual((resumed_status["phase"],resumed_status["reason"]),
                          ("BLOCKED","HEALTH_RECEIPT_INVALID"))
 
+    def test_missing_acceptance_ledger_rejects_before_any_child_or_contact(self):
+        env = self.fx.env(); env.pop("SHERLOCK_LEDGER")
+        result = self.fx.run(env=env)
+        self.assertNotEqual(result.returncode, 0, (result.stdout, result.stderr))
+        self.assertIn("MISSING_SHERLOCK_LEDGER", result.stderr)
+        self.assertFalse(self.fx.capture.exists())
+        self.assertFalse(any(self.fx.controllers.glob("controller-*")))
+
     def test_health_receipt_requires_exact_one_by_three_matrix(self):
         cases=(("reduced",{}),("duplicate",{}),("missing-size",{}),
                ("wrong-attempt",{}),(None,{"FAKE_HEALTH_REPS_FIELD":"2"}))
@@ -1075,6 +1083,7 @@ class PaidAdmissionOrderingTests(unittest.TestCase):
             tool = root / "admission.py"
             env = dict(os.environ, SHERLOCK_LANE="paid",
                        SHERLOCK_CONTROLLER_ROOT=str(root / "controller"), BENCH_RUNS=str(runs),
+                       SHERLOCK_LEDGER=str(root / "quality.jsonl"),
                        SHERLOCK_FREE_TEST_COMMAND=trip, SHERLOCK_HEALTH_COMMAND=trip,
                        SHERLOCK_TARGET_COMMAND=trip, SHERLOCK_PAID_ADMISSION_TOOL=str(tool),
                        SHERLOCK_PAID_ADMISSION_MANIFEST=str(manifest),
@@ -1129,6 +1138,7 @@ class PaidAdmissionOrderingTests(unittest.TestCase):
             free = root / "free-ran"
             env = dict(os.environ, SHERLOCK_LANE="paid", SHERLOCK_API_KEY="must-not-leak",
                 SHERLOCK_CONTROLLER_ROOT=str(root / "controller"), BENCH_RUNS=str(runs),
+                SHERLOCK_LEDGER=str(root / "quality.jsonl"),
                 SHERLOCK_HEALTH_COMMAND="true", SHERLOCK_TARGET_COMMAND="true",
                 SHERLOCK_PAID_ADMISSION_TOOL=str(tool),
                 SHERLOCK_PAID_ADMISSION_MANIFEST=str(manifest),

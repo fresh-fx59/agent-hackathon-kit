@@ -596,9 +596,16 @@ def validity_result(trace, tag, manifest_sha, key):
 
 def parse_configuration():
     required = ("SHERLOCK_CONTROLLER_ROOT", "SHERLOCK_FREE_TEST_COMMAND", "BENCH_RUNS",
-                "SHERLOCK_TARGET_COMMAND", "SHERLOCK_HEALTH_COMMAND")
+                "SHERLOCK_TARGET_COMMAND", "SHERLOCK_HEALTH_COMMAND", "SHERLOCK_LEDGER")
     for name in required:
         if not os.environ.get(name): raise Blocked("MISSING_" + name)
+    ledger = os.environ["SHERLOCK_LEDGER"]
+    if not os.path.isabs(ledger) or os.path.realpath(ledger) != os.path.normpath(ledger):
+        raise Blocked("INVALID_SHERLOCK_LEDGER")
+    if os.path.lexists(ledger):
+        mode = os.lstat(ledger).st_mode
+        if not stat.S_ISREG(mode) or stat.S_ISLNK(mode):
+            raise Blocked("INVALID_SHERLOCK_LEDGER")
     limits = {}
     for field, name in LIMIT_ENV.items():
         try: value = int(os.environ.get(name, ""))
