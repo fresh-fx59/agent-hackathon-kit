@@ -1,0 +1,12 @@
+{
+  "schema": 1,
+  "kind": "provider-free preserved capture parser verification",
+  "accepted_parser_only": true,
+  "source_run": "r15 rejected; verdict unchanged",
+  "calls": 27,
+  "completion_journal_sha256": "4282a4d87bba0dd259b2810e083336e628bb91759228ba01053bf3a08b3c3e4c",
+  "prompt_tokens": 2255692,
+  "completion_tokens": 65689,
+  "audit_code_sha256": "d519d24fcb61e6b525418d29eaaae81508036bda59aa956c01a79785da00eaec",
+  "checked_at": "2026-09-05T19:38:11.005408+00:00"
+}

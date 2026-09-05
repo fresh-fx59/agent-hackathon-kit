@@ -1231,6 +1231,57 @@ def _gzip_json(path):
     return _strict_json(body), raw_hash
 
 
+def _gzip_sse(path):
+    """Read one complete raw Task 3 SSE capture into its final observation."""
+    raw, raw_hash = _asset(path, "TARGET_CONTRACT_FAILED")
+    try:
+        body = gzip.decompress(raw)
+        # SSE recognizes CR, LF, and CRLF only.  `str.splitlines()` would
+        # incorrectly split valid JSON content at Unicode line separators.
+        lines = re.split(r"\r\n|\r|\n", body.decode("utf-8"))
+    except (OSError, EOFError, UnicodeError) as exc:
+        raise ProbeFailure("TARGET_CONTRACT_FAILED", "sse capture") from exc
+    response, data_events, complete, data = {}, 0, False, []
+    for line in lines:
+        if not line:
+            if not data:
+                continue
+            payload, data = "\n".join(data), []
+            if complete or not payload:
+                raise ProbeFailure("TARGET_CONTRACT_FAILED", "sse capture")
+            if payload == "[DONE]":
+                complete = True
+                continue
+            try:
+                event = _strict_json(payload.encode("utf-8"))
+            except ProbeFailure as exc:
+                raise ProbeFailure("TARGET_CONTRACT_FAILED", "sse capture") from exc
+            if not isinstance(event, dict):
+                raise ProbeFailure("TARGET_CONTRACT_FAILED", "sse capture")
+            data_events += 1
+            if "model" in event:
+                if not isinstance(event["model"], str) or not event["model"]:
+                    raise ProbeFailure("TARGET_CONTRACT_FAILED", "sse capture")
+                if "model" in response and response["model"] != event["model"]:
+                    raise ProbeFailure("TARGET_CONTRACT_FAILED", "sse capture")
+                response["model"] = event["model"]
+            if "usage" in event and event["usage"] is not None:
+                if not _ordinary_usage(event["usage"]):
+                    raise ProbeFailure("TARGET_CONTRACT_FAILED", "sse capture")
+                # This matches the proxy's last-event-wins observation and
+                # prevents intermediate cumulative usage from being summed.
+                response["usage"] = event["usage"]
+            continue
+        if complete:
+            raise ProbeFailure("TARGET_CONTRACT_FAILED", "sse capture")
+        if line.startswith("data:"):
+            value = line[5:]
+            data.append(value[1:] if value.startswith(" ") else value)
+    if data or not complete or not data_events:
+        raise ProbeFailure("TARGET_CONTRACT_FAILED", "sse capture")
+    return response, raw_hash
+
+
 def _task3_observations(trace):
     """Normalize Task 3's durable JSONL/capture contract for the audit.
 
@@ -1270,7 +1321,9 @@ def _task3_observations(trace):
         # uses the copied Task 3 body directory.  Both are no-follow assets.
         root = capture_root if capture_root.is_dir() else trace
         request, request_hash = _gzip_json(root / req_name)
-        response, response_hash = _gzip_json(root / res_name)
+        response, response_hash = (_gzip_sse(root / res_name)
+                                   if res_name.endswith(".res.sse.gz")
+                                   else _gzip_json(root / res_name))
         if not isinstance(request, dict) or request.get("model") != row["sent_model"]:
             raise ProbeFailure("TARGET_IDENTITY_MISMATCH", "raw request identity")
         if not isinstance(response, dict) or response.get("model") != row["returned_model"]:

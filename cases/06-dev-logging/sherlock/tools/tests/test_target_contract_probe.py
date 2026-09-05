@@ -1456,6 +1456,52 @@ print(json.dumps([{'type':'result','result':'ok','is_error':False,'session_id':'
         (trace / "run-verdict.json").write_text(json.dumps(actual))
         self.assertTrue(self.probe.audit(trace)["accepted"])
 
+    def test_task3_observations_accept_complete_gzip_sse_and_uses_final_usage_once(self):
+        self.probe.prepare(self.args)
+        trace = self.root / "probe-work" / "runs" / "target-contract-probe"; self._accepted_trace(trace)
+        request_id = "0" * 32
+        response = trace / (request_id + ".a1.res.sse.gz")
+        with gzip.open(response, "wb") as handle:
+            handle.write(
+                b": provider keepalive\r\n"
+                b"event: message\r\n"
+                b"data: {\"model\":\"deepseek-v4-20260901\",\"choices\":[{\"delta\":{\"content\":\"line" +
+                "\u2028".encode("utf-8") + b"break\"}}],\"usage\":\r\n"
+                b"data: {\"prompt_tokens\":1,\"completion_tokens\":0}}\r\n\r\n"
+                b"data: {\"usage\":{\"prompt_tokens\":3,\"completion_tokens\":2,\"total_tokens\":5,\"completion_tokens_details\":{\"reasoning_tokens\":1},\"prompt_tokens_details\":{\"cached_tokens\":1}}}\r\n\r\n"
+                b"data: [DONE]\r\n\r\n")
+        journal = json.loads((trace / "upstream-completed.jsonl").read_text())
+        journal["body_response_file"] = response.name
+        journal["usage"] = {"prompt_tokens": 3, "completion_tokens": 2,
+                            "total_tokens": 5,
+                            "completion_tokens_details": {"reasoning_tokens": 1},
+                            "prompt_tokens_details": {"cached_tokens": 1}}
+        (trace / "upstream-completed.jsonl").write_text(json.dumps(journal) + "\n")
+        observations = self.probe._task3_observations(trace)[2]
+        self.assertEqual(len(observations), 1)
+        self.assertEqual(observations[0][0]["usage"], journal["usage"])
+
+    def test_task3_observations_rejects_malformed_or_incomplete_gzip_sse(self):
+        self.probe.prepare(self.args)
+        trace = self.root / "probe-work" / "runs" / "target-contract-probe"; self._accepted_trace(trace)
+        request_id = "0" * 32
+        journal = json.loads((trace / "upstream-completed.jsonl").read_text())
+        for name, body in (
+                ("malformed", b"data: {not-json}\n\ndata: [DONE]\n\n"),
+                ("incomplete", b"data: {\"model\":\"deepseek-v4-20260901\",\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":1}}\n\n"),
+                ("over_spaced_done", b"data: {\"model\":\"deepseek-v4-20260901\",\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":1}}\n\ndata:  [DONE]\n\n"),
+                ("malformed_usage_then_valid", b"data: {\"model\":\"deepseek-v4-20260901\",\"usage\":{\"prompt_tokens\":\"bad\",\"completion_tokens\":1}}\n\ndata: {\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":1}}\n\ndata: [DONE]\n\n"),
+                ("conflicting_model", b"data: {\"model\":\"deepseek-v4-20260901\"}\n\ndata: {\"model\":\"other\",\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":1}}\n\ndata: [DONE]\n\n")):
+            with self.subTest(name=name):
+                response = trace / (request_id + ".a1.res.sse.gz")
+                with gzip.open(response, "wb") as handle:
+                    handle.write(body)
+                journal["body_response_file"] = response.name
+                (trace / "upstream-completed.jsonl").write_text(json.dumps(journal) + "\n")
+                with self.assertRaisesRegex(self.probe.ProbeFailure, "sse capture"):
+                    self.probe._task3_observations(trace)
+                response.unlink()
+
     def test_round5_ambient_conflict_is_refused_before_nonce_consumption(self):
         self.probe.prepare(self.args)
         manifest = self.root / "probe-manifest.json"; old = os.environ.get("SHERLOCK_FORBIDDEN")

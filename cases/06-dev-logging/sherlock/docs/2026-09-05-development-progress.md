@@ -12,7 +12,7 @@ No provider contact until the offline repair gates pass. Fresh manifests require
 
 | Task | State | Acceptance |
 |---|---|---|
-| 1. Stream audit parser | in progress | Synthetic real-SSE regression red→green, malformed-stream/accounting coverage, one review |
+| 1. Stream audit parser | verified | Synthetic real-SSE regression red→green, malformed-stream/accounting coverage, one review |
 | 2. Version and run receipts | planned | Immutable package identity rejects changed bytes before contact; every experiment has outcome |
 | 3. Evidence/validator/supervisor repair | planned | Masked failures, missing evidence, and lost supervision detected with owned cleanup |
 | 4. Efficient report-review skill | planned | Correct evidence-cited comparisons with measured context use |
@@ -44,3 +44,8 @@ runtime prose/script change creates v45 before testing that changed package.
 
 - 2026-09-05 — Root verified original raw EVTX paths and completed provider-free intake r1/r2; reports and complete source hashes are in `docs/run-reports/`. Explicit EVTX selection passed143files/90267records, while original directory baseline correctly recorded the extra unsupported sidecar.
 - 2026-09-05 — Root read actual r15 capture framing without provider contact:27 raw SSE captures; inspected a215-event/59116-byte sample with final nested usage and `[DONE]`. Copying only captured bodies and completion journal into a separate offline audit directory, preserving remote originals.
+
+- 2026-09-05 — Task1 implementer completed70provider-free tests in49.759s. Root independently parsed all27preserved r15 raw captures and reconciled2,255,692prompt/65,689completion tokens with the completion journal. This verifies parser/identity/usage observations only; original r15 quality and full acceptance remain rejected. Result: `docs/run-reports/2026-09-05-r15-parser-verification.json`. One Claude Sonnet medium scoped review is running.
+
+- 2026-09-05 — Root independent unittest run passed all70 tests in50.621s. Claude `claude-sonnet-5`, medium effort, tools disabled, returned PASS with no must-fix findings. Review retained in `docs/run-reports/2026-09-05-sse-review.json`; parser repair ready to commit. No provider experiment.
+- 2026-09-05 — Final Codex gpt-5.6-sol low critique of version specification requested registry history protection, dedicated package selector, and check-to-use snapshot binding. Accepted all three; dedicated selector already required, now explicit. Updated spec before implementation.
