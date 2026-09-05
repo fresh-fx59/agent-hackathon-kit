@@ -1,0 +1,37 @@
+{
+  "schema": 1,
+  "run_id": "sherlock-offline-intake-20260905-r2",
+  "purpose": "Verify original EVTX ingestion with explicit selection and accounted non-EVTX sidecar",
+  "hypothesis": "143 selected EVTX inputs ingest completely without changing the skill",
+  "kind": "provider-free",
+  "skill_version": "v44",
+  "code_revision": "f88de0f4761127441f29c0ac01bfa97ed364db8d",
+  "status": "accepted",
+  "process": {
+    "run_id": "sherlock-offline-intake-20260905-r2",
+    "start": "2026-09-05T19:32:01.078307+00:00",
+    "end": "2026-09-05T19:32:04.898288+00:00",
+    "exit_code": 0,
+    "inputs": 143,
+    "output": "/Users/a/hack/sherlock-offline-intake-20260905-r2/corpus"
+  },
+  "checks": {
+    "jsonl_files": 143,
+    "records": 90267,
+    "expected_files": 143,
+    "expected_records": 90267
+  },
+  "excluded_but_preserved": [
+    "$I30: non-EVTX input explicitly recorded in raw-input-manifest.json"
+  ],
+  "evidence_root": "/Users/a/hack/sherlock-offline-intake-20260905-r2",
+  "findings": [
+    "Explicit EVTX selection succeeds; directory baseline retains an honest unsupported-sidecar failure."
+  ],
+  "unknowns": [
+    "This establishes conversion, not model investigation or record-by-record semantic conversion fidelity."
+  ],
+  "next_step": "Bind raw source hashes and rendered record mapping into final corpus run",
+  "model": null,
+  "usage": null
+}

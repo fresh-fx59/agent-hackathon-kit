@@ -11,6 +11,8 @@ accepted target arm. The archived `cases/6-log-analisys-codex/` artifacts remain
 planning/review documents, not build targets; implement only from the
 authoritative Sherlock specification.
 
+Sherlock development also follows `cases/06-dev-logging/sherlock/AGENTS.md`.
+
 ## Case 06 — what we are actually building (operator, 2026-07-28)
 
 Not a hackathon prop. **An internal tool the whole company uses**, invoked from
