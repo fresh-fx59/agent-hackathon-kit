@@ -164,6 +164,46 @@ class AdmissionTests(unittest.TestCase):
         row.update(changes)
         self.write_json(self.manifest, row)
 
+    def set_monitored_profile(self):
+        """Replace finite fixtures with the reviewed schema2 monitored pair."""
+        package_digest = "d" * 64
+        gates = json.loads(self.profile.read_text(encoding="utf-8"))["gate_sha256"]
+        self.write_json(self.profile, {
+            "schema": 2, "provider_base_url": "https://paid.invalid/v1", "route": "paid",
+            "secret_ref": "SHERLOCK_API_KEY", "requested_model": "deepseek-v4-flash",
+            "expected_returned_identity": "deepseek-v4-flash",
+            "identity_mode": "provider_pinned_version", "temperature": 0, "top_p": 1,
+            "max_output_tokens": 32000, "session_token_limit": 262000,
+            "cache": {"enabled": True}, "interactive": {"enabled": True},
+            "qwen": {"cli": "/usr/bin/true", "max_session_turns": -1,
+                     "max_wall_time_s": -1, "max_tool_calls": -1,
+                     "wall_time_cli": "omitted",
+                     "vendor_limits": {"workflow_agent_max_turns": 100}},
+            "limits": {"requests": None}, "settings_sha256": sha256(self.settings),
+            "system_prompt_sha256": "5" * 64, "package_version": "v45",
+            "package_sha256": package_digest, "skill_sha256": package_digest,
+            "tool_schema_sha256": "6" * 64, "gate_sha256": gates,
+            "lane_guard": {"enabled": True}, "execution_mode": "operator_monitored",
+            "request_read_timeout_s": 600,
+        })
+        self.write_json(self.budget, {
+            "schema": 2, "execution_mode": "operator_monitored",
+            "max_upstream_attempts": None, "max_request_bytes": None,
+            "max_wall_seconds": None, "max_consecutive_provider_failures": None,
+            "context_window": 262000, "max_output_tokens": 32000,
+            "session_token_limit": 262000, "request_timeout_ms": 600000,
+        })
+        harness = json.loads(self.harness.read_text(encoding="utf-8"))
+        # This historical field binds the selected package digest; it does not select v44.
+        harness["bindings"]["skill_v44_sha256"] = package_digest
+        self.write_json(self.harness, harness)
+        target = json.loads(self.target.read_text(encoding="utf-8"))
+        target.update({"target_profile_sha256": sha256(self.profile),
+                       "package_version": "v45", "package_sha256": package_digest})
+        self.write_json(self.target, target)
+        self.refresh_checksum()
+        self.write_manifest()
+
     def assert_failure(self, code: str, operation=None):
         operation = operation or (lambda: self.module.verify_admission(self.manifest, now=NOW))
         with self.assertRaises(self.module.AdmissionFailure) as caught:
@@ -247,6 +287,8 @@ class AdmissionTests(unittest.TestCase):
     def test_alias_requires_explicit_risk_acceptance(self):
         target = json.loads(self.target.read_text())
         target["identity_assurance"] = "alias_unresolved"
+        target["created_at"] = "2026-09-04T11:40:00Z"
+        target["expires_at"] = "2026-09-04T12:10:00Z"
         profile = json.loads(self.profile.read_text())
         profile["identity_mode"] = "alias_unresolved"
         self.write_json(self.profile, profile)
@@ -255,9 +297,89 @@ class AdmissionTests(unittest.TestCase):
         self.refresh_checksum()
         self.write_manifest()
         self.assert_failure("FULL_RUN_NOT_AUTHORIZED")
-        self.write_manifest(accept_alias_identity_risk=True)
+        self.write_manifest(accept_alias_identity_risk=True,
+                            expires_at="2026-09-04T12:10:00Z")
         accepted = self.module.verify_admission(self.manifest, now=NOW)
         self.assertEqual(accepted["identity_assurance"], "alias_unresolved")
+
+    def test_monitored_schema2_profile_and_nullable_budget_are_admitted(self):
+        self.set_monitored_profile()
+        result = self.module.verify_admission(self.manifest, now=NOW)
+        self.assertTrue(result["accepted"])
+        self.assertEqual(result["execution_mode"], "operator_monitored")
+        self.assertEqual(result["package_version"], "v45")
+
+    def test_finite_schema1_with_explicit_package_binding_remains_compatible(self):
+        package_digest = "d" * 64
+        profile = json.loads(self.profile.read_text(encoding="utf-8"))
+        profile.update({"package_version": "v45", "package_sha256": package_digest})
+        self.write_json(self.profile, profile)
+        target = json.loads(self.target.read_text(encoding="utf-8"))
+        target.update({"target_profile_sha256": sha256(self.profile),
+                       "package_version": "v45", "package_sha256": package_digest})
+        self.write_json(self.target, target); self.refresh_checksum()
+        harness = json.loads(self.harness.read_text(encoding="utf-8"))
+        harness["bindings"]["skill_v44_sha256"] = package_digest
+        self.write_json(self.harness, harness); self.write_manifest()
+        self.assertTrue(self.module.verify_admission(self.manifest, now=NOW)["accepted"])
+
+    def test_monitored_profile_requires_matching_explicit_package_identity(self):
+        self.set_monitored_profile()
+        profile = json.loads(self.profile.read_text(encoding="utf-8"))
+        profile["package_sha256"] = "e" * 64
+        self.write_json(self.profile, profile)
+        target = json.loads(self.target.read_text(encoding="utf-8"))
+        target["target_profile_sha256"] = sha256(self.profile)
+        self.write_json(self.target, target); self.refresh_checksum(); self.write_manifest()
+        self.assert_failure("INPUTS_INCOMPARABLE")
+
+    def test_monitored_profile_missing_skill_digest_is_a_clean_refusal(self):
+        self.set_monitored_profile()
+        profile = json.loads(self.profile.read_text(encoding="utf-8"))
+        del profile["skill_sha256"]
+        self.write_json(self.profile, profile)
+        target = json.loads(self.target.read_text(encoding="utf-8"))
+        target["target_profile_sha256"] = sha256(self.profile)
+        self.write_json(self.target, target); self.refresh_checksum(); self.write_manifest()
+        self.assert_failure("INPUTS_INCOMPARABLE")
+
+    def test_monitored_budget_rejects_an_implicit_aggregate_cap(self):
+        self.set_monitored_profile()
+        budget = json.loads(self.budget.read_text(encoding="utf-8"))
+        budget["max_wall_seconds"] = 1
+        self.write_json(self.budget, budget); self.write_manifest()
+        self.assert_failure("TARGET_PROBE_BUDGET")
+
+    def test_finite_profile_rejects_monitored_budget(self):
+        """A schema2 budget cannot change a schema1 target's execution contract."""
+        budget = json.loads(self.budget.read_text(encoding="utf-8"))
+        budget.update({
+            "schema": 2, "execution_mode": "operator_monitored",
+            "max_upstream_attempts": None, "max_request_bytes": None,
+            "max_wall_seconds": None, "max_consecutive_provider_failures": None,
+            "request_timeout_ms": 600000,
+        })
+        self.write_json(self.budget, budget)
+        self.write_manifest()
+        self.assert_failure("INPUTS_INCOMPARABLE")
+
+    def test_monitored_profile_rejects_finite_budget(self):
+        """A schema1 budget cannot silently cap an operator-monitored target."""
+        finite_budget = self.budget.read_bytes()
+        self.set_monitored_profile()
+        self.budget.write_bytes(finite_budget)
+        self.write_manifest()
+        self.assert_failure("INPUTS_INCOMPARABLE")
+
+    def test_target_receipt_duration_and_action_expiry_are_bounded_by_target(self):
+        target = json.loads(self.target.read_text(encoding="utf-8"))
+        target["expires_at"] = "2026-09-06T12:00:01Z"
+        self.write_json(self.target, target); self.refresh_checksum(); self.write_manifest()
+        self.assert_failure("TARGET_RECEIPT_EXPIRED")
+        target["expires_at"] = "2026-09-04T12:10:00Z"
+        self.write_json(self.target, target); self.refresh_checksum()
+        self.write_manifest(expires_at="2026-09-04T12:20:00Z")
+        self.assert_failure("FULL_RUN_NOT_AUTHORIZED")
 
     def test_detached_checksum_covers_complete_receipt_bytes(self):
         self.checksum.write_text("0" * 64 + "\n", encoding="ascii")

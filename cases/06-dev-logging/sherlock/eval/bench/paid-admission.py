@@ -7,6 +7,7 @@ import datetime as dt
 import fcntl
 import hashlib
 import hmac
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -52,10 +53,24 @@ BUDGET_KEYS = {"schema", "max_upstream_attempts", "max_request_bytes",
                "max_wall_seconds", "max_consecutive_provider_failures",
                "context_window", "max_output_tokens", "session_token_limit",
                "request_timeout_ms"}
+MONITORED_BUDGET_KEYS = BUDGET_KEYS | {"execution_mode"}
 DEFAULT_NONCE_ROOT = (
     Path(pwd.getpwuid(os.getuid()).pw_dir)
     / ".local" / "state" / "sherlock" / "paid-admission-nonces"
 )
+
+
+def _load_run_manifest():
+    """Use the one target-profile validator shared with staging and probes."""
+    path = Path(__file__).with_name("run-manifest.py")
+    spec = importlib.util.spec_from_file_location("sherlock_run_manifest", path)
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    return module
+
+
+RUN_MANIFEST = _load_run_manifest()
 
 
 class AdmissionFailure(ValueError):
@@ -170,15 +185,22 @@ def _validate_harness(receipt: dict):
 
 
 def _validate_profile_and_identity(profile: dict, receipt: dict):
-    if (set(profile) != PROFILE_KEYS or profile.get("schema") != 1
-            or any(not _is_hex(profile.get(name)) for name in
-                   ("settings_sha256", "system_prompt_sha256", "skill_sha256",
-                    "tool_schema_sha256"))
-            or not isinstance(profile.get("gate_sha256"), dict)
-            or set(profile["gate_sha256"]) != {"reportcheck", "citecheck",
-                                                "statecheck", "triagecheck"}
-            or any(not _is_hex(value) for value in profile["gate_sha256"].values())):
+    try:
+        RUN_MANIFEST.validate_target_profile(profile)
+    except RUN_MANIFEST.ManifestError as error:
+        raise AdmissionFailure("INPUTS_INCOMPARABLE", "profile schema") from error
+    schema = profile.get("schema")
+    explicit_package = {"package_version", "package_sha256"}
+    if schema == 1 and set(profile) not in (PROFILE_KEYS, PROFILE_KEYS | explicit_package):
         raise AdmissionFailure("INPUTS_INCOMPARABLE", "profile schema")
+    if schema == 2 or explicit_package.issubset(profile):
+        if (not isinstance(profile.get("package_version"), str)
+                or not _is_hex(profile.get("package_sha256"))
+                or (schema == 2 and not hmac.compare_digest(profile["package_sha256"], profile.get("skill_sha256", "")))
+                or receipt.get("package_version") != profile["package_version"]
+                or not hmac.compare_digest(receipt.get("package_sha256", ""),
+                                           profile["package_sha256"])):
+            raise AdmissionFailure("INPUTS_INCOMPARABLE", "package identity mismatch")
     if receipt.get("target_profile_sha256") is None:
         raise AdmissionFailure("TARGET_CONTRACT_FAILED", "profile unbound")
     requested = profile.get("requested_model")
@@ -251,6 +273,12 @@ def verify_admission(manifest, now=None) -> dict:
     target_expires = _time(target.get("expires_at"), "TARGET_CONTRACT_FAILED")
     if not target_created <= current < target_expires:
         raise AdmissionFailure("TARGET_RECEIPT_EXPIRED")
+    maximum_receipt_age = dt.timedelta(minutes=30 if target.get("identity_assurance") == "alias_unresolved"
+                                       else 24 * 60)
+    if target_expires - target_created > maximum_receipt_age:
+        raise AdmissionFailure("TARGET_RECEIPT_EXPIRED", "receipt lifetime")
+    if expires > target_expires:
+        raise AdmissionFailure("FULL_RUN_NOT_AUTHORIZED", "action exceeds target receipt")
 
     profile_path, profile, profile_raw = _bound_asset(
         root, "target-profile.json", action["target_profile_sha256"],
@@ -266,7 +294,10 @@ def verify_admission(manifest, now=None) -> dict:
     shared = {
         "settings_sha256": profile["settings_sha256"],
         "tool_schema_sha256": profile["tool_schema_sha256"],
-        "skill_v44_sha256": profile["skill_sha256"],
+        # The historical binding label is a digest slot, not a v44 selector.
+        # Schema2 binds it to the explicit selected-package digest.
+        "skill_v44_sha256": (profile["package_sha256"] if "package_sha256" in profile
+                              else profile["skill_sha256"]),
         "report_gate_program_sha256": profile["gate_sha256"]["reportcheck"],
         "citation_gate_program_sha256": profile["gate_sha256"]["citecheck"],
         "state_gate_program_sha256": profile["gate_sha256"]["statecheck"],
@@ -290,10 +321,29 @@ def verify_admission(manifest, now=None) -> dict:
     budget_path, budget, _ = _bound_asset(
         root, "full-run-budget.json", action["full_run_budget_sha256"],
         "TARGET_PROBE_BUDGET")
-    if (set(budget) != BUDGET_KEYS or budget.get("schema") != 1
-            or any(type(budget.get(name)) is not int or budget[name] <= 0
-                   for name in BUDGET_KEYS - {"schema"})):
+    if budget.get("schema") == 1:
+        valid_budget = (set(budget) == BUDGET_KEYS
+                        and all(type(budget.get(name)) is int and budget[name] > 0
+                                for name in BUDGET_KEYS - {"schema"}))
+    elif budget.get("schema") == 2:
+        nullable = {"max_upstream_attempts", "max_request_bytes", "max_wall_seconds",
+                    "max_consecutive_provider_failures"}
+        positive = BUDGET_KEYS - {"schema"} - nullable
+        valid_budget = (set(budget) == MONITORED_BUDGET_KEYS
+                        and budget.get("execution_mode") == "operator_monitored"
+                        and all(budget.get(name) is None for name in nullable)
+                        and all(type(budget.get(name)) is int and budget[name] > 0
+                                for name in positive)
+                        and budget.get("request_timeout_ms") == 600000)
+    else:
+        valid_budget = False
+    if not valid_budget:
         raise AdmissionFailure("TARGET_PROBE_BUDGET", "full-run budget")
+    profile_mode = ("operator_monitored" if profile.get("schema") == 2
+                    else "finite")
+    budget_mode = budget.get("execution_mode", "finite")
+    if budget_mode != profile_mode:
+        raise AdmissionFailure("INPUTS_INCOMPARABLE", "profile/budget execution mode")
 
     return {
         "schema": 1,
@@ -311,6 +361,9 @@ def verify_admission(manifest, now=None) -> dict:
         "action_nonce": action["nonce"],
         "target_receipt_nonce": target["nonce"],
         "identity_assurance": assurance,
+        "execution_mode": budget.get("execution_mode", "finite"),
+        "package_version": profile.get("package_version"),
+        "package_sha256": profile.get("package_sha256", profile["skill_sha256"]),
     }
 
 
