@@ -104,3 +104,15 @@ runtime prose/script change creates v45 before testing that changed package.
 - 2026-09-06 — Claude selected-harness review completed119.856s. Root reproduced missing direct settings cross-bind at helper boundary, added assertion; missing timeout claim disproved by already-green shared-validator regression. Final helper/legacy suite running. Sol reports real monitored target mock end-to-end passed5.333s with signedlaunch, externalobserver,guardian,runner/proxy,terminalreceipt; fullrun_fresh integration still pending.
 
 - 2026-09-06 — Root selected harness final suite passed30tests/38.371s; syntax/compile/diff checks green. Fresh frozen-v45 raw intake exits0 for both corpora, exact complete output-set/hash match and all raw source hashes unchanged. Initial total_records included metadata lines; append-only correction preserves original results and establishes90,267/469 JSONL records. Reports and exact artifacts retained; no provider contact.
+
+- 2026-09-05T21:27:18.829115+00:00 — Reviewed commits througha16dfbe fast-forwarded clean remote test checkout fromf88de0f using bundle as claude-developer. No services changed. Retrieved current public neuraldeep wallet prices via curl after web tool URL refusal: deepseek-v4-flash input29.546 RUB/million, output84.7 RUB/million; raw response and canonical rate card retained under final intake root. No authenticated or model request.
+
+- 2026-09-06 — Created exclusive `/Users/a/hack/sherlock-final-inputs-20260906`: JSONL-only event corpora (143/90,267 and1/469), external inventory-only keys with defects=[] and separate exact rendering/raw-hash provenance. Explicitly retained physical-recovery qualification; no prior findings copied. Remote transfer started; post-transfer hashes pending.
+
+- 2026-09-06 — Actual run-manifest.inspect_corpus validated both fresh JSONL-only corpora against inventory-only keys. Initial developer invocation supplied Path instead of required string and failed E_INPUT_INVALID before inspection; corrected caller type, both validations passed. No source or implementation change.
+
+- 2026-09-06 — Root inspected first installed-Qwen lifecycle smoke handoff. Normal actual hooks and durable faults are visible, but provider request bytes/SSE and launch identity were not retained; synthetic pre_deny must not stand in for actual CLI output. Deletion marker check is tautological and guardian final cleanup could mask termination failure. Returned these precise evidence/assertion gaps to worker for correction and fresh run; no final compatibility acceptance claimed.
+
+- 2026-09-06 — Remote final-input transfer verified: exact161file set,93,867,616bytes and allSHA256 match local inventory. Ownership assigned claude-developer. Created generic full-investigation prompts plus separate acquisition qualification for each corpus; event corpora unchanged. Prompt transfer and binding remain next launch preparation.
+
+- 2026-09-06 — Both full investigation prompt transfers verified byte-exact SHA256 (Winevtxfb977f58…721e1, independent06983106…21271); ownership claude-developer. Transfer report now includes separate prompt checks. No model request.

@@ -1,0 +1,24 @@
+{
+  "schema": 1,
+  "status": "PASS",
+  "files": 161,
+  "bytes": 93867616,
+  "complete_file_set_equal": true,
+  "all_hashes_equal": true,
+  "local_root": "/Users/a/hack/sherlock-final-inputs-20260906",
+  "remote_root": "contabo-prod:/home/claude-developer/hack/sherlock-final-inputs-20260906",
+  "scope": "161 transferred initial files, before prompt addition",
+  "manifest_sha256": "f29677257f0399a9c4387c44f21904b747355f6d71e473eeb3e60a42d9bd1442",
+  "prompts": [
+    {
+      "corpus": "winevtx",
+      "sha256": "fb977f58dea667f4e41e9fcedf06ab203007934c3671b0b5ea82a15cab2721e1",
+      "remote_hash_equal": true
+    },
+    {
+      "corpus": "independent",
+      "sha256": "06983106de1a8ff97b5fc2b272104779ae03f8383816894ee71a5336abc21271",
+      "remote_hash_equal": true
+    }
+  ]
+}

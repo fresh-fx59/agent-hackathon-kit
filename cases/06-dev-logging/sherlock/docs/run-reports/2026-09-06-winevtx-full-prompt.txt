@@ -1,0 +1,11 @@
+/sherlock
+
+Investigate the entire supplied EVTX-derived JSONL corpus at {CORPUS} from scratch. The copied corpus is the only incident evidence. Establish coverage of all files and hosts, inspect underlying records, test competing explanations, and distinguish observed facts from hypotheses and unknowns. Research primary documentation on the web when interpreting event semantics; external documentation explains event meaning but does not establish that an incident occurred here. Do not infer compromise or a root cause from filenames, event counts, or event IDs alone.
+
+Create work/report.md using the selected skill's shipped report contract, required Russian headings and field literals. Cite exact corpus evidence for each finding. Report uncertainty, missing telemetry, acquisition limits, and any inability to establish causality. Derive the number and content of findings from the corpus. Do not load previous investigation reports, findings, worklists, checkpoints, pattern cards or agent memory.
+
+Run the selected package's finalizer against ./work and {CORPUS}. Repair every reported defect and rerun until all four unchanged gates are clean. Preserve work/validation/ and all supporting work artifacts. The final user-facing response must repeat work/report.md verbatim.
+
+Acquisition provenance:
+Input provenance only. Fresh rendering using frozen Sherlock v45. Event inputs are exclusively corpus/*.jsonl. No previous report, finding, worklist, checkpoint or memory is included.
+Winevtx includes 29,913 structurally validated physical records beyond header-declared chunk ranges. Their presence does not establish active-log membership. Distinguish recovered evidence from current log state.
