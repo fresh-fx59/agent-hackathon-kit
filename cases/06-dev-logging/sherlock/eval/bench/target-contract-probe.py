@@ -695,21 +695,36 @@ def prepare(args, secret_reader=None):
         fixture_dir = root / "fixture"
         fixture = FIXTURE.build_fixture(args.source_corpus, fixture_dir, HERE / "probe" / "recipe.json", 4401)
         settings_tool = HERE.parent.parent / "measure" / "corporate-settings.py"
+        lifecycle_helper = HERE / "lifecycle-supervisor.py"
+        monitored = bool(getattr(args, "operator_monitored", False))
         mute_args = [arg for name in ambient_skill_names() for arg in ("--disable-skill", name)]
         settings_run = subprocess.run(["python3", str(settings_tool), "emit-run", "--max-retries", "0",
                                        "--max-tokens", str(PROBE_MAX_OUTPUT_TOKENS),
                                        "--session-token-limit", str(PROBE_SESSION_TOKEN_LIMIT),
-                                       "--skill-directory", str(root / "probe-work" / "skill-catalogue"),
+                                       *(["--timeout", "600000"] if monitored else []),
+                                       "--skill-directory", ("../skill-catalogue" if monitored else
+                                                             str(root / "probe-work" / "skill-catalogue")),
                                        *mute_args],
                                       text=True, capture_output=True, timeout=30)
         if settings_run.returncode:
             raise ProbeFailure("TARGET_PROBE_PREPARE", "corporate settings")
         settings_bytes = settings_run.stdout.encode("utf-8")
-        monitored = bool(getattr(args, "operator_monitored", False))
         if monitored:
             settings_row = _strict_json(settings_bytes)
             settings_row.setdefault("model", {})["maxSessionTurns"] = -1
             settings_row["model"]["maxWallTimeSeconds"] = -1
+            hook_command = (
+                'python3 "%s" hook --observer-dir "$SHERLOCK_OBSERVER_DIR" '
+                '--workspace "$PWD" --nonce "$SHERLOCK_RUN_NONCE" '
+                '--boot-id "$SHERLOCK_BOOT_ID"' % lifecycle_helper)
+            hooks = settings_row.setdefault("hooks", {})
+            for event in ("PreToolUse", "PostToolUse", "PostToolUseFailure"):
+                if event in hooks:
+                    raise ProbeFailure("TARGET_PROBE_PREPARE",
+                                       "lifecycle hook collision")
+                hooks[event] = [{"matcher": "*", "hooks": [{
+                    "type": "command", "command": hook_command,
+                    "timeout": 10000}]}]
             settings_bytes = canonical(settings_row) + b"\n"
         profile = _profile(args, sha256(settings_bytes), runtime_package)
         budget = MONITORED_BUDGET if monitored else DEFAULT_BUDGET
@@ -727,6 +742,7 @@ def prepare(args, secret_reader=None):
                      "runner_sha256": sha256((HERE / "bench-controller.sh").read_bytes()),
                      "driver_sha256": sha256((HERE / "run-bench.sh").read_bytes()),
                      "proxy_sha256": sha256((HERE.parent.parent / "measure" / "upstream-log-proxy.py").read_bytes()),
+                     "lifecycle_helper_sha256": sha256(lifecycle_helper.read_bytes()),
                      "oracle_sha256": sha256((HERE / "target-contract-oracle.py").read_bytes()),
                      "audit_sha256": sha256(Path(__file__).read_bytes()),
                      "bench_status_sha256": sha256((HERE / "bench-status.py").read_bytes()),
@@ -953,13 +969,14 @@ def _verify_package(root, manifest, code="TARGET_PROBE_NOT_AUTHORIZED", *, rate_
     package = values["input-package.json"]
     expected_package = {"schema", "arm", "package_version", "package_sha256", "fixture_tree_sha256", "fixture_expectations_sha256",
                         "settings_sha256", "runner_sha256", "driver_sha256", "proxy_sha256",
+                        "lifecycle_helper_sha256",
                         "oracle_sha256", "audit_sha256", "bench_status_sha256", "run_verdict_sha256",
                         "qwen_sha256", "skill_sha256", "gate_sha256"}
     if not isinstance(package, dict) or set(package) != expected_package or package.get("schema") != 1 or \
             not isinstance(package.get("arm"), str) or not isinstance(package.get("package_version"), str) or \
             not _hex(package.get("package_sha256")) or not _hex(package.get("fixture_tree_sha256")) or \
             not _hex(package.get("fixture_expectations_sha256")) or \
-            any(not _hex(package.get(name)) for name in ("settings_sha256", "runner_sha256", "driver_sha256", "proxy_sha256", "oracle_sha256", "audit_sha256", "qwen_sha256", "skill_sha256")) or \
+            any(not _hex(package.get(name)) for name in ("settings_sha256", "runner_sha256", "driver_sha256", "proxy_sha256", "lifecycle_helper_sha256", "oracle_sha256", "audit_sha256", "qwen_sha256", "skill_sha256")) or \
             not isinstance(package.get("gate_sha256"), dict) or set(package["gate_sha256"]) != set(GATES) or \
             any(not _hex(value) for value in package["gate_sha256"].values()):
         raise ProbeFailure(code, "input package invalid")
@@ -995,6 +1012,7 @@ def _verify_package(root, manifest, code="TARGET_PROBE_NOT_AUTHORIZED", *, rate_
     dependencies = {
         "runner_sha256": HERE / "bench-controller.sh", "driver_sha256": HERE / "run-bench.sh",
         "proxy_sha256": HERE.parent.parent / "measure" / "upstream-log-proxy.py",
+        "lifecycle_helper_sha256": HERE / "lifecycle-supervisor.py",
         "oracle_sha256": HERE / "target-contract-oracle.py", "audit_sha256": Path(__file__),
         "bench_status_sha256": HERE / "bench-status.py", "run_verdict_sha256": HERE / "run-verdict.py",
     }
@@ -1747,7 +1765,10 @@ def main(argv=None):
                 timeout = None if profile.get("execution_mode") == "operator_monitored" else 600
                 done = run_owned_process(command, text=True, capture_output=True, timeout=timeout)
                 if done.returncode:
-                    raise ProbeFailure("TARGET_CONTRACT_FAILED", "controlled runner nonzero")
+                    detail = "controlled runner nonzero"
+                    if done.stderr:
+                        detail += ": " + done.stderr[-4096:].strip()
+                    raise ProbeFailure("TARGET_CONTRACT_FAILED", detail)
                 row = _strict_json(done.stdout.encode("utf-8"))
                 if set(row) != {"trace", "runner_exit_code", "stdout_sha256"} or row.get("runner_exit_code") != 0 or not isinstance(row.get("trace"), str):
                     raise ProbeFailure("TARGET_CONTRACT_FAILED", "controlled runner output")

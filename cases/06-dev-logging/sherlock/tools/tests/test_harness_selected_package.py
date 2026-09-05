@@ -51,6 +51,9 @@ class SelectedPackageTests(unittest.TestCase):
         budget=json.loads((self.output/'probe-budget.json').read_text())
         self.assertIsNone(budget['max_wall_seconds'])
         self.assertEqual(budget['request_timeout_ms'],600000)
+        package=json.loads((self.output/'input-package.json').read_text())
+        self.assertEqual(package.get('lifecycle_helper_sha256'),
+                         self.qual.digest((ROOT/'eval/bench/lifecycle-supervisor.py').read_bytes()))
 
     def test_changed_settings_refused_without_model_or_secret_access(self):
         (self.fixture.root/'corporate-settings.json').chmod(0o600)

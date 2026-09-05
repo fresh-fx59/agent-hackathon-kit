@@ -327,8 +327,8 @@ PY
        { [ "${SHERLOCK_OPERATOR_MONITORED_MODE:-0}" != 1 ] && { \
        [ -z "${SHERLOCK_BUDGET_MAX_UPSTREAM_ATTEMPTS:-}" ] || \
        [ -z "${SHERLOCK_BUDGET_MAX_REQUEST_BYTES:-}" ] || \
-       [ -z "${SHERLOCK_BUDGET_MAX_WALL_SECONDS:-}" ]; }; } || \
-       [ -z "${SHERLOCK_BUDGET_MAX_CONSECUTIVE_PROVIDER_FAILURES:-}" ]; then
+       [ -z "${SHERLOCK_BUDGET_MAX_WALL_SECONDS:-}" ] || \
+       [ -z "${SHERLOCK_BUDGET_MAX_CONSECUTIVE_PROVIDER_FAILURES:-}" ]; }; }; then
       echo "  ✗ upstream lane: controlled attribution requires trace path, identity, and four caps" >&2
       return 1
     fi
@@ -336,13 +336,14 @@ PY
     budget_env=(
       "UPSTREAM_BUDGET_STATE=$budget_state"
       "UPSTREAM_EXPECTED_RETURNED_IDENTITY=$expected"
-      "UPSTREAM_MAX_CONSECUTIVE_PROVIDER_FAILURES=$SHERLOCK_BUDGET_MAX_CONSECUTIVE_PROVIDER_FAILURES"
+      "UPSTREAM_OPERATOR_MONITORED_MODE=${SHERLOCK_OPERATOR_MONITORED_MODE:-0}"
     )
     if [ "${SHERLOCK_OPERATOR_MONITORED_MODE:-0}" != 1 ]; then
       budget_env+=(
         "UPSTREAM_MAX_UPSTREAM_ATTEMPTS=$SHERLOCK_BUDGET_MAX_UPSTREAM_ATTEMPTS"
         "UPSTREAM_MAX_REQUEST_BYTES=$SHERLOCK_BUDGET_MAX_REQUEST_BYTES"
         "UPSTREAM_MAX_WALL_SECONDS=$SHERLOCK_BUDGET_MAX_WALL_SECONDS"
+        "UPSTREAM_MAX_CONSECUTIVE_PROVIDER_FAILURES=$SHERLOCK_BUDGET_MAX_CONSECUTIVE_PROVIDER_FAILURES"
       )
     fi
     # The action envelope is a pair of sealed file descriptors expressed as

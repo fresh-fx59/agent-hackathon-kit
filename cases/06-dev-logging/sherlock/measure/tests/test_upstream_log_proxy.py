@@ -16,6 +16,7 @@ Everything here runs against a STUB upstream. No metered tokens.
 
     python3 measure/tests/test_upstream_log_proxy.py
 """
+import importlib.util
 import json
 import os
 import pathlib
@@ -32,6 +33,12 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 HERE = os.path.dirname(os.path.abspath(__file__))
 MEASURE = os.path.dirname(HERE)
 PROXY = os.path.join(MEASURE, "upstream-log-proxy.py")
+LIFECYCLE_PATH = os.path.join(os.path.dirname(MEASURE), "eval", "bench",
+                              "lifecycle-supervisor.py")
+LIFECYCLE_SPEC = importlib.util.spec_from_file_location(
+    "sherlock_lifecycle_supervisor_proxy_test", LIFECYCLE_PATH)
+LIFECYCLE = importlib.util.module_from_spec(LIFECYCLE_SPEC)
+LIFECYCLE_SPEC.loader.exec_module(LIFECYCLE)
 
 
 class Stub(BaseHTTPRequestHandler):
@@ -68,6 +75,23 @@ class Stub(BaseHTTPRequestHandler):
                                          "tool_calls": [{"id": "c1", "type": "function",
                                                          "function": {"name": "read_file",
                                                                       "arguments": "{}"}}]}}],
+            }).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+        elif mode == "first_wrong_tool_then_right_prose":
+            first = len(self.server.seen) == 1
+            payload = json.dumps({
+                "model": "Substituted-Model" if first else "DeepSeek-V4-Flash",
+                "choices": [{"message": {
+                    "role": "assistant",
+                    "content": None if first else "accepted prose",
+                    "tool_calls": ([{"id": "discarded-tool", "type": "function",
+                                     "function": {"name": "read_file",
+                                                  "arguments": "{}"}}]
+                                   if first else [])}}],
             }).encode()
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
@@ -181,6 +205,69 @@ class ProxyCase(unittest.TestCase):
         out, err = self.proc.communicate(timeout=5)
         self.fail("proxy never came up: %s %s" % (out, err))
 
+    def start_lifecycle(self, case="healthy", **updates):
+        self.srv.mode = "json_toolcall"
+        trace = pathlib.Path(self.tmp) / ("trace-" + case)
+        trace.mkdir()
+        workspace = pathlib.Path(self.tmp) / ("workspace-" + case)
+        workspace.mkdir()
+        nonce = (case.replace("-", "") + "x" * 32)[:32]
+        boot = "test-boot"
+        observer = LIFECYCLE.init_segment(trace, nonce, boot,
+                                          capability=b"p" * 32)
+        now = time.monotonic_ns()
+        if case != "missing":
+            LIFECYCLE.publish_observation(
+                observer, nonce, boot, sequence=0,
+                monotonic_ns=(now - 61_000_000_000 if case == "stale" else now),
+                wall_time="2026-09-05T12:00:00Z", capability=b"p" * 32,
+                pending_operation="watching mock provider")
+        current = observer / "current-observation.json"
+        if case == "wrong-nonce":
+            row = json.loads(current.read_text())
+            row["run_nonce"] = "z" * 32
+            current.write_text(json.dumps(row) + "\n")
+        elif case == "malformed":
+            current.write_text("{bad-json\n")
+        elif case == "regressed":
+            first = current.read_bytes()
+            LIFECYCLE.publish_observation(
+                observer, nonce, boot, sequence=1, monotonic_ns=now + 1,
+                wall_time="2026-09-05T12:00:01Z", capability=b"p" * 32,
+                pending_operation="watching mock provider")
+            LIFECYCLE.check_dispatch(observer, nonce, boot,
+                                     now_monotonic_ns=now + 2)
+            current.write_bytes(first)
+        elif case == "unmatched-hook":
+            event = {"hook_event_name": "PreToolUse", "session_id": "s",
+                     "tool_use_id": "t", "tool_name": "read_file",
+                     "tool_input": {"file_path": "missing"}}
+            result = LIFECYCLE.handle_hook(
+                observer, workspace, nonce, boot, json.dumps(event).encode())
+            self.assertTrue(result["continue"])
+        env = dict(os.environ,
+                   UPSTREAM_BASE="http://127.0.0.1:%d/v1" % self.up_port,
+                   UPSTREAM_LOG=self.log, LISTEN_PORT=str(self.px_port),
+                   SHERLOCK_OBSERVER_DIR=str(observer),
+                   SHERLOCK_RUN_NONCE=nonce, SHERLOCK_BOOT_ID=boot,
+                   SHERLOCK_LIFECYCLE_HELPER=LIFECYCLE_PATH,
+                   UPSTREAM_LANE_ABORT=str(trace / "abort.json"))
+        env.update({key: str(value) for key, value in updates.items()})
+        self.proc = subprocess.Popen([sys.executable, PROXY], env=env,
+                                     stdout=subprocess.PIPE,
+                                     stderr=subprocess.PIPE)
+        for _ in range(100):
+            try:
+                with urllib.request.urlopen(
+                        "http://127.0.0.1:%d/healthz" % self.px_port,
+                        timeout=1) as response:
+                    response.read()
+                return observer
+            except Exception:
+                time.sleep(0.05)
+        out, err = self.proc.communicate(timeout=5)
+        self.fail("lifecycle proxy never came up: %s %s" % (out, err))
+
     def start_retrying(self, mode, attempts, delay_ms="10"):
         self.srv.mode = mode
         env = dict(os.environ,
@@ -200,7 +287,7 @@ class ProxyCase(unittest.TestCase):
                 time.sleep(0.05)
         self.fail("proxy never came up")
 
-    def start_budgeted(self, mode="json_toolcall", bootstrap=True, **updates):
+    def start_budgeted(self, mode="json_toolcall", bootstrap=True, monitored=False, **updates):
         """Start the real proxy with finite, trace-local paid reservations."""
         self.srv.mode = mode
         self.budget_state = os.path.join(self.tmp, "upstream-budget-state.json")
@@ -218,16 +305,26 @@ class ProxyCase(unittest.TestCase):
             UPSTREAM_EXPECTED_RETURNED_IDENTITY="DeepSeek-V4-Flash",
         )
         env.update({key: str(value) for key, value in updates.items()})
+        if monitored:
+            env["UPSTREAM_OPERATOR_MONITORED_MODE"] = "1"
+            for name in ("UPSTREAM_MAX_UPSTREAM_ATTEMPTS", "UPSTREAM_MAX_REQUEST_BYTES",
+                         "UPSTREAM_MAX_WALL_SECONDS",
+                         "UPSTREAM_MAX_CONSECUTIVE_PROVIDER_FAILURES"):
+                env.pop(name, None)
         if bootstrap:
-            limits = {
+            limits = ({name: None for name in (
+                "max_upstream_attempts", "max_request_bytes", "max_wall_seconds",
+                "max_consecutive_provider_failures")} if monitored else {
                 "max_upstream_attempts": int(env["UPSTREAM_MAX_UPSTREAM_ATTEMPTS"]),
                 "max_request_bytes": int(env["UPSTREAM_MAX_REQUEST_BYTES"]),
                 "max_wall_seconds": int(env["UPSTREAM_MAX_WALL_SECONDS"]),
                 "max_consecutive_provider_failures": int(
                     env["UPSTREAM_MAX_CONSECUTIVE_PROVIDER_FAILURES"]),
-            }
+            })
             pathlib.Path(self.budget_state).write_text(json.dumps({
-                "schema": 1, "run_tag": "controlled-run", "updated_at": "fixture",
+                "schema": 2 if monitored else 1,
+                **({"execution_mode": "operator_monitored"} if monitored else {}),
+                "run_tag": "controlled-run", "updated_at": "fixture",
                 "attempts_charged": 0, "request_bytes": 0,
                 "consecutive_provider_failures": 0, "limits": limits,
                 "verdict": "WITHIN", "reason": None,
@@ -280,6 +377,57 @@ class ProxyCase(unittest.TestCase):
 
 
 class ItNamesWhatActuallyAnswered(ProxyCase):
+
+    def test_lifecycle_faults_block_before_dummy_upstream_contact(self):
+        for case in ("missing", "stale", "wrong-nonce", "malformed",
+                     "regressed", "unmatched-hook"):
+            with self.subTest(case=case):
+                if self.proc:
+                    self.proc.terminate()
+                    self.proc.wait(timeout=10)
+                    for stream in (self.proc.stdout, self.proc.stderr):
+                        if stream:
+                            stream.close()
+                    self.proc = None
+                self.srv.seen.clear()
+                self.px_port = free_port()
+                observer = self.start_lifecycle(case)
+                code, _ = self.post()
+                self.assertEqual(code, 403)
+                self.assertEqual(self.srv.seen, [])
+                self.assertTrue((observer / "fault.json").exists())
+
+    def test_healthy_lifecycle_observation_allows_dummy_dispatch(self):
+        self.start_lifecycle("healthy")
+        code, _ = self.post()
+        self.assertEqual(code, 200)
+        self.assertEqual(len(self.srv.seen), 1)
+
+    def test_provider_tool_without_hook_pair_blocks_the_next_dispatch(self):
+        observer = self.start_lifecycle("healthy")
+        code, _ = self.post()
+        self.assertEqual(code, 200)
+        identity = json.loads((observer / "identity.json").read_text())
+        LIFECYCLE.publish_observation(
+            observer, identity["run_nonce"], identity["boot_id"], sequence=1,
+            capability=(observer / "observation.key").read_bytes(),
+            pending_operation="checking missing hook pair")
+        code, _ = self.post()
+        self.assertEqual(code, 403)
+        self.assertEqual(len(self.srv.seen), 1)
+        fault = json.loads((observer / "fault.json").read_text())
+        self.assertEqual(fault["reason"], "EXPECTED_TOOL_HOOK_MISSING")
+
+    def test_discarded_substitution_creates_no_impossible_hook_expectation(self):
+        observer = self.start_lifecycle(
+            "healthy", UPSTREAM_EXPECTED_RETURNED_IDENTITY="DeepSeek-V4-Flash",
+            UPSTREAM_SUBSTITUTION_RETRY_MAX=1)
+        self.srv.mode = "first_wrong_tool_then_right_prose"
+        code, _ = self.post()
+        self.assertEqual(code, 200)
+        self.assertEqual(len(self.srv.seen), 2)
+        expected = json.loads((observer / "expectations.json").read_text())
+        self.assertEqual(expected["expected"], {})
 
     def test_records_the_returned_model_not_the_requested_alias(self):
         self.start("json_toolcall")
@@ -680,6 +828,23 @@ class ItCanRestoreTheProviderAlias(ProxyCase):
 
 
 class ItReservesPaidBudgetBeforeForwarding(ProxyCase):
+
+    def test_monitored_budget_accounts_without_aggregate_refusal(self):
+        self.srv.fail_times = 1
+        self.start_budgeted(monitored=True, UPSTREAM_RETRY_MAX=1,
+                            UPSTREAM_RETRY_BASE_MS=1)
+        code, _body = self.post()
+        self.assertEqual(code, 200)
+        state = self.budget()
+        self.assertEqual(len(self.srv.seen), 2)
+        self.assertEqual(state["schema"], 2)
+        self.assertEqual(state["execution_mode"], "operator_monitored")
+        self.assertEqual(state["attempts_charged"], 2)
+        self.assertGreater(state["request_bytes"], 0)
+        self.assertEqual(state["limits"], {name: None for name in (
+            "max_upstream_attempts", "max_request_bytes", "max_wall_seconds",
+            "max_consecutive_provider_failures")})
+        self.assertEqual(state["verdict"], "WITHIN")
 
     def test_restart_reconciles_completed_rows_as_a_reservation_lower_bound(self):
         """A stale-but-valid state cannot undercount paid sends already in JSONL."""

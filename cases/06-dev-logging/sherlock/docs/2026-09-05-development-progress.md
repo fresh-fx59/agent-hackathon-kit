@@ -13,10 +13,10 @@ No provider contact until the offline repair gates pass. Fresh manifests require
 | Task | State | Acceptance |
 |---|---|---|
 | 1. Stream audit parser | verified | Synthetic real-SSE regression red→green, malformed-stream/accounting coverage, one review |
-| 2. Version and run receipts | planned | Immutable package identity rejects changed bytes before contact; every experiment has outcome |
-| 3. Evidence/validator/supervisor repair | planned | Masked failures, missing evidence, and lost supervision detected with owned cleanup |
+| 2. Version and run receipts | verified; v45 frozen and registered | Immutable package identity rejects changed bytes before contact; every experiment has outcome |
+| 3. Evidence/validator/supervisor repair | verified; full controller→runner→proxy composition passed | Masked failures, missing evidence, and lost supervision detected with owned cleanup |
 | 4. Efficient report-review skill | usable, fixture limitations recorded | Correct evidence-cited comparisons with measured context use |
-| 5. Raw corpus and target qualification | planned | Exact raw inputs, original gates and target audit pass |
+| 5. Raw corpus and target qualification | fresh raw intake and remote input hashes verified; provider qualification pending | Exact raw inputs, original gates and target audit pass |
 | 6. Full corpus and fresh new corpus | planned | Both reports validated on the identical final skill package |
 
 ## Preflight interface scan
@@ -116,3 +116,21 @@ runtime prose/script change creates v45 before testing that changed package.
 - 2026-09-06 — Remote final-input transfer verified: exact161file set,93,867,616bytes and allSHA256 match local inventory. Ownership assigned claude-developer. Created generic full-investigation prompts plus separate acquisition qualification for each corpus; event corpora unchanged. Prompt transfer and binding remain next launch preparation.
 
 - 2026-09-06 — Both full investigation prompt transfers verified byte-exact SHA256 (Winevtxfb977f58…721e1, independent06983106…21271); ownership claude-developer. Transfer report now includes separate prompt checks. No model request.
+
+- 2026-09-06 — Corrected lifecycle smoke attribution: worker originally called local Qwen0.22, but new immutable launch identity proves installed local0.21.1. Improvedr7 retains exact provider/CLI/helper evidence and passes locally only. Directed repeat on actualcontabo-prod Qwen0.22.0 asclaude-developer; local pass does not qualify the intended runtime.
+
+- 2026-09-06 — Frozen integration submitted to Claude Sonnet5 medium review (exact seven-file hash snapshot retained). Root independent lifecycle helper17tests passed0.194s. Combined fullrunner/target suite has reported a failure and error and remains running; not accepted. Collecting complete diagnostics before focused repair. Actual remoteQwen0.22.0 smoke artifacts135files verified exact remote/local set+hash match and standardized report published. No target-provider contact.
+
+- 2026-09-06 — Root combinedfullrunner/target80tests completed95.506s with2failures+1error: two older monitored fixtures do not yet supply required observation, so Qwen is never reached; finite→monitored refusal now occurs earlier at missing signedlaunch instead of expected old diagnostic. Sent exact failures to owner for fixture repair while preserving denial/ownedcleanup semantics. Root completeproxy51tests passed33.084s. Process scan found no remaining targeted temporary test processes. Claude production review still running.
+
+- 2026-09-06 — Claude Sonnet5 medium integration review completed269.616s (raw JSON retained; list-price estimateUSD0.5908818, notinvoice). Accepted startup-terminal evidence class at both full and target paths: guardian failure after signedlaunch leaves no faultreceipt. Root expanded sameclass to observation-wait failure before lifecycle_state assignment. Missingreceipt alreadyrejects acceptance; fix targets complete terminal evidence, not fabricated acceptance bypass. Third cwd allegation rejected against v45 logmap.write_active_marker absolute realpath out/workspace. Owner implementing scoped regressions+repair; helper remains unchanged.
+
+- 2026-09-05T22:08:45.161265+00:00 — Lifecycle owner completed focused startup terminal repair and reports full controller53/60.701s, target74/61.155s, helper+proxy68/33.603s and audit7/.095s PASS. Root independently reruns previously failing combined suite and narrow Claude review. Full actual-runner composition fixture remains in progress; no target-provider launch.
+
+- 2026-09-05T22:09:34.639130+00:00 — Root combined fullrunner/target suite now PASS81tests/61.443s. Narrow Claude Sonnet5 medium startup review completed41.620s (list-price estimateUSD0.0886706): conditional concern second record_fault may raise exclusive-create error is disproved by lifecycle helper _fault_unlocked prior-return and FileExistsError fallback. Actual invalid-observation regressions also pass, preserving original fault and signed receipt. Raw review/input retained; no additional code change justified. Version gate v45 and diff-check pass.
+
+- 2026-09-05T22:12:20.367565+00:00 — Full selected-controller→runner composition exposed missing lifecycle_helper_sha256 in selected harness input package, failing before observer/Qwen. Root initial wrong unittest class selector raised AttributeError; corrected selection reproduced genuine LIFECYCLE_LAUNCH_INVALID in0.896s. Added helper fingerprint assertion: red, then green after copying digest from twice-verified source input package. Broader harness regression running; no runtime package change. Hook quoting suspicion disproved by actual target preparation source.
+
+- 2026-09-05T22:13:17.962008+00:00 — Root selected harness regression suite PASS30tests/37.458s after helper fingerprint propagation. Shell syntax, modified Python compilation, and diff-check pass. Full-run composition fixture continues; final package remains frozen v45.
+
+- 2026-09-05T22:16:03.365029+00:00 — Root independently reran final full-run composition/audit file: PASS8tests/4.242s. Real controller/runner/proxy with explicit mock Qwen, provider and fixture process/observer state; no model-quality claim. All reviewed integration changes ready for commit and test-host sync. Repository scripts/verify.sh remains absent from tracked tree; existing Sherlock verify.sh is historical live v1 benchmark and is not substituted. Ran scoped complete suites, shell/Python checks and diff-check instead; no prod deploy or git push.

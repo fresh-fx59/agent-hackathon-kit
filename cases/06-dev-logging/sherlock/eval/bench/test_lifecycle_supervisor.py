@@ -1,0 +1,336 @@
+#!/usr/bin/env python3
+import base64
+import importlib.util
+import json
+import os
+from pathlib import Path
+import shutil
+import subprocess
+import sys
+import tempfile
+import time
+import unittest
+from unittest import mock
+
+
+HERE = Path(__file__).resolve().parent
+SPEC = importlib.util.spec_from_file_location(
+    "sherlock_lifecycle_supervisor", HERE / "lifecycle-supervisor.py")
+LIFECYCLE = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(LIFECYCLE)
+
+
+class LifecycleSupervisorTest(unittest.TestCase):
+    def setUp(self):
+        self.temp = Path(tempfile.mkdtemp(prefix="sherlock-lifecycle-test-"))
+        self.trace = self.temp / "trace"
+        self.trace.mkdir()
+        self.workspace = self.temp / "workspace"
+        self.workspace.mkdir()
+        self.nonce = "a" * 32
+        self.boot = "test-boot-id"
+        self.capability = b"c" * 32
+        self.observer = LIFECYCLE.init_segment(
+            self.trace, self.nonce, self.boot, capability=self.capability)
+
+    def tearDown(self):
+        shutil.rmtree(self.temp)
+
+    def observe(self, sequence=0, monotonic_ns=10_000_000_000, **changes):
+        values = {
+            "last_completed_request": None,
+            "last_completed_tool": None,
+            "pending_operation": "reviewing current capture and gate state",
+        }
+        values.update(changes)
+        return LIFECYCLE.publish_observation(
+            self.observer, self.nonce, self.boot, sequence=sequence,
+            monotonic_ns=monotonic_ns, wall_time="2026-09-05T12:00:00Z",
+            capability=self.capability, **values)
+
+    def hook(self, phase, tool_id="tool-1", session_id="session-1", **extra):
+        row = {"hook_event_name": phase, "session_id": session_id,
+               "tool_use_id": tool_id, "tool_name": "run_shell_command",
+               "tool_input": {"command": "true"}}
+        row.update(extra)
+        raw = json.dumps(row, sort_keys=True).encode()
+        return LIFECYCLE.handle_hook(
+            self.observer, self.workspace, self.nonce, self.boot, raw)
+
+    def write_active(self, worklists):
+        work = self.workspace / "work"
+        work.mkdir(exist_ok=True)
+        marker_dir = self.workspace / ".sherlock"
+        marker_dir.mkdir(exist_ok=True)
+        marker = {"version": 36, "active": True,
+                  "workspace": str(self.workspace), "out": str(work),
+                  "mode": "single" if worklists == ["worklist.tsv"] else "multi",
+                  "worklists": worklists}
+        if marker["mode"] == "multi":
+            marker["hosts_manifest"] = "hosts.tsv"
+            (work / "hosts.tsv").write_text(
+                "h\t-\t-\t-\t-\t%s\tmap.md\n" % worklists[0])
+        (marker_dir / "active.json").write_text(json.dumps(marker) + "\n")
+        return work
+
+    def test_observation_is_fresh_without_aggregate_lifetime_limit(self):
+        self.observe()
+        first = LIFECYCLE.check_dispatch(
+            self.observer, self.nonce, self.boot, now_monotonic_ns=69_000_000_000)
+        self.observe(sequence=1, monotonic_ns=9_000_000_000_000)
+        later = LIFECYCLE.check_dispatch(
+            self.observer, self.nonce, self.boot,
+            now_monotonic_ns=9_059_000_000_000)
+        self.assertEqual(first["sequence"], 0)
+        self.assertEqual(later["sequence"], 1)
+
+    def test_missing_stale_wrong_future_and_regressed_observations_fault(self):
+        cases = ("missing", "stale", "wrong-nonce", "future", "regressed")
+        for case in cases:
+            with self.subTest(case=case):
+                shutil.rmtree(self.observer)
+                self.observer = LIFECYCLE.init_segment(
+                    self.trace, self.nonce, self.boot, capability=self.capability)
+                now = 100_000_000_000
+                if case != "missing":
+                    self.observe(monotonic_ns=now)
+                current = self.observer / "current-observation.json"
+                if case == "stale":
+                    now += 60_000_000_001
+                elif case == "wrong-nonce":
+                    row = json.loads(current.read_text())
+                    row["run_nonce"] = "b" * 32
+                    current.write_text(json.dumps(row) + "\n")
+                elif case == "future":
+                    now -= 1
+                elif case == "regressed":
+                    first = current.read_bytes()
+                    self.observe(sequence=1, monotonic_ns=now + 1)
+                    LIFECYCLE.check_dispatch(
+                        self.observer, self.nonce, self.boot,
+                        now_monotonic_ns=now + 2)
+                    current.write_bytes(first)
+                with self.assertRaises(LIFECYCLE.LifecycleFault):
+                    LIFECYCLE.check_dispatch(
+                        self.observer, self.nonce, self.boot,
+                        now_monotonic_ns=now + (2 if case == "regressed" else 0))
+                fault = json.loads((self.observer / "fault.json").read_text())
+                self.assertEqual(fault["schema"], 1)
+                self.assertEqual(fault["run_nonce"], self.nonce)
+
+    def test_malformed_observation_becomes_a_permanent_fault(self):
+        (self.observer / "current-observation.json").write_text("{not-json\n")
+        with self.assertRaises(LIFECYCLE.LifecycleFault):
+            LIFECYCLE.check_dispatch(
+                self.observer, self.nonce, self.boot,
+                now_monotonic_ns=10_000_000_000)
+        self.assertTrue((self.observer / "fault.json").exists())
+
+    def test_fault_is_permanent_even_after_fresh_observation(self):
+        with self.assertRaises(LIFECYCLE.LifecycleFault):
+            LIFECYCLE.check_dispatch(
+                self.observer, self.nonce, self.boot,
+                now_monotonic_ns=10_000_000_000)
+        self.observe(monotonic_ns=10_000_000_000)
+        with self.assertRaisesRegex(LIFECYCLE.LifecycleFault, "terminal"):
+            LIFECYCLE.check_dispatch(
+                self.observer, self.nonce, self.boot,
+                now_monotonic_ns=10_000_000_001)
+
+    def test_pre_snapshot_preserves_deleted_registered_bytes_and_post_faults(self):
+        work = self.write_active(["worklist.tsv"])
+        original = b"id\t?\trare\tSecurity.jsonl:1\t1\trecord\n"
+        (work / "worklist.tsv").write_bytes(original)
+        (work / "worklist.manifest.json").write_text(
+            json.dumps({"schema": 1, "ids": ["id"], "rows": 1,
+                        "sha256": "0" * 64}) + "\n")
+        before = self.hook("PreToolUse")
+        digest = LIFECYCLE.sha256(original)
+        self.assertTrue(before["continue"])
+        self.assertEqual((self.observer / "objects" / digest).read_bytes(), original)
+
+        (work / "worklist.tsv").unlink()
+        after = self.hook("PostToolUse", tool_response={"ok": True})
+        self.assertFalse(after["continue"])
+        self.assertEqual(after["hookSpecificOutput"]["permissionDecision"], "deny")
+        self.assertTrue((self.observer / "fault.json").exists())
+        with self.assertRaises(LIFECYCLE.LifecycleFault):
+            LIFECYCLE.check_dispatch(
+                self.observer, self.nonce, self.boot,
+                now_monotonic_ns=10_000_000_000)
+
+    def test_same_count_rename_cannot_replace_a_registered_path(self):
+        work = self.write_active(["worklist.tsv", "worklist-host.tsv"])
+        (work / "worklist.tsv").write_text("one\n")
+        (work / "worklist-host.tsv").write_text("two\n")
+        self.hook("PreToolUse")
+        (work / "worklist-host.tsv").rename(work / "replacement.tsv")
+        result = self.hook("PostToolUse", tool_response={"ok": True})
+        self.assertFalse(result["continue"])
+        fault = json.loads((self.observer / "fault.json").read_text())
+        self.assertIn("worklist-host.tsv", fault["detail"])
+
+    def test_content_revision_registers_a_new_object_without_deletion_fault(self):
+        work = self.write_active(["worklist.tsv"])
+        ledger = work / "worklist.tsv"
+        ledger.write_bytes(b"before\n")
+        self.hook("PreToolUse")
+        ledger.write_bytes(b"after\n")
+        result = self.hook("PostToolUse", tool_response={"ok": True})
+        self.assertTrue(result["continue"])
+        registry = json.loads((self.observer / "registry.json").read_text())
+        versions = registry["files"]["work/worklist.tsv"]["versions"]
+        self.assertEqual(versions, [LIFECYCLE.sha256(b"before\n"),
+                                    LIFECYCLE.sha256(b"after\n")])
+
+    def test_duplicate_hook_is_idempotent_only_for_identical_input(self):
+        work = self.write_active(["worklist.tsv"])
+        (work / "worklist.tsv").write_text("row\n")
+        first = self.hook("PreToolUse")
+        duplicate = self.hook("PreToolUse")
+        self.assertEqual(first, duplicate)
+        conflict = self.hook("PreToolUse", tool_input={"command": "false"})
+        self.assertFalse(conflict["continue"])
+        self.assertTrue((self.observer / "fault.json").exists())
+
+    def test_unmatched_pre_pair_blocks_dispatch(self):
+        self.observe()
+        self.hook("PreToolUse")
+        with self.assertRaisesRegex(LIFECYCLE.LifecycleFault, "hook pair"):
+            LIFECYCLE.check_dispatch(
+                self.observer, self.nonce, self.boot,
+                now_monotonic_ns=10_000_000_001)
+
+    def test_provider_expected_tool_requires_matching_completed_hook_pair(self):
+        self.observe()
+        LIFECYCLE.register_expected_tools(
+            self.observer, self.nonce, self.boot, "request-1", ["tool-1"])
+        with self.assertRaisesRegex(LIFECYCLE.LifecycleFault, "expected tool"):
+            LIFECYCLE.check_dispatch(
+                self.observer, self.nonce, self.boot,
+                now_monotonic_ns=10_000_000_001)
+
+    def test_completed_hook_pair_satisfies_provider_expectation(self):
+        self.observe()
+        LIFECYCLE.register_expected_tools(
+            self.observer, self.nonce, self.boot, "request-1", ["tool-1"])
+        self.hook("PreToolUse")
+        self.hook("PostToolUse", tool_response={"ok": True})
+        row = LIFECYCLE.check_dispatch(
+            self.observer, self.nonce, self.boot,
+            now_monotonic_ns=10_000_000_001)
+        self.assertEqual(row["sequence"], 0)
+
+    def test_hook_receipt_retains_exact_input_and_output(self):
+        work = self.write_active(["worklist.tsv"])
+        (work / "worklist.tsv").write_text("row\n")
+        source = {"hook_event_name": "PreToolUse", "session_id": "s",
+                  "tool_use_id": "t", "tool_name": "write_file",
+                  "tool_input": {"file_path": "work/report.md", "content": "x"}}
+        raw = json.dumps(source, ensure_ascii=False, indent=2).encode()
+        output = LIFECYCLE.handle_hook(
+            self.observer, self.workspace, self.nonce, self.boot, raw)
+        receipt = json.loads((self.observer / "hook-events.jsonl").read_text().splitlines()[-1])
+        self.assertEqual(base64.b64decode(receipt["input_base64"]), raw)
+        self.assertEqual(receipt["output"], output)
+
+    def test_changing_file_is_rejected_without_silent_retry(self):
+        path = self.workspace / "race.tsv"
+        path.write_bytes(b"before\n")
+        original_read = LIFECYCLE.os.read
+        changed = []
+
+        def mutate_after_read(fd, length):
+            data = original_read(fd, length)
+            if data and not changed:
+                changed.append(True)
+                path.write_bytes(b"changed-and-longer\n")
+            return data
+
+        with mock.patch.object(LIFECYCLE.os, "read", side_effect=mutate_after_read):
+            with self.assertRaisesRegex(LIFECYCLE.LifecycleFault,
+                                        "FILE_CHANGED_WHILE_READ"):
+                LIFECYCLE._read_regular(path)
+
+    def test_symlinked_required_file_faults_without_snapshot(self):
+        work = self.write_active(["worklist.tsv"])
+        source = self.temp / "outside.tsv"
+        source.write_text("outside\n")
+        (work / "worklist.tsv").symlink_to(source)
+        output = self.hook("PreToolUse")
+        self.assertFalse(output["continue"])
+        self.assertEqual(list((self.observer / "objects").iterdir()), [])
+
+    def test_hook_cli_returns_success_with_explicit_denial_json(self):
+        command = [sys.executable, str(HERE / "lifecycle-supervisor.py"), "hook",
+                   "--observer-dir", str(self.observer),
+                   "--workspace", str(self.workspace), "--nonce", self.nonce,
+                   "--boot-id", self.boot]
+        done = subprocess.run(command, input="{}", text=True, capture_output=True)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        output = json.loads(done.stdout)
+        self.assertFalse(output["continue"])
+        self.assertEqual(output["hookSpecificOutput"]["permissionDecision"], "deny")
+
+    def test_launch_and_terminal_receipt_are_capability_signed(self):
+        self.observe(monotonic_ns=time.monotonic_ns())
+        digest = "d" * 64
+        launch_workspace = self.trace / "workspace"
+        launch_workspace.mkdir(mode=0o700)
+        launch = LIFECYCLE.publish_launch(
+            self.observer, self.trace, self.nonce, self.boot,
+            action="target_contract_probe_operator_monitored",
+            run_tag="target-contract-probe", predecessor_nonce=None,
+            package_version="v45", package_sha256=digest,
+            controller_pid=os.getpid(), controller_start_ticks="fixture",
+            controller_pgid=os.getpgrp(), workspace_dir=launch_workspace,
+            target_profile_sha256=digest,
+            run_budget_sha256=digest, input_package_sha256=digest,
+            settings_sha256=digest, lifecycle_helper_sha256=digest,
+            authorization_sha256=digest, manifest_sha256=digest)
+        launch_path = self.trace / "lifecycle-launch.json"
+        self.assertEqual(LIFECYCLE.verify_signed_record(
+            self.observer, launch), launch)
+        receipt = LIFECYCLE.finalize_segment(
+            self.observer, self.trace, self.nonce, self.boot,
+            run_tag="target-contract-probe",
+            launch_sha256=LIFECYCLE.sha256(launch_path.read_bytes()),
+            lifecycle_helper_sha256=digest, guardian_pid=123,
+            guardian_start_ticks="guardian-fixture", guardian_exit_code=-15)
+        self.assertEqual(receipt["status"], "PASS")
+        self.assertEqual(receipt["expected_tool_count"], 0)
+        self.assertEqual(LIFECYCLE.verify_signed_record(
+            self.observer, receipt), receipt)
+
+    def test_guardian_expires_owned_controller_and_leaves_unrelated_process(self):
+        shutil.rmtree(self.observer)
+        boot = LIFECYCLE.current_boot_id()
+        self.observer = LIFECYCLE.init_segment(
+            self.trace, self.nonce, boot, capability=self.capability)
+        LIFECYCLE.publish_observation(
+            self.observer, self.nonce, boot, sequence=0,
+            monotonic_ns=time.monotonic_ns() - LIFECYCLE.MAX_OBSERVATION_AGE_NS - 1,
+            capability=self.capability)
+        controller = subprocess.Popen(["sleep", "30"], start_new_session=True)
+        unrelated = subprocess.Popen(["sleep", "30"], start_new_session=True)
+        try:
+            rc = LIFECYCLE.run_guardian(
+                self.observer, self.nonce, boot, controller.pid,
+                LIFECYCLE.process_start_ticks(controller.pid),
+                os.getpgid(controller.pid), interval_s=0.01)
+            self.assertEqual(rc, 2)
+            controller.wait(timeout=2)
+            self.assertIsNone(unrelated.poll())
+            event = json.loads(
+                (self.observer / "guardian-events.jsonl").read_text().splitlines()[-1])
+            self.assertTrue(event["ownership_verified"])
+            self.assertTrue(event["signal_sent"])
+        finally:
+            for process in (controller, unrelated):
+                if process.poll() is None:
+                    process.terminate()
+                process.wait(timeout=2)
+
+
+if __name__ == "__main__":
+    unittest.main()

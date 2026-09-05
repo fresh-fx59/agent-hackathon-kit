@@ -69,12 +69,35 @@ class TargetContractProbeTest(unittest.TestCase):
             os.chmod(parent, 0o700)
         shutil.rmtree(self.temp)
 
+    def _publish_initial_observation(self, prepared_root, process):
+        manifest = json.loads((prepared_root / "probe-manifest.json").read_text())
+        nonce = manifest["nonce"]
+        observer = (prepared_root / "probe-work" / "runs" / "target-contract-probe" /
+                    ("observer-" + nonce))
+        deadline = time.monotonic() + 15
+        while not (observer / "identity.json").is_file() and time.monotonic() < deadline:
+            if process.poll() is not None:
+                break
+            time.sleep(.05)
+        self.assertTrue((observer / "identity.json").is_file(), "observer was not initialized")
+        identity = json.loads((observer / "identity.json").read_text())
+        result = subprocess.run([
+            sys.executable, str(BENCH / "lifecycle-supervisor.py"), "observe",
+            "--observer-dir", str(observer), "--nonce", nonce,
+            "--boot-id", identity["boot_id"], "--sequence", "0",
+            "--pending-operation", "test inspected target-probe launch",
+        ], text=True, capture_output=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return observer
+
     def test_explicit_operator_monitored_prepare_seals_honest_unlimited_policy(self):
         self.args.operator_monitored = True
         self.probe.prepare(self.args)
         profile = json.loads((self.root / "target-profile.json").read_text())
         budget = json.loads((self.root / "probe-budget.json").read_text())
         manifest = json.loads((self.root / "probe-manifest.json").read_text())
+        settings = json.loads((self.root / "corporate-settings.json").read_text())
+        package = json.loads((self.root / "input-package.json").read_text())
 
         self.assertEqual(profile["schema"], 2)
         self.assertEqual(profile["execution_mode"], "operator_monitored")
@@ -94,6 +117,22 @@ class TargetContractProbeTest(unittest.TestCase):
         })
         self.assertEqual(manifest["schema"], 2)
         self.assertEqual(manifest["action"], "target_contract_probe_operator_monitored")
+        self.assertEqual(settings["model"]["generationConfig"]["timeout"], 600000)
+        self.assertEqual(settings["skills"]["directories"], ["../skill-catalogue"])
+        expected_hook_command = (
+            'python3 "%s" hook --observer-dir "$SHERLOCK_OBSERVER_DIR" '
+            '--workspace "$PWD" --nonce "$SHERLOCK_RUN_NONCE" '
+            '--boot-id "$SHERLOCK_BOOT_ID"'
+            % (ROOT / "eval" / "bench" / "lifecycle-supervisor.py"))
+        for event in ("PreToolUse", "PostToolUse", "PostToolUseFailure"):
+            hook = settings["hooks"][event][0]["hooks"][0]
+            self.assertEqual(hook, {"type": "command",
+                                    "command": expected_hook_command,
+                                    "timeout": 10000})
+        self.assertEqual(
+            package["lifecycle_helper_sha256"],
+            hashlib.sha256((ROOT / "eval" / "bench" /
+                            "lifecycle-supervisor.py").read_bytes()).hexdigest())
         self.assertEqual(
             manifest["probe_budget_sha256"],
             hashlib.sha256((self.root / "probe-budget.json").read_bytes()).hexdigest())
@@ -155,6 +194,7 @@ class TargetContractProbeTest(unittest.TestCase):
            env=dict(os.environ, SHERLOCK_API_KEY="test-only"))
         qwen_pid = None
         try:
+            self._publish_initial_observation(root, outer)
             deadline = time.monotonic() + 15
             while time.monotonic() < deadline and not pid_path.exists(): time.sleep(0.05)
             self.assertTrue(pid_path.exists(), "real runner never reached stubborn Qwen")
@@ -494,7 +534,7 @@ class TargetContractProbeTest(unittest.TestCase):
 
         self.assertNotEqual(child.returncode, 0)
         self.assertFalse(marker.exists(), (stdout, stderr))
-        self.assertIn("TARGET_PROBE_POLICY", stderr, (stdout, stderr))
+        self.assertIn("monitored launch receipt missing", stderr, (stdout, stderr))
 
     def test_refusals_happen_before_secret_proxy_runner_or_network(self):
         for case in ("missing_approval", "wrong_hash", "expired", "wrong_action",
@@ -910,12 +950,15 @@ raise SystemExit(1)
             operator_monitored=True, arm="v44"))
         self.probe.prepare(args)
         manifest = args.root / "probe-manifest.json"
-        done = subprocess.run([
+        process = subprocess.Popen([
             sys.executable, str(PROBE_PATH), "run", "--manifest", str(manifest),
             "--operator-approved-probe", self._sha(manifest), "--nonce-root",
             str(args.root / "nonces"), "--transport-base-url", "http://127.0.0.1:9/v1",
-            "--json"], text=True, capture_output=True, timeout=30,
+            "--json"], text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             env=dict(os.environ, SHERLOCK_API_KEY="test-only"))
+        self._publish_initial_observation(args.root, process)
+        stdout, stderr = process.communicate(timeout=30)
+        done = subprocess.CompletedProcess(process.args, process.returncode, stdout, stderr)
         self.assertNotEqual(done.returncode, 0)
         trace = args.root / "probe-work" / "runs" / "target-contract-probe"
         diagnostics = {}
@@ -932,7 +975,45 @@ raise SystemExit(1)
         self.assertEqual(observed["settings"]["model"]["maxWallTimeSeconds"], -1)
         self.assertEqual(observed["workflow_agent_max_turns"], "200")
         controller = CONTROLLER_PATH.read_text(encoding="utf-8")
-        self.assertIn("communicate_owned_process(child, timeout=None if monitored else 600)", controller)
+        self.assertIn("stdout, stderr = child.communicate(timeout=.25)", controller)
+        self.assertIn('"--interval", "0.25"', controller)
+
+    def test_monitored_invalid_initial_observation_closes_launch_before_runner(self):
+        marker = self.temp / "monitored-startup-contact"
+        qwen = self.temp / "monitored-startup-tripwire.sh"
+        qwen.write_text("#!/bin/sh\nprintf contacted > %s\nexit 97\n" % marker,
+                        encoding="utf-8")
+        qwen.chmod(0o700)
+        args = self.probe.PrepareArgs(**dict(
+            self.args.__dict__, root=(self.temp / "monitored-startup").resolve(),
+            qwen_bin=str(qwen), operator_monitored=True, arm="v44"))
+        self.probe.prepare(args)
+        manifest = args.root / "probe-manifest.json"
+        process = subprocess.Popen([
+            sys.executable, str(PROBE_PATH), "run", "--manifest", str(manifest),
+            "--operator-approved-probe", self._sha(manifest), "--nonce-root",
+            str(args.root / "nonces"), "--transport-base-url", "http://127.0.0.1:9/v1",
+            "--json"], text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            env=dict(os.environ, SHERLOCK_API_KEY="test-only"))
+        nonce = json.loads(manifest.read_text())["nonce"]
+        trace = args.root / "probe-work" / "runs" / "target-contract-probe"
+        observer = trace / ("observer-" + nonce)
+        deadline = time.monotonic() + 15
+        while not (observer / "identity.json").is_file() and time.monotonic() < deadline:
+            if process.poll() is not None:
+                break
+            time.sleep(.05)
+        self.assertTrue((observer / "identity.json").is_file())
+        (observer / "current-observation.json").write_text("{}\n", encoding="utf-8")
+        stdout, stderr = process.communicate(timeout=10)
+        self.assertNotEqual(process.returncode, 0, (stdout, stderr))
+        self.assertFalse(marker.exists(), (stdout, stderr))
+        self.assertTrue((trace / "lifecycle-launch.json").is_file())
+        self.assertTrue((trace / "lifecycle-receipt.json").is_file(),
+                        (stdout, stderr, sorted(path.name for path in trace.iterdir())))
+        receipt = json.loads((trace / "lifecycle-receipt.json").read_text())
+        self.assertEqual((receipt["status"], receipt["fault_reason"]),
+                         ("FAULT", "OBSERVATION_INVALID"))
 
     def test_provider_free_finite_e2e_uses_real_runner_lane_proxy_and_task7(self):
         self._provider_free_e2e_uses_real_runner_lane_proxy_and_task7(False)
@@ -964,7 +1045,12 @@ if os.environ.get('SHERLOCK_OPERATOR_MONITORED_MODE') == '1':
     assert '--max-wall-time' not in sys.argv
     assert settings['model']['maxWallTimeSeconds'] == -1
 skill_root = Path(os.environ['QWEN_SKILL_ROOT'])
-assert settings['skills']['directories'] == [str(skill_root.parent)]
+if os.environ.get('SHERLOCK_OPERATOR_MONITORED_MODE') == '1':
+    assert settings['skills']['directories'] == ['../skill-catalogue']
+    assert Path.cwd().name == 'workspace'
+    assert (Path.cwd() / settings['skills']['directories'][0]).resolve() == skill_root.parent.resolve()
+else:
+    assert settings['skills']['directories'] == [str(skill_root.parent)]
 assert skill_root.parent.name == 'skill-catalogue'
 assert (skill_root / 'SKILL.md').is_file()
 try:
@@ -1053,10 +1139,54 @@ print(json.dumps([{'type':'result','result':'ok','is_error':False,'session_id':'
                 manifest_row["expires_at"] = self.probe._time_text(now + dt.timedelta(seconds=8))
                 manifest_row["rate_snapshot_sha256"] = self._sha(root / "probe-rate-snapshot.json")
                 manifest.write_bytes(self.probe.canonical(manifest_row) + b"\n")
-            done = subprocess.run([sys.executable, str(PROBE_PATH), "run", "--manifest", str(manifest),
+            command = [sys.executable, str(PROBE_PATH), "run", "--manifest", str(manifest),
                 "--operator-approved-probe", self._sha(manifest), "--nonce-root", str(root / "nonces"),
-                "--transport-base-url", "http://127.0.0.1:%d/v1" % server.server_port, "--json"],
-                text=True, capture_output=True, timeout=120, env=dict(os.environ, SHERLOCK_API_KEY="fixture-token"))
+                "--transport-base-url", "http://127.0.0.1:%d/v1" % server.server_port, "--json"]
+            if operator_monitored:
+                process = subprocess.Popen(command, text=True, stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE, env=dict(os.environ, SHERLOCK_API_KEY="fixture-token"))
+                stop_observer = threading.Event()
+                observer_errors = []
+                nonce = json.loads(manifest.read_text())["nonce"]
+                observer = (root / "probe-work" / "runs" / "target-contract-probe" /
+                            ("observer-" + nonce))
+
+                def observe_lifecycle():
+                    deadline = time.monotonic() + 30
+                    while not (observer / "identity.json").is_file() and time.monotonic() < deadline:
+                        if process.poll() is not None:
+                            return
+                        time.sleep(.02)
+                    sequence = 0
+                    while not stop_observer.is_set() and process.poll() is None:
+                        try:
+                            identity = json.loads((observer / "identity.json").read_text())
+                            result = subprocess.run([
+                                sys.executable, str(BENCH / "lifecycle-supervisor.py"), "observe",
+                                "--observer-dir", str(observer), "--nonce", nonce,
+                                "--boot-id", identity["boot_id"], "--sequence", str(sequence),
+                                "--pending-operation", "provider-free monitored e2e"],
+                                text=True, capture_output=True, timeout=5)
+                            if result.returncode:
+                                observer_errors.append(result.stderr)
+                                return
+                            sequence += 1
+                        except BaseException as exc:
+                            observer_errors.append(repr(exc))
+                            return
+                        stop_observer.wait(.5)
+
+                observer_thread = threading.Thread(target=observe_lifecycle, daemon=True)
+                observer_thread.start()
+                try:
+                    stdout, stderr = process.communicate(timeout=120)
+                    done = subprocess.CompletedProcess(command, process.returncode, stdout, stderr)
+                finally:
+                    stop_observer.set(); observer_thread.join(timeout=5)
+                self.assertFalse(observer_errors, observer_errors)
+            else:
+                done = subprocess.run(command, text=True, capture_output=True, timeout=120,
+                    env=dict(os.environ, SHERLOCK_API_KEY="fixture-token"))
         finally:
             server.shutdown(); thread.join(timeout=5); server.server_close()
         trace_hint = root / "probe-work" / "runs" / "target-contract-probe"
@@ -1081,12 +1211,23 @@ print(json.dumps([{'type':'result','result':'ok','is_error':False,'session_id':'
         diagnostic["upstream-requests-seen"] = repr(len(seen))
         projection = subprocess.run([sys.executable, str(ROOT / "eval" / "bench" / "run-verdict.py"),
                                      str(trace_hint), "--target-probe", "--json"], text=True, capture_output=True)
-        diagnostic["fresh-task7"] = repr((projection.returncode, projection.stdout, projection.stderr))
+        try:
+            projected = json.loads(projection.stdout)
+            projection_detail = {key: projected.get(key) for key in
+                                 ("state", "failures", "primary_failure")}
+        except json.JSONDecodeError:
+            projection_detail = projection.stdout[-4096:]
+        diagnostic["fresh-task7"] = repr((projection.returncode, projection_detail,
+                                           projection.stderr[-4096:]))
+        for name in ("lifecycle-launch.json", "lifecycle-receipt.json"):
+            path = trace_hint / name
+            if path.is_file():
+                diagnostic[name] = path.read_text(encoding="utf-8", errors="replace")
         if gates_path.is_file():
             gates = json.loads(gates_path.read_text())
             cite = gates.get("gates", {}).get("citecheck", {}).get("json", {})
             diagnostic["target-contract-probe/citecheck-summary.json"] = json.dumps({
-                key: cite.get(key) for key in ("blocking", "defects", "ledger", "summary", "outcomes", "report_evidence")}, ensure_ascii=False)
+                key: cite.get(key) for key in ("blocking", "defects")}, ensure_ascii=False)
             diagnostic["target-contract-probe/gates-summary.json"] = json.dumps({
                 "verdict": gates.get("verdict"),
                 **{name: {"exit_code": row.get("exit_code"), "blocking": row.get("blocking")}
@@ -1108,6 +1249,16 @@ print(json.dumps([{'type':'result','result':'ok','is_error':False,'session_id':'
             self.assertEqual(launch["manifest_raw_sha256"], self._sha(trace / "probe-manifest.json"))
             self.assertEqual(launch["action_authorization_sha256"],
                              self._sha(trace / "action-authorization.json"))
+            lifecycle_launch = json.loads((trace / "lifecycle-launch.json").read_text())
+            lifecycle_receipt = json.loads((trace / "lifecycle-receipt.json").read_text())
+            self.assertEqual(lifecycle_launch["workspace_dir"], str(trace / "workspace"))
+            self.assertEqual(lifecycle_launch["manifest_sha256"],
+                             self._sha(trace / "probe-manifest.json"))
+            self.assertEqual(lifecycle_launch["authorization_sha256"],
+                             self._sha(trace / "action-authorization.json"))
+            self.assertEqual(lifecycle_receipt["status"], "PASS")
+            self.assertEqual(lifecycle_receipt["expected_tool_count"], 0)
+            self.assertEqual(lifecycle_receipt["completed_tool_count"], 0)
         else:
             self.assertFalse((trace / "launch-start.json").exists())
         sealed_prompt = trace / "probe" / "prompt.txt"

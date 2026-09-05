@@ -1,0 +1,9 @@
+{
+  "eval/bench/bench-controller.sh": "b7d20ca92dc31e26a826e51354374a7d4bcd01b7f570d8768e2ee899e53a3c6f",
+  "eval/bench/target-contract-probe.py": "c5082d0c6cc5a553f06258ad4b3e366c7eca47b40b1f66b4ae5c1592ca3ba8be",
+  "eval/bench/lifecycle-supervisor.py": "b11e5d8a9499a6185acd540319acb6b2c0f1cc084925af82683237213bd06cd9",
+  "eval/bench/run-bench.sh": "d4cdd4826b71d3c95b578604bc6307c2288ff02748d9d04e9c18d51404f9b440",
+  "eval/bench/run-verdict.py": "9a856e1ab2ca44c272b3ca7c0d17fc42b94949eacf7bd6c2b0480414932e7656",
+  "measure/upstream-log-proxy.py": "952ed18e779b83835bd85789890b7fe2375803c33212148740f92ca35572fefa",
+  "measure/upstream-lane.sh": "f5d456443c3662de1f5202bad6da835c8d1e86b124f4a37e520da246b322474e"
+}

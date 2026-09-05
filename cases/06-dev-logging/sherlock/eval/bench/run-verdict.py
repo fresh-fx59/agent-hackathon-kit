@@ -13,10 +13,12 @@ import subprocess
 import sys
 import tempfile
 import time
+import importlib.util
 
 
 HERE = Path(__file__).resolve().parent
 STATUS_TOOL = HERE / "bench-status.py"
+LIFECYCLE_TOOL = HERE / "lifecycle-supervisor.py"
 TERMINAL = {"ACCEPTED", "REJECTED", "RUN_FAILED", "FINISHED", "FINISHED_UNCHECKED"}
 REQUIRED_GATES = ("citecheck", "triagecheck", "statecheck", "reportcheck")
 MAX_JSON = 1024 * 1024
@@ -104,6 +106,125 @@ def read_json(path):
     if not isinstance(value, dict):
         raise ValueError("invalid artifact")
     return value
+
+
+def _lifecycle_module():
+    """Load the pinned local verifier; terminal evidence is not trusted JSON."""
+    spec = importlib.util.spec_from_file_location("sherlock_lifecycle_verifier",
+                                                  LIFECYCLE_TOOL)
+    if spec is None or spec.loader is None:
+        raise ValueError("lifecycle verifier unavailable")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def monitored_lifecycle_failures(trace):
+    """Return fail-closed terminal-audit findings for a monitored trace.
+
+    A signed launch makes lifecycle evidence mandatory.  This deliberately
+    verifies raw bytes and signatures rather than accepting the controller's
+    status projection, which is mutable after launch.
+    """
+    trace = Path(trace).resolve()
+    launch_path = trace / "lifecycle-launch.json"
+    if not os.path.lexists(launch_path):
+        # Schema 2 is the finite-proof replacement: it has no aggregate cap,
+        # so lifecycle supervision is mandatory rather than an optional add-on.
+        try:
+            profile = read_json(trace / "target-profile.json")
+        except (OSError, UnicodeError, ValueError, json.JSONDecodeError):
+            return []
+        if (profile.get("schema") == 2
+                and profile.get("execution_mode") == "operator_monitored"):
+            return ["LIFECYCLE_AUDIT_INVALID"]
+        return []
+    try:
+        lifecycle = _lifecycle_module()
+        launch_raw = lifecycle._read_regular(launch_path, MAX_JSON)
+        launch = lifecycle._strict_json(launch_raw)
+        if set(launch) != lifecycle.LAUNCH_FIELDS:
+            raise ValueError("launch schema")
+        observer = Path(launch["observer_dir"])
+        if observer.parent.resolve() != trace or not observer.name.startswith("observer-"):
+            raise ValueError("observer location")
+        lifecycle.verify_signed_record(observer, launch)
+        if (launch.get("schema") != 1 or launch.get("execution_mode") != "operator_monitored"
+                or not isinstance(launch.get("run_nonce"), str)
+                or not isinstance(launch.get("run_tag"), str)
+                or not isinstance(launch.get("lifecycle_helper_sha256"), str)):
+            raise ValueError("launch identity")
+        receipt_raw = lifecycle._read_regular(trace / "lifecycle-receipt.json", MAX_JSON)
+        receipt = lifecycle._strict_json(receipt_raw)
+        if set(receipt) != lifecycle.RECEIPT_FIELDS:
+            raise ValueError("receipt schema")
+        lifecycle.verify_signed_record(observer, receipt)
+        identity_raw = lifecycle._read_regular(observer / "identity.json", MAX_JSON)
+        if (receipt.get("schema") != 1
+                or receipt.get("run_nonce") != launch["run_nonce"]
+                or receipt.get("run_tag") != launch["run_tag"]
+                or receipt.get("launch_sha256") != lifecycle.sha256(launch_raw)
+                or receipt.get("observer_dir") != launch["observer_dir"]
+                or receipt.get("observer_identity_sha256") != lifecycle.sha256(identity_raw)
+                or receipt.get("lifecycle_helper_sha256") != launch["lifecycle_helper_sha256"]
+                or type(receipt.get("expected_tool_count")) is not int
+                or type(receipt.get("completed_tool_count")) is not int
+                or receipt["expected_tool_count"] < 0
+                or receipt["completed_tool_count"] < 0):
+            raise ValueError("receipt identity")
+        # Receipt digests cover the observer state the controller had at its
+        # terminal decision.  A mismatch is invalid evidence even if the HMAC
+        # itself remains valid.
+        for field, name in (("registry_sha256", "registry.json"),
+                            ("pairs_sha256", "pairs.json"),
+                            ("expectations_sha256", "expectations.json")):
+            if receipt[field] != lifecycle.sha256(lifecycle._read_regular(observer / name, MAX_JSON)):
+                raise ValueError("observer digest")
+        for field, name in (("last_accepted_observation_sha256", "last-accepted-observation.json"),
+                            ("hook_starts_sha256", "hook-starts.jsonl"),
+                            ("hook_events_sha256", "hook-events.jsonl"),
+                            ("guardian_events_sha256", "guardian-events.jsonl"),
+                            ("fault_sha256", "fault.json")):
+            claimed = receipt.get(field)
+            if claimed is None:
+                if (observer / name).exists():
+                    raise ValueError("missing optional observer digest")
+            elif (not isinstance(claimed, str)
+                  or claimed != lifecycle.sha256(lifecycle._read_regular(observer / name, MAX_JSON))):
+                raise ValueError("optional observer digest")
+        expected = lifecycle._strict_json(lifecycle._read_regular(
+            observer / "expectations.json", MAX_JSON))
+        pairs = lifecycle._strict_json(lifecycle._read_regular(
+            observer / "pairs.json", MAX_JSON))
+        expected_ids = {
+            tool_id for request in expected.get("expected", {}).values()
+            for tool_id in request.get("tool_use_ids", [])
+        }
+        completed_ids = set()
+        incomplete = False
+        for key, pair in pairs.get("pairs", {}).items():
+            if not isinstance(pair, dict):
+                raise ValueError("pair schema")
+            tool_id = key.split("\x1f", 1)[-1]
+            pre, post = pair.get("pre"), pair.get("post")
+            if post is not None or (isinstance(pre, dict)
+                                    and pre.get("output", {}).get("continue") is False):
+                completed_ids.add(tool_id)
+            elif pre is not None:
+                incomplete = True
+        if (not isinstance(expected.get("expected"), dict)
+                or not isinstance(pairs.get("pairs"), dict)
+                or receipt["expected_tool_count"] != len(expected_ids)
+                or receipt["completed_tool_count"] != len(expected_ids & completed_ids)):
+            raise ValueError("derived tool reconciliation")
+        if receipt.get("status") != "PASS" or receipt.get("fault_sha256") is not None \
+                or receipt.get("fault_reason") is not None \
+                or incomplete or receipt["expected_tool_count"] != receipt["completed_tool_count"]:
+            return ["LIFECYCLE_AUDIT_FAULT"]
+        return []
+    except (OSError, UnicodeError, ValueError, TypeError, RuntimeError,
+            json.JSONDecodeError, AttributeError):
+        return ["LIFECYCLE_AUDIT_INVALID"]
 
 
 def discover_controller_authority(trace):
@@ -556,6 +677,8 @@ def terminal_verdict(args, status):
     except (OSError, UnicodeError, ValueError, json.JSONDecodeError):
         ledger_metrics, clipped = {}, []
         failures.append("UPSTREAM_LEDGER_INVALID")
+    lifecycle_failures = monitored_lifecycle_failures(trace)
+    failures.extend(lifecycle_failures)
     if clipped:
         failures.append("COMPACTION_OUTPUT_CLIPPED")
     if args.target_probe and (ledger_metrics.get("provider_calls_observed", 0) < 1
@@ -570,6 +693,8 @@ def terminal_verdict(args, status):
         "LANE_INTEGRITY_BREACH",
         "TRACE_NOT_SEALED",
         "UPSTREAM_LEDGER_INVALID",
+        "LIFECYCLE_AUDIT_INVALID",
+        "LIFECYCLE_AUDIT_FAULT",
         "COMPACTION_OUTPUT_CLIPPED",
     }
     report_correct = (
@@ -759,6 +884,7 @@ def terminal_verdict(args, status):
                                  ("attempt_exit_code", "driver_exit_code", "wrapper_exit_code")):
         failures.append("EXIT_LAYER_NONZERO")
     metrics = {"gate_exits": gate_exits, "gate_blocking": gate_blocking,
+               "lifecycle_failures": lifecycle_failures,
                "replay_exit": replay_exit}
     metrics.update(ledger_metrics)
     estimate, rate_snapshot = _budget_estimate(trace, status.get("run_tag"))

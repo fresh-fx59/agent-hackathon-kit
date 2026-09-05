@@ -34,6 +34,7 @@ below for the layout and for what those files contain.
 import datetime
 import errno
 import hashlib
+import importlib.util
 import math
 import fcntl
 import gzip
@@ -76,6 +77,30 @@ UPSTREAM_ACTION_BUDGET = os.environ.get("UPSTREAM_ACTION_BUDGET", "").strip()
 UPSTREAM_RATE_SNAPSHOT = os.environ.get("UPSTREAM_RATE_SNAPSHOT", "").strip()
 UPSTREAM_EXPECTED_RETURNED_IDENTITY = os.environ.get(
     "UPSTREAM_EXPECTED_RETURNED_IDENTITY", "")
+SHERLOCK_OBSERVER_DIR = os.environ.get("SHERLOCK_OBSERVER_DIR", "").strip()
+SHERLOCK_RUN_NONCE = os.environ.get("SHERLOCK_RUN_NONCE", "").strip()
+SHERLOCK_BOOT_ID = os.environ.get("SHERLOCK_BOOT_ID", "").strip()
+SHERLOCK_LIFECYCLE_HELPER = os.environ.get(
+    "SHERLOCK_LIFECYCLE_HELPER", "").strip()
+_LIFECYCLE = None
+_LIFECYCLE_CONFIG_ERROR = None
+_lifecycle_values = (SHERLOCK_OBSERVER_DIR, SHERLOCK_RUN_NONCE,
+                     SHERLOCK_BOOT_ID, SHERLOCK_LIFECYCLE_HELPER)
+if any(_lifecycle_values):
+    if not all(_lifecycle_values):
+        _LIFECYCLE_CONFIG_ERROR = "partial lifecycle configuration"
+    else:
+        try:
+            _helper = os.path.abspath(SHERLOCK_LIFECYCLE_HELPER)
+            _helper_info = os.lstat(_helper)
+            if not stat.S_ISREG(_helper_info.st_mode) or stat.S_ISLNK(_helper_info.st_mode):
+                raise OSError("lifecycle helper is not a regular file")
+            _spec = importlib.util.spec_from_file_location(
+                "sherlock_lifecycle_supervisor_proxy", _helper)
+            _LIFECYCLE = importlib.util.module_from_spec(_spec)
+            _spec.loader.exec_module(_LIFECYCLE)
+        except BaseException as _exc:
+            _LIFECYCLE_CONFIG_ERROR = "%s: %s" % (type(_exc).__name__, _exc)
 PROXY_INSTANCE = str(uuid.uuid4())
 # THE 177,000-TOKEN CEILING WAS A MODEL-ID PARSING ARTIFACT, not a real limit.
 # qwen-code sizes the context window from the model id, and its own normalize()
@@ -382,6 +407,7 @@ _BUDGET_LIMITS = {
     "max_consecutive_provider_failures": _positive_env(
         "UPSTREAM_MAX_CONSECUTIVE_PROVIDER_FAILURES"),
 }
+_MONITORED_BUDGET = os.environ.get("UPSTREAM_OPERATOR_MONITORED_MODE") == "1"
 ACTION_LIMITS = ("max_provider_calls", "max_prompt_tokens", "max_completion_tokens",
                  "max_wall_time_s", "max_estimated_cost_rub")
 _ACTION_BUDGET_ENABLED = bool(UPSTREAM_ACTION_BUDGET)
@@ -391,7 +417,8 @@ _ACTION_BUDGET_ENABLED = bool(UPSTREAM_ACTION_BUDGET)
 _BUDGET_ENABLED = bool(UPSTREAM_BUDGET_STATE) and not _ACTION_BUDGET_ENABLED
 if _BUDGET_ENABLED and (not RUN_TAG or
                         not (UPSTREAM_EXPECTED_RETURNED_IDENTITY or UPSTREAM_ROUTE_FILE) or
-                        any(value is None for value in _BUDGET_LIMITS.values())):
+                        (not _MONITORED_BUDGET and
+                         any(value is None for value in _BUDGET_LIMITS.values()))):
     raise ValueError("controlled proxy requires run identity and all finite limits")
 # Only statuses that are transient on this lane. A 401/404/422 is a real defect
 # in the request and retrying it just burns the context again for nothing.
@@ -1457,7 +1484,11 @@ def _budget_shape(row):
     fields = {"schema", "run_tag", "updated_at", "attempts_charged",
               "request_bytes", "consecutive_provider_failures", "limits",
               "verdict", "reason"}
-    return (isinstance(row, dict) and set(row) == fields and row.get("schema") == 1 and
+    if _MONITORED_BUDGET:
+        fields.add("execution_mode")
+    return (isinstance(row, dict) and set(row) == fields and
+            row.get("schema") == (2 if _MONITORED_BUDGET else 1) and
+            row.get("execution_mode", "finite") == ("operator_monitored" if _MONITORED_BUDGET else "finite") and
             row.get("run_tag") == RUN_TAG and row.get("limits") == _BUDGET_LIMITS and
             all(type(row.get(name)) is int and row[name] >= 0 for name in
                 ("attempts_charged", "request_bytes", "consecutive_provider_failures")) and
@@ -1659,7 +1690,7 @@ def _reconcile_completed(row):
         raise BudgetUnknown() from exc
     row["attempts_charged"] = max(row["attempts_charged"], attempts)
     row["request_bytes"] = max(row["request_bytes"], request_bytes)
-    if row["verdict"] == "WITHIN":
+    if row["verdict"] == "WITHIN" and not _MONITORED_BUDGET:
         if row["attempts_charged"] > row["limits"]["max_upstream_attempts"]:
             row.update(verdict="EXCEEDED", reason="MAX_UPSTREAM_ATTEMPTS")
         elif row["request_bytes"] > row["limits"]["max_request_bytes"]:
@@ -1696,7 +1727,10 @@ def _reserve_budget(request_bytes):
             return row
         attempts = row["attempts_charged"] + 1
         total_bytes = row["request_bytes"] + request_bytes
-        if attempts > row["limits"]["max_upstream_attempts"]:
+        if _MONITORED_BUDGET:
+            row["attempts_charged"] = attempts
+            row["request_bytes"] = total_bytes
+        elif attempts > row["limits"]["max_upstream_attempts"]:
             row.update(verdict="EXCEEDED", reason="MAX_UPSTREAM_ATTEMPTS")
         elif total_bytes > row["limits"]["max_request_bytes"]:
             row.update(verdict="EXCEEDED", reason="MAX_REQUEST_BYTES")
@@ -1834,7 +1868,7 @@ def _record_budget_result(success):
     def finish(row):
         row["consecutive_provider_failures"] = (
             0 if success else row["consecutive_provider_failures"] + 1)
-        if (not success and row["consecutive_provider_failures"] >=
+        if (not _MONITORED_BUDGET and not success and row["consecutive_provider_failures"] >=
                 row["limits"]["max_consecutive_provider_failures"]):
             row.update(verdict="EXCEEDED", reason="MAX_CONSECUTIVE_PROVIDER_FAILURES")
         return row
@@ -2319,6 +2353,11 @@ def _scan_obj(obj, state):
             part = ch.get(key)
             if isinstance(part, dict) and part.get("tool_calls"):
                 state["tool_call"] = True
+                for call in part.get("tool_calls") or []:
+                    tool_id = call.get("id") if isinstance(call, dict) else None
+                    if isinstance(tool_id, str) and tool_id \
+                            and tool_id not in state["tool_use_ids"]:
+                        state["tool_use_ids"].append(tool_id)
             # CONTENT, not merely "an event". A usage-only chunk is an event and
             # carries nothing; that distinction is the whole deadline.
             if isinstance(part, dict) and (part.get("content")
@@ -2360,6 +2399,30 @@ class Proxy(BaseHTTPRequestHandler):
         if _LANE_ABORT is not None:
             self._lane_refusal()
             return
+
+        # Controlled runs make root observation a pre-dispatch requirement.
+        # This check precedes route lookup, credential reads, reservations and
+        # socket creation. A first fault is durable and terminal; another
+        # heartbeat cannot revive the same segment.
+        if any(_lifecycle_values):
+            detail = _LIFECYCLE_CONFIG_ERROR
+            if detail is None:
+                try:
+                    _LIFECYCLE.check_dispatch(
+                        SHERLOCK_OBSERVER_DIR, SHERLOCK_RUN_NONCE,
+                        SHERLOCK_BOOT_ID)
+                except BaseException as exc:
+                    detail = "%s: %s" % (type(exc).__name__, exc)
+                    try:
+                        _LIFECYCLE.record_fault(
+                            SHERLOCK_OBSERVER_DIR, SHERLOCK_RUN_NONCE,
+                            "PROXY_DISPATCH_BLOCKED", detail)
+                    except BaseException:
+                        pass
+            if detail is not None:
+                _lane_trip("LIFECYCLE_FAULT", detail)
+                self._lane_refusal()
+                return
 
         # LOG THE OUTBOUND OUTPUT BUDGET. `prompt + max_tokens` is what the
         # provider checks, not the prompt alone, and an unclamped qwen-code
@@ -2604,6 +2667,9 @@ class Proxy(BaseHTTPRequestHandler):
         # sees malformed JSON while a status-only ledger says success.
         state = {"returned_model": None, "tool_call": False, "error": None,
                  "usage": None, "finish_reason": None,
+                 "status": None,
+                 "request_id": request_id, "tool_use_ids": [],
+                 "registered_tool_use_ids": [], "lifecycle_refused": False,
                  "stream_events": 0, "stream_parse_errors": 0,
                  "content_events": 0, "ttft_ms": None, "stream_started_at": None,
                  "deadline_unenforceable": False,
@@ -2744,6 +2810,7 @@ class Proxy(BaseHTTPRequestHandler):
                 self.wfile.write(payload)
                 return
 
+          state["status"] = status
           ctype = (resp.headers.get("Content-Type") or "")
           streaming = "text/event-stream" in ctype.lower()
           try:
@@ -3097,11 +3164,49 @@ class Proxy(BaseHTTPRequestHandler):
         if hold and _is_substitution(state["returned_model"], expected):
             state["substituted"] = True
             return
+        if not self._register_lifecycle_expectations(state):
+            return
         self._relay_headers(resp, status)
         self.send_header("Content-Length", str(len(payload)))
         self.end_headers()
         self.wfile.write(payload)
         state["released"] = True
+
+    def _register_lifecycle_expectations(self, state):
+        # Only a successful response that will actually reach qwen creates a
+        # hook obligation.  A discarded wrong-model body, malformed response,
+        # or HTTP error cannot produce a Qwen tool event and therefore must not
+        # poison the next otherwise-valid dispatch with an impossible pair.
+        if (_LIFECYCLE is None or not state["tool_use_ids"]
+                or state.get("substituted")
+                or state.get("error") is not None
+                or not state.get("response_valid")
+                or not (isinstance(state.get("status"), int)
+                        and 200 <= state["status"] < 300)):
+            return True
+        pending = [value for value in state["tool_use_ids"]
+                   if value not in state["registered_tool_use_ids"]]
+        if not pending:
+            return True
+        try:
+            _LIFECYCLE.register_expected_tools(
+                SHERLOCK_OBSERVER_DIR, SHERLOCK_RUN_NONCE,
+                SHERLOCK_BOOT_ID, state["request_id"], pending)
+            state["registered_tool_use_ids"].extend(pending)
+            return True
+        except BaseException as exc:
+            detail = "%s: %s" % (type(exc).__name__, exc)
+            try:
+                _LIFECYCLE.record_fault(
+                    SHERLOCK_OBSERVER_DIR, SHERLOCK_RUN_NONCE,
+                    "TOOL_EXPECTATION_WRITE_FAILED", detail)
+            except BaseException:
+                pass
+            _lane_trip("LIFECYCLE_FAULT", detail)
+            state["lifecycle_refused"] = True
+            self._lane_refusal()
+            state["released"] = True
+            return False
 
     def _relay_error(self, status, resp, raw):
         """The provider's own refusal, verbatim and exactly once.
@@ -3237,7 +3342,7 @@ class Proxy(BaseHTTPRequestHandler):
         # Action mode delays its 200 until the complete stream is inside the
         # monotonic reservation.  Once headers are sent a later deadline can
         # only close a 200 stream, which is not a bounded paid outcome.
-        if not hold and not _ACTION_BUDGET_ENABLED:
+        if not hold and not _ACTION_BUDGET_ENABLED and _LIFECYCLE is None:
             # Byte-for-byte the pre-retry behaviour when the feature is off:
             # headers first, then relay each line as it arrives.
             self._release_head(resp, state)
@@ -3285,15 +3390,21 @@ class Proxy(BaseHTTPRequestHandler):
                 # reserved wall bound.  Knowing the model is enough to release
                 # schema-1's stream, but not enough to tell an action client
                 # success: another fragmented event can still cross the bound.
-                if (not _ACTION_BUDGET_ENABLED and
+                if (_LIFECYCLE is None and not _ACTION_BUDGET_ENABLED and
                         (state["returned_model"] or self._hold_expired(state))):
                     self._release_head(resp, state)
+            state["response_valid"] = (
+                state["stream_complete"] is True
+                and state["stream_parse_errors"] == 0
+                and state["error"] is None)
+            if not self._register_lifecycle_expectations(state):
+                return
         finally:
             # Anything held that is NOT a discard must still be delivered,
             # including a stream that ended, errored or timed out before it
             # ever named a model. Holding is a delay, never a loss.
-            if (not state["substituted"] and not (_ACTION_BUDGET_ENABLED and
-                                                   state["error"] is not None)):
+            if (not state["substituted"] and not state["lifecycle_refused"]
+                    and not (_ACTION_BUDGET_ENABLED and state["error"] is not None)):
                 self._release_head(resp, state)
 
 

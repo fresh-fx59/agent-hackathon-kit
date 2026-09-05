@@ -18,8 +18,8 @@ QWEN="${QWEN_BIN:-$HOME/.local/bin/qwen}"
 ARM="${1:-unknown}"
 TARGET_PROBE_MODE="${SHERLOCK_TARGET_PROBE_MODE:-0}"
 OPERATOR_MONITORED_MODE="${SHERLOCK_OPERATOR_MONITORED_MODE:-0}"
-[ "$OPERATOR_MONITORED_MODE" = 0 ] || [ "$TARGET_PROBE_MODE" = 1 ] || {
-  echo "✗ operator-monitored mode requires the sealed target probe" >&2; exit 2;
+[ "$OPERATOR_MONITORED_MODE" = 0 ] || [ "$OPERATOR_MONITORED_MODE" = 1 ] || {
+  echo "✗ SHERLOCK_OPERATOR_MONITORED_MODE must be 0 or 1" >&2; exit 2;
 }
 PACKAGE_SELECTOR_EXPLICIT=0
 if [ "${SHERLOCK_PACKAGE_VERSION+x}" = x ]; then
@@ -259,9 +259,9 @@ if [ -n "${SHERLOCK_RUN_TAG:-}" ] || [ -n "${SHERLOCK_TRACE:-}" ]; then
   CONTROLLED=1
   STAMP="$SHERLOCK_RUN_TAG"
   TRACE="$SHERLOCK_TRACE"
-  python3 - "$RUNS" "$STAMP" "$TRACE" "$TARGET_PROBE_MODE" <<'PY' || exit 2
+  python3 - "$RUNS" "$STAMP" "$TRACE" "$TARGET_PROBE_MODE" "$OPERATOR_MONITORED_MODE" <<'PY' || exit 2
 import os, re, stat, sys
-runs, tag, trace, target_probe = sys.argv[1:]
+runs, tag, trace, target_probe, monitored = sys.argv[1:]
 if not os.path.isabs(runs) or not os.path.isabs(trace):
     raise SystemExit("controlled run paths must be absolute")
 if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,95}", tag) or tag in (".", ".."):
@@ -277,7 +277,18 @@ except OSError as exc:
     raise SystemExit("controlled trace missing: %s" % exc)
 if not stat.S_ISDIR(mode) or stat.S_ISLNK(mode):
     raise SystemExit("controlled trace must be a no-symlink directory")
-if target_probe == "1":
+if monitored == "1":
+    # The controller has already copied and sealed the exact launch inputs.
+    # The signed-launch verifier below checks their names and digests; reject
+    # symlinks and device entries before any runner processing.
+    entries = os.listdir(trace)
+    if not entries:
+        raise SystemExit("monitored trace missing sealed launch inputs")
+    for name in entries:
+        mode = os.lstat(os.path.join(trace, name)).st_mode
+        if stat.S_ISLNK(mode) or not (stat.S_ISREG(mode) or stat.S_ISDIR(mode)):
+            raise SystemExit("monitored trace contains unsafe launch input")
+elif target_probe == "1":
     # The controller writes this Task 3 authorization before the runner starts.
     # Any other entry means a reused or attacker-populated trace.
     entries = sorted(os.listdir(trace))
@@ -308,7 +319,8 @@ if [ "$CONTROLLED" = "1" ] && [ "$TARGET_PROBE_MODE" != "1" ] && [ "$RUN_LANE" =
   echo "✗ controlled paid run requires consumed paid admission" >&2
   exit 2
 fi
-if [ "$CONTROLLED" = "1" ] && [ "$TARGET_PROBE_MODE" != "1" ] && [ -n "${SHERLOCK_PAID_ADMISSION_MANIFEST:-}" ]; then
+if [ "$CONTROLLED" = "1" ] && [ "$TARGET_PROBE_MODE" != "1" ] \
+    && [ -n "${SHERLOCK_PAID_ADMISSION_MANIFEST:-}" ] && [ "$OPERATOR_MONITORED_MODE" != "1" ]; then
   : "${SHERLOCK_TARGET_PROFILE:?paid admission omitted target profile}"
   : "${SHERLOCK_SETTINGS:?paid admission omitted settings}"
   : "${SHERLOCK_INPUT_PACKAGE:?paid admission omitted input package}"
@@ -405,13 +417,53 @@ PY
   export SHERLOCK_REQUEST_TIMEOUT_MS="$(printf '%s\n' "$FULL_PROFILE_VALUES" | sed -n '8p')"
   export SHERLOCK_MODEL="$MODEL" SHERLOCK_EXPECTED_RETURNED_IDENTITY="$EXPECTED_RETURNED_IDENTITY"
 fi
+# Controller-owned monitored paid inputs were copied before the signed launch.
+# Read only those trace-local bytes here; source admission paths must not become
+# a second mutable authority after launch.
+if [ "$CONTROLLED" = "1" ] && [ "$TARGET_PROBE_MODE" != "1" ] \
+    && [ "$OPERATOR_MONITORED_MODE" = "1" ] && [ "$RUN_LANE" = "paid" ]; then
+  FULL_PROFILE_VALUES="$(python3 - "$TRACE" <<'PY'
+import json, os, stat, sys
+from pathlib import Path
+trace = Path(sys.argv[1])
+def load(name):
+    path = trace / name
+    st = os.lstat(path)
+    if stat.S_ISLNK(st.st_mode) or not stat.S_ISREG(st.st_mode): raise ValueError(name)
+    with open(path, encoding="utf-8") as handle: return json.load(handle)
+try:
+    profile, budget = load("target-profile.json"), load("run-budget.json")
+    if (profile.get("schema") != 2 or profile.get("execution_mode") != "operator_monitored"
+            or budget.get("schema") != 2 or budget.get("execution_mode") != "operator_monitored"):
+        raise ValueError("mode")
+    qwen = profile["qwen"]
+    values = (profile["provider_base_url"], profile["requested_model"],
+              profile["expected_returned_identity"], qwen["cli"],
+              profile["max_output_tokens"], profile["session_token_limit"],
+              budget["context_window"], budget["request_timeout_ms"])
+    if any(value in (None, "") for value in values): raise ValueError("value")
+    print(*values, sep="\n")
+except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError):
+    raise SystemExit("MONITORED_PAID_INPUT_INVALID")
+PY
+)" || exit 2
+  BASE_URL="$(printf '%s\n' "$FULL_PROFILE_VALUES" | sed -n '1p')"
+  MODEL="$(printf '%s\n' "$FULL_PROFILE_VALUES" | sed -n '2p')"
+  EXPECTED_RETURNED_IDENTITY="$(printf '%s\n' "$FULL_PROFILE_VALUES" | sed -n '3p')"
+  QWEN="$(printf '%s\n' "$FULL_PROFILE_VALUES" | sed -n '4p')"
+  export SHERLOCK_MAX_OUTPUT_TOKENS="$(printf '%s\n' "$FULL_PROFILE_VALUES" | sed -n '5p')"
+  export SHERLOCK_SESSION_TOKEN_LIMIT="$(printf '%s\n' "$FULL_PROFILE_VALUES" | sed -n '6p')"
+  export SHERLOCK_CONTEXT_WINDOW="$(printf '%s\n' "$FULL_PROFILE_VALUES" | sed -n '7p')"
+  export SHERLOCK_REQUEST_TIMEOUT_MS="$(printf '%s\n' "$FULL_PROFILE_VALUES" | sed -n '8p')"
+  export SHERLOCK_MODEL="$MODEL" SHERLOCK_EXPECTED_RETURNED_IDENTITY="$EXPECTED_RETURNED_IDENTITY"
+fi
 # A controlled subscription qualification is model-specific evidence, so its
 # exact approved settings are an input, not a set of values to regenerate.  The
 # controller already binds their digest into run-manifest.json.  Seal those
 # bytes into the trace before Qwen can observe them, and verify that binding
 # here so the later qualification audit does not have to trust an ambient path.
 if [ "$CONTROLLED" = "1" ] && [ "$TARGET_PROBE_MODE" != "1" ] \
-    && [ "$RUN_LANE" = "subscription" ]; then
+    && [ "$RUN_LANE" = "subscription" ] && [ "$OPERATOR_MONITORED_MODE" != "1" ]; then
   : "${SHERLOCK_SETTINGS:?controlled subscription omitted settings}"
   python3 - "$SHERLOCK_SETTINGS" "$TRACE/corporate-settings.json" \
     "$TRACE/run-manifest.json" <<'PY' || exit 2
@@ -470,10 +522,123 @@ try: os.fsync(directory)
 finally: os.close(directory)
 PY
 fi
+
+# A monitored run is authorized at launch, not by an ambient unlimited-mode
+# switch.  The controller signs this exact receipt with the observer capability
+# before it starts the runner.  Validate the canonical bytes while the
+# capability is still private to the runner; neither its path nor its contents
+# are passed to Qwen.
+verify_monitored_launch() {
+  [ "$OPERATOR_MONITORED_MODE" = 1 ] || return 0
+  [ "$CONTROLLED" = 1 ] || { echo "✗ monitored mode requires controlled launch" >&2; return 1; }
+  : "${SHERLOCK_LIFECYCLE_LAUNCH:?monitored launch receipt missing}"
+  : "${SHERLOCK_LIFECYCLE_LAUNCH_SHA256:?monitored launch digest missing}"
+  python3 - "$TRACE" "$PACKAGE_VERSION" "$PACKAGE_DIGEST" "$RUN_LANE" "$TARGET_PROBE_MODE" \
+    "$SHERLOCK_LIFECYCLE_LAUNCH" "$SHERLOCK_LIFECYCLE_LAUNCH_SHA256" "$HERE/lifecycle-supervisor.py" <<'PY'
+import hashlib, hmac, importlib.util, json, os, re, stat, sys
+from pathlib import Path
+(trace_text, package_version, package_digest, lane, probe, launch_text,
+ launch_digest, helper_text) = sys.argv[1:]
+trace, launch, helper = map(Path, (trace_text, launch_text, helper_text))
+HEX = re.compile(r"[0-9a-f]{64}")
+def regular(path):
+    if not path.is_absolute() or path.resolve(strict=True) != path:
+        raise SystemExit("LIFECYCLE_LAUNCH_INVALID")
+    before = path.lstat()
+    if stat.S_ISLNK(before.st_mode) or not stat.S_ISREG(before.st_mode) or before.st_nlink != 1:
+        raise SystemExit("LIFECYCLE_LAUNCH_INVALID")
+    fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+    try:
+        data = b""
+        while True:
+            block = os.read(fd, 65536)
+            if not block: break
+            data += block
+        after = os.fstat(fd)
+    finally: os.close(fd)
+    if (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns) != (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns):
+        raise SystemExit("LIFECYCLE_LAUNCH_INVALID")
+    return data
+def strict(raw):
+    def pairs(rows):
+        result = {}
+        for key, value in rows:
+            if key in result: raise ValueError("duplicate")
+            result[key] = value
+        return result
+    return json.loads(raw.decode("utf-8"), object_pairs_hook=pairs,
+                      parse_constant=lambda value: (_ for _ in ()).throw(ValueError(value)))
+def canonical(value):
+    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
+def digest(data): return hashlib.sha256(data).hexdigest()
+try:
+    if launch != trace / "lifecycle-launch.json": raise ValueError("launch path")
+    raw = regular(launch)
+    if not HEX.fullmatch(launch_digest) or not hmac.compare_digest(digest(raw), launch_digest): raise ValueError("launch digest")
+    row = strict(raw)
+    fields = {"schema", "action", "execution_mode", "run_tag", "run_nonce", "predecessor_nonce", "launched_at", "workspace_dir", "observer_dir", "observer_identity_sha256", "observer_capability_sha256", "boot_id", "controller_pid", "controller_start_ticks", "controller_pgid", "target_profile_sha256", "run_budget_sha256", "input_package_sha256", "settings_sha256", "lifecycle_helper_sha256", "authorization_sha256", "manifest_sha256", "package_version", "package_sha256", "key_id", "hmac_sha256"}
+    if set(row) != fields or row.get("schema") != 1 or row.get("run_tag") != trace.name:
+        raise ValueError("schema")
+    expected_action = ("target_contract_probe_operator_monitored" if probe == "1" else
+                       "harness_qualification_operator_monitored" if lane == "subscription" else
+                       "full_paid_run")
+    if row.get("action") != expected_action or row.get("execution_mode") != "operator_monitored":
+        raise ValueError("mode")
+    if row.get("package_version") != package_version or row.get("package_sha256") != package_digest:
+        raise ValueError("package")
+    if not isinstance(row.get("run_nonce"), str) or not row["run_nonce"]:
+        raise ValueError("nonce")
+    workspace = Path(row.get("workspace_dir", ""))
+    if workspace != trace / "workspace" or workspace.is_symlink() or not workspace.is_dir() or os.listdir(workspace):
+        raise ValueError("workspace")
+    if any(not isinstance(row.get(name), str) or not HEX.fullmatch(row[name]) for name in
+           ("observer_identity_sha256", "observer_capability_sha256", "target_profile_sha256", "run_budget_sha256", "input_package_sha256", "settings_sha256", "lifecycle_helper_sha256", "authorization_sha256", "manifest_sha256", "package_sha256", "hmac_sha256")):
+        raise ValueError("digest fields")
+    observer = Path(row["observer_dir"])
+    if observer.parent != trace or observer.name != "observer-" + row["run_nonce"]:
+        raise ValueError("observer path")
+    key = regular(observer / "observation.key")
+    if len(key) != 32 or digest(key) != row["observer_capability_sha256"]:
+        raise ValueError("observer capability")
+    if digest(regular(observer / "identity.json")) != row["observer_identity_sha256"]:
+        raise ValueError("observer identity")
+    unsigned = dict(row); signature = unsigned.pop("hmac_sha256")
+    if not hmac.compare_digest(hmac.new(key, canonical(unsigned), hashlib.sha256).hexdigest(), signature):
+        raise ValueError("signature")
+    if digest(regular(helper)) != row["lifecycle_helper_sha256"]:
+        raise ValueError("helper")
+    budget_name = "probe-budget.json" if probe == "1" else "run-budget.json"
+    for name, field in (("target-profile.json", "target_profile_sha256"),
+                        (budget_name, "run_budget_sha256"),
+                        ("input-package.json", "input_package_sha256"),
+                        ("corporate-settings.json", "settings_sha256")):
+        if digest(regular(trace / name)) != row[field]: raise ValueError(name)
+    manifest_name = "probe-manifest.json" if probe == "1" else "run-manifest.json"
+    if digest(regular(trace / manifest_name)) != row["manifest_sha256"]: raise ValueError("manifest")
+    authorization_name = ("action-authorization.json" if probe == "1" else
+                          "run-manifest.json" if lane == "subscription" else "paid-admission.json")
+    if digest(regular(trace / authorization_name)) != row["authorization_sha256"]: raise ValueError("authorization")
+    version_gate = Path(helper).with_name("version-gate.py")
+    spec = importlib.util.spec_from_file_location("version_gate", version_gate)
+    module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
+    if module.tree_digest(trace / "runtime-package") != package_digest: raise ValueError("runtime package")
+    print(workspace)
+except (OSError, UnicodeError, ValueError, TypeError, json.JSONDecodeError, SystemExit) as error:
+    if isinstance(error, SystemExit) and str(error) != "LIFECYCLE_LAUNCH_INVALID": raise
+    raise SystemExit("LIFECYCLE_LAUNCH_INVALID") from error
+PY
+}
+MONITORED_WORKSPACE="$(verify_monitored_launch)" || exit 2
+if [ "$OPERATOR_MONITORED_MODE" = 1 ]; then
+  # The controller copied this immutable package into the trace before signing
+  # lifecycle-launch.json.  Qwen's catalogue is installed from that exact
+  # tree, never from a developer's HOME or a mutable checkout.
+  PACKAGE_PATH="$TRACE/runtime-package"
+fi
 # The target probe uses the same runner, but its audit needs the exact approved
 # package alongside the real trace.  Copy it only after controlled-trace
 # ownership has been verified; no report or proxy evidence is synthesized.
-if [ "${SHERLOCK_TARGET_PROBE_MODE:-0}" = "1" ]; then
+if [ "${SHERLOCK_TARGET_PROBE_MODE:-0}" = "1" ] && [ "$OPERATOR_MONITORED_MODE" != "1" ]; then
   python3 - "$SHERLOCK_PROBE_SEALED_INPUT" "$TRACE" <<'PY' || exit 2
 import os, shutil, stat, sys
 from pathlib import Path
@@ -1117,7 +1282,14 @@ trap 'on_exit $?' EXIT
 [ "$ARM" != unknown ] || { echo "usage: run-bench.sh <none|v1|v2|v3>" >&2; exit 2; }
 [ -d "$CORPUS" ] || { echo "✗ corpus not found: $CORPUS" >&2; exit 1; }
 : "${SHERLOCK_API_KEY:?set SHERLOCK_API_KEY}"
-W="$(mktemp -d "${TMPDIR:-/tmp}/bench-XXXXXX")"
+if [ "$OPERATOR_MONITORED_MODE" = 1 ]; then
+  # The HMAC-bound trace is this segment's fresh root.  Qwen runs in the
+  # exclusive workspace child; immutable settings resolve ../skill-catalogue
+  # to a sibling that is outside that writable project.
+  W="$MONITORED_WORKSPACE"
+else
+  W="$(mktemp -d "${TMPDIR:-/tmp}/bench-XXXXXX")"
+fi
 # save_trace is also reached by an early lane-start refusal.  Give that path a
 # real duration origin before any fallible setup runs.
 START="$(date +%s)"
@@ -1180,7 +1352,16 @@ fi
 # and closed it wrongly" from "found it and discarded it" — and that is exactly
 # the question every arm since v5 exists to answer. It used to be deleted on
 # exit, so five runs in a row were unreadable. Keep it next to the ledger.
-export QWEN_HOME="$W/home"; mkdir -p "$QWEN_HOME"
+if [ "$OPERATOR_MONITORED_MODE" = 1 ]; then
+  [ -z "${SHERLOCK_SEED_WORK:-}" ] || {
+    echo "✗ monitored launch refuses resumed or seeded work" >&2; exit 1;
+  }
+  export HOME="$W/home"
+  export QWEN_HOME="$W/qwen-home"
+  mkdir -p "$HOME" "$QWEN_HOME"
+else
+  export QWEN_HOME="$W/home"; mkdir -p "$QWEN_HOME"
+fi
 
 # STATE THE CONTEXT WINDOW OUTRIGHT, same as run-case.sh. This is the runner on
 # the 649 MB corpus, so a 177,000-token ceiling hurts here most of all.
@@ -1393,7 +1574,32 @@ fi
 # install block below.
 MUTE_ARGS=""
 if [ "$PACKAGE_VERSION" != "none" ]; then
-  ARM_HOME="${SHERLOCK_ARM_HOME:-$HOME/.qwen/skills/log-rca}"
+  if [ "$OPERATOR_MONITORED_MODE" = 1 ]; then
+    # Qwen 0.22.0 discovers skills only through the immutable settings bytes;
+    # QWEN_SKILL_ROOT supplies hook commands but does not change discovery.
+    # Install the trace-bound package into that one configured catalogue, not
+    # into the fresh HOME and not into a runner-invented trace directory.
+    ARM_HOME="$(python3 - "$TRACE/corporate-settings.json" "$W" <<'PY'
+import json, os, stat, sys
+path, workspace = sys.argv[1:]
+try:
+    st = os.lstat(path)
+    if not stat.S_ISREG(st.st_mode) or stat.S_ISLNK(st.st_mode): raise ValueError()
+    with open(path, encoding="utf-8") as handle: row = json.load(handle)
+    directories = row["skills"]["directories"]
+    if directories != ["../skill-catalogue"]:
+        raise ValueError()
+    print(os.path.normpath(os.path.join(workspace, directories[0], "log-rca")))
+except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError):
+    raise SystemExit("MONITORED_SKILL_CATALOGUE_INVALID")
+PY
+)" || exit 2
+    [ -z "${SHERLOCK_ARM_HOME:-}" ] || [ "$SHERLOCK_ARM_HOME" = "$ARM_HOME" ] || {
+      echo "✗ monitored SHERLOCK_ARM_HOME disagrees with sealed settings" >&2; exit 2;
+    }
+  else
+    ARM_HOME="${SHERLOCK_ARM_HOME:-$HOME/.qwen/skills/log-rca}"
+  fi
   case "$ARM_HOME" in
     "$W"|"$W"/*) printf 'run-bench.sh: ARM_HOME %s is inside the writable root %s\n' \
                    "$ARM_HOME" "$W" >&2; exit 2 ;;

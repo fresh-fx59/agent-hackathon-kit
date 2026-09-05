@@ -5,12 +5,14 @@ import datetime as dt
 import fcntl
 import hashlib
 import hmac
+import importlib.util
 import json
 import os
 from pathlib import Path
 import re
 import secrets
 import shlex
+import shutil
 import signal
 import stat
 import subprocess
@@ -75,6 +77,9 @@ TARGET_ENV_ALLOW = {
     # behaviour; it is NOT covered by SHERLOCK_UPSTREAM_RETRY, which governs
     # provider ERRORS and is deliberately 0 on the paid launchers.
     "SHERLOCK_SUBSTITUTION_RETRY",
+    "SHERLOCK_INTERACTIVE",
+    "SHERLOCK_MAX_SESSION_TURNS", "SHERLOCK_MAX_TOOL_CALLS",
+    "SHERLOCK_MAX_WALL_TIME_S", "SHERLOCK_WORKFLOW_AGENT_MAX_TURNS",
 }
 MAX_JSON_BYTES = 1024 * 1024
 MAX_ARTIFACTS = 4096
@@ -401,17 +406,24 @@ def verify_process_proof(controller, controller_id, tag, proof, key):
 
 
 def budget_initial(tag, limits):
-    return {"schema": 1, "run_tag": tag, "updated_at": now(), "attempts_charged": 0,
+    monitored = all(value is None for value in limits.values())
+    return {"schema": 2 if monitored else 1,
+            **({"execution_mode": "operator_monitored"} if monitored else {}),
+            "run_tag": tag, "updated_at": now(), "attempts_charged": 0,
             "request_bytes": 0, "consecutive_provider_failures": 0,
             "limits": dict(limits), "verdict": "WITHIN", "reason": None}
 
 
 def budget_read(path, tag, limits):
+    monitored = all(value is None for value in limits.values())
     fields = {"schema", "run_tag", "updated_at", "attempts_charged", "request_bytes",
               "consecutive_provider_failures", "limits", "verdict", "reason"}
+    if monitored: fields.add("execution_mode")
     try: row = read_object(path, fields)
     except Exception as exc: raise Blocked("BUDGET_STATE_UNKNOWN", True) from exc
-    if (row.get("schema") != 1 or row.get("run_tag") != tag or row.get("limits") != limits or
+    if (row.get("schema") != (2 if monitored else 1)
+            or row.get("execution_mode", "finite") != ("operator_monitored" if monitored else "finite")
+            or row.get("run_tag") != tag or row.get("limits") != limits or
             row.get("verdict") not in ("WITHIN", "EXCEEDED") or
             any(type(row.get(name)) is not int or row[name] < 0 for name in
                 ("attempts_charged", "request_bytes", "consecutive_provider_failures")) or
@@ -507,19 +519,23 @@ def communicate_owned_process(child, timeout, cleanup_grace_s=RUNNER_TERM_GRACE_
 
 
 def install_owned_child_signal_handler(cleanup_grace_s=RUNNER_TERM_GRACE_S,
-                                       kill_reap_grace_s=KILL_REAP_GRACE_S):
+                                       kill_reap_grace_s=KILL_REAP_GRACE_S,
+                                       raise_on_signal=True):
     """Install before spawn; defer TERM until the fresh child group is registered."""
-    ownership = {"child": None, "pending_signal": None,
+    ownership = {"child": None, "pending_signal": None, "received_signal": None,
                  "cleanup_grace_s": cleanup_grace_s,
-                 "kill_reap_grace_s": kill_reap_grace_s}
+                 "kill_reap_grace_s": kill_reap_grace_s,
+                 "raise_on_signal": raise_on_signal}
 
     def stop(signum, _frame):
+        ownership["received_signal"] = signum
         child = ownership["child"]
         if child is None:
             ownership["pending_signal"] = signum
             return
         terminate_owned_process_group(child, cleanup_grace_s, kill_reap_grace_s)
-        raise SystemExit(128 + signum)
+        if raise_on_signal:
+            raise SystemExit(128 + signum)
 
     return ownership, signal.signal(signal.SIGTERM, stop)
 
@@ -530,7 +546,8 @@ def register_owned_child(ownership, child):
     if signum is not None:
         terminate_owned_process_group(
             child, ownership["cleanup_grace_s"], ownership["kill_reap_grace_s"])
-        raise SystemExit(128 + signum)
+        if ownership["raise_on_signal"]:
+            raise SystemExit(128 + signum)
 
 
 def artifact_rows(trace):
@@ -682,12 +699,34 @@ def parse_configuration():
         mode = os.lstat(ledger).st_mode
         if not stat.S_ISREG(mode) or stat.S_ISLNK(mode):
             raise Blocked("INVALID_SHERLOCK_LEDGER")
+    monitored = os.environ.get("SHERLOCK_OPERATOR_MONITORED_MODE") == "1"
     limits = {}
-    for field, name in LIMIT_ENV.items():
-        try: value = int(os.environ.get(name, ""))
-        except ValueError: raise Blocked("INVALID_" + name)
-        if value <= 0: raise Blocked("INVALID_" + name)
-        limits[field] = value
+    if monitored:
+        if any(name in os.environ for name in LIMIT_ENV.values()):
+            raise Blocked("MONITORED_AGGREGATE_LIMIT_CONFLICT")
+        budget_path = os.environ.get("SHERLOCK_RUN_BUDGET") or os.environ.get("SHERLOCK_PROBE_BUDGET")
+        if not budget_path:
+            raise Blocked("MISSING_SHERLOCK_RUN_BUDGET")
+        budget = read_object(Path(budget_path))
+        expected = {"schema", "execution_mode", *LIMIT_NAMES, "context_window",
+                    "max_output_tokens", "session_token_limit", "request_timeout_ms"}
+        nullable = set(LIMIT_NAMES)
+        positive = expected - nullable - {"schema", "execution_mode"}
+        if (set(budget) != expected or budget.get("schema") != 2
+                or budget.get("execution_mode") != "operator_monitored"
+                or any(budget.get(name) is not None for name in nullable)
+                or any(type(budget.get(name)) is not int or budget[name] <= 0
+                       for name in positive)
+                or budget.get("request_timeout_ms") != 600000):
+            raise Blocked("INVALID_MONITORED_BUDGET")
+        limits = {name: None for name in LIMIT_NAMES}
+        os.environ["SHERLOCK_RUN_BUDGET"] = str(Path(budget_path).resolve())
+    else:
+        for field, name in LIMIT_ENV.items():
+            try: value = int(os.environ.get(name, ""))
+            except ValueError: raise Blocked("INVALID_" + name)
+            if value <= 0: raise Blocked("INVALID_" + name)
+            limits[field] = value
     if any(os.environ.get(name) for name in
            ("SHERLOCK_BUDGET_MAX_INPUT_TOKENS", "SHERLOCK_BUDGET_MAX_OUTPUT_TOKENS",
             "SHERLOCK_BUDGET_MAX_TOKENS")):
@@ -751,7 +790,229 @@ def controlled_environment(allowed):
     return env
 
 
-def target_environment(tag, trace, staged_corpus, limits):
+def load_lifecycle_helper():
+    path = HERE / "lifecycle-supervisor.py"
+    raw = read_bytes(path, 4 * 1024 * 1024)
+    spec = importlib.util.spec_from_file_location("sherlock_lifecycle_controller", path)
+    if spec is None or spec.loader is None:
+        raise Blocked("LIFECYCLE_HELPER_INVALID", True)
+    module = importlib.util.module_from_spec(spec)
+    try:
+        spec.loader.exec_module(module)
+    except BaseException as exc:
+        raise Blocked("LIFECYCLE_HELPER_INVALID", True) from exc
+    if read_bytes(path, 4 * 1024 * 1024) != raw:
+        raise Blocked("LIFECYCLE_HELPER_CHANGED", True)
+    return module, path.resolve(), digest(raw)
+
+
+def wait_for_initial_observation(lifecycle, observer, nonce, boot_id, timeout_s=60):
+    deadline = time.monotonic() + timeout_s
+    current = observer / "current-observation.json"
+    while not current.is_file() and time.monotonic() < deadline:
+        time.sleep(.05)
+    if not current.is_file():
+        lifecycle.record_fault(observer, nonce, "INITIAL_OBSERVATION_MISSING",
+                               "no authenticated observation before launch")
+        raise Blocked("LIFECYCLE_INITIAL_OBSERVATION")
+    try:
+        lifecycle.check_dispatch(observer, nonce, boot_id)
+    except lifecycle.LifecycleFault as exc:
+        raise Blocked("LIFECYCLE_" + exc.reason) from exc
+
+
+def start_guardian(lifecycle, lifecycle_path, observer, nonce, boot_id, controller_start_ticks,
+                   controller_pgid):
+    stdout = open(observer / "guardian.stdout", "xb")
+    stderr = open(observer / "guardian.stderr", "xb")
+    try:
+        guardian = subprocess.Popen(
+            [sys.executable, str(lifecycle_path), "guardian",
+             "--observer-dir", str(observer), "--nonce", nonce,
+             "--boot-id", boot_id, "--controller-pid", str(os.getpid()),
+             "--controller-start-ticks", str(controller_start_ticks),
+             "--controller-pgid", str(controller_pgid), "--interval", "0.25"],
+            stdin=subprocess.DEVNULL, stdout=stdout, stderr=stderr)
+    finally:
+        stdout.close(); stderr.close()
+    started = lifecycle.process_start_ticks(guardian.pid)
+    if not started:
+        guardian.terminate(); guardian.wait(timeout=5)
+        raise Blocked("LIFECYCLE_GUARDIAN_INVALID", True)
+    return guardian, started
+
+
+def stop_guardian(guardian):
+    if guardian is None:
+        return 0
+    rc = guardian.poll()
+    if rc is None:
+        guardian.terminate()
+        try: rc = guardian.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            guardian.kill(); rc = guardian.wait(timeout=5)
+    return rc
+
+
+def copy_regular_snapshot(source, destination, limit=16 * 1024 * 1024):
+    source, destination = Path(source), Path(destination)
+    if (not source.is_absolute() or source.resolve(strict=True) != source
+            or os.lstat(source).st_nlink != 1):
+        raise Blocked("MONITORED_INPUT_INVALID", True)
+    raw = read_bytes(source, limit)
+    publish_no_replace(destination, raw, 0o400)
+    return raw
+
+
+def load_version_gate_helper():
+    path = HERE / "version-gate.py"
+    raw = read_bytes(path, 4 * 1024 * 1024)
+    spec = importlib.util.spec_from_file_location("sherlock_version_gate_controller", path)
+    if spec is None or spec.loader is None:
+        raise Blocked("VERSION_GATE_INVALID", True)
+    module = importlib.util.module_from_spec(spec)
+    try:
+        spec.loader.exec_module(module)
+    except BaseException as exc:
+        raise Blocked("VERSION_GATE_INVALID", True) from exc
+    if read_bytes(path, 4 * 1024 * 1024) != raw:
+        raise Blocked("VERSION_GATE_CHANGED", True)
+    return module
+
+
+def copy_runtime_package(source, destination, expected_sha256):
+    source, destination = Path(source), Path(destination)
+    if not source.is_absolute() or source.resolve(strict=True) != source or source.is_symlink():
+        raise Blocked("MONITORED_PACKAGE_INVALID", True)
+    gate = load_version_gate_helper()
+    try:
+        before = gate.tree_digest(source)
+        if before != expected_sha256:
+            raise Blocked("MONITORED_PACKAGE_MISMATCH", True)
+        shutil.copytree(source, destination, symlinks=True)
+        after_source = gate.tree_digest(source)
+        after_copy = gate.tree_digest(destination)
+    except Blocked:
+        raise
+    except Exception as exc:
+        raise Blocked("MONITORED_PACKAGE_INVALID", True) from exc
+    if before != after_source or after_copy != expected_sha256:
+        raise Blocked("MONITORED_PACKAGE_CHANGED", True)
+    for current, directories, files in os.walk(destination):
+        for path in [Path(current), *(Path(current) / name for name in directories + files)]:
+            os.chmod(path, stat.S_IMODE(os.lstat(path).st_mode) & ~0o222)
+
+
+def prepare_monitored_lifecycle(trace, tag, lane, manifest_raw, controller_proof,
+                                *, authorization_source, nonce):
+    state = None
+    sources = {
+        "target-profile.json": Path(os.environ["SHERLOCK_TARGET_PROFILE"]),
+        "run-budget.json": Path(os.environ["SHERLOCK_RUN_BUDGET"]),
+        "input-package.json": Path(os.environ["SHERLOCK_INPUT_PACKAGE"]),
+        "corporate-settings.json": Path(os.environ["SHERLOCK_SETTINGS"]),
+    }
+    raw = {name: copy_regular_snapshot(source, trace / name)
+           for name, source in sources.items()}
+    authorization_name = "run-manifest.json" if lane == "subscription" else "paid-admission.json"
+    if authorization_name == "run-manifest.json":
+        authorization_raw = manifest_raw
+    else:
+        authorization_raw = copy_regular_snapshot(authorization_source,
+                                                  trace / authorization_name)
+    try:
+        input_package = json.loads(raw["input-package.json"])
+        profile = json.loads(raw["target-profile.json"])
+        package_version = input_package["package_version"]
+        package_sha = input_package["package_sha256"]
+        if (not isinstance(package_version, str) or not re.fullmatch(r"v[1-9][0-9]*", package_version)
+                or not isinstance(package_sha, str) or not re.fullmatch(r"[0-9a-f]{64}", package_sha)
+                or profile.get("schema") != 2
+                or profile.get("execution_mode") != "operator_monitored"
+                or profile.get("package_version") != package_version
+                or profile.get("package_sha256") != package_sha
+                or profile.get("settings_sha256") != digest(raw["corporate-settings.json"])):
+            raise ValueError()
+        supplied_version = os.environ.get("SHERLOCK_PACKAGE_VERSION")
+        if supplied_version is not None and supplied_version != package_version:
+            raise ValueError()
+        os.environ["SHERLOCK_PACKAGE_VERSION"] = package_version
+        lifecycle, lifecycle_path, lifecycle_sha = load_lifecycle_helper()
+        if input_package.get("lifecycle_helper_sha256") != lifecycle_sha:
+            raise ValueError()
+        package_source = Path(os.environ["SHERLOCK_SKILL_ROOT"])
+        copy_runtime_package(package_source, trace / "runtime-package", package_sha)
+        workspace = trace / "workspace"
+        workspace.mkdir(mode=0o700)
+        os.chmod(workspace, 0o700)
+        boot_id = lifecycle.current_boot_id()
+        controller_ticks = lifecycle.process_start_ticks(os.getpid())
+        controller_pgid = os.getpgrp()
+        if not controller_ticks or controller_proof.get("pgid") != controller_pgid:
+            raise ValueError()
+        observer = lifecycle.init_segment(trace, nonce, boot_id)
+        launch = lifecycle.publish_launch(
+            observer, trace, nonce, boot_id,
+            action=("harness_qualification_operator_monitored"
+                    if lane == "subscription" else "full_paid_run"),
+            run_tag=tag, predecessor_nonce=None,
+            package_version=package_version, package_sha256=package_sha,
+            controller_pid=os.getpid(), controller_start_ticks=controller_ticks,
+            controller_pgid=controller_pgid, workspace_dir=workspace,
+            target_profile_sha256=digest(raw["target-profile.json"]),
+            run_budget_sha256=digest(raw["run-budget.json"]),
+            input_package_sha256=digest(raw["input-package.json"]),
+            settings_sha256=digest(raw["corporate-settings.json"]),
+            lifecycle_helper_sha256=lifecycle_sha,
+            authorization_sha256=digest(authorization_raw),
+            manifest_sha256=digest(manifest_raw))
+        launch_path = trace / "lifecycle-launch.json"
+        launch_sha = digest(read_bytes(launch_path, 4 * 1024 * 1024))
+        state = {"module": lifecycle, "path": lifecycle_path, "sha256": lifecycle_sha,
+                 "observer": observer, "nonce": nonce, "boot_id": boot_id,
+                 "launch_sha256": launch_sha, "guardian": None,
+                 "guardian_start_ticks": None,
+                 "controller_start_ticks": controller_ticks,
+                 "controller_pgid": controller_pgid,
+                 "workspace": workspace, "launch": launch}
+        wait_for_initial_observation(lifecycle, observer, nonce, boot_id)
+        guardian, guardian_ticks = start_guardian(
+            lifecycle, lifecycle_path, observer, nonce, boot_id,
+            controller_ticks, controller_pgid)
+        state["guardian"] = guardian
+        state["guardian_start_ticks"] = guardian_ticks
+    except (Blocked, OSError, ValueError, KeyError, TypeError, json.JSONDecodeError,
+            RuntimeError) as exc:
+        if state is not None:
+            try:
+                lifecycle.record_fault(observer, nonce, "LIFECYCLE_STARTUP_FAILED", str(exc))
+                finalize_monitored_lifecycle(trace, tag, state)
+            except Exception:
+                pass
+        raise Blocked("LIFECYCLE_LAUNCH_INVALID", True) from exc
+    return state
+
+
+def finalize_monitored_lifecycle(trace, tag, state):
+    guardian = state.get("guardian")
+    guardian_rc = stop_guardian(guardian)
+    helper_sha = digest(read_bytes(state["path"], 4 * 1024 * 1024))
+    if helper_sha != state["sha256"]:
+        try:
+            state["module"].record_fault(state["observer"], state["nonce"],
+                                         "LIFECYCLE_HELPER_CHANGED", "terminal digest")
+        except Exception:
+            pass
+    return state["module"].finalize_segment(
+        state["observer"], trace, state["nonce"], state["boot_id"], run_tag=tag,
+        launch_sha256=state["launch_sha256"], lifecycle_helper_sha256=helper_sha,
+        guardian_pid=guardian.pid if guardian is not None else 0,
+        guardian_start_ticks=(state["guardian_start_ticks"]
+                              if guardian is not None else 0),
+        guardian_exit_code=guardian_rc)
+
+
+def target_environment(tag, trace, staged_corpus, limits, lifecycle_state=None):
     env = controlled_environment(TARGET_ENV_ALLOW)
     env.update({"SHERLOCK_RUN_TAG": tag, "SHERLOCK_TRACE": str(trace),
                 "SHERLOCK_CORPUS": str(staged_corpus),
@@ -759,7 +1020,25 @@ def target_environment(tag, trace, staged_corpus, limits):
     for name in ("SHERLOCK_TARGET_PROFILE", "SHERLOCK_SETTINGS", "SHERLOCK_INPUT_PACKAGE",
                  "SHERLOCK_RUN_BUDGET", "SHERLOCK_PAID_ADMISSION_MANIFEST"):
         if name in os.environ: env[name] = os.environ[name]
-    for field, name in LIMIT_ENV.items(): env[name] = str(limits[field])
+    if os.environ.get("SHERLOCK_OPERATOR_MONITORED_MODE") == "1":
+        env["SHERLOCK_OPERATOR_MONITORED_MODE"] = "1"
+        if lifecycle_state is not None:
+            env.update({
+                "SHERLOCK_TARGET_PROFILE": str(trace / "target-profile.json"),
+                "SHERLOCK_SETTINGS": str(trace / "corporate-settings.json"),
+                "SHERLOCK_INPUT_PACKAGE": str(trace / "input-package.json"),
+                "SHERLOCK_RUN_BUDGET": str(trace / "run-budget.json"),
+                "SHERLOCK_SKILL_ROOT": str(trace / "runtime-package"),
+                "SHERLOCK_PACKAGE_VERSION": lifecycle_state["launch"]["package_version"],
+                "SHERLOCK_OBSERVER_DIR": str(lifecycle_state["observer"]),
+                "SHERLOCK_RUN_NONCE": lifecycle_state["nonce"],
+                "SHERLOCK_BOOT_ID": lifecycle_state["boot_id"],
+                "SHERLOCK_LIFECYCLE_HELPER": str(lifecycle_state["path"]),
+                "SHERLOCK_LIFECYCLE_LAUNCH": str(trace / "lifecycle-launch.json"),
+                "SHERLOCK_LIFECYCLE_LAUNCH_SHA256": lifecycle_state["launch_sha256"],
+            })
+    else:
+        for field, name in LIMIT_ENV.items(): env[name] = str(limits[field])
     return env
 
 
@@ -778,6 +1057,7 @@ def run_fresh(root, runs, controller_id, controller, key_path, key, limits, lock
     # Full paid lanes must be admitted before any child, health check, secret,
     # proxy, or target process is created.
     lane = os.environ.get("SHERLOCK_LANE", "paid")
+    admitted = None
     if lane == "paid":
         admission = os.environ.get("SHERLOCK_PAID_ADMISSION_MANIFEST", "")
         approved = os.environ.get("SHERLOCK_OPERATOR_APPROVED_FULL", "")
@@ -826,11 +1106,24 @@ def run_fresh(root, runs, controller_id, controller, key_path, key, limits, lock
             full_budget = read_object(Path(os.environ["SHERLOCK_RUN_BUDGET"]))
             expected_budget = {"schema", *LIMIT_NAMES, "context_window", "max_output_tokens",
                                "session_token_limit", "request_timeout_ms"}
-            if (set(full_budget) != expected_budget or full_budget.get("schema") != 1
-                    or any(type(full_budget.get(name)) is not int or full_budget[name] <= 0
-                           for name in expected_budget - {"schema"})):
-                raise ValueError()
-            limits = {name: full_budget[name] for name in LIMIT_NAMES}
+            if admitted.get("execution_mode") == "operator_monitored":
+                expected_budget.add("execution_mode")
+                positive = expected_budget - {"schema", "execution_mode", *LIMIT_NAMES}
+                if (set(full_budget) != expected_budget or full_budget.get("schema") != 2
+                        or full_budget.get("execution_mode") != "operator_monitored"
+                        or any(full_budget.get(name) is not None for name in LIMIT_NAMES)
+                        or any(type(full_budget.get(name)) is not int or full_budget[name] <= 0
+                               for name in positive)
+                        or full_budget.get("request_timeout_ms") != 600000
+                        or os.environ.get("SHERLOCK_OPERATOR_MONITORED_MODE") != "1"):
+                    raise ValueError()
+                limits = {name: None for name in LIMIT_NAMES}
+            else:
+                if (set(full_budget) != expected_budget or full_budget.get("schema") != 1
+                        or any(type(full_budget.get(name)) is not int or full_budget[name] <= 0
+                               for name in expected_budget - {"schema"})):
+                    raise ValueError()
+                limits = {name: full_budget[name] for name in LIMIT_NAMES}
             os.environ["SHERLOCK_PAID_ADMISSION_MANIFEST"] = admitted["manifest"]
         except (ValueError, KeyError, TypeError, json.JSONDecodeError):
             persist(controller, controller_id, "BLOCKED", tag, reason="FULL_RUN_NOT_AUTHORIZED"); return 1
@@ -903,11 +1196,34 @@ def run_fresh(root, runs, controller_id, controller, key_path, key, limits, lock
         persist(controller, controller_id, "BLOCKED", tag, reason="MANIFEST_INVALID"); return 1
     try:
         manifest = read_object(trace / "run-manifest.json")
+        manifest_raw = read_bytes(trace / "run-manifest.json")
         manifest_sha = manifest["manifest_sha256"]
         if manifest.get("run_tag") != tag or not re.fullmatch(r"[0-9a-f]{64}", manifest_sha): raise ValueError()
         if os.listdir(trace) != ["run-manifest.json"]: raise ValueError()
     except Exception:
         persist(controller, controller_id, "BLOCKED", tag, reason="MANIFEST_INVALID"); return 1
+    monitored = os.environ.get("SHERLOCK_OPERATOR_MONITORED_MODE") == "1"
+    lifecycle_state = ownership = prior_sigterm = None
+    if monitored:
+        try:
+            if lane not in ("paid", "subscription"):
+                raise Blocked("MONITORED_LANE_INVALID")
+            if lane == "paid":
+                nonce = admitted["action_nonce"]
+                authorization_source = Path(admitted["manifest"]).parent / "paid-admission.json"
+            else:
+                nonce = secrets.token_hex(16)
+                authorization_source = trace / "run-manifest.json"
+            lifecycle_state = prepare_monitored_lifecycle(
+                trace, tag, lane, manifest_raw, controller_proof,
+                authorization_source=authorization_source, nonce=nonce)
+            ownership, prior_sigterm = install_owned_child_signal_handler(raise_on_signal=False)
+        except (Blocked, OSError, ValueError, KeyError, TypeError, RuntimeError) as exc:
+            if prior_sigterm is not None:
+                signal.signal(signal.SIGTERM, prior_sigterm)
+            reason = exc.reason if isinstance(exc, Blocked) else "LIFECYCLE_LAUNCH_INVALID"
+            persist(controller, controller_id, "BLOCKED_UNKNOWN", tag, manifest_sha, reason)
+            return 1
     link_unsigned = {"schema": 1, "parent_trace": str(controller),
         "parent_identity_sha256": digest(str(controller).encode()), "child_run_tag": tag,
         "child_trace": str(trace), "child_manifest_sha256": manifest_sha,
@@ -916,17 +1232,49 @@ def run_fresh(root, runs, controller_id, controller, key_path, key, limits, lock
     persist(controller, controller_id, "READY", tag, manifest_sha)
     persist(controller, controller_id, "QWEN_RUNNING", tag, manifest_sha)
     command = os.environ["SHERLOCK_TARGET_COMMAND"]
-    child = subprocess.Popen(["bash", "-c", "exec " + command], start_new_session=True,
-                             env=target_environment(tag, trace, staged, limits))
+    try:
+        child = subprocess.Popen(["bash", "-c", "exec " + command], start_new_session=True,
+                                 env=target_environment(tag, trace, staged, limits,
+                                                        lifecycle_state))
+        if ownership is not None:
+            register_owned_child(ownership, child)
+    except (OSError, SystemExit) as exc:
+        if lifecycle_state is not None:
+            lifecycle_state["module"].record_fault(
+                lifecycle_state["observer"], lifecycle_state["nonce"],
+                "RUNNER_START_FAILED", str(exc))
+            try: finalize_monitored_lifecycle(trace, tag, lifecycle_state)
+            except Exception: pass
+        if prior_sigterm is not None:
+            signal.signal(signal.SIGTERM, prior_sigterm)
+        persist(controller, controller_id, "RUNNER_FAILED", tag, manifest_sha,
+                "RUNNER_START_FAILED")
+        return 1
     ready = trace / ".runner-ready"; deadline = time.monotonic() + 30
     while not ready.is_file() and child.poll() is None and time.monotonic() < deadline: time.sleep(.02)
     if not ready.is_file():
-        if child.poll() is None: child.terminate()
+        if child.poll() is None: terminate_owned_process_group(child)
+        if lifecycle_state is not None:
+            lifecycle_state["module"].record_fault(
+                lifecycle_state["observer"], lifecycle_state["nonce"],
+                "RUNNER_HANDSHAKE_FAILED", "runner ready marker absent")
+            try: finalize_monitored_lifecycle(trace, tag, lifecycle_state)
+            except Exception: pass
+        if prior_sigterm is not None:
+            signal.signal(signal.SIGTERM, prior_sigterm)
         persist(controller, controller_id, "RUNNER_FAILED", tag, manifest_sha, "RUNNER_HANDSHAKE_FAILED")
         return 1
     try: proof = proc_snapshot(child.pid, proc_root, leader=True)
     except Blocked as exc:
-        if child.poll() is None: child.terminate()
+        if child.poll() is None: terminate_owned_process_group(child)
+        if lifecycle_state is not None:
+            lifecycle_state["module"].record_fault(
+                lifecycle_state["observer"], lifecycle_state["nonce"],
+                "PROCESS_PROOF_INVALID", exc.reason)
+            try: finalize_monitored_lifecycle(trace, tag, lifecycle_state)
+            except Exception: pass
+        if prior_sigterm is not None:
+            signal.signal(signal.SIGTERM, prior_sigterm)
         persist(controller, controller_id, "BLOCKED_UNKNOWN", tag, manifest_sha, exc.reason); return 1
     try:
         publish_no_replace(trace / "upstream-budget-state.json",
@@ -937,45 +1285,85 @@ def run_fresh(root, runs, controller_id, controller, key_path, key, limits, lock
                                controller_id, tag, proof, key), key)) + b"\n")
     except FileExistsError:
         terminate_owned(proof, proc_root)
+        if lifecycle_state is not None:
+            lifecycle_state["module"].record_fault(
+                lifecycle_state["observer"], lifecycle_state["nonce"],
+                "HANDSHAKE_ARTIFACT_COLLISION", "controller artifacts")
+            try: finalize_monitored_lifecycle(trace, tag, lifecycle_state)
+            except Exception: pass
+        if prior_sigterm is not None:
+            signal.signal(signal.SIGTERM, prior_sigterm)
         persist(controller, controller_id, "BLOCKED_UNKNOWN", tag, manifest_sha,
                 "HANDSHAKE_ARTIFACT_COLLISION")
         return 1
     return monitor_and_finish(root, controller, controller_id, trace, tag, manifest_sha,
-                              key_path, key, limits, proc_root, proof, child)
+                              key_path, key, limits, proc_root, proof, child,
+                              lifecycle_state=lifecycle_state, ownership=ownership,
+                              prior_sigterm=prior_sigterm)
 
 
 def monitor_and_finish(root, controller, controller_id, trace, tag, manifest_sha,
-                       key_path, key, limits, proc_root, proof, child=None):
+                       key_path, key, limits, proc_root, proof, child=None,
+                       lifecycle_state=None, ownership=None, prior_sigterm=None):
     started = time.monotonic(); budget_path = trace / "upstream-budget-state.json"
-    breach = None; budget = None
-    while group_members(proof, proc_root):
-        if child is not None: child.poll()
-        elapsed = time.monotonic() - started
-        try: budget = budget_read(budget_path, tag, limits)
-        except Blocked as exc: breach = exc.reason; break
-        if budget["verdict"] == "EXCEEDED": breach = budget["reason"] or "BUDGET_EXCEEDED"
-        elif elapsed >= limits["max_wall_seconds"]: breach = "MAX_WALL_SECONDS"
-        write_receipt(trace, tag, manifest_sha, budget, limits, elapsed, key,
-                      "EXCEEDED" if breach else None, breach)
-        if breach: break
-        time.sleep(.05)
-    if not breach:
-        try: budget = budget_read(budget_path, tag, limits)
-        except Blocked as exc: breach = exc.reason
-        else:
-            if budget["verdict"] == "EXCEEDED":
-                breach = budget["reason"] or "BUDGET_EXCEEDED"
-            elif time.monotonic() - started >= limits["max_wall_seconds"]:
-                breach = "MAX_WALL_SECONDS"
+    monitored = lifecycle_state is not None
+    breach = None; budget = None; lifecycle_receipt = None
+    try:
+        while group_members(proof, proc_root):
+            if child is not None: child.poll()
+            elapsed = time.monotonic() - started
+            try: budget = budget_read(budget_path, tag, limits)
+            except Blocked as exc: breach = exc.reason; break
+            if budget["verdict"] == "EXCEEDED": breach = budget["reason"] or "BUDGET_EXCEEDED"
+            elif not monitored and elapsed >= limits["max_wall_seconds"]: breach = "MAX_WALL_SECONDS"
+            if monitored:
+                guardian_rc = lifecycle_state["guardian"].poll()
+                signum = ownership.get("received_signal") if ownership is not None else None
+                if guardian_rc is not None or signum is not None:
+                    breach = "LIFECYCLE_GUARDIAN_EXITED"
+                    try:
+                        lifecycle_state["module"].record_fault(
+                            lifecycle_state["observer"], lifecycle_state["nonce"], breach,
+                            "guardian_rc=%r controller_signal=%r" % (guardian_rc, signum))
+                    except Exception:
+                        pass
+            write_receipt(trace, tag, manifest_sha, budget, limits, elapsed, key,
+                          "EXCEEDED" if breach else None, breach)
+            if breach: break
+            time.sleep(.05)
+        if not breach:
+            try: budget = budget_read(budget_path, tag, limits)
+            except Blocked as exc: breach = exc.reason
+            else:
+                if budget["verdict"] == "EXCEEDED":
+                    breach = budget["reason"] or "BUDGET_EXCEEDED"
+                elif not monitored and time.monotonic() - started >= limits["max_wall_seconds"]:
+                    breach = "MAX_WALL_SECONDS"
+        if breach and monitored and group_members(proof, proc_root):
+            evidence = terminate_owned(proof, proc_root, child)
+            atomic_replace(trace / "controller-termination.json", canonical(evidence) + b"\n")
+            if evidence["survivors"]: raise Blocked("OWNED_PROCESS_SURVIVED", True)
+        if monitored:
+            try:
+                lifecycle_receipt = finalize_monitored_lifecycle(trace, tag, lifecycle_state)
+            except Exception as exc:
+                breach = breach or "LIFECYCLE_RECEIPT_INVALID"
+            else:
+                if lifecycle_receipt.get("status") != "PASS":
+                    breach = breach or lifecycle_receipt.get("fault_reason") or "LIFECYCLE_FAULT"
+    finally:
+        if prior_sigterm is not None:
+            signal.signal(signal.SIGTERM, prior_sigterm)
     if breach:
         phase = "BLOCKED_UNKNOWN" if breach == "BUDGET_STATE_UNKNOWN" else "BLOCKED"
         if budget is not None:
             write_receipt(trace, tag, manifest_sha, budget, limits, time.monotonic() - started,
                           key, "EXCEEDED", breach)
         persist(controller, controller_id, phase, tag, manifest_sha, breach)
-        evidence = terminate_owned(proof, proc_root, child)
-        atomic_replace(trace / "controller-termination.json", canonical(evidence) + b"\n")
-        if evidence["survivors"]: raise Blocked("OWNED_PROCESS_SURVIVED", True)
+        if not (trace / "controller-termination.json").exists():
+            evidence = terminate_owned(proof, proc_root, child)
+            atomic_replace(trace / "controller-termination.json", canonical(evidence) + b"\n")
+            if evidence["survivors"]: raise Blocked("OWNED_PROCESS_SURVIVED", True)
         if phase == "BLOCKED_UNKNOWN": return 1
         seal_trace(trace, tag, manifest_sha, key); return 1
     rc = child.wait() if child is not None else 0
@@ -1149,8 +1537,88 @@ def target_contract_probe(argv):
     except (OSError, ValueError, KeyError, TypeError):
         print("PROBE_BUDGET", file=sys.stderr)
         return 1
+    lifecycle = lifecycle_path = observer = guardian = None
+    lifecycle_state = None
+    guardian_start_ticks = None
+    launch_sha = None
+    nonce = boot_id = None
+    if monitored:
+        try:
+            pinned_names = (
+                "target-profile.json", "corporate-settings.json", "probe-budget.json",
+                "probe-rate-snapshot.json", "fixture-manifest.json", "input-package.json",
+                "probe-manifest.json", "action-authorization.json", "probe/prompt.txt")
+            for name in pinned_names:
+                destination = trace / name
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                publish_no_replace(destination, read_bytes(sealed / name), 0o400)
+            for name in ("fixture", "runtime-package"):
+                source, destination = sealed / name, trace / name
+                if source.is_symlink() or not source.is_dir() or os.path.lexists(destination):
+                    raise Blocked("LIFECYCLE_INPUT_INVALID", True)
+                shutil.copytree(source, destination, symlinks=False)
+            input_raw = read_bytes(trace / "input-package.json")
+            input_package = json.loads(input_raw)
+            manifest_raw = read_bytes(trace / "probe-manifest.json")
+            manifest = json.loads(manifest_raw)
+            authorization_raw = read_bytes(trace / "action-authorization.json")
+            nonce = manifest["nonce"]
+            if (not re.fullmatch(r"[0-9a-f]{64}", nonce)
+                    or input_package.get("package_version") is None
+                    or not re.fullmatch(r"[0-9a-f]{64}", input_package.get("package_sha256", ""))):
+                raise ValueError()
+            workspace = trace / "workspace"
+            workspace.mkdir(mode=0o700)
+            lifecycle, lifecycle_path, lifecycle_sha = load_lifecycle_helper()
+            if lifecycle_sha != input_package.get("lifecycle_helper_sha256"):
+                raise Blocked("LIFECYCLE_HELPER_CHANGED", True)
+            boot_id = lifecycle.current_boot_id()
+            controller_ticks = lifecycle.process_start_ticks(os.getpid())
+            if not controller_ticks:
+                raise Blocked("LIFECYCLE_CONTROLLER_IDENTITY", True)
+            observer = lifecycle.init_segment(trace, nonce, boot_id)
+            launch = lifecycle.publish_launch(
+                observer, trace, nonce, boot_id,
+                action="target_contract_probe_operator_monitored",
+                run_tag=trace.name, predecessor_nonce=None,
+                package_version=input_package["package_version"],
+                package_sha256=input_package["package_sha256"],
+                controller_pid=os.getpid(), controller_start_ticks=controller_ticks,
+                controller_pgid=os.getpgrp(), workspace_dir=workspace.resolve(),
+                target_profile_sha256=digest(read_bytes(trace / "target-profile.json")),
+                run_budget_sha256=digest(read_bytes(trace / "probe-budget.json")),
+                input_package_sha256=digest(input_raw),
+                settings_sha256=digest(read_bytes(trace / "corporate-settings.json")),
+                lifecycle_helper_sha256=lifecycle_sha,
+                authorization_sha256=digest(authorization_raw),
+                manifest_sha256=digest(manifest_raw))
+            launch_path = trace / "lifecycle-launch.json"
+            launch_sha = digest(read_bytes(launch_path))
+            lifecycle_state = {
+                "module": lifecycle, "path": lifecycle_path, "sha256": lifecycle_sha,
+                "observer": observer, "nonce": nonce, "boot_id": boot_id,
+                "launch_sha256": launch_sha, "guardian": None,
+                "guardian_start_ticks": None,
+            }
+            wait_for_initial_observation(lifecycle, observer, nonce, boot_id)
+            guardian, guardian_start_ticks = start_guardian(
+                lifecycle, lifecycle_path, observer, nonce, boot_id,
+                controller_ticks, os.getpgrp())
+            lifecycle_state["guardian"] = guardian
+            lifecycle_state["guardian_start_ticks"] = guardian_start_ticks
+        except (Blocked, OSError, ValueError, KeyError, TypeError,
+                json.JSONDecodeError, RuntimeError) as exc:
+            if lifecycle_state is not None:
+                try:
+                    lifecycle.record_fault(observer, nonce, "LIFECYCLE_STARTUP_FAILED", str(exc))
+                    finalize_monitored_lifecycle(trace, trace.name, lifecycle_state)
+                except Exception:
+                    pass
+            print("PROBE_LIFECYCLE: %s" % exc, file=sys.stderr)
+            return 1
     env.update({"BENCH_RUNS": str(runs), "SHERLOCK_RUN_TAG": trace.name,
-                "SHERLOCK_ARM_HOME": str(work / "skill-catalogue" / "log-rca"),
+                "SHERLOCK_ARM_HOME": str((trace if monitored else work) /
+                                           "skill-catalogue" / "log-rca"),
                 "SHERLOCK_TRACE": str(trace), "SHERLOCK_CORPUS": str(sealed / "fixture"),
                 "SHERLOCK_BASE_URL": transport, "SHERLOCK_MODEL": profile["requested_model"],
                 "SHERLOCK_EXPECTED_RETURNED_IDENTITY": profile["expected_returned_identity"],
@@ -1185,12 +1653,17 @@ def target_contract_probe(argv):
     if monitored:
         env.update({"SHERLOCK_OPERATOR_MONITORED_MODE": "1", "SHERLOCK_TIMEOUT": "0",
                     "SHERLOCK_MAX_SESSION_TURNS": "-1", "SHERLOCK_MAX_WALL_TIME_S": "-1",
-                    "SHERLOCK_MAX_TOOL_CALLS": "-1", "SHERLOCK_WORKFLOW_AGENT_MAX_TURNS": "200"})
+                    "SHERLOCK_MAX_TOOL_CALLS": "-1", "SHERLOCK_WORKFLOW_AGENT_MAX_TURNS": "200",
+                    "SHERLOCK_OBSERVER_DIR": str(observer), "SHERLOCK_RUN_NONCE": nonce,
+                    "SHERLOCK_BOOT_ID": boot_id, "SHERLOCK_LIFECYCLE_HELPER": str(lifecycle_path),
+                    "SHERLOCK_LIFECYCLE_LAUNCH": str(trace / "lifecycle-launch.json"),
+                    "SHERLOCK_LIFECYCLE_LAUNCH_SHA256": launch_sha})
     else:
         env.update({"SHERLOCK_BUDGET_MAX_UPSTREAM_ATTEMPTS": str(limits["max_provider_calls"]),
                     "SHERLOCK_BUDGET_MAX_REQUEST_BYTES": str(limits["max_prompt_tokens"] * 4),
                     "SHERLOCK_BUDGET_MAX_WALL_SECONDS": str(limits["max_wall_time_s"])})
     child = None
+    runner_start_failure = False
     ownership, prior_sigterm = install_owned_child_signal_handler()
     try:
         child = subprocess.Popen(["bash", str(HERE / "run-bench.sh"), env["SHERLOCK_PROBE_ARM"]],
@@ -1207,18 +1680,71 @@ def target_contract_probe(argv):
                      "boot_id_sha256": digest(b"target-contract-probe"),
                      "command_sha256": digest(" ".join(child.args).encode("utf-8"))}
         atomic_replace(trace / "controller-process.json", canonical(proof) + b"\n")
-        stdout, stderr = communicate_owned_process(child, timeout=None if monitored else 600)
+        if monitored:
+            while True:
+                try:
+                    stdout, stderr = child.communicate(timeout=.25)
+                    break
+                except subprocess.TimeoutExpired:
+                    if guardian.poll() is not None:
+                        lifecycle.record_fault(observer, nonce, "GUARDIAN_EXITED",
+                                               "guardian exited while target remained live")
+                        terminate_owned_process_group(child)
+                        stdout, stderr = child.communicate()
+                        break
+        else:
+            stdout, stderr = communicate_owned_process(child, timeout=600)
         done = subprocess.CompletedProcess(child.args, child.returncode, stdout, stderr)
+    except SystemExit as exc:
+        if not monitored:
+            raise
+        lifecycle.record_fault(observer, nonce, "CONTROLLER_TERMINATED",
+                               "signal interrupted monitored controller")
+        if child is not None:
+            try: terminate_owned_process_group(child)
+            except OSError: pass
+            stdout, stderr = child.communicate()
+            done = subprocess.CompletedProcess(child.args, child.returncode, stdout, stderr)
+        else:
+            runner_start_failure = True
+            done = subprocess.CompletedProcess([], int(exc.code) if isinstance(exc.code, int) else 1,
+                                               "", "")
     except (Blocked, OSError, subprocess.TimeoutExpired):
+        runner_start_failure = True
         try:
             if child is not None and _process_group_exists(child.pid):
                 terminate_owned_process_group(child)
         except OSError:
             pass
-        print("PROBE_RUNNER_START", file=sys.stderr)
-        return 1
+        if monitored:
+            lifecycle.record_fault(observer, nonce, "RUNNER_START_FAILED",
+                                   "runner launch or supervision failed")
+        if child is not None:
+            stdout, stderr = child.communicate()
+            done = subprocess.CompletedProcess(child.args, child.returncode, stdout, stderr)
+        else:
+            done = subprocess.CompletedProcess([], 1, "", "")
     finally:
         signal.signal(signal.SIGTERM, prior_sigterm)
+    if monitored:
+        guardian_rc = stop_guardian(guardian)
+        try:
+            receipt = lifecycle.finalize_segment(
+                observer, trace, nonce, boot_id, run_tag=trace.name,
+                launch_sha256=launch_sha,
+                lifecycle_helper_sha256=digest(read_bytes(lifecycle_path, 4 * 1024 * 1024)),
+                guardian_pid=guardian.pid,
+                guardian_start_ticks=guardian_start_ticks,
+                guardian_exit_code=guardian_rc)
+        except (Blocked, OSError, ValueError, lifecycle.LifecycleFault) as exc:
+            print("PROBE_LIFECYCLE_RECEIPT: %s" % exc, file=sys.stderr)
+            return 1
+        if receipt.get("status") != "PASS":
+            print("PROBE_LIFECYCLE_FAULT: %s" % receipt.get("fault_reason"), file=sys.stderr)
+            return 1
+    if runner_start_failure:
+        print("PROBE_RUNNER_START", file=sys.stderr)
+        return 1
     # Task 7 is the terminal interpreter for the ordinary trace.  Its raw
     # projection, not a controller-written summary, is what the target-probe
     # audit later consumes.  Publish it before declaring this runner healthy.
@@ -1308,6 +1834,46 @@ def main():
             if status["phase"] != "QWEN_RUNNING": raise Blocked("RESUME_PHASE_AMBIGUOUS", True)
             proof = read_object(trace / "controller-process.json", PROOF_FIELDS)
             verify_process_proof(controller, resume_id, link["child_run_tag"], proof, key)
+            if all(value is None for value in limits.values()):
+                evidence = terminate_owned(proof, proc_root)
+                atomic_replace(trace / "controller-termination.json", canonical(evidence) + b"\n")
+                if evidence["survivors"]:
+                    raise Blocked("OWNED_PROCESS_SURVIVED", True)
+                try:
+                    lifecycle, lifecycle_path, lifecycle_sha = load_lifecycle_helper()
+                    launch_raw = read_bytes(trace / "lifecycle-launch.json", 4 * 1024 * 1024)
+                    launch = json.loads(launch_raw)
+                    observer = Path(launch["observer_dir"])
+                    lifecycle.verify_signed_record(observer, launch)
+                    if (launch.get("run_tag") != link["child_run_tag"]
+                            or launch.get("lifecycle_helper_sha256") != lifecycle_sha):
+                        raise ValueError()
+                    lifecycle.record_fault(observer, launch["run_nonce"],
+                                           "MONITORED_SEGMENT_INTERRUPTED",
+                                           "controller restarted during active segment")
+                    deadline = time.monotonic() + 2
+                    while not (observer / "guardian-events.jsonl").exists() and time.monotonic() < deadline:
+                        time.sleep(.05)
+                    lifecycle.finalize_segment(
+                        observer, trace, launch["run_nonce"], launch["boot_id"],
+                        run_tag=link["child_run_tag"], launch_sha256=digest(launch_raw),
+                        lifecycle_helper_sha256=lifecycle_sha, guardian_pid=0,
+                        guardian_start_ticks="interrupted", guardian_exit_code=-1)
+                except (Blocked, OSError, ValueError, KeyError, TypeError,
+                        json.JSONDecodeError, RuntimeError) as exc:
+                    raise Blocked("MONITORED_SEGMENT_RECOVERY_FAILED", True) from exc
+                try:
+                    state = budget_read(trace / "upstream-budget-state.json",
+                                        link["child_run_tag"], limits)
+                    write_receipt(trace, link["child_run_tag"], link["child_manifest_sha256"],
+                                  state, limits, 0, key, "EXCEEDED",
+                                  "MONITORED_SEGMENT_INTERRUPTED")
+                except Blocked:
+                    pass
+                persist(controller, resume_id, "BLOCKED", link["child_run_tag"],
+                        link["child_manifest_sha256"], "MONITORED_SEGMENT_INTERRUPTED")
+                seal_trace(trace, link["child_run_tag"], link["child_manifest_sha256"], key)
+                return 1
             if not group_members(proof, proc_root): raise Blocked("RECORDED_LAUNCH_UNCERTAIN", True)
             owner = {"schema": 1, "controller_id": resume_id, "child_run_tag": link["child_run_tag"],
                      **proc_snapshot(os.getpid(), proc_root, controller=True)}

@@ -976,6 +976,7 @@ def prepare_selected(source: Path, output: Path, qwen: Path):
         manifest_raw = _plain_file(source / 'probe-manifest.json', 'SELECTED_MANIFEST')
         manifest = parse_json(manifest_raw, 'SELECTED_MANIFEST')
         probe._verify_package(source, manifest)
+        source_package = parse_json(_plain_file(source / 'input-package.json', 'SELECTED_INPUT_PACKAGE'), 'SELECTED_INPUT_PACKAGE')
         original = parse_json(_plain_file(source / 'target-profile.json', 'SELECTED_PROFILE'), 'SELECTED_PROFILE')
         if original.get('schema') != 2 or original.get('execution_mode') != 'operator_monitored':
             raise QualificationFailure('SELECTED_PROFILE_MODE')
@@ -1027,6 +1028,7 @@ def prepare_selected(source: Path, output: Path, qwen: Path):
     (output / 'prompt.txt').write_text('Investigate the fresh local corpus using Sherlock. Retain evidence and satisfy all shipped report and validation requirements.\n')
     package = parse_json(_plain_file(output / 'input-package.json', 'INPUT_PACKAGE'), 'INPUT_PACKAGE')
     package.update(prompt_sha256=digest((output / 'prompt.txt').read_bytes()),
+                   lifecycle_helper_sha256=source_package['lifecycle_helper_sha256'],
                    arm=registered.version, package_version=registered.version, package_sha256=registered.digest,
                    settings_sha256=digest(settings), tool_schema_sha256=digest(tools_rows),
                    target_profile_sha256=record['target_profile_sha256'],

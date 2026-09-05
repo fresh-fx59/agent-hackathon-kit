@@ -15,6 +15,7 @@ import sys
 import tempfile
 import time
 import unittest
+from unittest import mock
 
 
 HERE = Path.cwd()
@@ -542,6 +543,74 @@ printf '{{"schema":1}}\\n' > "$SHERLOCK_TRACE/candidate.json"
                 shlex.quote(mode),shlex.quote(str(self.target_tool)))
         return env
 
+    def monitored_env(self, **updates):
+        module = controller_namespace()["load_version_gate_helper"]()
+        package_sha = module.tree_digest(self.skill)
+        helper_sha = hashlib.sha256(
+            (HERE / "eval/bench/lifecycle-supervisor.py").read_bytes()).hexdigest()
+        settings = self.base / "monitored-settings.json"
+        settings.write_text("{}\n", encoding="utf-8")
+        profile = self.base / "monitored-profile.json"
+        profile.write_text(json.dumps({
+            "schema": 2, "execution_mode": "operator_monitored",
+            "package_version": "v45", "package_sha256": package_sha,
+            "settings_sha256": hashlib.sha256(settings.read_bytes()).hexdigest(),
+        }, sort_keys=True) + "\n", encoding="utf-8")
+        budget = self.base / "monitored-budget.json"
+        budget.write_text(json.dumps({
+            "schema": 2, "execution_mode": "operator_monitored",
+            "max_upstream_attempts": None, "max_request_bytes": None,
+            "max_wall_seconds": None, "max_consecutive_provider_failures": None,
+            "context_window": 262000, "max_output_tokens": 32000,
+            "session_token_limit": 262000, "request_timeout_ms": 600000,
+        }, sort_keys=True) + "\n", encoding="utf-8")
+        inputs = self.base / "monitored-input-package.json"
+        inputs.write_text(json.dumps({
+            "schema": 2, "package_version": "v45", "package_sha256": package_sha,
+            "lifecycle_helper_sha256": helper_sha,
+        }, sort_keys=True) + "\n", encoding="utf-8")
+        configured = dict(
+            SHERLOCK_OPERATOR_MONITORED_MODE="1",
+            SHERLOCK_PACKAGE_VERSION="v45",
+            SHERLOCK_TARGET_PROFILE=str(profile), SHERLOCK_SETTINGS=str(settings),
+            SHERLOCK_INPUT_PACKAGE=str(inputs), SHERLOCK_PROBE_BUDGET=str(budget),
+        )
+        configured.update(updates)
+        env = self.env(**configured)
+        for name in ("SHERLOCK_BUDGET_MAX_UPSTREAM_ATTEMPTS",
+                     "SHERLOCK_BUDGET_MAX_REQUEST_BYTES",
+                     "SHERLOCK_BUDGET_MAX_WALL_SECONDS",
+                     "SHERLOCK_BUDGET_MAX_CONSECUTIVE_PROVIDER_FAILURES"):
+            env.pop(name, None)
+        return env
+
+    def observe_until_exit(self, process, *, stop_after_first=False):
+        sequence = -1
+        seen = set()
+        deadline = time.time() + 20
+        while process.poll() is None and time.time() < deadline:
+            for identity_path in self.runs.glob("run-*/observer-*/identity.json"):
+                observer = identity_path.parent
+                if (observer.parent / "lifecycle-receipt.json").exists():
+                    continue
+                identity = json.loads(identity_path.read_text())
+                if stop_after_first and observer in seen:
+                    continue
+                sequence += 1
+                result = subprocess.run([
+                    sys.executable, str(HERE / "eval/bench/lifecycle-supervisor.py"),
+                    "observe", "--observer-dir", str(observer),
+                    "--nonce", identity["run_nonce"], "--boot-id", identity["boot_id"],
+                    "--sequence", str(sequence), "--pending-operation",
+                    "test inspected controller and trace state",
+                ], capture_output=True, text=True)
+                self.case.assertEqual(result.returncode, 0, result.stderr)
+                seen.add(observer)
+                if stop_after_first:
+                    return seen
+            time.sleep(.1)
+        return seen
+
     def run(self, *args, env=None, timeout=30):
         return subprocess.run(["bash", str(CONTROLLER), *args], env=env or self.env(),
                               capture_output=True, text=True, timeout=timeout)
@@ -566,6 +635,155 @@ class PersistentControllerTests(unittest.TestCase):
             except OSError: return
             time.sleep(.02)
         self.fail("process %s survived"%pid)
+
+    def test_monitored_subscription_has_signed_launch_guardian_and_terminal_receipt(self):
+        process = subprocess.Popen(
+            ["bash", str(CONTROLLER)], env=self.fx.monitored_env(),
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        seen = self.fx.observe_until_exit(process)
+        stdout, stderr = process.communicate(timeout=10)
+        self.assertEqual(process.returncode, 0, (stdout, stderr))
+        self.assertEqual(len(seen), 1)
+        trace = next(self.fx.runs.glob("run-*"))
+        launch = json.loads((trace / "lifecycle-launch.json").read_text())
+        receipt = json.loads((trace / "lifecycle-receipt.json").read_text())
+        self.assertEqual(launch["action"], "harness_qualification_operator_monitored")
+        self.assertEqual(Path(launch["workspace_dir"]), trace / "workspace")
+        self.assertEqual(receipt["status"], "PASS")
+        self.assertEqual((receipt["expected_tool_count"], receipt["completed_tool_count"]), (0, 0))
+        self.assertEqual(json.loads((trace / "upstream-budget-state.json").read_text())["limits"],
+                         {name: None for name in ("max_upstream_attempts", "max_request_bytes",
+                                                  "max_wall_seconds", "max_consecutive_provider_failures")})
+        target_env = json.loads(self.fx.target_env_names.read_text())
+        for name in ("SHERLOCK_OBSERVER_DIR", "SHERLOCK_RUN_NONCE", "SHERLOCK_BOOT_ID",
+                     "SHERLOCK_LIFECYCLE_HELPER", "SHERLOCK_LIFECYCLE_LAUNCH",
+                     "SHERLOCK_LIFECYCLE_LAUNCH_SHA256"):
+            self.assertIn(name, target_env)
+        self.assertFalse(any(name.startswith("SHERLOCK_BUDGET_MAX_") for name in target_env))
+
+    def test_monitored_invalid_initial_observation_closes_signed_launch_without_child(self):
+        process = subprocess.Popen(
+            ["bash", str(CONTROLLER)], env=self.fx.monitored_env(),
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        deadline = time.time() + 15
+        observer = None
+        while time.time() < deadline and process.poll() is None:
+            identities = list(self.fx.runs.glob("run-*/observer-*/identity.json"))
+            if identities:
+                observer = identities[0].parent
+                break
+            time.sleep(.05)
+        self.assertIsNotNone(observer)
+        (observer / "current-observation.json").write_text("{}\n", encoding="utf-8")
+        stdout, stderr = process.communicate(timeout=10)
+        self.assertNotEqual(process.returncode, 0, (stdout, stderr))
+        trace = observer.parent
+        self.assertTrue((trace / "lifecycle-launch.json").is_file())
+        self.assertFalse(self.fx.target_env_names.exists(), (stdout, stderr))
+        self.assertTrue((trace / "lifecycle-receipt.json").is_file(),
+                        (stdout, stderr, sorted(path.name for path in trace.iterdir())))
+        receipt = json.loads((trace / "lifecycle-receipt.json").read_text())
+        self.assertEqual((receipt["status"], receipt["fault_reason"]),
+                         ("FAULT", "OBSERVATION_INVALID"))
+
+    def test_monitored_guardian_start_failure_closes_signed_launch(self):
+        namespace = controller_namespace()
+        trace = self.fx.runs / "guardian-start-failure"
+        trace.mkdir(mode=0o700)
+        manifest_raw = b'{"schema":1,"run_tag":"guardian-start-failure"}\n'
+        (trace / "run-manifest.json").write_bytes(manifest_raw)
+        env = self.fx.monitored_env()
+        env["SHERLOCK_RUN_BUDGET"] = env["SHERLOCK_PROBE_BUDGET"]
+
+        def fail_guardian(*_args, **_kwargs):
+            raise OSError("fixture guardian spawn failure")
+
+        namespace["wait_for_initial_observation"] = lambda *_args, **_kwargs: None
+        namespace["start_guardian"] = fail_guardian
+        with mock.patch.dict(os.environ, env, clear=True):
+            with self.assertRaises(namespace["Blocked"]):
+                namespace["prepare_monitored_lifecycle"](
+                    trace, trace.name, "subscription", manifest_raw,
+                    {"pgid": os.getpgrp()}, authorization_source=trace / "run-manifest.json",
+                    nonce="a" * 32)
+        self.assertTrue((trace / "lifecycle-launch.json").is_file())
+        receipt = json.loads((trace / "lifecycle-receipt.json").read_text())
+        self.assertEqual((receipt["status"], receipt["fault_reason"],
+                          receipt["guardian_pid"], receipt["guardian_start_ticks"]),
+                         ("FAULT", "LIFECYCLE_STARTUP_FAILED", 0, "0"))
+
+    def test_monitored_controller_detects_dead_guardian_and_stops_owned_child(self):
+        process = subprocess.Popen(
+            ["bash", str(CONTROLLER)], env=self.fx.monitored_env(FAKE_TARGET_MODE="wait"),
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        self.fx.observe_until_exit(process, stop_after_first=True)
+        deadline = time.time() + 10
+        guardian_pid = None
+        while time.time() < deadline and process.poll() is None:
+            result = subprocess.run(["ps", "-axo", "pid=,ppid=,command="],
+                                    capture_output=True, text=True)
+            for line in result.stdout.splitlines():
+                fields = line.strip().split(None, 2)
+                if len(fields) == 3 and fields[1] == str(process.pid) \
+                        and "lifecycle-supervisor.py guardian" in fields[2]:
+                    guardian_pid = int(fields[0]); break
+            if guardian_pid is not None: break
+            time.sleep(.05)
+        self.assertIsNotNone(guardian_pid)
+        os.kill(guardian_pid, signal.SIGKILL)
+        stdout, stderr = process.communicate(timeout=15)
+        self.assertNotEqual(process.returncode, 0, (stdout, stderr))
+        trace = next(self.fx.runs.glob("run-*"))
+        self.assertTrue((trace / "lifecycle-receipt.json").is_file(),
+                        (stdout, stderr, sorted(path.name for path in trace.iterdir())))
+        receipt = json.loads((trace / "lifecycle-receipt.json").read_text())
+        self.assertEqual((receipt["status"], receipt["fault_reason"]),
+                         ("FAULT", "LIFECYCLE_GUARDIAN_EXITED"))
+        status = json.loads((self.fx.controller_dir() / "status.json").read_text())
+        self.assertEqual((status["phase"], status["reason"]),
+                         ("BLOCKED", "LIFECYCLE_GUARDIAN_EXITED"))
+        self.assertTrue((trace / "controller-termination.json").is_file())
+
+    def test_monitored_controller_restart_closes_segment_and_requires_fresh_nonce(self):
+        env = self.fx.monitored_env(FAKE_TARGET_MODE="wait")
+        process = subprocess.Popen(
+            ["bash", str(CONTROLLER)], env=env,
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        self.fx.observe_until_exit(process, stop_after_first=True)
+        deadline = time.time() + 10
+        proof_path = None
+        while time.time() < deadline:
+            candidates = list(self.fx.runs.glob("run-*/controller-process.json"))
+            if candidates:
+                proof_path = candidates[0]; break
+            time.sleep(.05)
+        self.assertIsNotNone(proof_path)
+        first_trace = proof_path.parent
+        first_launch = json.loads((first_trace / "lifecycle-launch.json").read_text())
+        child_pid = json.loads(proof_path.read_text())["pid"]
+        os.kill(process.pid, signal.SIGKILL)
+        process.wait(timeout=5)
+        resumed = self.fx.run("--resume", self.fx.controller_dir().name,
+                              env=self.fx.monitored_env(), timeout=20)
+        self.assertNotEqual(resumed.returncode, 0, (resumed.stdout, resumed.stderr))
+        receipt = json.loads((first_trace / "lifecycle-receipt.json").read_text())
+        self.assertEqual((receipt["status"], receipt["fault_reason"]),
+                         ("FAULT", "MONITORED_SEGMENT_INTERRUPTED"))
+        self.assert_process_gone(child_pid)
+        self.assertTrue((first_trace / "sealed").is_file())
+
+        retry = subprocess.Popen(
+            ["bash", str(CONTROLLER)], env=self.fx.monitored_env(),
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        self.fx.observe_until_exit(retry)
+        stdout, stderr = retry.communicate(timeout=10)
+        self.assertEqual(retry.returncode, 0, (stdout, stderr))
+        traces = sorted(self.fx.runs.glob("run-*"))
+        self.assertEqual(len(traces), 2)
+        retry_trace = next(trace for trace in traces if trace != first_trace)
+        retry_launch = json.loads((retry_trace / "lifecycle-launch.json").read_text())
+        self.assertNotEqual(retry_launch["run_nonce"], first_launch["run_nonce"])
+        self.assertNotEqual(retry_launch["observer_dir"], first_launch["observer_dir"])
 
     def test_done_bootstraps_and_reuses_strict_key_exact_link_receipt_and_seal(self):
         first=self.fx.run(); self.assertEqual(first.returncode,0,(first.stdout,first.stderr))
