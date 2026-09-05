@@ -311,7 +311,7 @@ elif command == 'matrix':""")
         self.assertEqual(captured['SHERLOCK_REQUEST_TIMEOUT_MS'],'600000')
         self.assertEqual(captured['SHERLOCK_SKILL_ROOT'],str(output/'runtime-package'))
         self.assertFalse(any(name.startswith('SHERLOCK_BUDGET_MAX_') for name in captured))
-        self.assertNotIn('SHERLOCK_TIMEOUT',captured)
+        self.assertEqual(captured['SHERLOCK_TIMEOUT'], '0')
 
     def test_one_argument_launcher_builds_complete_fixed_controller_bundle_and_input(self):
         repo = self.root / "repo"; bench = repo / "eval" / "bench"; bench.mkdir(parents=True)
