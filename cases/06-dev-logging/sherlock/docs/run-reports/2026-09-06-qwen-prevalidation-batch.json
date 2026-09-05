@@ -1,0 +1,10 @@
+{
+  "schema": 1,
+  "qwen_version": "0.22.0",
+  "source": "/tmp/qwen-post-tool-batch-capture-20260906-r1/evidence/post-tool-batch.stdin.json",
+  "local_source": "/Users/a/hack/qwen-post-tool-batch-capture-20260906-r1/evidence/post-tool-batch.stdin.json",
+  "sha256": "51d35dc912773586a74e3904814d4f778dc01b071f2bc0dfadea4b260745ef19",
+  "exact_input_utf8": "{\"session_id\":\"f64ab903-f7ff-41f7-b897-27e880a76e36\",\"transcript_path\":\"/tmp/qwen-post-tool-batch-capture-20260906-r1/evidence/workspace/home/projects/-tmp-qwen-post-tool-batch-capture-20260906-r1-evidence-workspace/chats/f64ab903-f7ff-41f7-b897-27e880a76e36.jsonl\",\"cwd\":\"/tmp/qwen-post-tool-batch-capture-20260906-r1/evidence/workspace\",\"hook_event_name\":\"PostToolBatch\",\"timestamp\":\"2026-09-05T23:10:57.462Z\",\"permission_mode\":\"yolo\",\"tool_calls\":[{\"tool_name\":\"run_shell_command\",\"tool_input\":{\"command\":\"printf invalid\",\"directory\":\"/outside-fixture-workspace\"},\"tool_use_id\":\"call_invalid_directory\",\"tool_call_id\":\"call_invalid_directory\",\"status\":\"error\",\"tool_response\":{\"response_parts\":[{\"functionResponse\":{\"id\":\"call_invalid_directory\",\"name\":\"run_shell_command\",\"response\":{\"error\":\"Directory '/outside-fixture-workspace' is not within any of the registered workspace directories.\"}}}],\"result_display\":\"Directory '/outside-fixture-workspace' is not within any of the registered workspace directories.\",\"error\":\"Directory '/outside-fixture-workspace' is not within any of the registered workspace directories.\",\"error_type\":\"invalid_tool_params\",\"execution_status\":\"not_started\",\"content_length\":97}}]}",
+  "provider": "loopback_only",
+  "purpose": "actual client rejection schema proof; no lifecycle acceptance claimed"
+}
