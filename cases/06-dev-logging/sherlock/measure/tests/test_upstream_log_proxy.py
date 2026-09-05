@@ -409,6 +409,18 @@ class ItNamesWhatActuallyAnswered(ProxyCase):
         code, _ = self.post()
         self.assertEqual(code, 200)
         identity = json.loads((observer / "identity.json").read_text())
+        event = {
+            "hook_event_name": "PostToolBatch", "session_id": "session-1",
+            "tool_calls": [{
+                "tool_name": "read_file", "tool_input": {},
+                "tool_use_id": "c1", "tool_call_id": "c1", "status": "success",
+                "tool_response": {"execution_status": "completed"},
+            }],
+        }
+        result = LIFECYCLE.handle_hook(
+            observer, pathlib.Path(self.tmp) / "workspace-healthy",
+            identity["run_nonce"], identity["boot_id"], json.dumps(event).encode())
+        self.assertFalse(result["continue"])
         LIFECYCLE.publish_observation(
             observer, identity["run_nonce"], identity["boot_id"], sequence=1,
             capability=(observer / "observation.key").read_bytes(),
@@ -418,6 +430,37 @@ class ItNamesWhatActuallyAnswered(ProxyCase):
         self.assertEqual(len(self.srv.seen), 1)
         fault = json.loads((observer / "fault.json").read_text())
         self.assertEqual(fault["reason"], "EXPECTED_TOOL_HOOK_MISSING")
+
+    def test_exact_client_prevalidation_rejection_allows_next_dispatch(self):
+        observer = self.start_lifecycle("healthy")
+        code, _ = self.post()
+        self.assertEqual(code, 200)
+        identity = json.loads((observer / "identity.json").read_text())
+        event = {
+            "cwd": str(pathlib.Path(self.tmp) / "workspace-healthy"),
+            "hook_event_name": "PostToolBatch", "permission_mode": "default",
+            "session_id": "session-1", "timestamp": "2026-09-06T00:00:00.000Z",
+            "tool_calls": [{
+                "tool_name": "read_file", "tool_input": {"file_path": "/outside"},
+                "tool_use_id": "c1", "tool_call_id": "c1", "status": "error",
+                "tool_response": {"error": "outside workspace",
+                                  "error_type": "invalid_tool_params",
+                                  "execution_status": "not_started"},
+            }],
+            "transcript_path": str(pathlib.Path(self.tmp) / "transcript.jsonl"),
+        }
+        result = LIFECYCLE.handle_hook(
+            observer, pathlib.Path(self.tmp) / "workspace-healthy",
+            identity["run_nonce"], identity["boot_id"], json.dumps(event).encode())
+        self.assertTrue(result["continue"])
+        LIFECYCLE.publish_observation(
+            observer, identity["run_nonce"], identity["boot_id"], sequence=1,
+            capability=(observer / "observation.key").read_bytes(),
+            pending_operation="checking client prevalidation evidence")
+        self.srv.mode = "json_prose"
+        code, _ = self.post()
+        self.assertEqual(code, 200)
+        self.assertEqual(len(self.srv.seen), 2)
 
     def test_discarded_substitution_creates_no_impossible_hook_expectation(self):
         observer = self.start_lifecycle(

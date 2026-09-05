@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Wait for a Sherlock trace, verify its report, and explain any failure."""
 import argparse
+import base64
 import datetime as dt
 import hashlib
 import json
@@ -168,21 +169,29 @@ def monitored_lifecycle_failures(trace):
                 or receipt.get("observer_identity_sha256") != lifecycle.sha256(identity_raw)
                 or receipt.get("lifecycle_helper_sha256") != launch["lifecycle_helper_sha256"]
                 or type(receipt.get("expected_tool_count")) is not int
+                or type(receipt.get("batched_tool_count")) is not int
                 or type(receipt.get("completed_tool_count")) is not int
+                or type(receipt.get("rejected_tool_count")) is not int
                 or receipt["expected_tool_count"] < 0
-                or receipt["completed_tool_count"] < 0):
+                or receipt["batched_tool_count"] < 0
+                or receipt["completed_tool_count"] < 0
+                or receipt["rejected_tool_count"] < 0):
             raise ValueError("receipt identity")
         # Receipt digests cover the observer state the controller had at its
         # terminal decision.  A mismatch is invalid evidence even if the HMAC
         # itself remains valid.
         for field, name in (("registry_sha256", "registry.json"),
                             ("pairs_sha256", "pairs.json"),
-                            ("expectations_sha256", "expectations.json")):
+                            ("expectations_sha256", "expectations.json"),
+                            ("batch_tools_sha256", "batch-tools.json"),
+                            ("rejections_sha256", "rejections.json")):
             if receipt[field] != lifecycle.sha256(lifecycle._read_regular(observer / name, MAX_JSON)):
                 raise ValueError("observer digest")
         for field, name in (("last_accepted_observation_sha256", "last-accepted-observation.json"),
                             ("hook_starts_sha256", "hook-starts.jsonl"),
                             ("hook_events_sha256", "hook-events.jsonl"),
+                            ("post_tool_batch_events_sha256",
+                             "post-tool-batch-events.jsonl"),
                             ("guardian_events_sha256", "guardian-events.jsonl"),
                             ("fault_sha256", "fault.json")):
             claimed = receipt.get(field)
@@ -190,16 +199,26 @@ def monitored_lifecycle_failures(trace):
                 if (observer / name).exists():
                     raise ValueError("missing optional observer digest")
             elif (not isinstance(claimed, str)
-                  or claimed != lifecycle.sha256(lifecycle._read_regular(observer / name, MAX_JSON))):
+                  or claimed != lifecycle.sha256(lifecycle._read_regular(
+                      observer / name,
+                      MAX_LEDGER if name == "post-tool-batch-events.jsonl" else MAX_JSON))):
                 raise ValueError("optional observer digest")
         expected = lifecycle._strict_json(lifecycle._read_regular(
             observer / "expectations.json", MAX_JSON))
         pairs = lifecycle._strict_json(lifecycle._read_regular(
             observer / "pairs.json", MAX_JSON))
+        batch_tools = lifecycle._strict_json(lifecycle._read_regular(
+            observer / "batch-tools.json", MAX_JSON))
+        rejections = lifecycle._strict_json(lifecycle._read_regular(
+            observer / "rejections.json", MAX_JSON))
         if (expected.get("schema") != lifecycle.SCHEMA
                 or not isinstance(expected.get("expected"), dict)
                 or pairs.get("schema") != lifecycle.SCHEMA
-                or not isinstance(pairs.get("pairs"), dict)):
+                or not isinstance(pairs.get("pairs"), dict)
+                or batch_tools.get("schema") != lifecycle.SCHEMA
+                or not isinstance(batch_tools.get("tools"), dict)
+                or rejections.get("schema") != lifecycle.SCHEMA
+                or not isinstance(rejections.get("rejected"), dict)):
             raise ValueError("tool state schema")
         expected_owners = {}
         for request_reference, request in expected["expected"].items():
@@ -236,12 +255,129 @@ def monitored_lifecycle_failures(trace):
                 completed_ids.add(tool_id)
             elif pre is not None:
                 incomplete = True
+        rejected_ids = set()
+        batch_ids = set()
+        batch_fields = {"tool_call_id", "tool_name", "request_reference", "status",
+                        "error_type", "execution_status", "input_sha256", "sequence"}
+        for tool_id, row in batch_tools["tools"].items():
+            if (not isinstance(tool_id, str) or not tool_id or len(tool_id) > 4096
+                    or not isinstance(row, dict) or set(row) != batch_fields
+                    or row.get("tool_call_id") != tool_id
+                    or not isinstance(row.get("tool_name"), str) or not row["tool_name"]
+                    or row.get("request_reference") != expected_owners.get(tool_id)
+                    or not isinstance(row.get("status"), str) or not row["status"]
+                    or (row.get("error_type") is not None
+                        and not isinstance(row.get("error_type"), str))
+                    or (row.get("execution_status") is not None
+                        and not isinstance(row.get("execution_status"), str))
+                    or not lifecycle._hex_digest(row.get("input_sha256"))
+                    or type(row.get("sequence")) is not int or row["sequence"] < 0):
+                raise ValueError("batch tool schema")
+            batch_ids.add(tool_id)
+        rejection_fields = {"tool_call_id", "tool_name", "request_reference", "status",
+                            "error_type", "execution_status", "input_sha256", "sequence"}
+        for tool_id, row in rejections["rejected"].items():
+            if (not isinstance(tool_id, str) or not tool_id or len(tool_id) > 4096
+                    or not isinstance(row, dict) or set(row) != rejection_fields
+                    or row.get("tool_call_id") != tool_id
+                    or not isinstance(row.get("tool_name"), str) or not row["tool_name"]
+                    or row.get("request_reference") != expected_owners.get(tool_id)
+                    or row.get("status") != "error"
+                    or row.get("error_type") != "invalid_tool_params"
+                    or row.get("execution_status") != "not_started"
+                    or not lifecycle._hex_digest(row.get("input_sha256"))
+                    or type(row.get("sequence")) is not int or row["sequence"] < 0):
+                raise ValueError("rejection schema")
+            rejected_ids.add(tool_id)
+        derived_batch_tools = {}
+        derived_rejections = {}
+        batch_path = observer / "post-tool-batch-events.jsonl"
+        if batch_path.exists():
+            batch_raw = lifecycle._read_regular(batch_path, MAX_LEDGER)
+            for expected_sequence, raw_line in enumerate(batch_raw.splitlines()):
+                receipt_row = lifecycle._strict_json(raw_line)
+                receipt_fields = {
+                    "schema", "run_nonce", "sequence", "session_id", "phase",
+                    "input_sha256", "input_base64", "tool_call_ids",
+                    "rejected_tool_call_ids", "output", "observed_at", "monotonic_ns",
+                }
+                if (set(receipt_row) != receipt_fields
+                        or receipt_row.get("schema") != lifecycle.SCHEMA
+                        or receipt_row.get("run_nonce") != launch["run_nonce"]
+                        or receipt_row.get("sequence") != expected_sequence
+                        or receipt_row.get("phase") != "PostToolBatch"
+                        or not isinstance(receipt_row.get("session_id"), str)
+                        or not receipt_row["session_id"]
+                        or not isinstance(receipt_row.get("tool_call_ids"), list)
+                        or not isinstance(receipt_row.get("rejected_tool_call_ids"), list)
+                        or receipt_row.get("output", {}).get("continue") is not True):
+                    raise ValueError("batch receipt schema")
+                input_raw = base64.b64decode(
+                    receipt_row["input_base64"], validate=True)
+                if (lifecycle.sha256(input_raw) != receipt_row.get("input_sha256")
+                        or len(input_raw) > lifecycle.MAX_HOOK_INPUT_BYTES):
+                    raise ValueError("batch input digest")
+                event = lifecycle._strict_json(input_raw)
+                calls = event.get("tool_calls")
+                if (event.get("hook_event_name") != "PostToolBatch"
+                        or event.get("session_id") != receipt_row["session_id"]
+                        or not isinstance(calls, list) or not calls):
+                    raise ValueError("batch event schema")
+                call_ids, qualifying = [], []
+                for call in calls:
+                    if not isinstance(call, dict):
+                        raise ValueError("batch call schema")
+                    tool_id = call.get("tool_call_id")
+                    response = call.get("tool_response")
+                    if (not isinstance(tool_id, str) or not tool_id or len(tool_id) > 4096
+                            or call.get("tool_use_id") != tool_id
+                            or not isinstance(call.get("tool_name"), str)
+                            or not call["tool_name"] or not isinstance(response, dict)
+                            or tool_id not in expected_owners
+                            or tool_id in call_ids or tool_id in derived_batch_tools):
+                        raise ValueError("batch call identity")
+                    call_ids.append(tool_id)
+                    derived_batch_tools[tool_id] = {
+                        "tool_call_id": tool_id, "tool_name": call["tool_name"],
+                        "request_reference": expected_owners[tool_id],
+                        "status": call.get("status"),
+                        "error_type": response.get("error_type"),
+                        "execution_status": response.get("execution_status"),
+                        "input_sha256": receipt_row["input_sha256"],
+                        "sequence": expected_sequence,
+                    }
+                    if (call.get("status") == "error"
+                            and response.get("error_type") == "invalid_tool_params"
+                            and response.get("execution_status") == "not_started"):
+                        qualifying.append(tool_id)
+                        derived_rejections[tool_id] = {
+                            "tool_call_id": tool_id, "tool_name": call["tool_name"],
+                            "request_reference": expected_owners.get(tool_id),
+                            "status": "error", "error_type": "invalid_tool_params",
+                            "execution_status": "not_started",
+                            "input_sha256": receipt_row["input_sha256"],
+                            "sequence": expected_sequence,
+                        }
+                if (call_ids != receipt_row["tool_call_ids"]
+                        or qualifying != receipt_row["rejected_tool_call_ids"]):
+                    raise ValueError("batch receipt projection")
+        if derived_batch_tools != batch_tools["tools"]:
+            raise ValueError("derived batch tool state")
+        if derived_rejections != rejections["rejected"]:
+            raise ValueError("derived rejection state")
+        if (completed_ids & rejected_ids or rejected_ids - expected_ids
+                or batch_ids != expected_ids):
+            raise ValueError("ambiguous rejected tool")
         if (receipt["expected_tool_count"] != len(expected_ids)
-                or receipt["completed_tool_count"] != len(expected_ids & completed_ids)):
+                or receipt["batched_tool_count"] != len(expected_ids & batch_ids)
+                or receipt["completed_tool_count"] != len(expected_ids & completed_ids)
+                or receipt["rejected_tool_count"] != len(expected_ids & rejected_ids)):
             raise ValueError("derived tool reconciliation")
         if receipt.get("status") != "PASS" or receipt.get("fault_sha256") is not None \
                 or receipt.get("fault_reason") is not None \
-                or incomplete or receipt["expected_tool_count"] != receipt["completed_tool_count"]:
+                or incomplete or receipt["expected_tool_count"] != receipt["batched_tool_count"] \
+                or receipt["expected_tool_count"] != (\
+                    receipt["completed_tool_count"] + receipt["rejected_tool_count"]):
             return ["LIFECYCLE_AUDIT_FAULT"]
         return []
     except (OSError, UnicodeError, ValueError, TypeError, RuntimeError,

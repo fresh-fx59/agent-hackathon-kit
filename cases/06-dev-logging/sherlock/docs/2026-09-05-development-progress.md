@@ -14,7 +14,7 @@ No provider contact until the offline repair gates pass. Fresh manifests require
 |---|---|---|
 | 1. Stream audit parser | verified | Synthetic real-SSE regression red→green, malformed-stream/accounting coverage, one review |
 | 2. Version and run receipts | verified; v45 frozen and registered | Immutable package identity rejects changed bytes before contact; every experiment has outcome |
-| 3. Evidence/validator/supervisor repair | verified; full controller→runner→proxy composition passed | Masked failures, missing evidence, and lost supervision detected with owned cleanup |
+| 3. Evidence/validator/supervisor repair | integration passed; actual-client guardian timing repair in progress | Masked failures, missing evidence, and lost supervision detected with owned cleanup |
 | 4. Efficient report-review skill | usable, fixture limitations recorded | Correct evidence-cited comparisons with measured context use |
 | 5. Raw corpus and target qualification | fresh raw intake and remote input hashes verified; provider qualification pending | Exact raw inputs, original gates and target audit pass |
 | 6. Full corpus and fresh new corpus | planned | Both reports validated on the identical final skill package |
@@ -134,3 +134,5 @@ runtime prose/script change creates v45 before testing that changed package.
 - 2026-09-05T22:13:17.962008+00:00 — Root selected harness regression suite PASS30tests/37.458s after helper fingerprint propagation. Shell syntax, modified Python compilation, and diff-check pass. Full-run composition fixture continues; final package remains frozen v45.
 
 - 2026-09-05T22:16:03.365029+00:00 — Root independently reran final full-run composition/audit file: PASS8tests/4.242s. Real controller/runner/proxy with explicit mock Qwen, provider and fixture process/observer state; no model-quality claim. All reviewed integration changes ready for commit and test-host sync. Repository scripts/verify.sh remains absent from tracked tree; existing Sherlock verify.sh is historical live v1 benchmark and is not substituted. Ran scoped complete suites, shell/Python checks and diff-check instead; no prod deploy or git push.
+
+- 2026-09-06 — Actual subscription qualification r3 exposed guardian completion race despite offline composition pass. Full evidence and successive r1/r2/r3 findings are in docs/run-reports/2026-09-06-v45-qualification-r1.md. No DeepSeek call; v45 unchanged. Repair separates continuous supervision from nextrequest/terminal tool completion; root review also requires preserving continuous observation sequence regression detection.

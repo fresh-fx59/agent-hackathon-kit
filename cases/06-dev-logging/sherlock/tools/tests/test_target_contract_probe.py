@@ -124,7 +124,7 @@ class TargetContractProbeTest(unittest.TestCase):
             '--workspace "$PWD" --nonce "$SHERLOCK_RUN_NONCE" '
             '--boot-id "$SHERLOCK_BOOT_ID"'
             % (ROOT / "eval" / "bench" / "lifecycle-supervisor.py"))
-        for event in ("PreToolUse", "PostToolUse", "PostToolUseFailure"):
+        for event in ("PreToolUse", "PostToolUse", "PostToolUseFailure", "PostToolBatch"):
             hook = settings["hooks"][event][0]["hooks"][0]
             self.assertEqual(hook, {"type": "command",
                                     "command": expected_hook_command,

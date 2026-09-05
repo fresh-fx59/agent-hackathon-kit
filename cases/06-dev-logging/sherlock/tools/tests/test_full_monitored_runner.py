@@ -82,10 +82,150 @@ class MonitoredTerminalAuditTest(unittest.TestCase):
                 self.observer, self.workspace, self.nonce, self.boot,
                 json.dumps(event, sort_keys=True).encode())
             self.assertTrue(result["continue"])
+        batch_event = {
+            "hook_event_name": "PostToolBatch", "session_id": "session-1",
+            "tool_calls": [{
+                "tool_name": "skill", "tool_input": {"skill": "mockskill"},
+                "tool_use_id": "call-provider-1",
+                "tool_call_id": "call-provider-1", "status": "success",
+                "tool_response": {"execution_status": "completed"},
+            }],
+        }
+        result = LIFECYCLE.handle_hook(
+            self.observer, self.workspace, self.nonce, self.boot,
+            json.dumps(batch_event, sort_keys=True).encode())
+        self.assertTrue(result["continue"])
         receipt = self.finish()
         self.assertEqual(receipt["expected_tool_count"], 1)
         self.assertEqual(receipt["completed_tool_count"], 1)
         self.assertEqual(VERDICT.monitored_lifecycle_failures(self.trace), [])
+
+    def test_auditor_rejects_replayed_completed_batch_id(self):
+        LIFECYCLE.register_expected_tools(
+            self.observer, self.nonce, self.boot, "request-1", ["call-provider-1"])
+        for phase in ("PreToolUse", "PostToolUse"):
+            event = {
+                "hook_event_name": phase, "session_id": "session-1",
+                "tool_use_id": "toolu-qwen-1", "tool_call_id": "call-provider-1",
+                "tool_name": "skill", "tool_input": {"skill": "mockskill"},
+            }
+            if phase == "PostToolUse":
+                event["tool_response"] = {"ok": True}
+            self.assertTrue(LIFECYCLE.handle_hook(
+                self.observer, self.workspace, self.nonce, self.boot,
+                json.dumps(event, sort_keys=True).encode())["continue"])
+        batch_event = {
+            "hook_event_name": "PostToolBatch", "session_id": "session-1",
+            "tool_calls": [{
+                "tool_name": "skill", "tool_input": {"skill": "mockskill"},
+                "tool_use_id": "call-provider-1", "tool_call_id": "call-provider-1",
+                "status": "success", "tool_response": {"execution_status": "completed"},
+            }],
+        }
+        self.assertTrue(LIFECYCLE.handle_hook(
+            self.observer, self.workspace, self.nonce, self.boot,
+            json.dumps(batch_event, sort_keys=True).encode())["continue"])
+        receipt = self.finish()
+
+        batch_path = self.observer / "post-tool-batch-events.jsonl"
+        batch_path.write_bytes(batch_path.read_bytes() + batch_path.read_bytes())
+        receipt["post_tool_batch_events_sha256"] = LIFECYCLE.sha256(
+            batch_path.read_bytes())
+        receipt = LIFECYCLE._sign_record(self.observer, receipt)
+        (self.trace / "lifecycle-receipt.json").write_bytes(
+            LIFECYCLE._canonical(receipt) + b"\n")
+        self.assertEqual(VERDICT.monitored_lifecycle_failures(self.trace),
+                         ["LIFECYCLE_AUDIT_INVALID"])
+
+    def test_prevalidation_rejection_is_separately_bound_and_audited(self):
+        LIFECYCLE.register_expected_tools(
+            self.observer, self.nonce, self.boot, "request-1", ["call-invalid"])
+        event = {
+            "cwd": str(self.workspace),
+            "hook_event_name": "PostToolBatch",
+            "permission_mode": "default",
+            "session_id": "session-1",
+            "timestamp": "2026-09-06T00:00:00.000Z",
+            "tool_calls": [{
+                "tool_name": "run_shell_command",
+                "tool_input": {"command": "true", "directory": "/outside"},
+                "tool_use_id": "call-invalid",
+                "tool_call_id": "call-invalid",
+                "status": "error",
+                "tool_response": {
+                    "error": "Directory is outside the workspace",
+                    "error_type": "invalid_tool_params",
+                    "execution_status": "not_started",
+                },
+            }],
+            "transcript_path": str(self.workspace / "transcript.jsonl"),
+        }
+        result = LIFECYCLE.handle_hook(
+            self.observer, self.workspace, self.nonce, self.boot,
+            json.dumps(event, sort_keys=True).encode())
+        self.assertTrue(result["continue"])
+        receipt = self.finish()
+        self.assertEqual(receipt["expected_tool_count"], 1)
+        self.assertEqual(receipt["completed_tool_count"], 0)
+        self.assertEqual(receipt["rejected_tool_count"], 1)
+        self.assertEqual(VERDICT.monitored_lifecycle_failures(self.trace), [])
+
+        rejections = json.loads((self.observer / "rejections.json").read_text())
+        rejections["rejected"]["call-invalid"]["input_sha256"] = "0" * 64
+        (self.observer / "rejections.json").write_text(
+            json.dumps(rejections, sort_keys=True, separators=(",", ":")) + "\n")
+        receipt["rejections_sha256"] = LIFECYCLE.sha256(
+            (self.observer / "rejections.json").read_bytes())
+        receipt = LIFECYCLE._sign_record(self.observer, receipt)
+        (self.trace / "lifecycle-receipt.json").write_bytes(
+            LIFECYCLE._canonical(receipt) + b"\n")
+        self.assertEqual(VERDICT.monitored_lifecycle_failures(self.trace),
+                         ["LIFECYCLE_AUDIT_INVALID"])
+
+    def test_auditor_rejects_unknown_nonrejection_batch_id(self):
+        LIFECYCLE.register_expected_tools(
+            self.observer, self.nonce, self.boot, "request-1", ["call-valid"])
+        for phase in ("PreToolUse", "PostToolUse"):
+            event = {
+                "hook_event_name": phase, "session_id": "session-1",
+                "tool_use_id": "toolu-valid", "tool_call_id": "call-valid",
+                "tool_name": "run_shell_command", "tool_input": {"command": "true"},
+            }
+            if phase == "PostToolUse":
+                event["tool_response"] = {"ok": True}
+            self.assertTrue(LIFECYCLE.handle_hook(
+                self.observer, self.workspace, self.nonce, self.boot,
+                json.dumps(event, sort_keys=True).encode())["continue"])
+        batch_event = {
+            "hook_event_name": "PostToolBatch", "session_id": "session-1",
+            "tool_calls": [{"tool_name": "run_shell_command",
+                            "tool_input": {"command": "true"},
+                            "tool_use_id": "call-valid", "tool_call_id": "call-valid",
+                            "status": "success",
+                            "tool_response": {"execution_status": "completed"}}],
+        }
+        self.assertTrue(LIFECYCLE.handle_hook(
+            self.observer, self.workspace, self.nonce, self.boot,
+            json.dumps(batch_event, sort_keys=True).encode())["continue"])
+        receipt = self.finish()
+
+        batch_path = self.observer / "post-tool-batch-events.jsonl"
+        batch = json.loads(batch_path.read_text())
+        raw = json.loads(LIFECYCLE.base64.b64decode(batch["input_base64"]))
+        raw["tool_calls"][0]["tool_use_id"] = "call-unknown"
+        raw["tool_calls"][0]["tool_call_id"] = "call-unknown"
+        raw_bytes = json.dumps(raw, sort_keys=True).encode()
+        batch["input_base64"] = LIFECYCLE.base64.b64encode(raw_bytes).decode()
+        batch["input_sha256"] = LIFECYCLE.sha256(raw_bytes)
+        batch["tool_call_ids"] = ["call-unknown"]
+        batch_path.write_bytes(LIFECYCLE._canonical(batch) + b"\n")
+        receipt["post_tool_batch_events_sha256"] = LIFECYCLE.sha256(
+            batch_path.read_bytes())
+        receipt = LIFECYCLE._sign_record(self.observer, receipt)
+        (self.trace / "lifecycle-receipt.json").write_bytes(
+            LIFECYCLE._canonical(receipt) + b"\n")
+        self.assertEqual(VERDICT.monitored_lifecycle_failures(self.trace),
+                         ["LIFECYCLE_AUDIT_INVALID"])
 
     def test_schema2_trace_without_launch_is_rejected(self):
         other = Path(self.temp.name) / "unlaunched"

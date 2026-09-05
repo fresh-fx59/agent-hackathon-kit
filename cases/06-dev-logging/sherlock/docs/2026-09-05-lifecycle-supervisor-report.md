@@ -6,13 +6,18 @@ v45 package content, and target findings are outside this report.
 
 ## Current state
 
-The lifecycle supervisor is implemented in the development harness. A real
-selected-subscription qualification exposed and reproduced a guardian boundary
-error after its first provider response. Its narrow repair passed local tests
-and scoped review; the subsequent installed-Qwen smoke exposed the distinct
-provider/Qwen tool-ID domains. The exact-ID correlation repair is locally green
-and awaiting the fresh installed-Qwen rerun. No metered target provider contact
-has occurred.
+The lifecycle supervisor is implemented in the development harness. Its
+guardian timing and provider/Qwen tool-ID repairs passed local tests, scoped
+review, and installed-Qwen 0.22.0 remote smoke. Selected-subscription
+qualification r4 then exposed a separate client-prevalidation boundary: Qwen
+rejected an invalid tool directory before firing PreToolUse and the next proxy
+dispatch correctly refused the still-unreconciled provider expectation. The
+narrow PostToolBatch repair now binds every expected provider ID to exactly one
+accepted client batch item and either one completed Pre/Post pair or the exact
+`invalid_tool_params`/`not_started` rejection. Local affected suites, independent
+root tests, and the first installed-client rejection smoke passed; the final
+installed-client rerun against the review-fixed exact-once snapshot is pending.
+No metered target provider contact occurred while developing this repair.
 
 ## Timeline
 
@@ -244,6 +249,148 @@ has occurred.
   cross-slot collision was already rejected by the downstream key-shape check.
   The delimiter check was retained as the cleaner input boundary because it
   prevents any ambiguous pair key from being written at all.
+- 2026-09-06 — The final installed-Qwen 0.22.0 remote r4 smoke passed against
+  helper SHA-256 `f38353b4e788dab6a210b66dcd463cec2a6f67be41e48d3998093d9f8b3f4197`.
+  Built-in `skill` and delayed `run_shell_command` calls each produced matching
+  Pre/Post pairs whose provider call IDs reconciled to their distinct Qwen
+  tool-use IDs while the guardian stayed live. A deliberate no-hook case
+  refused the next dispatch with `EXPECTED_TOOL_HOOK_MISSING` and no second
+  successful response. The remote/local mirror inventories matched all 111
+  regular files at canonical SHA-256
+  `cd454472b7c40e3932d9b3f319040a0639f940bd185b16d440d374e3d929f67f`;
+  the durable r4 JSON and Markdown reports retain the identities and mappings.
+
+- 2026-09-06 — Selected-subscription qualification r4 stopped before a
+  second provider dispatch with `EXPECTED_TOOL_HOOK_MISSING`. The retained Qwen
+  transcript binds the provider call ID to `invalid_tool_params` and
+  `executionStatus: not_started`: the model supplied the trace root as a shell
+  directory, outside Qwen's registered workspace. Installed Qwen 0.22.0 source
+  confirms `buildInvocation` rejects this directory before
+  `_executeToolCallBody` creates an internal ID or fires PreToolUse, so absence
+  of a Pre/Post pair is correct for this specific rejected attempt. The outbound
+  next-request tool message drops `error_type` and `execution_status`, therefore
+  neither its text nor a generic tool error can waive the expectation.
+- 2026-09-06 — Scoped the repair before editing. Monitored settings will add
+  Qwen's awaited `PostToolBatch` hook. The helper will accept a hookless expected
+  call only from a retained raw batch item with the exact provider call ID,
+  `status: error`, `error_type: invalid_tool_params`, and
+  `execution_status: not_started`. Expected IDs must form a disjoint union of
+  completed/denied Pre/Post pairs and authenticated pre-execution rejections;
+  overlaps, duplicate or unexpected IDs, mismatched names when present, and all
+  other error states fault. Missing/crashed batch delivery remains
+  `EXPECTED_TOOL_HOOK_MISSING`, and every started or executed call still needs
+  its normal pair. The signed receipt and independent terminal auditor will bind
+  separate rejection state, raw-event digests, and rejected counts. Acceptance
+  requires red/green helper, proxy, auditor, and settings regressions plus an
+  installed-Qwen invalid-directory-then-repaired-call smoke; v45 remains
+  unchanged.
+
+- 2026-09-06 — Added the exact captured batch payload and three negative
+  helper cases plus an independent terminal-audit case before implementation.
+  The four-test run failed four assertions in 0.044s: the valid prevalidation
+  rejection was denied as `INVALID_HOOK_INPUT`, both successful/started batch
+  cases reported that generic phase error instead of the required missing-hook
+  fault, and terminal rejection evidence could not be created. This is the
+  expected red state for the absent PostToolBatch boundary.
+
+- 2026-09-06 — Implemented the exact PostToolBatch input gate, durable
+  rejection state and raw batch journal, disjoint dispatch/terminal
+  reconciliation, signed receipt fields, independent raw-event audit, and the
+  fourth monitored settings hook. The five focused helper, negative, terminal
+  auditor, and settings tests passed in 0.240s. Successful or started tool
+  results without normal pairs now fault as `EXPECTED_TOOL_HOOK_MISSING`; only
+  the captured invalid/not-started tuple discharges its exact provider ID.
+
+- 2026-09-06 — Root review identified that the independent auditor did
+  not reject an unknown non-rejection ID in an otherwise valid raw batch. A
+  forged signed fixture with a completed expected call and an unrelated batch
+  success incorrectly audited clean in 0.014s. This red regression proves the
+  auditor still needs the helper's every-batch-ID-must-be-expected invariant.
+
+- 2026-09-06 — Added the missing expected-owner check to the raw batch
+  audit. The forged unknown-success regression then passed in 0.013s, so both
+  qualifying rejections and ordinary batch items must now map to provider IDs
+  already registered from accepted responses.
+
+- 2026-09-06 — Full affected local suites passed: 28 lifecycle tests in
+  0.491s, 11 monitored-runner/auditor tests in 4.825s, 52 proxy tests in
+  31.954s, 43 verdict tests in 7.908s, and 74 target-contract tests in 62.379s.
+  A final six-case helper/auditor/proxy group passed in 0.705s after the
+  expected-owner audit repair; compilation and `git diff --check` passed. The
+  frozen production identities sent to the installed-client smoke are helper
+  `9e91112fe810b505b5cce9e37a42d8f5838d0e2d33a781e46e5f2da4d96ee685`,
+  terminal auditor
+  `c5937287748f6ed49fa51f1990bdd28369f404ecf4eee698fe9b0ad022fc90a6`,
+  and monitored settings producer
+  `12f492d9f3932c3625ae2285f0a9fd00b58ffae450e79bca55ef65f9f75a1361`.
+
+- 2026-09-06 — The first remote installed-Qwen 0.22 smoke against frozen
+  helper `9e9111…` passed all three behavioral modes: invalid then repaired made
+  three loopback requests and reconciled one batch rejection plus the repaired
+  Pre/Post pair; invalid without a batch stopped the next dispatch; a successful
+  batch without execution hooks stopped inside PostToolBatch. The last denial's
+  exact raw input and explicit `continue:false` output were retained in
+  `hook-fault-events.jsonl`, while accepted batches were retained in the batch
+  journal. This disproved the initial concern that denied batch input was lost.
+- 2026-09-06 — The required Codex gpt-5.6-sol medium review returned `FAIL`
+  with two valid findings in the same boundary. A normally completed pair did
+  not also have to appear in accepted PostToolBatch evidence, so missing or
+  fail-open batch delivery could pass. Duplicate detection likewise covered
+  rejected IDs but not completed IDs replayed across batches. Both contradict
+  the scoped missing-batch and duplicate-ID contract. The repair will durably
+  bind all batch IDs, require each expected provider ID in exactly one accepted
+  batch as well as exactly one completed/rejected outcome, and make the auditor
+  independently derive the same uniqueness from raw bytes. The retained review
+  output SHA-256 is
+  `70a6a19a9fb058e4aa32638177bcd7e4dd2a2d7bf332f51d13a833a7a1dcbf61`;
+  there will be no second model-review round.
+
+- 2026-09-06 — Added both review regressions before repair. A completed
+  pair without any batch receipt incorrectly passed dispatch, and an identical
+  successful batch replay incorrectly returned `continue:true`; both tests
+  failed in 0.018s, reproducing the review findings exactly.
+
+- 2026-09-06 — The first combined helper/runner run after enforcing one batch
+  item per expected provider ID failed five existing fixtures in 4.853s. Three
+  completed-pair fixtures and the monitored terminal fixture omitted the real
+  client's successful `PostToolBatch`; the older missing-hook assertion now hit
+  the earlier and correct `EXPECTED_TOOL_BATCH_MISSING` boundary. This is test
+  drift exposed by the stricter contract, not a reason to weaken it; the
+  fixtures must model the installed client's batch event explicitly.
+
+- 2026-09-06 — Updated the real-client fixtures and added an independent
+  terminal-auditor replay regression. Eight focused cases passed in 0.208s:
+  missing batch, replayed completed batch, missing execution hooks, completed
+  pair, provider/client ID bridge, live guardian timing, terminal bridge, and
+  forged raw-journal replay. Compilation and diff checks passed. The final
+  production snapshot sent for installed-client rerun is helper
+  `c8fb1cd4e6f149b9f1c49c3d9b6e2974412bc7c76c5c92646b21f3957f599eda`,
+  auditor
+  `65c6afb410efcf4a94775ba9086f5712719bd6aef13c07a69ceb847635ee79d6`,
+  with settings producer unchanged at
+  `12f492d9f3932c3625ae2285f0a9fd00b58ffae450e79bca55ef65f9f75a1361`.
+
+- 2026-09-06 — On the final snapshot, the combined helper/runner suite passed
+  42 tests in 5.231s, the terminal-verdict suite passed 43 in 7.502s, and the
+  target-contract suite passed 74 in 61.288s. The proxy suite had one stale
+  missing-hook assertion that now correctly encountered the earlier missing
+  batch boundary, plus one streaming connection reset in an unrelated
+  pass-through test while the long suites ran concurrently. Both proxy cases
+  require isolated reruns after updating only the stale fixture expectation.
+
+- 2026-09-06 — The updated proxy missing-hook fixture and the initially reset
+  streaming case passed together in 1.218s. A subsequent full proxy run passed
+  all lifecycle cases but hit a connection reset in a different existing
+  streaming-response case (52 tests, 34.024s); that exact case then passed alone
+  in 0.611s. This isolates the resets from the batch reconciliation change, but
+  the full proxy suite still needs one clean recorded run.
+
+- 2026-09-06 — The complete proxy suite then passed all 52 tests in 34.389s on
+  an isolated rerun. Root independently passed 30 helper tests in 0.481s and 12
+  monitored-runner/auditor tests in 4.784s on the same final helper/auditor
+  hashes, and inspected the exact-once dispatch and raw-auditor reconstruction;
+  both retained Codex review findings are addressed with no further review
+  requested.
 
 ## Limits and next boundary
 

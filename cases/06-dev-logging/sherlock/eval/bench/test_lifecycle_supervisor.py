@@ -58,6 +58,45 @@ class LifecycleSupervisorTest(unittest.TestCase):
         return LIFECYCLE.handle_hook(
             self.observer, self.workspace, self.nonce, self.boot, raw)
 
+    def post_tool_batch(self, calls):
+        row = {
+            "cwd": str(self.workspace),
+            "hook_event_name": "PostToolBatch",
+            "permission_mode": "default",
+            "session_id": "session-1",
+            "timestamp": "2026-09-06T00:00:00.000Z",
+            "tool_calls": calls,
+            "transcript_path": str(self.workspace / "transcript.jsonl"),
+        }
+        raw = json.dumps(row, sort_keys=True).encode()
+        return LIFECYCLE.handle_hook(
+            self.observer, self.workspace, self.nonce, self.boot, raw)
+
+    @staticmethod
+    def invalid_directory_call(tool_id="tool-1", **changes):
+        row = {
+            "tool_name": "run_shell_command",
+            "tool_input": {"command": "true", "directory": "/outside-workspace"},
+            "tool_use_id": tool_id,
+            "tool_call_id": tool_id,
+            "status": "error",
+            "tool_response": {
+                "error": "Directory is not within registered workspace directories",
+                "error_type": "invalid_tool_params",
+                "execution_status": "not_started",
+            },
+        }
+        row.update(changes)
+        return row
+
+    @staticmethod
+    def successful_call(tool_id="tool-1"):
+        return {
+            "tool_name": "run_shell_command", "tool_input": {"command": "true"},
+            "tool_use_id": tool_id, "tool_call_id": tool_id, "status": "success",
+            "tool_response": {"execution_status": "completed"},
+        }
+
     def write_active(self, worklists):
         work = self.workspace / "work"
         work.mkdir(exist_ok=True)
@@ -155,6 +194,93 @@ class LifecycleSupervisorTest(unittest.TestCase):
                 self.observer, self.nonce, self.boot,
                 now_monotonic_ns=10_000_000_001)
 
+    def test_exact_client_prevalidation_rejection_discharge_is_separate(self):
+        self.observe()
+        LIFECYCLE.register_expected_tools(
+            self.observer, self.nonce, self.boot, "request-1", ["tool-1"])
+        result = self.post_tool_batch([self.invalid_directory_call()])
+        self.assertTrue(result["continue"])
+        self.assertEqual(
+            LIFECYCLE.check_dispatch(
+                self.observer, self.nonce, self.boot,
+                now_monotonic_ns=10_000_000_001)["sequence"], 0)
+        rejected = json.loads((self.observer / "rejections.json").read_text())
+        self.assertEqual(set(rejected["rejected"]), {"tool-1"})
+        batch = json.loads(
+            (self.observer / "post-tool-batch-events.jsonl").read_text().splitlines()[0])
+        self.assertEqual(batch["input_sha256"], LIFECYCLE.sha256(base64.b64decode(
+            batch["input_base64"])))
+
+    def test_batch_success_or_started_error_cannot_waive_missing_hooks(self):
+        for changes in (
+                {"status": "success", "tool_response": {"execution_status": "completed"}},
+                {"tool_response": {"error_type": "invalid_tool_params",
+                                   "execution_status": "started"}},
+                {"tool_response": {"error_type": "execution_error",
+                                   "execution_status": "not_started"}}):
+            with self.subTest(changes=changes):
+                shutil.rmtree(self.observer)
+                self.observer = LIFECYCLE.init_segment(
+                    self.trace, self.nonce, self.boot, capability=self.capability)
+                self.observe()
+                LIFECYCLE.register_expected_tools(
+                    self.observer, self.nonce, self.boot, "request-1", ["tool-1"])
+                result = self.post_tool_batch([
+                    self.invalid_directory_call(**changes)])
+                self.assertFalse(result["continue"])
+                fault = json.loads((self.observer / "fault.json").read_text())
+                self.assertEqual(fault["reason"], "EXPECTED_TOOL_HOOK_MISSING")
+
+    def test_batch_rejection_cannot_overlap_pair_or_use_unknown_duplicate_id(self):
+        cases = ("overlap", "unknown", "duplicate", "replayed")
+        for case in cases:
+            with self.subTest(case=case):
+                shutil.rmtree(self.observer)
+                self.observer = LIFECYCLE.init_segment(
+                    self.trace, self.nonce, self.boot, capability=self.capability)
+                self.observe()
+                LIFECYCLE.register_expected_tools(
+                    self.observer, self.nonce, self.boot, "request-1", ["tool-1"])
+                if case == "overlap":
+                    self.hook("PreToolUse")
+                    self.hook("PostToolUse", tool_response={"ok": True})
+                    calls = [self.invalid_directory_call()]
+                elif case == "unknown":
+                    calls = [self.invalid_directory_call("unknown")]
+                elif case == "duplicate":
+                    calls = [self.invalid_directory_call(), self.invalid_directory_call()]
+                else:
+                    calls = [self.invalid_directory_call()]
+                result = self.post_tool_batch(calls)
+                if case == "replayed" and result["continue"]:
+                    result = self.post_tool_batch([self.invalid_directory_call()])
+                self.assertFalse(result["continue"])
+                self.assertTrue((self.observer / "fault.json").exists())
+
+    def test_completed_pair_still_requires_one_batch_receipt(self):
+        self.observe()
+        LIFECYCLE.register_expected_tools(
+            self.observer, self.nonce, self.boot, "request-1", ["tool-1"])
+        self.hook("PreToolUse")
+        self.hook("PostToolUse", tool_response={"ok": True})
+        with self.assertRaisesRegex(LIFECYCLE.LifecycleFault,
+                                    "EXPECTED_TOOL_BATCH_MISSING"):
+            LIFECYCLE.check_dispatch(
+                self.observer, self.nonce, self.boot,
+                now_monotonic_ns=10_000_000_001)
+
+    def test_completed_pair_cannot_replay_batch_receipt(self):
+        self.observe()
+        LIFECYCLE.register_expected_tools(
+            self.observer, self.nonce, self.boot, "request-1", ["tool-1"])
+        self.hook("PreToolUse")
+        self.hook("PostToolUse", tool_response={"ok": True})
+        self.assertTrue(self.post_tool_batch([self.successful_call()])["continue"])
+        replay = self.post_tool_batch([self.successful_call()])
+        self.assertFalse(replay["continue"])
+        fault = json.loads((self.observer / "fault.json").read_text())
+        self.assertEqual(fault["reason"], "CLIENT_BATCH_DUPLICATE")
+
     def test_pre_snapshot_preserves_deleted_registered_bytes_and_post_faults(self):
         work = self.write_active(["worklist.tsv"])
         original = b"id\t?\trare\tSecurity.jsonl:1\t1\trecord\n"
@@ -223,10 +349,10 @@ class LifecycleSupervisorTest(unittest.TestCase):
         self.observe()
         LIFECYCLE.register_expected_tools(
             self.observer, self.nonce, self.boot, "request-1", ["tool-1"])
-        with self.assertRaisesRegex(LIFECYCLE.LifecycleFault, "expected tool"):
-            LIFECYCLE.check_dispatch(
-                self.observer, self.nonce, self.boot,
-                now_monotonic_ns=10_000_000_001)
+        result = self.post_tool_batch([self.successful_call()])
+        self.assertFalse(result["continue"])
+        fault = json.loads((self.observer / "fault.json").read_text())
+        self.assertEqual(fault["reason"], "EXPECTED_TOOL_HOOK_MISSING")
 
     def test_completed_hook_pair_satisfies_provider_expectation(self):
         self.observe()
@@ -234,6 +360,7 @@ class LifecycleSupervisorTest(unittest.TestCase):
             self.observer, self.nonce, self.boot, "request-1", ["tool-1"])
         self.hook("PreToolUse")
         self.hook("PostToolUse", tool_response={"ok": True})
+        self.assertTrue(self.post_tool_batch([self.successful_call()])["continue"])
         row = LIFECYCLE.check_dispatch(
             self.observer, self.nonce, self.boot,
             now_monotonic_ns=10_000_000_001)
@@ -247,6 +374,8 @@ class LifecycleSupervisorTest(unittest.TestCase):
                   tool_call_id="call-provider-1")
         self.hook("PostToolUse", tool_id="toolu-qwen-1",
                   tool_call_id="call-provider-1", tool_response={"ok": True})
+        self.assertTrue(self.post_tool_batch(
+            [self.successful_call("call-provider-1")])["continue"])
         row = LIFECYCLE.check_dispatch(
             self.observer, self.nonce, self.boot,
             now_monotonic_ns=10_000_000_001)
@@ -446,6 +575,8 @@ class LifecycleSupervisorTest(unittest.TestCase):
             self.assertFalse((self.observer / "fault.json").exists())
 
             self.hook("PostToolUse", tool_response={"ok": True})
+            self.assertTrue(self.post_tool_batch(
+                [self.successful_call()])["continue"])
             LIFECYCLE.check_dispatch(self.observer, self.nonce, boot)
         finally:
             for process in (guardian, controller):

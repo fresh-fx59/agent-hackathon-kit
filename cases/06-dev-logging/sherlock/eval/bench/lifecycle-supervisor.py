@@ -43,8 +43,10 @@ RECEIPT_FIELDS = {
     "observer_dir", "observer_identity_sha256", "lifecycle_helper_sha256",
     "guardian_pid", "guardian_start_ticks", "guardian_exit_code",
     "last_accepted_observation_sha256", "registry_sha256", "pairs_sha256",
-    "expectations_sha256", "hook_starts_sha256", "hook_events_sha256",
-    "expected_tool_count", "completed_tool_count", "fault_sha256",
+    "expectations_sha256", "batch_tools_sha256", "rejections_sha256", "hook_starts_sha256",
+    "hook_events_sha256", "post_tool_batch_events_sha256",
+    "expected_tool_count", "batched_tool_count", "completed_tool_count",
+    "rejected_tool_count", "fault_sha256",
     "fault_reason", "guardian_events_sha256", "status", "key_id",
     "hmac_sha256",
 }
@@ -346,6 +348,10 @@ def init_segment(trace, run_nonce, boot_id, *, capability=None,
                    _canonical({"schema": SCHEMA, "pairs": {}}) + b"\n", 0o600)
     _atomic_create(observer / "expectations.json",
                    _canonical({"schema": SCHEMA, "expected": {}}) + b"\n", 0o600)
+    _atomic_create(observer / "batch-tools.json",
+                   _canonical({"schema": SCHEMA, "tools": {}}) + b"\n", 0o600)
+    _atomic_create(observer / "rejections.json",
+                   _canonical({"schema": SCHEMA, "rejected": {}}) + b"\n", 0o600)
     _fsync_dir(observer)
     return observer
 
@@ -528,6 +534,54 @@ def _completed_tool_ids(state):
     return completed, sorted(pending)
 
 
+def _rejected_tool_ids(state):
+    if state.get("schema") != SCHEMA or not isinstance(state.get("rejected"), dict):
+        raise LifecycleFault("REJECTION_STATE_MALFORMED", "shape")
+    rejected = set()
+    fields = {"tool_call_id", "tool_name", "request_reference", "status",
+              "error_type", "execution_status", "input_sha256", "sequence"}
+    for call_id, row in state["rejected"].items():
+        if (not isinstance(call_id, str) or not call_id or len(call_id) > 4096
+                or not isinstance(row, dict) or set(row) != fields
+                or row.get("tool_call_id") != call_id
+                or not isinstance(row.get("tool_name"), str) or not row["tool_name"]
+                or not isinstance(row.get("request_reference"), str)
+                or not row["request_reference"]
+                or row.get("status") != "error"
+                or row.get("error_type") != "invalid_tool_params"
+                or row.get("execution_status") != "not_started"
+                or not _hex_digest(row.get("input_sha256"))
+                or type(row.get("sequence")) is not int or row["sequence"] < 0):
+            raise LifecycleFault("REJECTION_STATE_MALFORMED", "rejected call shape")
+        rejected.add(call_id)
+    return rejected
+
+
+def _batched_tool_ids(state):
+    if state.get("schema") != SCHEMA or not isinstance(state.get("tools"), dict):
+        raise LifecycleFault("BATCH_STATE_MALFORMED", "shape")
+    batched = set()
+    fields = {"tool_call_id", "tool_name", "request_reference", "status",
+              "error_type", "execution_status", "input_sha256", "sequence"}
+    for call_id, row in state["tools"].items():
+        if (not isinstance(call_id, str) or not call_id or len(call_id) > 4096
+                or not isinstance(row, dict) or set(row) != fields
+                or row.get("tool_call_id") != call_id
+                or not isinstance(row.get("tool_name"), str) or not row["tool_name"]
+                or not isinstance(row.get("request_reference"), str)
+                or not row["request_reference"]
+                or not isinstance(row.get("status"), str) or not row["status"]
+                or (row.get("error_type") is not None
+                    and not isinstance(row.get("error_type"), str))
+                or (row.get("execution_status") is not None
+                    and not isinstance(row.get("execution_status"), str))
+                or not _hex_digest(row.get("input_sha256"))
+                or type(row.get("sequence")) is not int or row["sequence"] < 0):
+            raise LifecycleFault("BATCH_STATE_MALFORMED", "tool shape")
+        batched.add(call_id)
+    return batched
+
+
 def _raise_fault(observer, run_nonce, reason, detail):
     row = _fault_unlocked(observer, run_nonce, reason, detail)
     raise LifecycleFault(row["reason"], row["detail"])
@@ -623,8 +677,25 @@ def check_dispatch(observer, run_nonce, boot_id, *, now_monotonic_ns=None):
             if expected.get("schema") != SCHEMA or not isinstance(expected.get("expected"), dict):
                 raise ValueError("expectation state shape")
             owners = _expected_tool_owners(expected)
+            batched = _batched_tool_ids(_load_json(observer / "batch-tools.json"))
+            rejected = _rejected_tool_ids(_load_json(observer / "rejections.json"))
+            overlap = completed & rejected
+            if overlap:
+                raise LifecycleFault("TOOL_OUTCOME_AMBIGUOUS", sorted(overlap)[0])
+            unexpected = rejected - set(owners)
+            if unexpected:
+                raise LifecycleFault("CLIENT_REJECTION_UNEXPECTED", sorted(unexpected)[0])
+            unexpected_batch = batched - set(owners)
+            if unexpected_batch:
+                raise LifecycleFault("CLIENT_BATCH_UNEXPECTED_TOOL",
+                                     sorted(unexpected_batch)[0])
+            missing_batch = set(owners) - batched
+            if missing_batch:
+                raise LifecycleFault("EXPECTED_TOOL_BATCH_MISSING",
+                                     sorted(missing_batch)[0])
             missing = []
-            missing.extend(tool_id for tool_id in owners if tool_id not in completed)
+            missing.extend(tool_id for tool_id in owners
+                           if tool_id not in completed and tool_id not in rejected)
         except LifecycleFault as exc:
             _raise_fault(observer, run_nonce, exc.reason, exc.detail)
         except (OSError, UnicodeError, ValueError, TypeError, AttributeError) as exc:
@@ -782,6 +853,118 @@ def _hook_key(event):
     return "%s\x1f%s" % (session, tool)
 
 
+def _handle_post_tool_batch(observer, run_nonce, boot_id, event, raw_input):
+    session = event.get("session_id")
+    calls = event.get("tool_calls")
+    if (not isinstance(session, str) or not session or len(session) > 4096
+            or not isinstance(calls, list) or not calls):
+        raise LifecycleFault("INVALID_HOOK_INPUT", "PostToolBatch shape")
+    input_hash = sha256(raw_input)
+    output = _hook_output("PostToolBatch", True)
+    with _locked(observer):
+        terminal = _load_json(observer / "fault.json", absent=None)
+        if terminal is not None:
+            return _hook_output("PostToolBatch", False,
+                                "terminal lifecycle fault: %s" % terminal.get("reason"))
+        identity = _identity(observer)
+        if identity.get("run_nonce") != run_nonce or identity.get("boot_id") != boot_id:
+            raise LifecycleFault("SEGMENT_IDENTITY_MISMATCH", "hook")
+        expected = _load_json(observer / "expectations.json")
+        pairs = _load_json(observer / "pairs.json")
+        batches = _load_json(observer / "batch-tools.json")
+        rejections = _load_json(observer / "rejections.json")
+        owners = _expected_tool_owners(expected)
+        completed, pending = _completed_tool_ids(pairs)
+        batched = _batched_tool_ids(batches)
+        rejected = _rejected_tool_ids(rejections)
+        if completed & rejected:
+            raise LifecycleFault("TOOL_OUTCOME_AMBIGUOUS", sorted(completed & rejected)[0])
+        if rejected - set(owners):
+            raise LifecycleFault("CLIENT_REJECTION_UNEXPECTED",
+                                 sorted(rejected - set(owners))[0])
+        if pending:
+            raise LifecycleFault("HOOK_PAIR_MISSING", "incomplete hook pair: %s" % pending[0])
+        call_ids = []
+        accepted = []
+        batch_rows = []
+        for call in calls:
+            if not isinstance(call, dict):
+                raise LifecycleFault("INVALID_HOOK_INPUT", "PostToolBatch call")
+            call_id = call.get("tool_call_id")
+            tool_use_id = call.get("tool_use_id")
+            tool_name = call.get("tool_name")
+            response = call.get("tool_response")
+            if (not isinstance(call_id, str) or not call_id or len(call_id) > 4096
+                    or tool_use_id != call_id
+                    or not isinstance(tool_name, str) or not tool_name
+                    or not isinstance(call.get("status"), str) or not call["status"]
+                    or not isinstance(response, dict)):
+                raise LifecycleFault("INVALID_HOOK_INPUT", "PostToolBatch call identity")
+            if call_id in call_ids:
+                raise LifecycleFault("CLIENT_REJECTION_DUPLICATE", call_id)
+            if call_id in batched:
+                raise LifecycleFault("CLIENT_BATCH_DUPLICATE", call_id)
+            call_ids.append(call_id)
+            owner = owners.get(call_id)
+            if owner is None:
+                raise LifecycleFault("CLIENT_BATCH_UNEXPECTED_TOOL", call_id)
+            is_rejected = (call.get("status") == "error"
+                           and response.get("error_type") == "invalid_tool_params"
+                           and response.get("execution_status") == "not_started")
+            if is_rejected:
+                if call_id in completed:
+                    raise LifecycleFault("TOOL_OUTCOME_AMBIGUOUS", call_id)
+                if call_id in rejected:
+                    raise LifecycleFault("CLIENT_REJECTION_DUPLICATE", call_id)
+                accepted.append((call_id, tool_name, owner))
+            elif call_id not in completed:
+                raise LifecycleFault(
+                    "EXPECTED_TOOL_HOOK_MISSING",
+                    "PostToolBatch terminal tool has no completed hook pair: %s" % call_id)
+        sequence_path = observer / "post-tool-batch-events.jsonl"
+        sequence = 0
+        if sequence_path.exists():
+            sequence = sum(1 for line in sequence_path.read_bytes().splitlines() if line)
+        _append(observer / "hook-starts.jsonl", {
+            "schema": SCHEMA, "run_nonce": run_nonce, "session_id": session,
+            "phase": "PostToolBatch", "input_sha256": input_hash,
+            "input_base64": base64.b64encode(raw_input).decode("ascii"),
+            "observed_at": _wall_now(), "monotonic_ns": time.monotonic_ns()})
+        receipt = {
+            "schema": SCHEMA, "run_nonce": run_nonce, "sequence": sequence,
+            "session_id": session, "phase": "PostToolBatch",
+            "input_sha256": input_hash,
+            "input_base64": base64.b64encode(raw_input).decode("ascii"),
+            "tool_call_ids": call_ids,
+            "rejected_tool_call_ids": [row[0] for row in accepted],
+            "output": output, "observed_at": _wall_now(),
+            "monotonic_ns": time.monotonic_ns(),
+        }
+        _append(sequence_path, receipt)
+        for call_id, tool_name, owner in accepted:
+            rejections["rejected"][call_id] = {
+                "tool_call_id": call_id, "tool_name": tool_name,
+                "request_reference": owner, "status": "error",
+                "error_type": "invalid_tool_params", "execution_status": "not_started",
+                "input_sha256": input_hash, "sequence": sequence,
+            }
+        for call in calls:
+            response = call["tool_response"]
+            call_id = call["tool_call_id"]
+            batch_rows.append((call_id, {
+                "tool_call_id": call_id, "tool_name": call["tool_name"],
+                "request_reference": owners[call_id], "status": call["status"],
+                "error_type": response.get("error_type"),
+                "execution_status": response.get("execution_status"),
+                "input_sha256": input_hash, "sequence": sequence,
+            }))
+        _atomic_replace(observer / "rejections.json", _canonical(rejections) + b"\n")
+        for call_id, row in batch_rows:
+            batches["tools"][call_id] = row
+        _atomic_replace(observer / "batch-tools.json", _canonical(batches) + b"\n")
+        return output
+
+
 def handle_hook(observer, workspace, run_nonce, boot_id, raw_input):
     observer = Path(observer)
     phase = "Unknown"
@@ -790,8 +973,12 @@ def handle_hook(observer, workspace, run_nonce, boot_id, raw_input):
             raise LifecycleFault("INVALID_HOOK_INPUT", "size")
         event = _strict_json(raw_input)
         phase = event.get("hook_event_name")
-        if phase not in ("PreToolUse", "PostToolUse", "PostToolUseFailure"):
+        if phase not in ("PreToolUse", "PostToolUse", "PostToolUseFailure",
+                         "PostToolBatch"):
             raise LifecycleFault("INVALID_HOOK_INPUT", "event phase")
+        if phase == "PostToolBatch":
+            return _handle_post_tool_batch(
+                observer, run_nonce, boot_id, event, raw_input)
         key = _hook_key(event)
         call_id = event["tool_call_id"]
         input_hash = sha256(raw_input)
@@ -927,15 +1114,24 @@ def finalize_segment(observer, trace, run_nonce, boot_id, *, run_tag,
                          "terminal receipt")
         pairs_raw = _read_regular(observer / "pairs.json")
         expected_raw = _read_regular(observer / "expectations.json")
+        batch_tools_raw = _read_regular(observer / "batch-tools.json")
+        rejections_raw = _read_regular(observer / "rejections.json")
         registry_raw = _read_regular(observer / "registry.json")
         pairs, expected = _strict_json(pairs_raw), _strict_json(expected_raw)
         try:
             expected_ids = set(_expected_tool_owners(expected))
             completed_ids, pending = _completed_tool_ids(pairs)
+            batched_ids = _batched_tool_ids(_strict_json(batch_tools_raw))
+            rejected_ids = _rejected_tool_ids(_strict_json(rejections_raw))
+            if (completed_ids & rejected_ids or rejected_ids - expected_ids
+                    or batched_ids != expected_ids):
+                raise LifecycleFault("TOOL_OUTCOME_AMBIGUOUS",
+                                     "terminal completed/rejected reconciliation")
         except LifecycleFault as exc:
             _fault_unlocked(observer, run_nonce, exc.reason, exc.detail)
-            expected_ids, completed_ids, pending = set(), set(), ["malformed"]
-        if pending or not expected_ids.issubset(completed_ids):
+            expected_ids, batched_ids, completed_ids, rejected_ids, pending = (
+                set(), set(), set(), set(), ["malformed"])
+        if pending or not expected_ids.issubset(completed_ids | rejected_ids):
             _fault_unlocked(observer, run_nonce, "HOOK_PAIR_MISSING",
                             "terminal hook reconciliation")
         fault_path = observer / "fault.json"
@@ -955,10 +1151,16 @@ def finalize_segment(observer, trace, run_nonce, boot_id, *, run_tag,
             "registry_sha256": sha256(registry_raw),
             "pairs_sha256": sha256(pairs_raw),
             "expectations_sha256": sha256(expected_raw),
+            "batch_tools_sha256": sha256(batch_tools_raw),
+            "rejections_sha256": sha256(rejections_raw),
             "hook_starts_sha256": _optional_digest(observer / "hook-starts.jsonl"),
             "hook_events_sha256": _optional_digest(observer / "hook-events.jsonl"),
+            "post_tool_batch_events_sha256": _optional_digest(
+                observer / "post-tool-batch-events.jsonl"),
             "expected_tool_count": len(expected_ids),
+            "batched_tool_count": len(expected_ids & batched_ids),
             "completed_tool_count": len(expected_ids & completed_ids),
+            "rejected_tool_count": len(expected_ids & rejected_ids),
             "fault_sha256": fault_sha,
             "fault_reason": fault.get("reason") if fault is not None else None,
             "guardian_events_sha256": _optional_digest(

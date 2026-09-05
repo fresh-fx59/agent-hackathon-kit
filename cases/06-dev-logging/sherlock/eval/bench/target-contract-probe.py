@@ -718,7 +718,8 @@ def prepare(args, secret_reader=None):
                 '--workspace "$PWD" --nonce "$SHERLOCK_RUN_NONCE" '
                 '--boot-id "$SHERLOCK_BOOT_ID"' % lifecycle_helper)
             hooks = settings_row.setdefault("hooks", {})
-            for event in ("PreToolUse", "PostToolUse", "PostToolUseFailure"):
+            for event in ("PreToolUse", "PostToolUse", "PostToolUseFailure",
+                          "PostToolBatch"):
                 if event in hooks:
                     raise ProbeFailure("TARGET_PROBE_PREPARE",
                                        "lifecycle hook collision")
