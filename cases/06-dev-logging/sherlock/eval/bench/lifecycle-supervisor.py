@@ -433,8 +433,10 @@ def register_expected_tools(observer, run_nonce, boot_id, request_reference,
     for value in tool_use_ids:
         if not isinstance(value, str) or not value or len(value) > 4096:
             raise LifecycleFault("INVALID_TOOL_EXPECTATION", "tool id")
-        if value not in cleaned:
-            cleaned.append(value)
+        if value in cleaned:
+            raise LifecycleFault("INVALID_TOOL_EXPECTATION",
+                                 "duplicate tool id: %s" % value)
+        cleaned.append(value)
     observer = Path(observer)
     with _locked(observer):
         terminal = _load_json(observer / "fault.json", absent=None)
@@ -446,6 +448,16 @@ def register_expected_tools(observer, run_nonce, boot_id, request_reference,
         state = _load_json(observer / "expectations.json")
         if state.get("schema") != SCHEMA or not isinstance(state.get("expected"), dict):
             _raise_fault(observer, run_nonce, "EXPECTATION_STATE_MALFORMED", "shape")
+        try:
+            owners = _expected_tool_owners(state)
+        except LifecycleFault as exc:
+            _raise_fault(observer, run_nonce, exc.reason, exc.detail)
+        for tool_id in cleaned:
+            owner = owners.get(tool_id)
+            if owner is not None and owner != request_reference:
+                _raise_fault(observer, run_nonce, "TOOL_EXPECTATION_REUSED",
+                             "%s belongs to %s, not %s" % (
+                                 tool_id, owner, request_reference))
         row = state["expected"].get(request_reference)
         if row is None:
             row = {"request_reference": request_reference, "tool_use_ids": [],
@@ -460,6 +472,60 @@ def register_expected_tools(observer, run_nonce, boot_id, request_reference,
             "request_reference": request_reference, "tool_use_ids": cleaned,
             "observed_at": _wall_now(), "monotonic_ns": time.monotonic_ns()})
         return row
+
+
+def _expected_tool_owners(state):
+    if state.get("schema") != SCHEMA or not isinstance(state.get("expected"), dict):
+        raise LifecycleFault("EXPECTATION_STATE_MALFORMED", "shape")
+    owners = {}
+    for request_reference, request in state["expected"].items():
+        if (not isinstance(request_reference, str) or not request_reference
+                or not isinstance(request, dict)
+                or request.get("request_reference") != request_reference
+                or not isinstance(request.get("tool_use_ids"), list)):
+            raise LifecycleFault("EXPECTATION_STATE_MALFORMED", "request shape")
+        seen = set()
+        for tool_id in request["tool_use_ids"]:
+            if (not isinstance(tool_id, str) or not tool_id
+                    or len(tool_id) > 4096 or tool_id in seen):
+                raise LifecycleFault("EXPECTATION_STATE_MALFORMED",
+                                     "invalid or duplicate tool id")
+            seen.add(tool_id)
+            owner = owners.get(tool_id)
+            if owner is not None and owner != request_reference:
+                raise LifecycleFault("TOOL_EXPECTATION_REUSED",
+                                     "%s belongs to %s and %s" % (
+                                         tool_id, owner, request_reference))
+            owners[tool_id] = request_reference
+    return owners
+
+
+def _completed_tool_ids(state):
+    if state.get("schema") != SCHEMA or not isinstance(state.get("pairs"), dict):
+        raise LifecycleFault("HOOK_STATE_MALFORMED", "shape")
+    owners = {}
+    completed = set()
+    pending = []
+    for key, pair in state["pairs"].items():
+        if (not isinstance(key, str) or key.count("\x1f") != 1
+                or any(not part for part in key.split("\x1f"))
+                or not isinstance(pair, dict)):
+            raise LifecycleFault("HOOK_STATE_MALFORMED", "pair shape")
+        call_id = pair.get("tool_call_id")
+        if not isinstance(call_id, str) or not call_id or len(call_id) > 4096:
+            raise LifecycleFault("HOOK_STATE_MALFORMED", "tool_call_id")
+        owner = owners.get(call_id)
+        if owner is not None and owner != key:
+            raise LifecycleFault("HOOK_CALL_ID_REUSED",
+                                 "%s belongs to %s and %s" % (call_id, owner, key))
+        owners[call_id] = key
+        pre, post = pair.get("pre"), pair.get("post")
+        if post is not None or (isinstance(pre, dict)
+                                and pre.get("output", {}).get("continue") is False):
+            completed.add(call_id)
+        elif pre is not None:
+            pending.append(key)
+    return completed, sorted(pending)
 
 
 def _raise_fault(observer, run_nonce, reason, detail):
@@ -500,20 +566,42 @@ def _validate_observation(observer, run_nonce, boot_id, now_monotonic_ns):
     return row
 
 
+def _check_supervision_unlocked(observer, run_nonce, boot_id, now):
+    terminal = _load_json(observer / "fault.json", absent=None)
+    if terminal is not None:
+        raise LifecycleFault("TERMINAL", "terminal lifecycle fault: %s" % terminal.get("reason"))
+    try:
+        return _validate_observation(observer, run_nonce, boot_id, now)
+    except LifecycleFault:
+        raise
+    except (OSError, UnicodeError, ValueError, TypeError) as exc:
+        _raise_fault(observer, run_nonce, "OBSERVATION_MALFORMED",
+                     "%s: %s" % (type(exc).__name__, exc))
+
+
+def _accept_observation_unlocked(observer, row, now):
+    accepted = {"schema": SCHEMA, "run_nonce": row["run_nonce"],
+                "sequence": row["sequence"], "monotonic_ns": row["monotonic_ns"],
+                "checked_at_monotonic_ns": now}
+    _atomic_replace(observer / "last-accepted-observation.json",
+                    _canonical(accepted) + b"\n")
+
+
+def check_supervision(observer, run_nonce, boot_id, *, now_monotonic_ns=None):
+    """Check the continuously enforceable observer and terminal-fault state."""
+    observer = Path(observer)
+    with _locked(observer):
+        now = time.monotonic_ns() if now_monotonic_ns is None else now_monotonic_ns
+        row = _check_supervision_unlocked(observer, run_nonce, boot_id, now)
+        _accept_observation_unlocked(observer, row, now)
+        return row
+
+
 def check_dispatch(observer, run_nonce, boot_id, *, now_monotonic_ns=None):
     observer = Path(observer)
     with _locked(observer):
-        terminal = _load_json(observer / "fault.json", absent=None)
-        if terminal is not None:
-            raise LifecycleFault("TERMINAL", "terminal lifecycle fault: %s" % terminal.get("reason"))
         now = time.monotonic_ns() if now_monotonic_ns is None else now_monotonic_ns
-        try:
-            row = _validate_observation(observer, run_nonce, boot_id, now)
-        except LifecycleFault:
-            raise
-        except (OSError, UnicodeError, ValueError, TypeError) as exc:
-            _raise_fault(observer, run_nonce, "OBSERVATION_MALFORMED",
-                         "%s: %s" % (type(exc).__name__, exc))
+        row = _check_supervision_unlocked(observer, run_nonce, boot_id, now)
         try:
             pairs = _load_json(observer / "pairs.json", absent={"schema": SCHEMA, "pairs": {}})
             if pairs.get("schema") != SCHEMA or not isinstance(pairs.get("pairs"), dict):
@@ -523,8 +611,10 @@ def check_dispatch(observer, run_nonce, boot_id, *, now_monotonic_ns=None):
         except (OSError, UnicodeError, ValueError, TypeError) as exc:
             _raise_fault(observer, run_nonce, "HOOK_STATE_MALFORMED",
                          "%s: %s" % (type(exc).__name__, exc))
-        pending = sorted(key for key, value in pairs.get("pairs", {}).items()
-                         if value.get("post") is None)
+        try:
+            completed, pending = _completed_tool_ids(pairs)
+        except LifecycleFault as exc:
+            _raise_fault(observer, run_nonce, exc.reason, exc.detail)
         if pending:
             _raise_fault(observer, run_nonce, "HOOK_PAIR_MISSING",
                          "incomplete hook pair: %s" % pending[0])
@@ -532,30 +622,18 @@ def check_dispatch(observer, run_nonce, boot_id, *, now_monotonic_ns=None):
             expected = _load_json(observer / "expectations.json")
             if expected.get("schema") != SCHEMA or not isinstance(expected.get("expected"), dict):
                 raise ValueError("expectation state shape")
-            completed = set()
-            for key, value in pairs.get("pairs", {}).items():
-                tool_id = key.split("\x1f", 1)[-1]
-                if value.get("post") is not None or (
-                        value.get("pre") is not None
-                        and value["pre"].get("output", {}).get("continue") is False):
-                    completed.add(tool_id)
+            owners = _expected_tool_owners(expected)
             missing = []
-            for request in expected["expected"].values():
-                missing.extend(tool_id for tool_id in request.get("tool_use_ids", [])
-                               if tool_id not in completed)
-        except LifecycleFault:
-            raise
+            missing.extend(tool_id for tool_id in owners if tool_id not in completed)
+        except LifecycleFault as exc:
+            _raise_fault(observer, run_nonce, exc.reason, exc.detail)
         except (OSError, UnicodeError, ValueError, TypeError, AttributeError) as exc:
             _raise_fault(observer, run_nonce, "EXPECTATION_STATE_MALFORMED",
                          "%s: %s" % (type(exc).__name__, exc))
         if missing:
             _raise_fault(observer, run_nonce, "EXPECTED_TOOL_HOOK_MISSING",
                          "expected tool has no completed hook pair: %s" % sorted(missing)[0])
-        accepted = {"schema": SCHEMA, "run_nonce": run_nonce,
-                    "sequence": row["sequence"], "monotonic_ns": row["monotonic_ns"],
-                    "checked_at_monotonic_ns": now}
-        _atomic_replace(observer / "last-accepted-observation.json",
-                        _canonical(accepted) + b"\n")
+        _accept_observation_unlocked(observer, row, now)
         return row
 
 
@@ -694,8 +772,13 @@ def _hook_output(phase, allowed, reason=None):
 def _hook_key(event):
     session = event.get("session_id")
     tool = event.get("tool_use_id")
-    if not isinstance(session, str) or not session or not isinstance(tool, str) or not tool:
-        raise LifecycleFault("INVALID_HOOK_INPUT", "session_id/tool_use_id")
+    call_id = event.get("tool_call_id")
+    if (not isinstance(session, str) or not session
+            or not isinstance(tool, str) or not tool
+            or "\x1f" in session or "\x1f" in tool
+            or not isinstance(call_id, str) or not call_id or len(call_id) > 4096):
+        raise LifecycleFault("INVALID_HOOK_INPUT",
+                             "session_id/tool_use_id/tool_call_id")
     return "%s\x1f%s" % (session, tool)
 
 
@@ -710,6 +793,7 @@ def handle_hook(observer, workspace, run_nonce, boot_id, raw_input):
         if phase not in ("PreToolUse", "PostToolUse", "PostToolUseFailure"):
             raise LifecycleFault("INVALID_HOOK_INPUT", "event phase")
         key = _hook_key(event)
+        call_id = event["tool_call_id"]
         input_hash = sha256(raw_input)
         with _locked(observer):
             terminal = _load_json(observer / "fault.json", absent=None)
@@ -722,6 +806,11 @@ def handle_hook(observer, workspace, run_nonce, boot_id, raw_input):
             pairs = _load_json(observer / "pairs.json")
             pair = pairs["pairs"].get(key)
             slot = "pre" if phase == "PreToolUse" else "post"
+            if pair is not None and pair.get("tool_call_id") != call_id:
+                raise LifecycleFault(
+                    "HOOK_CALL_ID_MISMATCH",
+                    "%s changed from %s to %s" % (
+                        key, pair.get("tool_call_id"), call_id))
             if pair is not None and pair.get(slot) is not None:
                 prior = pair[slot]
                 if prior.get("phase") == phase and prior.get("input_sha256") == input_hash:
@@ -732,6 +821,7 @@ def handle_hook(observer, workspace, run_nonce, boot_id, raw_input):
             _append(observer / "hook-starts.jsonl", {
                 "schema": SCHEMA, "run_nonce": run_nonce,
                 "session_id": event["session_id"], "tool_use_id": event["tool_use_id"],
+                "tool_call_id": call_id,
                 "phase": phase, "input_sha256": input_hash,
                 "input_base64": base64.b64encode(raw_input).decode("ascii"),
                 "observed_at": _wall_now(), "monotonic_ns": time.monotonic_ns()})
@@ -743,14 +833,15 @@ def handle_hook(observer, workspace, run_nonce, boot_id, raw_input):
                 sequence = sum(1 for line in sequence_path.read_bytes().splitlines() if line)
             receipt = {"schema": SCHEMA, "run_nonce": run_nonce,
                        "sequence": sequence, "session_id": event["session_id"],
-                       "tool_use_id": event["tool_use_id"], "phase": phase,
+                       "tool_use_id": event["tool_use_id"],
+                       "tool_call_id": call_id, "phase": phase,
                        "input_sha256": input_hash,
                        "input_base64": base64.b64encode(raw_input).decode("ascii"),
                        "request_reference": event.get("request_id"),
                        "snapshots": snapshots, "output": output,
                        "observed_at": _wall_now(), "monotonic_ns": time.monotonic_ns()}
             if pair is None:
-                pair = {"pre": None, "post": None}
+                pair = {"tool_call_id": call_id, "pre": None, "post": None}
                 pairs["pairs"][key] = pair
             pair[slot] = {"phase": phase, "input_sha256": input_hash,
                           "output": output, "sequence": sequence}
@@ -838,27 +929,15 @@ def finalize_segment(observer, trace, run_nonce, boot_id, *, run_tag,
         expected_raw = _read_regular(observer / "expectations.json")
         registry_raw = _read_regular(observer / "registry.json")
         pairs, expected = _strict_json(pairs_raw), _strict_json(expected_raw)
-        expected_ids = {
-            tool_id
-            for request in expected.get("expected", {}).values()
-            for tool_id in request.get("tool_use_ids", [])
-        }
-        completed_ids = set()
-        incomplete = False
-        for key, value in pairs.get("pairs", {}).items():
-            tool_id = key.split("\x1f", 1)[-1]
-            pre, post = value.get("pre"), value.get("post")
-            if post is not None or (pre is not None
-                                    and pre.get("output", {}).get("continue") is False):
-                completed_ids.add(tool_id)
-            elif pre is not None:
-                incomplete = True
-        if incomplete or not expected_ids.issubset(completed_ids):
-            try:
-                _fault_unlocked(observer, run_nonce, "HOOK_PAIR_MISSING",
-                                "terminal hook reconciliation")
-            except FileExistsError:
-                pass
+        try:
+            expected_ids = set(_expected_tool_owners(expected))
+            completed_ids, pending = _completed_tool_ids(pairs)
+        except LifecycleFault as exc:
+            _fault_unlocked(observer, run_nonce, exc.reason, exc.detail)
+            expected_ids, completed_ids, pending = set(), set(), ["malformed"]
+        if pending or not expected_ids.issubset(completed_ids):
+            _fault_unlocked(observer, run_nonce, "HOOK_PAIR_MISSING",
+                            "terminal hook reconciliation")
         fault_path = observer / "fault.json"
         fault_sha = _optional_digest(fault_path)
         fault = _load_json(fault_path, absent=None)
@@ -899,8 +978,8 @@ def run_guardian(observer, run_nonce, boot_id, controller_pid,
     while True:
         started = time.monotonic_ns()
         try:
-            check_dispatch(observer, run_nonce, boot_id,
-                           now_monotonic_ns=started)
+            check_supervision(observer, run_nonce, boot_id,
+                              now_monotonic_ns=started)
         except LifecycleFault as exc:
             outcome = {"schema": SCHEMA, "run_nonce": run_nonce,
                        "reason": exc.reason, "detail": exc.detail,

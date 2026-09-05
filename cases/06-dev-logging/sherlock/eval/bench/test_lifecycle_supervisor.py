@@ -50,7 +50,8 @@ class LifecycleSupervisorTest(unittest.TestCase):
 
     def hook(self, phase, tool_id="tool-1", session_id="session-1", **extra):
         row = {"hook_event_name": phase, "session_id": session_id,
-               "tool_use_id": tool_id, "tool_name": "run_shell_command",
+               "tool_use_id": tool_id, "tool_call_id": tool_id,
+               "tool_name": "run_shell_command",
                "tool_input": {"command": "true"}}
         row.update(extra)
         raw = json.dumps(row, sort_keys=True).encode()
@@ -83,6 +84,23 @@ class LifecycleSupervisorTest(unittest.TestCase):
             now_monotonic_ns=9_059_000_000_000)
         self.assertEqual(first["sequence"], 0)
         self.assertEqual(later["sequence"], 1)
+
+    def test_guardian_supervision_persists_sequence_against_regression(self):
+        now = 10_000_000_000
+        first = self.observe(monotonic_ns=now)
+        self.assertEqual(LIFECYCLE.check_supervision(
+            self.observer, self.nonce, self.boot,
+            now_monotonic_ns=now + 1)["sequence"], 0)
+        self.observe(sequence=1, monotonic_ns=now + 2)
+        self.assertEqual(LIFECYCLE.check_supervision(
+            self.observer, self.nonce, self.boot,
+            now_monotonic_ns=now + 3)["sequence"], 1)
+        (self.observer / "current-observation.json").write_text(
+            json.dumps(first, sort_keys=True, separators=(",", ":")) + "\n")
+        with self.assertRaisesRegex(LIFECYCLE.LifecycleFault, "REGRESSED"):
+            LIFECYCLE.check_supervision(
+                self.observer, self.nonce, self.boot,
+                now_monotonic_ns=now + 4)
 
     def test_missing_stale_wrong_future_and_regressed_observations_fault(self):
         cases = ("missing", "stale", "wrong-nonce", "future", "regressed")
@@ -221,11 +239,77 @@ class LifecycleSupervisorTest(unittest.TestCase):
             now_monotonic_ns=10_000_000_001)
         self.assertEqual(row["sequence"], 0)
 
+    def test_provider_tool_call_id_maps_to_qwen_generated_tool_use_id(self):
+        self.observe()
+        LIFECYCLE.register_expected_tools(
+            self.observer, self.nonce, self.boot, "request-1", ["call-provider-1"])
+        self.hook("PreToolUse", tool_id="toolu-qwen-1",
+                  tool_call_id="call-provider-1")
+        self.hook("PostToolUse", tool_id="toolu-qwen-1",
+                  tool_call_id="call-provider-1", tool_response={"ok": True})
+        row = LIFECYCLE.check_dispatch(
+            self.observer, self.nonce, self.boot,
+            now_monotonic_ns=10_000_000_001)
+        self.assertEqual(row["sequence"], 0)
+        pairs = json.loads((self.observer / "pairs.json").read_text())
+        pair = pairs["pairs"]["session-1\x1ftoolu-qwen-1"]
+        self.assertEqual(pair["tool_call_id"], "call-provider-1")
+
+    def test_pre_and_post_reject_different_provider_tool_call_ids(self):
+        self.hook("PreToolUse", tool_id="toolu-qwen-1",
+                  tool_call_id="call-provider-1")
+        result = self.hook("PostToolUse", tool_id="toolu-qwen-1",
+                           tool_call_id="call-provider-2",
+                           tool_response={"ok": True})
+        self.assertFalse(result["continue"])
+        fault = json.loads((self.observer / "fault.json").read_text())
+        self.assertEqual(fault["reason"], "HOOK_CALL_ID_MISMATCH")
+
+    def test_hook_pair_identity_rejects_key_delimiter_in_input_ids(self):
+        result = self.hook("PreToolUse", session_id="session\x1fother")
+        self.assertFalse(result["continue"])
+        fault = json.loads((self.observer / "fault.json").read_text())
+        self.assertEqual(fault["reason"], "INVALID_HOOK_INPUT")
+
+    def test_two_hook_pairs_cannot_consume_one_provider_tool_call(self):
+        self.observe()
+        LIFECYCLE.register_expected_tools(
+            self.observer, self.nonce, self.boot, "request-1", ["call-provider-1"])
+        for tool_use_id in ("toolu-qwen-1", "toolu-qwen-2"):
+            self.hook("PreToolUse", tool_id=tool_use_id,
+                      tool_call_id="call-provider-1")
+            self.hook("PostToolUse", tool_id=tool_use_id,
+                      tool_call_id="call-provider-1", tool_response={"ok": True})
+        with self.assertRaisesRegex(LIFECYCLE.LifecycleFault,
+                                    "HOOK_CALL_ID_REUSED"):
+            LIFECYCLE.check_dispatch(
+                self.observer, self.nonce, self.boot,
+                now_monotonic_ns=10_000_000_001)
+
+    def test_provider_tool_call_id_cannot_cross_request_boundaries(self):
+        LIFECYCLE.register_expected_tools(
+            self.observer, self.nonce, self.boot, "request-1", ["call-provider-1"])
+        with self.assertRaisesRegex(LIFECYCLE.LifecycleFault,
+                                    "TOOL_EXPECTATION_REUSED"):
+            LIFECYCLE.register_expected_tools(
+                self.observer, self.nonce, self.boot, "request-2",
+                ["call-provider-1"])
+        fault = json.loads((self.observer / "fault.json").read_text())
+        self.assertEqual(fault["reason"], "TOOL_EXPECTATION_REUSED")
+
+    def test_duplicate_provider_tool_call_id_in_one_response_is_rejected(self):
+        with self.assertRaisesRegex(LIFECYCLE.LifecycleFault,
+                                    "INVALID_TOOL_EXPECTATION"):
+            LIFECYCLE.register_expected_tools(
+                self.observer, self.nonce, self.boot, "request-1",
+                ["call-provider-1", "call-provider-1"])
+
     def test_hook_receipt_retains_exact_input_and_output(self):
         work = self.write_active(["worklist.tsv"])
         (work / "worklist.tsv").write_text("row\n")
         source = {"hook_event_name": "PreToolUse", "session_id": "s",
-                  "tool_use_id": "t", "tool_name": "write_file",
+                  "tool_use_id": "t", "tool_call_id": "t",
+                  "tool_name": "write_file",
                   "tool_input": {"file_path": "work/report.md", "content": "x"}}
         raw = json.dumps(source, ensure_ascii=False, indent=2).encode()
         output = LIFECYCLE.handle_hook(
@@ -330,6 +414,45 @@ class LifecycleSupervisorTest(unittest.TestCase):
                 if process.poll() is None:
                     process.terminate()
                 process.wait(timeout=2)
+
+    def test_guardian_allows_provider_expectation_and_running_tool_until_dispatch(self):
+        shutil.rmtree(self.observer)
+        boot = LIFECYCLE.current_boot_id()
+        self.boot = boot
+        self.observer = LIFECYCLE.init_segment(
+            self.trace, self.nonce, boot, capability=self.capability)
+        self.observe(monotonic_ns=time.monotonic_ns())
+        controller = subprocess.Popen(["sleep", "30"], start_new_session=True)
+        guardian = None
+        try:
+            LIFECYCLE.register_expected_tools(
+                self.observer, self.nonce, boot, "request-1", ["tool-1"])
+            guardian = subprocess.Popen([
+                sys.executable, str(HERE / "lifecycle-supervisor.py"), "guardian",
+                "--observer-dir", str(self.observer), "--nonce", self.nonce,
+                "--boot-id", boot, "--controller-pid", str(controller.pid),
+                "--controller-start-ticks", LIFECYCLE.process_start_ticks(controller.pid),
+                "--controller-pgid", str(os.getpgid(controller.pid)), "--interval", "0.01",
+            ])
+            time.sleep(0.05)
+            self.assertIsNone(guardian.poll(), "expectation is pending client hook delivery")
+            self.assertIsNone(controller.poll())
+            self.assertFalse((self.observer / "fault.json").exists())
+
+            self.hook("PreToolUse")
+            time.sleep(0.05)
+            self.assertIsNone(guardian.poll(), "tool may run between its pre and post hooks")
+            self.assertIsNone(controller.poll())
+            self.assertFalse((self.observer / "fault.json").exists())
+
+            self.hook("PostToolUse", tool_response={"ok": True})
+            LIFECYCLE.check_dispatch(self.observer, self.nonce, boot)
+        finally:
+            for process in (guardian, controller):
+                if process is not None and process.poll() is None:
+                    process.terminate()
+                if process is not None:
+                    process.wait(timeout=2)
 
 
 if __name__ == "__main__":

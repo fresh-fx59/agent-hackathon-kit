@@ -240,7 +240,8 @@ class ProxyCase(unittest.TestCase):
             current.write_bytes(first)
         elif case == "unmatched-hook":
             event = {"hook_event_name": "PreToolUse", "session_id": "s",
-                     "tool_use_id": "t", "tool_name": "read_file",
+                     "tool_use_id": "t", "tool_call_id": "t",
+                     "tool_name": "read_file",
                      "tool_input": {"file_path": "missing"}}
             result = LIFECYCLE.handle_hook(
                 observer, workspace, nonce, boot, json.dumps(event).encode())

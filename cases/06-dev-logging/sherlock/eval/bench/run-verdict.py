@@ -196,25 +196,47 @@ def monitored_lifecycle_failures(trace):
             observer / "expectations.json", MAX_JSON))
         pairs = lifecycle._strict_json(lifecycle._read_regular(
             observer / "pairs.json", MAX_JSON))
-        expected_ids = {
-            tool_id for request in expected.get("expected", {}).values()
-            for tool_id in request.get("tool_use_ids", [])
-        }
+        if (expected.get("schema") != lifecycle.SCHEMA
+                or not isinstance(expected.get("expected"), dict)
+                or pairs.get("schema") != lifecycle.SCHEMA
+                or not isinstance(pairs.get("pairs"), dict)):
+            raise ValueError("tool state schema")
+        expected_owners = {}
+        for request_reference, request in expected["expected"].items():
+            if (not isinstance(request_reference, str) or not request_reference
+                    or not isinstance(request, dict)
+                    or request.get("request_reference") != request_reference
+                    or not isinstance(request.get("tool_use_ids"), list)):
+                raise ValueError("expectation schema")
+            seen = set()
+            for tool_id in request["tool_use_ids"]:
+                if (not isinstance(tool_id, str) or not tool_id
+                        or len(tool_id) > 4096 or tool_id in seen
+                        or tool_id in expected_owners):
+                    raise ValueError("ambiguous expected tool id")
+                seen.add(tool_id)
+                expected_owners[tool_id] = request_reference
+        expected_ids = set(expected_owners)
         completed_ids = set()
+        completed_owners = {}
         incomplete = False
         for key, pair in pairs.get("pairs", {}).items():
-            if not isinstance(pair, dict):
+            if (not isinstance(key, str) or key.count("\x1f") != 1
+                    or any(not part for part in key.split("\x1f"))
+                    or not isinstance(pair, dict)):
                 raise ValueError("pair schema")
-            tool_id = key.split("\x1f", 1)[-1]
+            tool_id = pair.get("tool_call_id")
+            if (not isinstance(tool_id, str) or not tool_id
+                    or len(tool_id) > 4096 or tool_id in completed_owners):
+                raise ValueError("ambiguous completed tool id")
+            completed_owners[tool_id] = key
             pre, post = pair.get("pre"), pair.get("post")
             if post is not None or (isinstance(pre, dict)
                                     and pre.get("output", {}).get("continue") is False):
                 completed_ids.add(tool_id)
             elif pre is not None:
                 incomplete = True
-        if (not isinstance(expected.get("expected"), dict)
-                or not isinstance(pairs.get("pairs"), dict)
-                or receipt["expected_tool_count"] != len(expected_ids)
+        if (receipt["expected_tool_count"] != len(expected_ids)
                 or receipt["completed_tool_count"] != len(expected_ids & completed_ids)):
             raise ValueError("derived tool reconciliation")
         if receipt.get("status") != "PASS" or receipt.get("fault_sha256") is not None \

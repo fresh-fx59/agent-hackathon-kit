@@ -64,6 +64,29 @@ class MonitoredTerminalAuditTest(unittest.TestCase):
         self.finish()
         self.assertEqual(VERDICT.monitored_lifecycle_failures(self.trace), [])
 
+    def test_provider_call_id_bridges_qwen_tool_use_id_in_terminal_audit(self):
+        LIFECYCLE.register_expected_tools(
+            self.observer, self.nonce, self.boot, "request-1", ["call-provider-1"])
+        for phase in ("PreToolUse", "PostToolUse"):
+            event = {
+                "hook_event_name": phase,
+                "session_id": "session-1",
+                "tool_use_id": "toolu-qwen-1",
+                "tool_call_id": "call-provider-1",
+                "tool_name": "skill",
+                "tool_input": {"skill": "mockskill"},
+            }
+            if phase == "PostToolUse":
+                event["tool_response"] = {"ok": True}
+            result = LIFECYCLE.handle_hook(
+                self.observer, self.workspace, self.nonce, self.boot,
+                json.dumps(event, sort_keys=True).encode())
+            self.assertTrue(result["continue"])
+        receipt = self.finish()
+        self.assertEqual(receipt["expected_tool_count"], 1)
+        self.assertEqual(receipt["completed_tool_count"], 1)
+        self.assertEqual(VERDICT.monitored_lifecycle_failures(self.trace), [])
+
     def test_schema2_trace_without_launch_is_rejected(self):
         other = Path(self.temp.name) / "unlaunched"
         other.mkdir()
