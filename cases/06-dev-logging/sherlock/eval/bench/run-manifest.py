@@ -42,6 +42,9 @@ TARGET_PROFILE_KEYS = {
     "qwen", "limits", "settings_sha256", "system_prompt_sha256",
     "skill_sha256", "tool_schema_sha256", "gate_sha256", "lane_guard",
 }
+MONITORED_TARGET_PROFILE_KEYS = TARGET_PROFILE_KEYS | {
+    "execution_mode", "request_read_timeout_s",
+}
 GATE_SHA256_KEYS = {"reportcheck", "citecheck", "statecheck", "triagecheck"}
 INPUT_IDENTITY_KEYS = {
     "schema", "raw_prompt_sha256", "canonical_prompt_sha256", "source_corpus_sha256",
@@ -171,27 +174,46 @@ def _exact_object(value, keys, code):
     return value
 
 
-def _control_objects(cache, interactive, qwen, limits, lane_guard, code):
+def _control_objects(cache, interactive, qwen, limits, lane_guard, code, schema=1):
     _exact_object(cache, {"enabled"}, code)
     _exact_object(interactive, {"enabled"}, code)
-    _exact_object(qwen, {"cli"}, code)
     _exact_object(limits, {"requests"}, code)
     _exact_object(lane_guard, {"enabled"}, code)
     if not isinstance(cache["enabled"], bool) or not isinstance(interactive["enabled"], bool):
         fail(code, "control booleans are invalid")
     if not isinstance(lane_guard["enabled"], bool):
         fail(code, "lane guard boolean is invalid")
+    if schema == 1:
+        _exact_object(qwen, {"cli"}, code)
+        try:
+            identity(qwen["cli"])
+        except ManifestError:
+            fail(code, "Qwen control is invalid")
+        _positive_int(limits["requests"], code)
+        return
+    _exact_object(qwen, {"cli", "max_session_turns", "max_wall_time_s",
+                         "max_tool_calls", "wall_time_cli", "vendor_limits"}, code)
+    _exact_object(qwen["vendor_limits"], {"workflow_agent_max_turns"}, code)
     try:
         identity(qwen["cli"])
     except ManifestError:
         fail(code, "Qwen control is invalid")
-    _positive_int(limits["requests"], code)
+    if (limits["requests"] is not None or qwen["max_session_turns"] != -1 or
+            qwen["max_wall_time_s"] != -1 or qwen["max_tool_calls"] != -1 or
+            qwen["wall_time_cli"] != "omitted"):
+        fail(code, "monitored controls are invalid")
+    _positive_int(qwen["vendor_limits"]["workflow_agent_max_turns"], code)
 
 
 def validate_target_profile(value):
-    if (not isinstance(value, dict) or set(value) != TARGET_PROFILE_KEYS or
-            isinstance(value.get("schema"), bool) or value.get("schema") != 1):
+    schema = value.get("schema") if isinstance(value, dict) else None
+    expected_keys = TARGET_PROFILE_KEYS if schema == 1 else MONITORED_TARGET_PROFILE_KEYS
+    if (not isinstance(value, dict) or set(value) != expected_keys or
+            isinstance(schema, bool) or schema not in (1, 2)):
         fail("E_TARGET_PROFILE_SCHEMA", "target profile fields are invalid")
+    if schema == 2 and (value.get("execution_mode") != "operator_monitored" or
+                        value.get("request_read_timeout_s") != 600):
+        fail("E_TARGET_PROFILE_SCHEMA", "monitored profile is invalid")
     if value.get("identity_mode") not in ("provider_pinned_version", "alias_unresolved"):
         fail("E_TARGET_PROFILE_SCHEMA", "identity mode is invalid")
     profile = dict(value)
@@ -220,7 +242,7 @@ def validate_target_profile(value):
     for digest_value in value["gate_sha256"].values():
         _sha256(digest_value)
     _control_objects(value["cache"], value["interactive"], value["qwen"], value["limits"],
-                     value["lane_guard"], "E_TARGET_PROFILE_SCHEMA")
+                     value["lane_guard"], "E_TARGET_PROFILE_SCHEMA", schema)
     return profile
 
 
@@ -249,8 +271,13 @@ def validate_input_identity(value):
     _exact_object(value["limits"], {"max_output_tokens", "session_token_limit", "profile"}, code)
     _positive_int(value["limits"]["max_output_tokens"], code)
     _positive_int(value["limits"]["session_token_limit"], code)
+    # Input identity intentionally embeds only execution controls, not the
+    # profile schema.  A nullable request ceiling is the monitored schema's
+    # unambiguous boundary marker; legacy identities retain a positive integer.
+    profile_limits = value["limits"]["profile"]
+    profile_schema = 2 if isinstance(profile_limits, dict) and profile_limits.get("requests") is None else 1
     _control_objects(value["cache"], value["interactive"], value["qwen"],
-                     value["limits"]["profile"], value["lane_guard"], code)
+                     value["limits"]["profile"], value["lane_guard"], code, profile_schema)
     return value
 
 

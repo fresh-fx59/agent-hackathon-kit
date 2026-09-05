@@ -69,6 +69,35 @@ class TargetContractProbeTest(unittest.TestCase):
             os.chmod(parent, 0o700)
         shutil.rmtree(self.temp)
 
+    def test_explicit_operator_monitored_prepare_seals_honest_unlimited_policy(self):
+        self.args.operator_monitored = True
+        self.probe.prepare(self.args)
+        profile = json.loads((self.root / "target-profile.json").read_text())
+        budget = json.loads((self.root / "probe-budget.json").read_text())
+        manifest = json.loads((self.root / "probe-manifest.json").read_text())
+
+        self.assertEqual(profile["schema"], 2)
+        self.assertEqual(profile["execution_mode"], "operator_monitored")
+        self.assertEqual(profile["request_read_timeout_s"], 600)
+        self.assertIsNone(profile["limits"]["requests"])
+        self.assertEqual(profile["qwen"], {
+            "cli": str(self.qwen_stub), "max_session_turns": -1,
+            "max_wall_time_s": -1, "max_tool_calls": -1,
+            "wall_time_cli": "omitted",
+            "vendor_limits": {"workflow_agent_max_turns": 200},
+        })
+        self.assertEqual(budget, {
+            "schema": 3, "mode": "operator_monitored",
+            "max_provider_calls": None, "max_prompt_tokens": None,
+            "max_completion_tokens": None, "max_wall_time_s": None,
+            "max_estimated_cost_rub": None, "request_read_timeout_s": 600,
+        })
+        self.assertEqual(manifest["schema"], 2)
+        self.assertEqual(manifest["action"], "target_contract_probe_operator_monitored")
+        self.assertEqual(
+            manifest["probe_budget_sha256"],
+            hashlib.sha256((self.root / "probe-budget.json").read_bytes()).hexdigest())
+
     def test_owned_runner_timeout_terminates_its_stubborn_process_group(self):
         """The outer watchdog must not orphan controller descendants."""
         pid_path = self.temp / "owned-grandchild.pid"
@@ -322,6 +351,45 @@ class TargetContractProbeTest(unittest.TestCase):
                     self.probe.run(manifest, digest, root / "nonces", secret_reader=self._tripwire,
                                    proxy_starter=self._tripwire, runner=self._tripwire)
                 self.assertEqual(self.trips, [])
+
+    def test_monitored_policy_mode_and_nonce_substitution_refuse_before_contact(self):
+        for mutation in ("policy", "mode", "nonce"):
+            with self.subTest(mutation=mutation):
+                root = self.temp / ("monitored-substitution-" + mutation)
+                args = self.probe.PrepareArgs(**dict(
+                    self.args.__dict__, root=root, operator_monitored=True))
+                self.probe.prepare(args)
+                manifest = root / "probe-manifest.json"
+                approved = self._sha(manifest)
+                if mutation == "policy":
+                    budget = json.loads((root / "probe-budget.json").read_text())
+                    budget["max_provider_calls"] = 6
+                    (root / "probe-budget.json").write_bytes(self.probe.canonical(budget) + b"\n")
+                elif mutation == "mode":
+                    profile = json.loads((root / "target-profile.json").read_text())
+                    profile["execution_mode"] = "finite"
+                    (root / "target-profile.json").write_bytes(self.probe.canonical(profile) + b"\n")
+                else:
+                    row = json.loads(manifest.read_text())
+                    row["nonce"] = "0" * 64
+                    manifest.write_bytes(self.probe.canonical(row) + b"\n")
+                with self.assertRaises(self.probe.ProbeFailure):
+                    self.probe.run(manifest, approved, root / "nonces",
+                                   secret_reader=self._tripwire,
+                                   proxy_starter=self._tripwire, runner=self._tripwire)
+                self.assertEqual(self.trips, [])
+                self.assertFalse((root / "nonces").exists())
+
+    def test_ambient_monitored_override_cannot_activate_finite_package(self):
+        self.probe.prepare(self.args)
+        manifest = self.root / "probe-manifest.json"
+        with mock.patch.dict(os.environ, {"SHERLOCK_OPERATOR_MONITORED_MODE": "1"}):
+            with self.assertRaises(self.probe.ProbeFailure):
+                self.probe.run(manifest, self._sha(manifest), self.root / "nonces",
+                               secret_reader=self._tripwire,
+                               proxy_starter=self._tripwire, runner=self._tripwire)
+        self.assertEqual(self.trips, [])
+        self.assertFalse((self.root / "nonces").exists())
 
     def test_identity_modes_are_narrow_and_missing_identity_is_terminal(self):
         self.assertEqual(self.probe.audit_identity("provider_pinned_version", "deepseek-v4-20260901",
@@ -623,7 +691,58 @@ class TargetContractProbeTest(unittest.TestCase):
         self.assertFalse((trace / "run-manifest.json").exists())
         self.assertFalse((trace / "work" / "report.md").exists())
 
-    def test_provider_free_e2e_uses_real_runner_lane_proxy_and_task7(self):
+    def test_monitored_real_runner_receives_unlimited_flags_without_global_wall_flag(self):
+        marker = self.temp / "monitored-runner.json"
+        qwen = self.temp / "monitored-qwen.py"
+        qwen.write_text("""#!/usr/bin/env python3
+import json, os, sys
+from pathlib import Path
+if '--sherlock-flag-probe-sentinel' in sys.argv:
+    raise SystemExit(0)
+Path(%r).write_text(json.dumps({
+    'argv': sys.argv[1:],
+    'settings': json.loads(Path('.qwen/settings.json').read_text()),
+    'workflow_agent_max_turns': os.environ.get('QWEN_CODE_WORKFLOW_AGENT_MAX_TURNS'),
+}))
+raise SystemExit(1)
+""" % str(marker), encoding="utf-8")
+        qwen.chmod(0o700)
+        args = self.probe.PrepareArgs(**dict(
+            self.args.__dict__, root=(self.temp / "monitored-runner").resolve(), qwen_bin=str(qwen),
+            operator_monitored=True, arm="v44"))
+        self.probe.prepare(args)
+        manifest = args.root / "probe-manifest.json"
+        done = subprocess.run([
+            sys.executable, str(PROBE_PATH), "run", "--manifest", str(manifest),
+            "--operator-approved-probe", self._sha(manifest), "--nonce-root",
+            str(args.root / "nonces"), "--transport-base-url", "http://127.0.0.1:9/v1",
+            "--json"], text=True, capture_output=True, timeout=30,
+            env=dict(os.environ, SHERLOCK_API_KEY="test-only"))
+        self.assertNotEqual(done.returncode, 0)
+        trace = args.root / "probe-work" / "runs" / "target-contract-probe"
+        diagnostics = {}
+        for path in list((args.root / "probe-work").rglob("*.err")) + list(trace.glob("*.json")):
+            try: diagnostics[str(path.relative_to(args.root))] = path.read_text(errors="replace")
+            except OSError: pass
+        self.assertTrue(marker.exists(), (done.stdout, done.stderr, diagnostics))
+        observed = json.loads(marker.read_text())
+        self.assertIn("--max-session-turns", observed["argv"])
+        self.assertEqual(observed["argv"][observed["argv"].index("--max-session-turns") + 1], "-1")
+        self.assertIn("--max-tool-calls", observed["argv"])
+        self.assertEqual(observed["argv"][observed["argv"].index("--max-tool-calls") + 1], "-1")
+        self.assertNotIn("--max-wall-time", observed["argv"])
+        self.assertEqual(observed["settings"]["model"]["maxWallTimeSeconds"], -1)
+        self.assertEqual(observed["workflow_agent_max_turns"], "200")
+        controller = CONTROLLER_PATH.read_text(encoding="utf-8")
+        self.assertIn("communicate_owned_process(child, timeout=None if monitored else 600)", controller)
+
+    def test_provider_free_finite_e2e_uses_real_runner_lane_proxy_and_task7(self):
+        self._provider_free_e2e_uses_real_runner_lane_proxy_and_task7(False)
+
+    def test_provider_free_monitored_e2e_uses_real_runner_lane_proxy_and_task7(self):
+        self._provider_free_e2e_uses_real_runner_lane_proxy_and_task7(True)
+
+    def _provider_free_e2e_uses_real_runner_lane_proxy_and_task7(self, operator_monitored):
         """One local call crosses the same sealed path as a paid target probe."""
         canonical_report = (ROOT / "tools" / "tests" / "fixtures" /
                             "target-contract-reports" / "canonical.md").read_text(encoding="utf-8")
@@ -635,6 +754,11 @@ from pathlib import Path
 if '--sherlock-flag-probe-sentinel' in sys.argv:
     raise SystemExit(0)
 settings = json.loads(Path('.qwen/settings.json').read_text())
+if os.environ.get('SHERLOCK_OPERATOR_MONITORED_MODE') == '1':
+    assert sys.argv[sys.argv.index('--max-session-turns') + 1] == '-1'
+    assert sys.argv[sys.argv.index('--max-tool-calls') + 1] == '-1'
+    assert '--max-wall-time' not in sys.argv
+    assert settings['model']['maxWallTimeSeconds'] == -1
 skill_root = Path(os.environ['QWEN_SKILL_ROOT'])
 assert settings['skills']['directories'] == [str(skill_root.parent)]
 assert skill_root.parent.name == 'skill-catalogue'
@@ -706,7 +830,8 @@ print(json.dumps([{'type':'result','result':'ok','is_error':False,'session_id':'
         try:
             root = (self.temp / "e2e").resolve()
             args = self.probe.PrepareArgs(**dict(self.args.__dict__, root=root, qwen_bin=str(qwen), arm="v44",
-                provider_base_url="http://127.0.0.1:%d/v1" % server.server_port))
+                provider_base_url="http://127.0.0.1:%d/v1" % server.server_port,
+                operator_monitored=operator_monitored))
             self.probe.prepare(args)
             manifest = root / "probe-manifest.json"
             done = subprocess.run([sys.executable, str(PROBE_PATH), "run", "--manifest", str(manifest),
@@ -770,18 +895,26 @@ print(json.dumps([{'type':'result','result':'ok','is_error':False,'session_id':'
         self.assertEqual(response["model"], row["returned_model"])
         self.assertEqual(response["usage"], {"prompt_tokens": 3, "completion_tokens": 2})
         budget = json.loads((trace / "upstream-budget-state.json").read_text())
-        self.assertEqual(budget["schema"], 2)
-        self.assertEqual(budget["limits"], {key: self.probe.DEFAULT_BUDGET[key] for key in (
-            "max_provider_calls", "max_prompt_tokens", "max_completion_tokens", "max_wall_time_s", "max_estimated_cost_rub")})
         profile = json.loads((trace / "target-profile.json").read_text())
-        self.assertEqual(profile["limits"]["requests"],
-                         budget["limits"]["max_provider_calls"])
-        self.assertGreaterEqual(budget["limits"]["max_prompt_tokens"],
-                                profile["limits"]["requests"] * profile["session_token_limit"])
-        self.assertGreaterEqual(budget["limits"]["max_completion_tokens"],
-                                profile["limits"]["requests"] * profile["max_output_tokens"])
-        self.assertLessEqual(profile["limits"]["requests"] * budget["projected"]["wall_time_s"],
-                             budget["limits"]["max_wall_time_s"])
+        if operator_monitored:
+            self.assertEqual(budget["schema"], 3)
+            self.assertEqual(budget["budget_assurance"], "operator_monitored")
+            self.assertEqual(budget["limits"], {key: None for key in (
+                "max_provider_calls", "max_prompt_tokens", "max_completion_tokens", "max_wall_time_s", "max_estimated_cost_rub")})
+            self.assertEqual(profile["execution_mode"], "operator_monitored")
+            self.assertIsNone(profile["limits"]["requests"])
+            self.assertEqual(profile["request_read_timeout_s"], 600)
+        else:
+            self.assertEqual(budget["schema"], 2)
+            self.assertEqual(budget["limits"], {key: self.probe.DEFAULT_BUDGET[key] for key in (
+                "max_provider_calls", "max_prompt_tokens", "max_completion_tokens", "max_wall_time_s", "max_estimated_cost_rub")})
+            self.assertEqual(profile["limits"]["requests"], budget["limits"]["max_provider_calls"])
+            self.assertGreaterEqual(budget["limits"]["max_prompt_tokens"],
+                                    profile["limits"]["requests"] * profile["session_token_limit"])
+            self.assertGreaterEqual(budget["limits"]["max_completion_tokens"],
+                                    profile["limits"]["requests"] * profile["max_output_tokens"])
+            self.assertLessEqual(profile["limits"]["requests"] * budget["projected"]["wall_time_s"],
+                                 budget["limits"]["max_wall_time_s"])
         self.assertEqual(budget["rate_snapshot"], json.loads((trace / "probe-rate-snapshot.json").read_text()))
         # The legacy failure cap protects the lane's retry loop; it is not a
         # paid-envelope limit and so must not appear in schema-2's five limits.
@@ -897,6 +1030,36 @@ print(json.dumps([{'type':'result','result':'ok','is_error':False,'session_id':'
                 else:
                     first = trace / "request-bodies" / "one.json"
                     os.link(first, trace / "response-bodies" / "alias.json")
+                with self.assertRaises(self.probe.ProbeFailure):
+                    self.probe.audit(trace)
+                self.assertFalse((trace / "target-contract-receipt.json").exists())
+
+    def test_monitored_audit_rejects_tampered_usage_rate_policy_and_identity(self):
+        for mutation in ("usage", "rate", "policy", "identity"):
+            with self.subTest(mutation=mutation):
+                root = self.temp / ("monitored-audit-" + mutation)
+                args = self.probe.PrepareArgs(**dict(
+                    self.args.__dict__, root=root, operator_monitored=True))
+                self.probe.prepare(args)
+                manifest = root / "probe-manifest.json"
+                self.probe.authorize(manifest, self._sha(manifest), root / "nonces")
+                trace = root / "probe-work" / "runs" / "target-contract-probe"
+                self._accepted_trace(trace, root)
+                if mutation in ("usage", "rate", "policy"):
+                    budget_path = trace / "upstream-budget-state.json"
+                    budget = json.loads(budget_path.read_text())
+                    if mutation == "usage":
+                        budget["observed"]["prompt_tokens"] = 2
+                    elif mutation == "rate":
+                        budget["rate_snapshot"]["sha256"] = "0" * 64
+                    else:
+                        budget["limits"]["max_provider_calls"] = 6
+                    budget_path.write_bytes(self.probe.canonical(budget) + b"\n")
+                else:
+                    journal_path = trace / "upstream-completed.jsonl"
+                    journal = json.loads(journal_path.read_text())
+                    journal["sent_model"] = "other-model"
+                    journal_path.write_bytes(self.probe.canonical(journal) + b"\n")
                 with self.assertRaises(self.probe.ProbeFailure):
                     self.probe.audit(trace)
                 self.assertFalse((trace / "target-contract-receipt.json").exists())
@@ -1182,12 +1345,14 @@ print(json.dumps([{'type':'result','result':'ok','is_error':False,'session_id':'
         rate = {"schema": 1, "run_tag": trace.name, "effective_at": effective, "source": "local-test",
                 "prompt_rub_per_token": 0.0, "completion_rub_per_token": 0.0}
         rate["sha256"] = self._sha_bytes(self.probe.canonical(rate))
-        (trace / "upstream-budget-state.json").write_text(json.dumps({"schema": 2,
+        profile = json.loads((trace / "target-profile.json").read_text())
+        monitored = profile.get("execution_mode") == "operator_monitored"
+        (trace / "upstream-budget-state.json").write_text(json.dumps({"schema": 3 if monitored else 2,
             "run_tag": trace.name, "updated_at": effective,
-            "limits": {key: self.probe.DEFAULT_BUDGET[key] for key in (
+            "limits": {key: (None if monitored else self.probe.DEFAULT_BUDGET[key]) for key in (
                 "max_provider_calls", "max_prompt_tokens", "max_completion_tokens",
                 "max_wall_time_s", "max_estimated_cost_rub")},
-            "budget_assurance": "client_pre_dispatch", "projected": {"provider_calls": 1,
+            "budget_assurance": "operator_monitored" if monitored else "client_pre_dispatch", "projected": {"provider_calls": 1,
             "prompt_tokens": 1, "completion_tokens": 1, "wall_time_s": 1.0, "estimated_cost_rub": 0.1},
             "observed": {"provider_calls": 1, "prompt_tokens": 1, "completion_tokens": 1},
             "completed_overshoot": {"provider_calls": 0, "prompt_tokens": 0, "completion_tokens": 0},

@@ -17,6 +17,10 @@ SKILLS="$(cd "$HERE/../.." && pwd)/skills"
 QWEN="${QWEN_BIN:-$HOME/.local/bin/qwen}"
 ARM="${1:-unknown}"
 TARGET_PROBE_MODE="${SHERLOCK_TARGET_PROBE_MODE:-0}"
+OPERATOR_MONITORED_MODE="${SHERLOCK_OPERATOR_MONITORED_MODE:-0}"
+[ "$OPERATOR_MONITORED_MODE" = 0 ] || [ "$TARGET_PROBE_MODE" = 1 ] || {
+  echo "✗ operator-monitored mode requires the sealed target probe" >&2; exit 2;
+}
 # Target-contract probe mode uses the ordinary v44 runner.  It never fabricates
 # a report, capture, ledger, budget, or verdict: those are only valid when
 # emitted by the Task 3 proxy and Task 7 terminal verifier below.
@@ -142,9 +146,16 @@ budget_check() {
   esac
   [ "$2" -gt 0 ] || { echo "✗ $1 must be > 0 (got '$2')" >&2; exit 1; }
 }
-budget_check SHERLOCK_MAX_SESSION_TURNS "$MAX_SESSION_TURNS"
-budget_check SHERLOCK_MAX_TOOL_CALLS "$MAX_TOOL_CALLS"
-budget_check SHERLOCK_MAX_WALL_TIME_S "$MAX_WALL_TIME_S"
+if [ "$OPERATOR_MONITORED_MODE" = 1 ]; then
+  [ "$MAX_SESSION_TURNS" = -1 ] && [ "$MAX_TOOL_CALLS" = -1 ] && \
+    [ "$MAX_WALL_TIME_S" = -1 ] && [ "$TIMEOUT" = 0 ] || {
+      echo "✗ monitored Qwen limits do not match the sealed unlimited policy" >&2; exit 1;
+    }
+else
+  budget_check SHERLOCK_MAX_SESSION_TURNS "$MAX_SESSION_TURNS"
+  budget_check SHERLOCK_MAX_TOOL_CALLS "$MAX_TOOL_CALLS"
+  budget_check SHERLOCK_MAX_WALL_TIME_S "$MAX_WALL_TIME_S"
+fi
 budget_check SHERLOCK_WORKFLOW_AGENT_MAX_TURNS "$WORKFLOW_AGENT_MAX_TURNS"
 export QWEN_CODE_WORKFLOW_AGENT_MAX_TURNS="$WORKFLOW_AGENT_MAX_TURNS"
 
@@ -1640,7 +1651,9 @@ CLIENT_MODEL="$LANE_CLIENT_MODEL"
 if [ -x "$QWEN" ] || command -v "$QWEN" >/dev/null 2>&1; then
   qwen_flag_preflight --max-session-turns "$MAX_SESSION_TURNS"
   qwen_flag_preflight --max-tool-calls "$MAX_TOOL_CALLS"
-  qwen_flag_preflight --max-wall-time "${MAX_WALL_TIME_S}s"
+  if [ "$OPERATOR_MONITORED_MODE" != 1 ]; then
+    qwen_flag_preflight --max-wall-time "${MAX_WALL_TIME_S}s"
+  fi
 fi
 if [ "$CONTROLLED" = 1 ] && [ "$TARGET_PROBE_MODE" != "1" ]; then
   unset SHERLOCK_BUDGET_MAX_UPSTREAM_ATTEMPTS \
@@ -1697,15 +1710,22 @@ run_qwen() {
     --trace-dir "$TRACE" --attempt "$attempt" --session-id "$session" --reason "$ATTEMPT_REASON" \
     --upstream-log "$TRACE.upstream.jsonl" --inflight-path "$TRACE/upstream-inflight.json"
   # key via environment, never argv (visible in ps; this box has a guest account)
-  ( cd "$W" && OPENAI_API_KEY="$SHERLOCK_API_KEY" OPENAI_BASE_URL="$BASE_URL" \
-    SHERLOCK_STRICT_MARKER_LIFECYCLE="$STRICT_MARKER_LIFECYCLE" \
-    timeout "$TIMEOUT" "$QWEN" --auth-type openai --model "$CLIENT_MODEL" \
-      --approval-mode yolo \
-      --max-session-turns "$MAX_SESSION_TURNS" \
-      --max-wall-time "${MAX_WALL_TIME_S}s" \
-      --max-tool-calls "$MAX_TOOL_CALLS" \
-      "$@" --output-format json </dev/null \
-  ) >"$W/out.json" 2>"$W/err.txt"
+  if [ "$OPERATOR_MONITORED_MODE" = 1 ]; then
+    ( cd "$W" && OPENAI_API_KEY="$SHERLOCK_API_KEY" OPENAI_BASE_URL="$BASE_URL" \
+      SHERLOCK_STRICT_MARKER_LIFECYCLE="$STRICT_MARKER_LIFECYCLE" \
+      timeout 0 "$QWEN" --auth-type openai --model "$CLIENT_MODEL" \
+        --approval-mode yolo --max-session-turns -1 --max-tool-calls -1 \
+        "$@" --output-format json </dev/null \
+    ) >"$W/out.json" 2>"$W/err.txt"
+  else
+    ( cd "$W" && OPENAI_API_KEY="$SHERLOCK_API_KEY" OPENAI_BASE_URL="$BASE_URL" \
+      SHERLOCK_STRICT_MARKER_LIFECYCLE="$STRICT_MARKER_LIFECYCLE" \
+      timeout "$TIMEOUT" "$QWEN" --auth-type openai --model "$CLIENT_MODEL" \
+        --approval-mode yolo --max-session-turns "$MAX_SESSION_TURNS" \
+        --max-wall-time "${MAX_WALL_TIME_S}s" --max-tool-calls "$MAX_TOOL_CALLS" \
+        "$@" --output-format json </dev/null \
+    ) >"$W/out.json" 2>"$W/err.txt"
+  fi
   local rc=$?
   finished="$(date +%s)"
   # A resume must never overwrite the diagnostic from the attempt that failed.

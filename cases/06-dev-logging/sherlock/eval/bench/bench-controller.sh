@@ -1104,21 +1104,31 @@ def target_contract_probe(argv):
     env = controlled_environment(allowed_probe_env)
     try:
         budget = json.loads((sealed / "probe-budget.json").read_text(encoding="utf-8"))
+        monitored = (profile.get("schema") == 2 and
+                     profile.get("execution_mode") == "operator_monitored" and
+                     budget.get("schema") == 3 and budget.get("mode") == "operator_monitored")
         limits = {"max_provider_calls": budget["max_provider_calls"],
                   "max_prompt_tokens": budget["max_prompt_tokens"],
                   "max_completion_tokens": budget["max_completion_tokens"],
                   "max_wall_time_s": budget["max_wall_time_s"],
                   "max_estimated_cost_rub": budget["max_estimated_cost_rub"]}
-        if any(type(value) not in (int, float) or isinstance(value, bool) or value < 0 for value in limits.values()):
-            raise ValueError()
-        if type(limits["max_provider_calls"]) is not int or limits["max_provider_calls"] <= 0:
-            raise ValueError()
-        per_dispatch_timeout = (limits["max_wall_time_s"] /
-                                limits["max_provider_calls"])
-        if per_dispatch_timeout <= 0:
-            raise ValueError()
+        if monitored:
+            if any(value is not None for value in limits.values()) or budget.get("request_read_timeout_s") != 600:
+                raise ValueError()
+            per_dispatch_timeout = 600
+        else:
+            if any(type(value) not in (int, float) or isinstance(value, bool) or value < 0 for value in limits.values()):
+                raise ValueError()
+            if type(limits["max_provider_calls"]) is not int or limits["max_provider_calls"] <= 0:
+                raise ValueError()
+            per_dispatch_timeout = (limits["max_wall_time_s"] / limits["max_provider_calls"])
+            if per_dispatch_timeout <= 0:
+                raise ValueError()
         action = trace / "upstream-action-budget.json"
-        atomic_replace(action, canonical({"schema": 1, "run_tag": trace.name, "limits": limits}) + b"\n")
+        action_row = ({"schema": 2, "mode": "operator_monitored", "run_tag": trace.name,
+                       "request_read_timeout_s": 600, "limits": limits} if monitored else
+                      {"schema": 1, "run_tag": trace.name, "limits": limits})
+        atomic_replace(action, canonical(action_row) + b"\n")
     except (OSError, ValueError, KeyError, TypeError):
         print("PROBE_BUDGET", file=sys.stderr)
         return 1
@@ -1128,9 +1138,6 @@ def target_contract_probe(argv):
                 "SHERLOCK_BASE_URL": transport, "SHERLOCK_MODEL": profile["requested_model"],
                 "SHERLOCK_EXPECTED_RETURNED_IDENTITY": profile["expected_returned_identity"],
                 "QWEN_BIN": profile["qwen"]["cli"], "SHERLOCK_MAX_RETRIES": "0", "SHERLOCK_REQUIRE_ATTRIBUTION": "1",
-                "SHERLOCK_BUDGET_MAX_UPSTREAM_ATTEMPTS": str(limits["max_provider_calls"]),
-                "SHERLOCK_BUDGET_MAX_REQUEST_BYTES": str(limits["max_prompt_tokens"] * 4),
-                "SHERLOCK_BUDGET_MAX_WALL_SECONDS": str(limits["max_wall_time_s"]),
                 # This is the lane's retry-safety cap, rather than a sixth
                 # paid-envelope limit.  With retries disabled, one preserves
                 # the intended fail-on-first-provider-failure semantics and
@@ -1155,6 +1162,14 @@ def target_contract_probe(argv):
                 "SHERLOCK_PROBE_BUDGET": str(sealed / "probe-budget.json"),
                 "UPSTREAM_ACTION_BUDGET": str(action), "UPSTREAM_RATE_SNAPSHOT": str(trace / "probe-rate-snapshot.json"),
                 "SHERLOCK_PROBE_ARM": json.loads((sealed / "input-package.json").read_text(encoding="utf-8")).get("arm", "")})
+    if monitored:
+        env.update({"SHERLOCK_OPERATOR_MONITORED_MODE": "1", "SHERLOCK_TIMEOUT": "0",
+                    "SHERLOCK_MAX_SESSION_TURNS": "-1", "SHERLOCK_MAX_WALL_TIME_S": "-1",
+                    "SHERLOCK_MAX_TOOL_CALLS": "-1", "SHERLOCK_WORKFLOW_AGENT_MAX_TURNS": "200"})
+    else:
+        env.update({"SHERLOCK_BUDGET_MAX_UPSTREAM_ATTEMPTS": str(limits["max_provider_calls"]),
+                    "SHERLOCK_BUDGET_MAX_REQUEST_BYTES": str(limits["max_prompt_tokens"] * 4),
+                    "SHERLOCK_BUDGET_MAX_WALL_SECONDS": str(limits["max_wall_time_s"])})
     child = None
     ownership, prior_sigterm = install_owned_child_signal_handler()
     try:
@@ -1172,7 +1187,7 @@ def target_contract_probe(argv):
                      "boot_id_sha256": digest(b"target-contract-probe"),
                      "command_sha256": digest(" ".join(child.args).encode("utf-8"))}
         atomic_replace(trace / "controller-process.json", canonical(proof) + b"\n")
-        stdout, stderr = communicate_owned_process(child, timeout=600)
+        stdout, stderr = communicate_owned_process(child, timeout=None if monitored else 600)
         done = subprocess.CompletedProcess(child.args, child.returncode, stdout, stderr)
     except (Blocked, OSError, subprocess.TimeoutExpired):
         try:

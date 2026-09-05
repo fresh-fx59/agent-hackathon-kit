@@ -732,21 +732,31 @@ def target_probe_projection(path):
         if (expected.identity.st_dev, expected.identity.st_ino) != (trace.identity.st_dev, trace.identity.st_ino):
             raise ValueError("TRACE_UNRESOLVED")
         raw_manifest, manifest = target_read(trace, "probe-manifest.json")
-        if (set(manifest) != TARGET_PROBE_MANIFEST_KEYS or manifest.get("schema") != 1 or
-                manifest.get("action") != "target_contract_probe" or
+        if (set(manifest) != TARGET_PROBE_MANIFEST_KEYS or manifest.get("schema") not in (1, 2) or
+                manifest.get("action") not in {"target_contract_probe", "target_contract_probe_operator_monitored"} or
                 not isinstance(manifest.get("nonce"), str) or not re.fullmatch(r"[0-9a-f]{64}", manifest["nonce"]) or
                 timestamp(manifest.get("created_at")) is None or timestamp(manifest.get("expires_at")) is None or
                 timestamp(manifest["expires_at"]) <= timestamp(manifest["created_at"]) or
                 timestamp(manifest["expires_at"]) <= dt.datetime.now(dt.timezone.utc) or
                 not all(is_hex(manifest.get(name)) for name in TARGET_PROBE_MANIFEST_KEYS if name.endswith("_sha256"))):
             raise ValueError("TRACE_UNRESOLVED")
+        package_rows = {}
         for name, field in (("target-profile.json", "target_profile_sha256"),
                             ("probe-budget.json", "probe_budget_sha256"),
                             ("probe-rate-snapshot.json", "rate_snapshot_sha256"),
                             ("fixture-manifest.json", "fixture_manifest_sha256"),
                             ("input-package.json", "input_package_sha256")):
-            raw, _ = target_read(trace, name)
+            raw, row = target_read(trace, name)
             if not hmac.compare_digest(digest(raw), manifest[field]): raise ValueError("TRACE_UNRESOLVED")
+            package_rows[name] = row
+        profile = package_rows["target-profile.json"]
+        monitored = (profile.get("schema") == 2 and
+                     profile.get("execution_mode") == "operator_monitored" and
+                     profile.get("request_read_timeout_s") == 600)
+        expected_action = ("target_contract_probe_operator_monitored" if monitored
+                           else "target_contract_probe")
+        if manifest["action"] != expected_action or manifest["schema"] != (2 if monitored else 1):
+            raise ValueError("TRACE_UNRESOLVED")
         prompt = HeldDir.child(trace, "probe")
         if not hmac.compare_digest(digest(target_raw(prompt, "prompt.txt")), manifest["prompt_sha256"]):
             raise ValueError("TRACE_UNRESOLVED")

@@ -103,6 +103,13 @@ class DispatchBudget(unittest.TestCase):
     def _action(self, limits, run_tag="dispatch-fixture"):
         return {"schema": 1, "run_tag": run_tag, "limits": limits}
 
+    def _monitored_action(self, run_tag="dispatch-fixture"):
+        return {"schema": 2, "mode": "operator_monitored", "run_tag": run_tag,
+                "request_read_timeout_s": 600,
+                "limits": {"max_provider_calls": None, "max_prompt_tokens": None,
+                           "max_completion_tokens": None, "max_wall_time_s": None,
+                           "max_estimated_cost_rub": None}}
+
     def _rates(self, run_tag="dispatch-fixture"):
         row = {"schema": 1, "run_tag": run_tag,
                 "effective_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
@@ -224,6 +231,31 @@ class DispatchBudget(unittest.TestCase):
         self.assertEqual(self.upstream.requests, 0)
         self.assertEqual(self.budget(state)["reason"], "RATE_SNAPSHOT_INVALID",
                          (payload, self.budget(state)))
+
+    def test_operator_monitored_accounting_crosses_old_call_and_rub_ceilings(self):
+        rates = self._rates()
+        rates.update(prompt_rub_per_token=1.0, completion_rub_per_token=1.0)
+        rates = self._sign_rates(rates)
+        self.upstream.usage = {"prompt_tokens": 1000, "completion_tokens": 1000}
+        state = self.start(action_document=self._monitored_action(), rate_document=rates,
+                           extra_env={"UPSTREAM_READ_TIMEOUT": "600"})
+        for _ in range(7):
+            status, _ = self.post(max_tokens=100)
+            self.assertEqual(status, 200)
+        for _ in range(100):
+            row = self.budget(state)
+            if row.get("observed", {}).get("provider_calls") == 7:
+                break
+            time.sleep(0.02)
+        self.assertEqual(self.upstream.requests, 7)
+        self.assertEqual(row["schema"], 3)
+        self.assertEqual(row["budget_assurance"], "operator_monitored")
+        self.assertEqual(row["observed"], {"provider_calls": 7,
+                                           "prompt_tokens": 7000,
+                                           "completion_tokens": 7000})
+        self.assertGreater(row["projected"]["estimated_cost_rub"], 55.0)
+        self.assertEqual(row["verdict"], "WITHIN")
+        self.assertIsNone(row["reason"])
 
     def test_provider_overshoot_is_recorded_not_relabelled_as_prevented(self):
         self.upstream.usage = {"prompt_tokens": 10, "completion_tokens": 110}

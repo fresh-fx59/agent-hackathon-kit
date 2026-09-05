@@ -705,20 +705,30 @@ def _read_small_regular_json(path, maximum=65536):
 
 def _strict_action_budget(path):
     row = _read_small_regular_json(path)
-    if type(row) is not dict or set(row) != {"schema", "run_tag", "limits"} or \
-            row.get("schema") != 1 or type(row.get("run_tag")) is not str or \
-            not row["run_tag"] or row["run_tag"] != RUN_TAG:
+    schema = row.get("schema") if type(row) is dict else None
+    expected = ({"schema", "run_tag", "limits"} if schema == 1 else
+                {"schema", "mode", "run_tag", "request_read_timeout_s", "limits"})
+    if type(row) is not dict or set(row) != expected or schema not in (1, 2) or \
+            type(row.get("run_tag")) is not str or not row["run_tag"] or row["run_tag"] != RUN_TAG:
         raise ValueError("invalid action budget")
     limits = row["limits"]
     if type(limits) is not dict or set(limits) != set(ACTION_LIMITS):
         raise ValueError("invalid action limits")
-    for name in ACTION_LIMITS:
-        value = limits[name]
-        if type(value) not in (int, float) or isinstance(value, bool) or \
-                not math.isfinite(value) or value < 0:
-            raise ValueError("invalid action limit")
-    return {"schema": 1, "run_tag": RUN_TAG,
-            "limits": {name: limits[name] for name in ACTION_LIMITS}}
+    if schema == 1:
+        for name in ACTION_LIMITS:
+            value = limits[name]
+            if type(value) not in (int, float) or isinstance(value, bool) or \
+                    not math.isfinite(value) or value < 0:
+                raise ValueError("invalid action limit")
+        return {"schema": 1, "run_tag": RUN_TAG,
+                "limits": {name: limits[name] for name in ACTION_LIMITS}}
+    if (row.get("mode") != "operator_monitored" or
+            row.get("request_read_timeout_s") != 600 or UPSTREAM_READ_TIMEOUT != 600 or
+            any(limits[name] is not None for name in ACTION_LIMITS)):
+        raise ValueError("invalid monitored action policy")
+    return {"schema": 2, "mode": "operator_monitored", "run_tag": RUN_TAG,
+            "request_read_timeout_s": 600,
+            "limits": {name: None for name in ACTION_LIMITS}}
 
 
 def _strict_rate_snapshot(path):
@@ -1400,17 +1410,20 @@ def _read_budget():
 
 def _budget_shape(row):
     if _ACTION_BUDGET_ENABLED:
+        monitored = (_ACTION_BUDGET or {}).get("mode") == "operator_monitored"
         counters = ("provider_calls", "prompt_tokens", "completion_tokens",
                     "wall_time_s", "estimated_cost_rub")
         observed = ("provider_calls", "prompt_tokens", "completion_tokens")
         fields = {"schema", "run_tag", "updated_at", "limits", "rate_snapshot",
                   "budget_assurance", "projected", "observed", "completed_overshoot",
                   "observed_usage_unknown", "completed_attempt_ids", "verdict", "reason"}
-        return (isinstance(row, dict) and set(row) == fields and row.get("schema") == 2 and
+        return (isinstance(row, dict) and set(row) == fields and
+                row.get("schema") == (3 if monitored else 2) and
                 row.get("run_tag") == RUN_TAG and row.get("limits") ==
                 (_ACTION_BUDGET or {"limits": {name: 1 for name in ACTION_LIMITS}})["limits"] and
                 row.get("rate_snapshot") == _RATE_SNAPSHOT and
-                row.get("budget_assurance") == "client_pre_dispatch" and
+                row.get("budget_assurance") == ("operator_monitored" if monitored else
+                                                 "client_pre_dispatch") and
                 _valid_budget_timestamp(row.get("updated_at")) and
                 all(type(row.get(group)) is dict for group in
                     ("projected", "observed", "completed_overshoot")) and
@@ -1435,8 +1448,8 @@ def _budget_shape(row):
                 row["observed"]["provider_calls"] == len(row["completed_attempt_ids"]) and
                 row["projected"]["provider_calls"] >= row["observed"]["provider_calls"] and
                 row["observed_usage_unknown"] <= row["observed"]["provider_calls"] and
-                all(row["completed_overshoot"][name] == max(
-                    row["observed"][name] - row["limits"]["max_" + name], 0)
+                all(row["completed_overshoot"][name] == (0 if monitored else max(
+                    row["observed"][name] - row["limits"]["max_" + name], 0))
                     for name in observed) and
                 row.get("verdict") in ("WITHIN", "EXCEEDED") and
                 (row.get("reason") is None or
@@ -1477,11 +1490,12 @@ def _write_budget(row):
 
 
 def _action_initial_budget():
-    return {"schema": 2, "run_tag": RUN_TAG, "updated_at": _budget_timestamp(),
+    monitored = (_ACTION_BUDGET or {}).get("mode") == "operator_monitored"
+    return {"schema": 3 if monitored else 2, "run_tag": RUN_TAG, "updated_at": _budget_timestamp(),
             "limits": ((_ACTION_BUDGET or {}).get("limits") or
                        {name: 1 for name in ACTION_LIMITS}),
             "rate_snapshot": _RATE_SNAPSHOT,
-            "budget_assurance": "client_pre_dispatch",
+            "budget_assurance": "operator_monitored" if monitored else "client_pre_dispatch",
             "projected": {"provider_calls": 0, "prompt_tokens": 0,
                           "completion_tokens": 0, "wall_time_s": 0.0,
                           "estimated_cost_rub": 0.0},
@@ -1752,7 +1766,7 @@ def _reserve_dispatch(estimate):
             projected[name] += value
         for name in ACTION_LIMITS:
             counter = name.removeprefix("max_")
-            if projected[counter] > row["limits"][name]:
+            if row["limits"][name] is not None and projected[counter] > row["limits"][name]:
                 row.update(verdict="EXCEEDED", reason="MAX_" + name.upper())
                 return row
         # Deliberately never released: an answer lost to a crash may still have
@@ -1799,7 +1813,8 @@ def _apply_action_completion(row, attempt_id, usage):
     row["observed"] = observed
     row["completed_attempt_ids"] = row["completed_attempt_ids"] + [attempt_id]
     row["completed_overshoot"] = {
-        name: max(observed[name] - row["limits"]["max_" + name], 0)
+        name: (0 if row["limits"]["max_" + name] is None else
+               max(observed[name] - row["limits"]["max_" + name], 0))
         for name in ("provider_calls", "prompt_tokens", "completion_tokens")}
 
 

@@ -41,6 +41,10 @@ DEFAULT_BUDGET = {"schema": 2, "max_provider_calls": PROBE_MAX_PROVIDER_CALLS,
                   "max_prompt_tokens": PROBE_MAX_PROVIDER_CALLS * PROBE_SESSION_TOKEN_LIMIT,
                   "max_completion_tokens": PROBE_MAX_PROVIDER_CALLS * PROBE_MAX_OUTPUT_TOKENS,
                   "max_wall_time_s": 600, "max_estimated_cost_rub": 55.0}
+MONITORED_BUDGET = {"schema": 3, "mode": "operator_monitored",
+                    "max_provider_calls": None, "max_prompt_tokens": None,
+                    "max_completion_tokens": None, "max_wall_time_s": None,
+                    "max_estimated_cost_rub": None, "request_read_timeout_s": 600}
 CONTROLLER_TERM_GRACE_S = 15
 KILL_REAP_GRACE_S = 2
 
@@ -532,7 +536,9 @@ def _profile(args, settings_sha):
     _, qwen_sha = _asset(qwen, "TARGET_PROBE_PREPARE")
     settings = HERE.parent.parent / "measure" / "corporate-settings.py"
     skill = HERE.parent.parent / "skills" / "v44"
-    profile = {"schema": 1, "provider_base_url": args.provider_base_url.rstrip("/"),
+    monitored = bool(getattr(args, "operator_monitored", False))
+    profile = {"schema": 2 if monitored else 1,
+               "provider_base_url": args.provider_base_url.rstrip("/"),
                "route": args.route, "secret_ref": args.secret_ref,
                "requested_model": args.requested_model,
                "expected_returned_identity": args.expected_returned_identity,
@@ -540,12 +546,19 @@ def _profile(args, settings_sha):
                "max_output_tokens": PROBE_MAX_OUTPUT_TOKENS,
                "session_token_limit": PROBE_SESSION_TOKEN_LIMIT,
                "cache": {"enabled": False}, "interactive": {"enabled": False},
-               "qwen": {"cli": str(qwen)}, "limits": {"requests": PROBE_MAX_PROVIDER_CALLS},
+               "qwen": ({"cli": str(qwen), "max_session_turns": -1,
+                          "max_wall_time_s": -1, "max_tool_calls": -1,
+                          "wall_time_cli": "omitted",
+                          "vendor_limits": {"workflow_agent_max_turns": 200}}
+                         if monitored else {"cli": str(qwen)}),
+               "limits": {"requests": None if monitored else PROBE_MAX_PROVIDER_CALLS},
                "settings_sha256": settings_sha,
                "system_prompt_sha256": sha256((skill / "SKILL.md").read_bytes()),
                "skill_sha256": _tree_digest(skill),
                "tool_schema_sha256": _tree_digest(HERE.parent.parent / "skills" / "v44" / "tools"), "gate_sha256": _gate_digests(),
                "lane_guard": {"enabled": True}}
+    if monitored:
+        profile.update(execution_mode="operator_monitored", request_read_timeout_s=600)
     if args.identity_mode == "provider_pinned_version" and (
             args.requested_model != args.expected_returned_identity or
             re.search(r"(?:^|-)\d{6,}(?:$|-)", args.requested_model) is None):
@@ -636,10 +649,17 @@ def prepare(args, secret_reader=None):
         if settings_run.returncode:
             raise ProbeFailure("TARGET_PROBE_PREPARE", "corporate settings")
         settings_bytes = settings_run.stdout.encode("utf-8")
+        monitored = bool(getattr(args, "operator_monitored", False))
+        if monitored:
+            settings_row = _strict_json(settings_bytes)
+            settings_row.setdefault("model", {})["maxSessionTurns"] = -1
+            settings_row["model"]["maxWallTimeSeconds"] = -1
+            settings_bytes = canonical(settings_row) + b"\n"
         profile = _profile(args, sha256(settings_bytes))
+        budget = MONITORED_BUDGET if monitored else DEFAULT_BUDGET
         files = {"target-profile.json": canonical(profile) + b"\n",
                  "corporate-settings.json": settings_bytes,
-                 "probe-budget.json": canonical(DEFAULT_BUDGET) + b"\n",
+                 "probe-budget.json": canonical(budget) + b"\n",
                  "probe-rate-snapshot.json": rate_raw,
                  "fixture-manifest.json": (fixture_dir / "probe-fixture-manifest.json").read_bytes(),
                  "probe/prompt.txt": (HERE / "probe" / "prompt.txt").read_bytes(),
@@ -661,7 +681,9 @@ def prepare(args, secret_reader=None):
         created = _now()
         ttl = (dt.timedelta(hours=24) if args.identity_mode == "provider_pinned_version" and
                args.requested_model == args.expected_returned_identity else dt.timedelta(minutes=30))
-        manifest = {"schema": 1, "action": "target_contract_probe", "created_at": _time_text(created),
+        manifest = {"schema": 2 if monitored else 1,
+                    "action": ("target_contract_probe_operator_monitored" if monitored
+                               else "target_contract_probe"), "created_at": _time_text(created),
                     "expires_at": _time_text(created + ttl), "nonce": secrets.token_hex(32),
                     "target_profile_sha256": sha256(files["target-profile.json"]),
                     "probe_budget_sha256": sha256(files["probe-budget.json"]),
@@ -728,13 +750,16 @@ def _record_action_authorization(root, nonce_root, manifest, supplied_hash, auth
     }) + b"\n")
 
 
-def authorize(manifest_path, supplied_hash, nonce_root, action="target_contract_probe", *, consume=True):
+def authorize(manifest_path, supplied_hash, nonce_root, action=None, *, consume=True):
     raw = safe_read_regular(manifest_path)
     if not _hex(supplied_hash) or not hmac.compare_digest(sha256(raw), supplied_hash):
         raise ProbeFailure("TARGET_PROBE_NOT_AUTHORIZED", "manifest hash")
     row = _strict_json(raw, PROBE_MANIFEST_KEYS)
     created, expires = _iso(row.get("created_at")), _iso(row.get("expires_at"))
-    if row.get("schema") != 1 or row.get("action") != action or expires <= _now() or expires <= created:
+    expected_action = {1: "target_contract_probe", 2: "target_contract_probe_operator_monitored"}.get(
+        row.get("schema"))
+    if expected_action is None or row.get("action") != (action or expected_action) or \
+            (action is not None and action != expected_action) or expires <= _now() or expires <= created:
         raise ProbeFailure("TARGET_PROBE_NOT_AUTHORIZED", "action or expiry")
     for name in ("target_profile_sha256", "probe_budget_sha256", "fixture_manifest_sha256", "input_package_sha256", "rate_snapshot_sha256"):
         if not _hex(row.get(name)):
@@ -781,7 +806,9 @@ def _verify_package(root, manifest, code="TARGET_PROBE_NOT_AUTHORIZED"):
         RUN_MANIFEST.validate_target_profile(values["target-profile.json"])
     except Exception as exc:
         raise ProbeFailure(code, "target profile invalid") from exc
-    if values["probe-budget.json"] != DEFAULT_BUDGET:
+    expected_budget = (MONITORED_BUDGET if values["target-profile.json"].get("schema") == 2
+                       else DEFAULT_BUDGET)
+    if values["probe-budget.json"] != expected_budget:
         raise ProbeFailure(code, "probe budget invalid")
     try:
         _sealed_rate_snapshot(Path(root) / "probe-rate-snapshot.json")
@@ -922,15 +949,18 @@ def _finite_number(value):
     return type(value) in (int, float) and not isinstance(value, bool) and math.isfinite(value) and value >= 0
 
 
-def _strict_budget(row):
+def _strict_budget(row, monitored=False):
     fields = {"schema", "run_tag", "updated_at", "limits", "rate_snapshot", "budget_assurance",
               "projected", "observed", "completed_overshoot", "observed_usage_unknown",
               "completed_attempt_ids", "verdict", "reason"}
     counters = ("provider_calls", "prompt_tokens", "completion_tokens")
     limits = ("max_provider_calls", "max_prompt_tokens", "max_completion_tokens", "max_wall_time_s", "max_estimated_cost_rub")
-    if not isinstance(row, dict) or set(row) != fields or row.get("schema") != 2 or \
-            row.get("budget_assurance") != "client_pre_dispatch" or set(row.get("limits", {})) != set(limits) or \
-            not all(_finite_number(row["limits"][key]) for key in limits) or \
+    expected_schema = 3 if monitored else 2
+    expected_assurance = "operator_monitored" if monitored else "client_pre_dispatch"
+    if not isinstance(row, dict) or set(row) != fields or row.get("schema") != expected_schema or \
+            row.get("budget_assurance") != expected_assurance or set(row.get("limits", {})) != set(limits) or \
+            (monitored and any(row["limits"][key] is not None for key in limits)) or \
+            (not monitored and not all(_finite_number(row["limits"][key]) for key in limits)) or \
             not isinstance(row.get("run_tag"), str) or not row["run_tag"] or \
             not isinstance(row.get("rate_snapshot"), dict):
         raise ProbeFailure("TARGET_PROBE_BUDGET")
@@ -948,7 +978,7 @@ def _strict_budget(row):
             or updated > _now() + dt.timedelta(minutes=5) or effective > _now() + dt.timedelta(minutes=5)
             or _now() - effective > dt.timedelta(hours=24)):
         raise ProbeFailure("TARGET_PROBE_BUDGET")
-    expected_limits = {key: DEFAULT_BUDGET[key] for key in limits}
+    expected_limits = {key: (None if monitored else DEFAULT_BUDGET[key]) for key in limits}
     if row["limits"] != expected_limits:
         raise ProbeFailure("TARGET_PROBE_BUDGET")
     if any(not isinstance(row.get(group), dict) for group in ("projected", "observed", "completed_overshoot")) or \
@@ -957,7 +987,7 @@ def _strict_budget(row):
             not all(_finite_number(row["projected"][key]) for key in row["projected"]) or \
             not all(type(row[group][key]) is int and row[group][key] >= 0 for group in ("observed", "completed_overshoot") for key in counters):
         raise ProbeFailure("TARGET_PROBE_BUDGET")
-    if any(row["projected"][key] > row["limits"]["max_" + key] for key in ("provider_calls", "prompt_tokens", "completion_tokens", "wall_time_s", "estimated_cost_rub")):
+    if not monitored and any(row["projected"][key] > row["limits"]["max_" + key] for key in ("provider_calls", "prompt_tokens", "completion_tokens", "wall_time_s", "estimated_cost_rub")):
         raise ProbeFailure("TARGET_PROBE_BUDGET")
     attempts = row.get("completed_attempt_ids")
     if (type(row.get("observed_usage_unknown")) is not int or row["observed_usage_unknown"] < 0
@@ -966,8 +996,10 @@ def _strict_budget(row):
             or row["observed"]["provider_calls"] != len(attempts)
             or row["observed_usage_unknown"] > row["observed"]["provider_calls"]
             or row["projected"]["provider_calls"] < row["observed"]["provider_calls"]
-            or any(row["completed_overshoot"][key] != max(row["observed"][key] - row["limits"]["max_" + key], 0) for key in counters)
-            or row.get("verdict") not in {"WITHIN", "EXCEEDED"}
+            or (monitored and any(row["completed_overshoot"].values()))
+            or (not monitored and any(row["completed_overshoot"][key] != max(row["observed"][key] - row["limits"]["max_" + key], 0) for key in counters))
+            or (monitored and (row.get("verdict") != "WITHIN" or row.get("reason") is not None))
+            or (not monitored and row.get("verdict") not in {"WITHIN", "EXCEEDED"})
             or (row["verdict"] == "WITHIN" and (any(row["completed_overshoot"].values()) or row.get("reason") is not None))
             or (row["verdict"] == "EXCEEDED" and (not any(row["completed_overshoot"].values()) or not isinstance(row.get("reason"), str) or re.fullmatch(r"[A-Z][A-Z0-9_]{0,63}", row["reason"]) is None))):
         raise ProbeFailure("TARGET_PROBE_BUDGET")
@@ -1225,13 +1257,16 @@ def audit(trace):
                       "call_ids": [row["action_attempt_id"] for row, _, _ in task3_rows]}
         else:
             raise ProbeFailure("TARGET_CONTRACT_FAILED", "missing Task 3 completion journal")
-        budget = _strict_budget(_strict_json(_asset(trace / "upstream-budget-state.json", "TARGET_CONTRACT_FAILED")[0]))
+        monitored = package["target-profile.json"].get("execution_mode") == "operator_monitored"
+        budget = _strict_budget(
+            _strict_json(_asset(trace / "upstream-budget-state.json", "TARGET_CONTRACT_FAILED")[0]),
+            monitored=monitored)
         if set(ledger) != {"provider_calls_observed", "usage", "returned_identities", "sent_models", "call_ids"} or \
                 not isinstance(ledger.get("usage"), dict) or set(ledger["usage"]) != {"prompt_tokens", "completion_tokens"} or \
                 any(type(ledger["usage"][key]) is not int or ledger["usage"][key] < 0 for key in ledger["usage"]):
             raise ProbeFailure("TARGET_PROBE_BUDGET")
         calls = ledger.get("provider_calls_observed")
-        if type(calls) is not int or calls < 1 or calls > DEFAULT_BUDGET["max_provider_calls"] or \
+        if type(calls) is not int or calls < 1 or (not monitored and calls > DEFAULT_BUDGET["max_provider_calls"]) or \
                 budget["observed"].get("provider_calls") != calls or \
                 budget["completed_attempt_ids"] != ledger.get("call_ids") or \
                 not all(isinstance(value, str) and value for value in ledger.get("call_ids", [])) or \
@@ -1290,7 +1325,8 @@ def audit(trace):
         rate = budget["rate_snapshot"]
         estimated_cost = (usage["prompt_tokens"] * rate["prompt_rub_per_token"]
                           + usage["completion_tokens"] * rate["completion_rub_per_token"])
-        if budget["projected"]["estimated_cost_rub"] < estimated_cost or estimated_cost > budget["limits"]["max_estimated_cost_rub"]:
+        if (budget["projected"]["estimated_cost_rub"] < estimated_cost or
+                (not monitored and estimated_cost > budget["limits"]["max_estimated_cost_rub"])):
             raise ProbeFailure("TARGET_PROBE_BUDGET", "rate cost")
         identity = audit_identity(package["target-profile.json"]["identity_mode"],
                                   package["target-profile.json"]["expected_returned_identity"],
@@ -1388,6 +1424,7 @@ def main(argv=None):
                  "expected-returned-identity", "identity-mode", "qwen-bin", "arm", "rate-snapshot"):
         prep.add_argument("--" + name, required=True)
     prep.add_argument("--json", action="store_true")
+    prep.add_argument("--operator-monitored", action="store_true")
     auth = sub.add_parser("run")
     auth.add_argument("--manifest", required=True); auth.add_argument("--operator-approved-probe", required=True)
     auth.add_argument("--nonce-root", required=True)
@@ -1422,7 +1459,9 @@ def main(argv=None):
                            "--sealed-input", str(kwargs["profile_path"].parent), "--work", str(kwargs["work"])]
                 if args.transport_base_url:
                     command.extend(["--transport-base-url", args.transport_base_url])
-                done = run_owned_process(command, text=True, capture_output=True, timeout=600)
+                profile = _strict_json(kwargs["profile_path"].read_bytes())
+                timeout = None if profile.get("execution_mode") == "operator_monitored" else 600
+                done = run_owned_process(command, text=True, capture_output=True, timeout=timeout)
                 if done.returncode:
                     raise ProbeFailure("TARGET_CONTRACT_FAILED", "controlled runner nonzero")
                 row = _strict_json(done.stdout.encode("utf-8"))

@@ -363,15 +363,25 @@ def _budget_estimate(trace, run_tag):
               "max_wall_time_s", "max_estimated_cost_rub")
     observed = ("provider_calls", "prompt_tokens", "completion_tokens")
     projected = observed + ("wall_time_s", "estimated_cost_rub")
-    if (not isinstance(budget, dict) or set(budget) != fields or budget.get("schema") != 2
-            or budget.get("run_tag") != run_tag or budget.get("budget_assurance") != "client_pre_dispatch"):
+    if not isinstance(budget, dict) or set(budget) != fields or budget.get("run_tag") != run_tag:
+        return None, None
+    monitored = budget.get("schema") == 3
+    if monitored:
+        profile = _optional_json(trace, "target-profile.json")
+        if (not isinstance(profile, dict) or profile.get("schema") != 2
+                or profile.get("execution_mode") != "operator_monitored"
+                or profile.get("request_read_timeout_s") != 600
+                or budget.get("budget_assurance") != "operator_monitored"):
+            return None, None
+    elif budget.get("schema") != 2 or budget.get("budget_assurance") != "client_pre_dispatch":
         return None, None
     snapshot = budget.get("rate_snapshot")
     if (not _fresh_timestamp(budget.get("updated_at")) or not isinstance(snapshot, dict)
             or not isinstance(budget.get("limits"), dict)
             or set(budget["limits"]) != set(limits)
-            or any(not _finite_nonnegative(budget["limits"].get(name)) for name in limits)
-            or any(type(budget["limits"].get(name)) is not int for name in limits[:3])
+            or (monitored and any(budget["limits"].get(name) is not None for name in limits))
+            or (not monitored and any(not _finite_nonnegative(budget["limits"].get(name)) for name in limits))
+            or (not monitored and any(type(budget["limits"].get(name)) is not int for name in limits[:3]))
             or any(not isinstance(budget.get(group), dict) for group in
                    ("projected", "observed", "completed_overshoot"))
             or set(budget["projected"]) != set(projected)
@@ -391,10 +401,12 @@ def _budget_estimate(trace, run_tag):
             or budget["observed"]["provider_calls"] != len(budget["completed_attempt_ids"])
             or budget["projected"]["provider_calls"] < budget["observed"]["provider_calls"]
             or budget["observed_usage_unknown"] > budget["observed"]["provider_calls"]
-            or any(budget["completed_overshoot"][name] != max(
+            or (monitored and any(budget["completed_overshoot"].values()))
+            or (not monitored and any(budget["completed_overshoot"][name] != max(
                 budget["observed"][name] - budget["limits"]["max_" + name], 0)
-                   for name in observed)
-            or budget.get("verdict") not in {"WITHIN", "EXCEEDED"}
+                   for name in observed))
+            or (monitored and (budget.get("verdict") != "WITHIN" or budget.get("reason") is not None))
+            or (not monitored and budget.get("verdict") not in {"WITHIN", "EXCEEDED"})
             or (budget.get("reason") is not None and
                 (not isinstance(budget.get("reason"), str) or
                  re.fullmatch(r"[A-Z][A-Z0-9_]{0,63}", budget["reason"]) is None))):
