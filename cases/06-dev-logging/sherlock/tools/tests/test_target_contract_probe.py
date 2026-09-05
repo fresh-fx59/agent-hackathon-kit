@@ -404,6 +404,68 @@ class TargetContractProbeTest(unittest.TestCase):
         self.assertNotEqual(runner.returncode, 0)
         self.assertFalse(marker.exists())
 
+    def test_direct_runner_cannot_upgrade_valid_finite_authority_to_monitored(self):
+        """Consumed finite authority cannot be paired with ambient unlimited policy."""
+        marker = self.temp / "finite-upgrade-contact"
+        qwen = self.temp / "finite-upgrade-tripwire.sh"
+        qwen.write_text(
+            "#!/usr/bin/env bash\n"
+            "printf contacted > %s\n"
+            "exit 97\n" % marker,
+            encoding="utf-8")
+        qwen.chmod(0o755)
+        root = (self.temp / "authorized-finite").resolve()
+        args = self.probe.PrepareArgs(**dict(
+            self.args.__dict__, root=root, qwen_bin=str(qwen), arm="v44"))
+        self.probe.prepare(args)
+        manifest = root / "probe-manifest.json"
+        approval = self._sha(manifest)
+        nonce_root = root / "nonces"
+        self.probe.authorize(manifest, approval, nonce_root)
+        trace = root / "probe-work" / "runs" / "target-contract-probe"
+        trace.mkdir(parents=True)
+        forged_action = trace / "upstream-action-budget.json"
+        forged_action.write_bytes(self.probe.canonical({
+            "schema": 2, "mode": "operator_monitored",
+            "run_tag": "target-contract-probe", "request_read_timeout_s": 600,
+            "limits": {name: None for name in (
+                "max_provider_calls", "max_prompt_tokens", "max_completion_tokens",
+                "max_wall_time_s", "max_estimated_cost_rub")},
+        }) + b"\n")
+        (trace / "controller-process.json").write_text(json.dumps({
+            "pid": 1, "process_start_ticks": 1, "pgid": 1,
+            "boot_id_sha256": "0" * 64, "command_sha256": "0" * 64,
+        }))
+        runner_env = dict(
+            os.environ, BENCH_RUNS=str(trace.parent), SHERLOCK_RUN_TAG=trace.name,
+            SHERLOCK_TRACE=str(trace), SHERLOCK_TARGET_PROBE_MODE="1",
+            SHERLOCK_OPERATOR_MONITORED_MODE="1", SHERLOCK_TIMEOUT="0",
+            SHERLOCK_MAX_SESSION_TURNS="-1", SHERLOCK_MAX_TOOL_CALLS="-1",
+            SHERLOCK_MAX_WALL_TIME_S="-1", SHERLOCK_WORKFLOW_AGENT_MAX_TURNS="200",
+            SHERLOCK_PROBE_SEALED_INPUT=str(root), SHERLOCK_PROBE_APPROVAL=approval,
+            SHERLOCK_PROBE_NONCE_ROOT=str(nonce_root), SHERLOCK_PROBE_ARM="v44",
+            SHERLOCK_REQUIRE_ATTRIBUTION="1", SHERLOCK_MAX_RETRIES="0",
+            SHERLOCK_RESUME_MAX_ATTEMPTS="0", SHERLOCK_UPSTREAM_RETRY="0",
+            SHERLOCK_BUDGET_MAX_CONSECUTIVE_PROVIDER_FAILURES="1",
+            UPSTREAM_READ_TIMEOUT="600", UPSTREAM_ACTION_BUDGET=str(forged_action),
+            UPSTREAM_RATE_SNAPSHOT=str(root / "probe-rate-snapshot.json"),
+            SHERLOCK_API_KEY="fixture-token")
+
+        child = subprocess.Popen(
+            ["bash", str(BENCH / "run-bench.sh"), "v44"], env=runner_env,
+            text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            start_new_session=True)
+        deadline = time.monotonic() + 10
+        while child.poll() is None and not marker.exists() and time.monotonic() < deadline:
+            time.sleep(0.05)
+        if child.poll() is None:
+            os.killpg(child.pid, signal.SIGTERM)
+        stdout, stderr = child.communicate(timeout=5)
+
+        self.assertNotEqual(child.returncode, 0)
+        self.assertFalse(marker.exists(), (stdout, stderr))
+        self.assertIn("TARGET_PROBE_POLICY", stderr, (stdout, stderr))
+
     def test_refusals_happen_before_secret_proxy_runner_or_network(self):
         for case in ("missing_approval", "wrong_hash", "expired", "wrong_action",
                      "tampered_profile", "tampered_fixture", "used_nonce", "missing_rates"):

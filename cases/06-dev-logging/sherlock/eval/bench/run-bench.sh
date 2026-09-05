@@ -463,21 +463,26 @@ fi
 # controller passes the source only so this runner can make that owned copy;
 # after this point the Qwen child receives no source-package pathname.
 if [ "$TARGET_PROBE_MODE" = "1" ]; then
-  PROBE_VALUES="$(python3 - "$TRACE" "$ARM" <<'PY'
+  PROBE_VALUES="$(python3 - "$TRACE" "$ARM" "$OPERATOR_MONITORED_MODE" \
+    "$MAX_SESSION_TURNS" "$MAX_TOOL_CALLS" "$MAX_WALL_TIME_S" "$TIMEOUT" \
+    "$WORKFLOW_AGENT_MAX_TURNS" "${UPSTREAM_READ_TIMEOUT:-}" <<'PY'
 import json, os, stat, sys
 from pathlib import Path
-trace, arm = map(Path, sys.argv[1:3])
-arm = str(arm)
+trace, arm = Path(sys.argv[1]), sys.argv[2]
+runtime = sys.argv[3:10]
 def regular(name):
     path = trace / name
     mode = os.lstat(path).st_mode
-    if not stat.S_ISREG(mode) or stat.S_ISLNK(mode): raise ValueError(name)
-    with open(path, encoding="utf-8") as handle: return json.load(handle)
-profile = regular("target-profile.json")
-package = regular("input-package.json")
-budget = regular("probe-budget.json")
-settings = trace / "corporate-settings.json"
-rates = trace / "probe-rate-snapshot.json"
+    if not stat.S_ISREG(mode) or stat.S_ISLNK(mode) or os.stat(path).st_nlink != 1:
+        raise ValueError(name)
+    with open(path, "rb") as handle: raw = handle.read()
+    return raw, json.loads(raw)
+_profile_raw, profile = regular("target-profile.json")
+_package_raw, package = regular("input-package.json")
+_budget_raw, budget = regular("probe-budget.json")
+_settings_raw, settings = regular("corporate-settings.json")
+_rate_raw, rates = regular("probe-rate-snapshot.json")
+action_raw, action = regular("upstream-action-budget.json")
 fixture = trace / "fixture"
 if (not isinstance(profile, dict) or not isinstance(package, dict) or
         package.get("arm") != arm or not isinstance(profile.get("qwen"), dict) or
@@ -486,9 +491,50 @@ if (not isinstance(profile, dict) or not isinstance(package, dict) or
         not isinstance(profile["qwen"].get("cli"), str) or not profile["qwen"]["cli"] or
         type(profile.get("max_output_tokens")) is not int or profile["max_output_tokens"] <= 0 or
         type(profile.get("session_token_limit")) is not int or profile["session_token_limit"] <= 0 or
-        not isinstance(budget, dict) or not settings.is_file() or settings.is_symlink() or
-        not rates.is_file() or rates.is_symlink() or not fixture.is_dir() or fixture.is_symlink()):
+        not isinstance(budget, dict) or not isinstance(settings, dict) or
+        not isinstance(rates, dict) or not fixture.is_dir() or fixture.is_symlink()):
     raise ValueError("target probe package")
+limits = {name: budget.get(name) for name in (
+    "max_provider_calls", "max_prompt_tokens", "max_completion_tokens",
+    "max_wall_time_s", "max_estimated_cost_rub")}
+monitored = (profile.get("schema") == 2 and
+             profile.get("execution_mode") == "operator_monitored" and
+             budget.get("schema") == 3 and budget.get("mode") == "operator_monitored")
+if monitored:
+    qwen = profile["qwen"]
+    expected_runtime = ["1", str(qwen.get("max_session_turns")),
+                        str(qwen.get("max_tool_calls")), str(qwen.get("max_wall_time_s")),
+                        "0", str(qwen.get("vendor_limits", {}).get("workflow_agent_max_turns")),
+                        str(profile.get("request_read_timeout_s"))]
+    expected_action = {"schema": 2, "mode": "operator_monitored", "run_tag": trace.name,
+                       "request_read_timeout_s": profile.get("request_read_timeout_s"),
+                       "limits": limits}
+    model_settings = settings.get("model", {})
+    policy_valid = (qwen.get("wall_time_cli") == "omitted" and
+                    model_settings.get("maxSessionTurns") == -1 and
+                    model_settings.get("maxWallTimeSeconds") == -1 and
+                    all(value is None for value in limits.values()))
+else:
+    try: arm_number = int(arm[1:]) if arm.startswith("v") else 0
+    except ValueError: arm_number = 0
+    timeout = 5400 if arm_number >= 30 else 2700
+    expected_runtime = ["0", "600", "400", str(timeout - 300), str(timeout), "200",
+                        str(limits["max_wall_time_s"] / limits["max_provider_calls"])]
+    expected_action = {"schema": 1, "run_tag": trace.name, "limits": limits}
+    model_settings = settings.get("model", {})
+    policy_valid = (profile.get("schema") == 1 and set(profile["qwen"]) == {"cli"} and
+                    "execution_mode" not in profile and "maxSessionTurns" not in model_settings and
+                    "maxWallTimeSeconds" not in model_settings and
+                    all(type(limits[name]) in (int, float) and not isinstance(limits[name], bool)
+                        for name in limits))
+canonical_action = json.dumps(expected_action, ensure_ascii=False, sort_keys=True,
+                              separators=(",", ":")).encode() + b"\n"
+expected_action_path = str(trace / "upstream-action-budget.json")
+expected_rate_path = str(trace / "probe-rate-snapshot.json")
+if (not policy_valid or runtime != expected_runtime or action != expected_action or
+        action_raw != canonical_action or os.environ.get("UPSTREAM_ACTION_BUDGET") != expected_action_path or
+        os.environ.get("UPSTREAM_RATE_SNAPSHOT") != expected_rate_path):
+    raise SystemExit("TARGET_PROBE_POLICY")
 print(profile["provider_base_url"])
 print(profile["requested_model"])
 print(profile["expected_returned_identity"])

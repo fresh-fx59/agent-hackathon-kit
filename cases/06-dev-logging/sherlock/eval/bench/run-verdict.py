@@ -326,6 +326,16 @@ def _fresh_timestamp(value):
     return -300 <= age <= 86400
 
 
+def _utc_timestamp(value):
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        parsed = dt.datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except (TypeError, ValueError, OverflowError):
+        return None
+    return parsed if parsed.tzinfo is not None and parsed.utcoffset() == dt.timedelta(0) else None
+
+
 def _latest_attempt_exit(trace):
     path = trace / "attempts.jsonl"
     try:
@@ -377,6 +387,7 @@ def _budget_estimate(trace, run_tag):
         return None, None
     snapshot = budget.get("rate_snapshot")
     launch_rate_valid = True
+    monitored_update_valid = True
     if monitored:
         launch = _optional_json(trace, "launch-start.json")
         sealed_snapshot = _optional_json(trace, "probe-rate-snapshot.json")
@@ -391,9 +402,14 @@ def _budget_estimate(trace, run_tag):
                                  and effective <= started + dt.timedelta(minutes=5)
                                  and started - effective <= dt.timedelta(hours=24)
                                  and snapshot == sealed_snapshot)
+            updated = _utc_timestamp(budget.get("updated_at"))
+            monitored_update_valid = (updated is not None and updated >= started
+                                      and updated.timestamp() <= time.time() + 300)
         except (AttributeError, TypeError, ValueError, OverflowError):
             launch_rate_valid = False
-    if (not _fresh_timestamp(budget.get("updated_at")) or not isinstance(snapshot, dict)
+            monitored_update_valid = False
+    if ((not monitored and not _fresh_timestamp(budget.get("updated_at")))
+            or (monitored and not monitored_update_valid) or not isinstance(snapshot, dict)
             or not launch_rate_valid
             or not isinstance(budget.get("limits"), dict)
             or set(budget["limits"]) != set(limits)

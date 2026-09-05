@@ -256,6 +256,62 @@ class RunVerdictTests(unittest.TestCase):
             "verdict": "WITHIN", "reason": None,
         }), encoding="utf-8")
 
+    def test_monitored_task7_accepts_coherent_budget_update_older_than_a_day(self):
+        """A timely launch stays auditable after long local/tool-only work."""
+        started = dt.datetime.now(dt.timezone.utc).replace(microsecond=0) - dt.timedelta(days=2)
+        effective = started - dt.timedelta(hours=1)
+        updated = started + dt.timedelta(minutes=5)
+        iso = lambda value: value.isoformat().replace("+00:00", "Z")
+        snapshot = {
+            "schema": 1, "run_tag": "run-001", "effective_at": iso(effective),
+            "source": "fixture", "prompt_rub_per_token": 0.01,
+            "completion_rub_per_token": 0.02,
+        }
+        snapshot["sha256"] = hashlib.sha256(json.dumps(
+            snapshot, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        ).encode("utf-8")).hexdigest()
+        (self.fx.trace / "probe-rate-snapshot.json").write_text(json.dumps(snapshot))
+        (self.fx.trace / "target-profile.json").write_text(json.dumps({
+            "schema": 2, "execution_mode": "operator_monitored",
+            "request_read_timeout_s": 600,
+        }))
+        (self.fx.trace / "launch-start.json").write_text(json.dumps({
+            "started_at": iso(started),
+        }))
+        (self.fx.trace / "upstream-budget-state.json").write_text(json.dumps({
+            "schema": 3, "run_tag": "run-001", "updated_at": iso(updated),
+            "limits": {name: None for name in (
+                "max_provider_calls", "max_prompt_tokens", "max_completion_tokens",
+                "max_wall_time_s", "max_estimated_cost_rub")},
+            "rate_snapshot": snapshot, "budget_assurance": "operator_monitored",
+            "projected": {"provider_calls": 1, "prompt_tokens": 100,
+                          "completion_tokens": 20, "wall_time_s": 1.0,
+                          "estimated_cost_rub": 1.4},
+            "observed": {"provider_calls": 1, "prompt_tokens": 100,
+                         "completion_tokens": 20},
+            "observed_usage_unknown": 0,
+            "completed_attempt_ids": ["0" * 32 + ".a1"],
+            "completed_overshoot": {"provider_calls": 0, "prompt_tokens": 0,
+                                    "completion_tokens": 0},
+            "verdict": "WITHIN", "reason": None,
+        }))
+
+        cost, accepted_rate = VERDICT_TOOL._budget_estimate(self.fx.trace, "run-001")
+
+        self.assertEqual(cost, 1.4)
+        self.assertEqual(accepted_rate, snapshot)
+
+        budget_path = self.fx.trace / "upstream-budget-state.json"
+        budget = json.loads(budget_path.read_text())
+        for invalid in (started - dt.timedelta(seconds=1),
+                        dt.datetime.now(dt.timezone.utc) + dt.timedelta(minutes=10)):
+            with self.subTest(invalid_updated_at=iso(invalid)):
+                budget["updated_at"] = iso(invalid)
+                budget_path.write_text(json.dumps(budget))
+                self.assertEqual(
+                    VERDICT_TOOL._budget_estimate(self.fx.trace, "run-001"),
+                    (None, None))
+
     def test_usage_rows_do_not_imply_provider_billing(self):
         """Provider usage is observation, never a claim that the provider billed it."""
         self.write_status("ACCEPTED")
