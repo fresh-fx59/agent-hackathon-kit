@@ -1,0 +1,23 @@
+{
+  "run_id": "fresh-corpus-intake-20260905",
+  "kind": "provider-free input qualification",
+  "source": "/Users/a/Downloads/Telegram Desktop/BlueSkyRansomware/BlueSkyRansomware.evtx",
+  "source_bytes": 1118208,
+  "source_sha256": "5e501d3b0e97563975362aecd5c64911e4432c62e6327c8ab2067dcbf0c59309",
+  "script_sha256": "44efe1620c880378e291a0c0d873ebd4d4f307fb993222d8693436e2a6dfe409",
+  "argv": [
+    "python3",
+    "/Users/a/hack/wt-v42/cases/06-dev-logging/sherlock/skills/v44/tools/ingest.py",
+    "/Users/a/Downloads/Telegram Desktop/BlueSkyRansomware/BlueSkyRansomware.evtx",
+    "--out",
+    "/Users/a/hack/sherlock-fresh-corpus-intake-20260905/corpus"
+  ],
+  "started_at": "2026-09-05T20:08:14.502504+00:00",
+  "isolation": "new intake output only; no prior investigation reports/checkpoints loaded",
+  "package": "v44 unchanged; final common runtime qualification still pending",
+  "exit_code": 0,
+  "duration_s": 0.105,
+  "rendered_records": 469,
+  "finished_at": "2026-09-05T20:08:14.607897+00:00",
+  "limitation": "Input rendering only; no target model/report or cold-start acceptance claimed."
+}
