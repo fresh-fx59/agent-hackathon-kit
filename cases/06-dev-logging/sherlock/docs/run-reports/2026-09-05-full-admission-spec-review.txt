@@ -1,0 +1,11 @@
+MUST-FIX
+
+- Define the monitored full-budget JSON contract explicitly: schema number, exact keys, which aggregate fields must be `null`, and which per-request/integrity limits remain finite. “An explicit monitored budget schema” is insufficient for interoperable admission, controller, runner, proxy, and terminal validation implementations. [Spec lines 22–27](/Users/a/hack/wt-v42/cases/06-dev-logging/sherlock/docs/2026-09-05-full-monitored-admission-spec.md:22)
+
+- Define “fresh qualification” precisely: expiry/maximum age, required timestamps, nonce reuse rules, and whether both target and harness receipts expire. The acceptance suite requires rejection of “stale” receipts but currently has no testable freshness criterion. [Spec lines 19–21](/Users/a/hack/wt-v42/cases/06-dev-logging/sherlock/docs/2026-09-05-full-monitored-admission-spec.md:19)
+
+- Specify the supervision contract for an uncapped run: required evidence/heartbeat, maximum detection interval, ownership binding, and fail-closed behavior when supervision disappears. “Missing supervision” and “supervision faults” are required, but neither condition is defined; an otherwise unlimited process could therefore run unattended indefinitely. [Spec lines 25–27](/Users/a/hack/wt-v42/cases/06-dev-logging/sherlock/docs/2026-09-05-full-monitored-admission-spec.md:25)
+
+- Require hermetic cold-start state, including a fresh Qwen session and isolated history/cache/workspace or an explicit allowlist of readable inputs. Excluding named Sherlock artifacts alone does not prevent prior findings from entering through CLI session history, persistent agent memory, or ambient repository files. [Spec lines 31–34](/Users/a/hack/wt-v42/cases/06-dev-logging/sherlock/docs/2026-09-05-full-monitored-admission-spec.md:31)
+
+- Define request accounting as one durable terminal outcome per attempted upstream request—including timeout, transport failure, malformed response, cancellation, and interrupted execution—and require reconciliation at terminal audit. “Account for every request and response” is impossible literally when no response arrives and is too vague to detect missing records. [Spec lines 25–27](/Users/a/hack/wt-v42/cases/06-dev-logging/sherlock/docs/2026-09-05-full-monitored-admission-spec.md:25)
