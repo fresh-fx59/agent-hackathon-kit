@@ -24,6 +24,7 @@ import sys
 import tempfile
 import math
 import re
+import signal
 import time
 from urllib.parse import urlparse
 
@@ -40,6 +41,53 @@ DEFAULT_BUDGET = {"schema": 2, "max_provider_calls": PROBE_MAX_PROVIDER_CALLS,
                   "max_prompt_tokens": PROBE_MAX_PROVIDER_CALLS * PROBE_SESSION_TOKEN_LIMIT,
                   "max_completion_tokens": PROBE_MAX_PROVIDER_CALLS * PROBE_MAX_OUTPUT_TOKENS,
                   "max_wall_time_s": 600, "max_estimated_cost_rub": 55.0}
+
+
+def _process_group_exists(pgid):
+    try:
+        os.killpg(pgid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+
+
+def _terminate_owned_process_group(child, cleanup_grace_s=10):
+    """Stop the fresh session created for a controlled child, including descendants."""
+    pgid = child.pid
+    try:
+        os.killpg(pgid, signal.SIGTERM)
+    except ProcessLookupError:
+        child.poll()
+        return
+    deadline = time.monotonic() + cleanup_grace_s
+    while _process_group_exists(pgid) and time.monotonic() < deadline:
+        child.poll()
+        time.sleep(0.02)
+    if _process_group_exists(pgid):
+        try:
+            os.killpg(pgid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+    try:
+        child.wait(timeout=max(1, cleanup_grace_s))
+    except subprocess.TimeoutExpired:
+        pass
+
+
+def run_owned_process(command, timeout, cleanup_grace_s=10, **kwargs):
+    """Run a command in a fresh session and leave no owned group on timeout."""
+    if kwargs.pop("capture_output", False):
+        if kwargs.get("stdout") is not None or kwargs.get("stderr") is not None:
+            raise ValueError("stdout and stderr arguments may not be used with capture_output")
+        kwargs.update(stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    child = subprocess.Popen(command, start_new_session=True, **kwargs)
+    try:
+        stdout, stderr = child.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired as exc:
+        _terminate_owned_process_group(child, cleanup_grace_s)
+        stdout, stderr = child.communicate()
+        raise subprocess.TimeoutExpired(command, timeout, output=stdout, stderr=stderr) from exc
+    return subprocess.CompletedProcess(command, child.returncode, stdout, stderr)
 
 
 class ProbeFailure(ValueError):
@@ -1367,7 +1415,7 @@ def main(argv=None):
                            "--sealed-input", str(kwargs["profile_path"].parent), "--work", str(kwargs["work"])]
                 if args.transport_base_url:
                     command.extend(["--transport-base-url", args.transport_base_url])
-                done = subprocess.run(command, text=True, capture_output=True, timeout=600)
+                done = run_owned_process(command, text=True, capture_output=True, timeout=600)
                 if done.returncode:
                     raise ProbeFailure("TARGET_CONTRACT_FAILED", "controlled runner nonzero")
                 row = _strict_json(done.stdout.encode("utf-8"))

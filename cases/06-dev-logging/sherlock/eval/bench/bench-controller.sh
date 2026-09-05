@@ -457,6 +457,53 @@ def terminate_owned(proof, proc_root, child=None):
     return evidence
 
 
+def _process_group_exists(pgid):
+    try:
+        os.killpg(pgid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+
+
+def terminate_owned_process_group(child, cleanup_grace_s=10):
+    """Stop a child created with start_new_session, including all descendants."""
+    pgid = child.pid
+    try:
+        os.killpg(pgid, signal.SIGTERM)
+    except ProcessLookupError:
+        child.poll()
+        return
+    deadline = time.monotonic() + cleanup_grace_s
+    while _process_group_exists(pgid) and time.monotonic() < deadline:
+        child.poll()
+        time.sleep(.02)
+    if _process_group_exists(pgid):
+        try:
+            os.killpg(pgid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+    try:
+        child.wait(timeout=max(1, cleanup_grace_s))
+    except subprocess.TimeoutExpired:
+        pass
+
+
+def communicate_owned_process(child, timeout, cleanup_grace_s=10):
+    try:
+        return child.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        terminate_owned_process_group(child, cleanup_grace_s)
+        child.communicate()
+        raise
+
+
+def owned_child_signal_handler(child, cleanup_grace_s=10):
+    def stop(signum, _frame):
+        terminate_owned_process_group(child, cleanup_grace_s)
+        raise SystemExit(128 + signum)
+    return stop
+
+
 def artifact_rows(trace):
     rows = []
     entries = 0
@@ -1093,11 +1140,16 @@ def target_contract_probe(argv):
                      "boot_id_sha256": digest(b"target-contract-probe"),
                      "command_sha256": digest(" ".join(child.args).encode("utf-8"))}
         atomic_replace(trace / "controller-process.json", canonical(proof) + b"\n")
-        stdout, stderr = child.communicate(timeout=600)
+        prior_sigterm = signal.signal(signal.SIGTERM, owned_child_signal_handler(child))
+        try:
+            stdout, stderr = communicate_owned_process(child, timeout=600)
+        finally:
+            signal.signal(signal.SIGTERM, prior_sigterm)
         done = subprocess.CompletedProcess(child.args, child.returncode, stdout, stderr)
     except (Blocked, OSError, subprocess.TimeoutExpired):
         try:
-            if 'child' in locals() and child.poll() is None: child.kill(); child.wait(timeout=5)
+            if 'child' in locals() and _process_group_exists(child.pid):
+                terminate_owned_process_group(child)
         except OSError:
             pass
         print("PROBE_RUNNER_START", file=sys.stderr)

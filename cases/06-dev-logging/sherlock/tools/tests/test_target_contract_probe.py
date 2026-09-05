@@ -6,10 +6,12 @@ import json
 import os
 from pathlib import Path
 import re
+import signal
 import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 import datetime as dt
 import gzip
@@ -65,6 +67,37 @@ class TargetContractProbeTest(unittest.TestCase):
                 os.chmod(Path(parent) / name, 0o700)
             os.chmod(parent, 0o700)
         shutil.rmtree(self.temp)
+
+    def test_owned_runner_timeout_terminates_its_stubborn_process_group(self):
+        """The outer watchdog must not orphan controller descendants."""
+        pid_path = self.temp / "owned-grandchild.pid"
+        sleeper = self.temp / "stubborn-child.py"
+        sleeper.write_text(
+            "import os,signal,time\n"
+            "signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
+            "open(%r,'w').write(str(os.getpid()))\n"
+            "time.sleep(30)\n" % str(pid_path), encoding="utf-8")
+        script = self.temp / "stubborn-tree.py"
+        script.write_text(
+            "import signal,subprocess,sys,time\n"
+            "signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
+            "subprocess.Popen([sys.executable,%r])\n"
+            "time.sleep(30)\n" % str(sleeper), encoding="utf-8")
+        runner = getattr(self.probe, "run_owned_process", None)
+        self.assertTrue(callable(runner), "owned process-group runner is missing")
+        with self.assertRaises(subprocess.TimeoutExpired):
+            runner([sys.executable, str(script)], timeout=0.2, cleanup_grace_s=0.1,
+                   text=True, capture_output=True)
+        deadline = time.monotonic() + 2
+        while pid_path.exists() and time.monotonic() < deadline:
+            try:
+                os.kill(int(pid_path.read_text()), 0)
+            except ProcessLookupError:
+                break
+            time.sleep(0.02)
+        if pid_path.exists():
+            with self.assertRaises(ProcessLookupError):
+                os.kill(int(pid_path.read_text()), 0)
 
     def test_prepare_is_secret_free_and_seals_exact_manifest_assets(self):
         result = self.probe.prepare(self.args, secret_reader=self._tripwire)

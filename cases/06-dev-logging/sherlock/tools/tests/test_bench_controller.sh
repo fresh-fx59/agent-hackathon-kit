@@ -22,6 +22,22 @@ RUNNER = HERE / "eval" / "bench" / "run-bench.sh"
 CONTROLLER = HERE / "eval" / "bench" / "bench-controller.sh"
 
 
+def controller_namespace():
+    source = CONTROLLER.read_text(encoding="utf-8").split("<<'PY'\n", 1)[1].rsplit("\nPY", 1)[0]
+    source = source.rsplit("raise SystemExit(main())", 1)[0]
+    namespace = {"__name__": "bench_controller_test"}
+    prior = os.environ.get("BENCH_CONTROLLER_HERE")
+    os.environ["BENCH_CONTROLLER_HERE"] = str(CONTROLLER.parent)
+    try:
+        exec(compile(source, str(CONTROLLER), "exec"), namespace)
+    finally:
+        if prior is None:
+            os.environ.pop("BENCH_CONTROLLER_HERE", None)
+        else:
+            os.environ["BENCH_CONTROLLER_HERE"] = prior
+    return namespace
+
+
 def executable(path, body):
     path.write_text("#!/usr/bin/env bash\nset -euo pipefail\n" + body, encoding="utf-8")
     path.chmod(0o755)
@@ -1176,6 +1192,68 @@ class PaidAdmissionOrderingTests(unittest.TestCase):
 
 
 class TargetContractProbeControllerTests(unittest.TestCase):
+    def test_probe_watchdog_terminates_stubborn_owned_process_group(self):
+        """A timed-out runner cannot survive as an orphaned descendant."""
+        namespace = controller_namespace()
+        communicate = namespace.get("communicate_owned_process")
+        self.assertTrue(callable(communicate), "owned process-group communicator is missing")
+        with tempfile.TemporaryDirectory() as temporary:
+            pid_path = Path(temporary) / "grandchild.pid"
+            sleeper = Path(temporary) / "stubborn-child.py"
+            sleeper.write_text(
+                "import os,signal,time\n"
+                "signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
+                "open(%r,'w').write(str(os.getpid()))\n"
+                "time.sleep(30)\n" % str(pid_path), encoding="utf-8")
+            script = Path(temporary) / "stubborn-tree.py"
+            script.write_text(
+                "import signal,subprocess,sys,time\n"
+                "signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
+                "subprocess.Popen([sys.executable,%r])\n"
+                "time.sleep(30)\n" % str(sleeper), encoding="utf-8")
+            child = subprocess.Popen([sys.executable, str(script)], start_new_session=True,
+                                     text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            with self.assertRaises(subprocess.TimeoutExpired):
+                communicate(child, timeout=0.2, cleanup_grace_s=0.1)
+            deadline = time.monotonic() + 2
+            while pid_path.exists() and time.monotonic() < deadline:
+                try:
+                    os.kill(int(pid_path.read_text()), 0)
+                except ProcessLookupError:
+                    break
+                time.sleep(0.02)
+            if pid_path.exists():
+                with self.assertRaises(ProcessLookupError):
+                    os.kill(int(pid_path.read_text()), 0)
+
+    def test_probe_sigterm_handler_cleans_runner_in_its_separate_session(self):
+        """Outer watchdog TERM must cascade into the runner's distinct group."""
+        namespace = controller_namespace()
+        handler_factory = namespace.get("owned_child_signal_handler")
+        self.assertTrue(callable(handler_factory), "owned child signal handler is missing")
+        temporary = tempfile.TemporaryDirectory()
+        ready = Path(temporary.name) / "ready"
+        child = subprocess.Popen(
+            [sys.executable, "-c",
+             "import pathlib,signal,time; signal.signal(signal.SIGTERM, signal.SIG_IGN); "
+             "pathlib.Path(%r).write_text('ready'); time.sleep(30)" % str(ready)],
+            start_new_session=True)
+        try:
+            deadline = time.monotonic() + 2
+            while not ready.exists() and time.monotonic() < deadline:
+                time.sleep(.01)
+            self.assertTrue(ready.exists())
+            self.assertEqual(os.getpgid(child.pid), child.pid)
+            with self.assertRaises(SystemExit):
+                handler_factory(child, cleanup_grace_s=0.1)(signal.SIGTERM, None)
+            with self.assertRaises(ProcessLookupError):
+                os.killpg(child.pid, 0)
+        finally:
+            if child.poll() is None:
+                os.killpg(child.pid, signal.SIGKILL)
+                child.wait(timeout=2)
+            temporary.cleanup()
+
     def test_probe_preflight_rejects_ambient_control_before_trace_creation(self):
         """A rejected controller environment cannot leave a runnable trace."""
         with tempfile.TemporaryDirectory() as temporary:
