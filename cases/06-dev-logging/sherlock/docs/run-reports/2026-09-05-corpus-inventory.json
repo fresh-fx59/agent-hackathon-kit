@@ -1,0 +1,1909 @@
+{
+  "schema": 1,
+  "scope": "developer corpus inventory only; not target findings or active-log-membership proof",
+  "created_at": "2026-09-05T20:37:16.906035+00:00",
+  "source": "/Users/a/hack/sherlock-offline-intake-20260905-r2/corpus",
+  "total_records": 90267,
+  "hosts": {
+    "IPSERVER": 90267
+  },
+  "files": [
+    {
+      "file": "Application.jsonl",
+      "sha256": "c20f44295ab736110dc96499d37a2eaa5332f79d689dae797318d4c38463c1f7",
+      "records": 2942,
+      "event_ids": {
+        "5615": 3,
+        "5617": 3,
+        "1531": 3,
+        "0": 187,
+        "1001": 16,
+        "5": 1,
+        "1534": 1,
+        "1532": 2,
+        "4625": 1,
+        "257": 1,
+        "1003": 85,
+        "63": 42,
+        "1": 2,
+        "1016": 1,
+        "1034": 60,
+        "15": 156,
+        "1008": 1,
+        "1010": 1,
+        "1004": 20,
+        "102": 4,
+        "105": 4,
+        "330": 6,
+        "641": 4,
+        "325": 2,
+        "1005": 1,
+        "8230": 1,
+        "8198": 27,
+        "16384": 1106,
+        "903": 2,
+        "258": 17,
+        "16394": 1106,
+        "9027": 22,
+        "8224": 15,
+        "643": 3,
+        "614": 1,
+        "640": 1,
+        "636": 1,
+        "4097": 1,
+        "8195": 1,
+        "1130": 4,
+        "1040": 1,
+        "11707": 1,
+        "1033": 1,
+        "1042": 1,
+        "10000": 1,
+        "10001": 1,
+        "6000": 1,
+        "900": 2,
+        "1066": 1,
+        "902": 1,
+        "326": 2,
+        "300": 1,
+        "301": 2,
+        "302": 1,
+        "4108": 1,
+        "264": 8,
+        "4111": 1
+      },
+      "first_time": "2021-05-08T15:04:17.680010Z",
+      "last_time": "2021-06-02T20:49:08.615958Z"
+    },
+    {
+      "file": "HardwareEvents.jsonl",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "records": 0,
+      "event_ids": {},
+      "first_time": null,
+      "last_time": null
+    },
+    {
+      "file": "Internet Explorer.jsonl",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "records": 0,
+      "event_ids": {},
+      "first_time": null,
+      "last_time": null
+    },
+    {
+      "file": "Key Management Service.jsonl",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "records": 0,
+      "event_ids": {},
+      "first_time": null,
+      "last_time": null
+    },
+    {
+      "file": "Microsoft-Client-Licensing-Platform%4Admin.jsonl",
+      "sha256": "6d715cd630ee0f0eed8441ec8f8f205271c731d0fd104aa76e897aabf4deb456",
+      "records": 309,
+      "event_ids": {
+        "100": 53,
+        "101": 53,
+        "157": 56,
+        "116": 57,
+        "102": 53,
+        "175": 1,
+        "176": 1,
+        "117": 18,
+        "159": 17
+      },
+      "first_time": "2021-05-08T15:04:13.397167Z",
+      "last_time": "2021-06-01T20:01:48.081261Z"
+    },
+    {
+      "file": "Microsoft-Windows-AAD%4Operational.jsonl",
+      "sha256": "a64c771ac5c86f548443c9f69cc045b1f267d4a01836ef05c9cb6589575fd97b",
+      "records": 4,
+      "event_ids": {
+        "1097": 4
+      },
+      "first_time": "2021-05-09T21:43:30.013609Z",
+      "last_time": "2021-05-09T21:43:30.366993Z"
+    },
+    {
+      "file": "Microsoft-Windows-AppModel-Runtime%4Admin.jsonl",
+      "sha256": "29921774cd7fc19ff024918e21e0916efd9af34ecbab7cb440cd2aa46cb3a119",
+      "records": 332,
+      "event_ids": {
+        "39": 32,
+        "36": 1,
+        "40": 31,
+        "41": 3,
+        "70": 195,
+        "69": 32,
+        "42": 38
+      },
+      "first_time": "2021-05-08T15:04:06.558460Z",
+      "last_time": "2021-06-02T14:53:59.476252Z"
+    },
+    {
+      "file": "Microsoft-Windows-AppReadiness%4Admin.jsonl",
+      "sha256": "aacb03dd0fef3f770473bf86485417ee666b9d2cf66299ded7b8ae0ab56d56f3",
+      "records": 472,
+      "event_ids": {
+        "100": 7,
+        "240": 110,
+        "211": 45,
+        "109": 43,
+        "241": 110,
+        "220": 49,
+        "209": 11,
+        "101": 7,
+        "319": 8,
+        "232": 1,
+        "213": 54,
+        "10": 7,
+        "218": 7,
+        "214": 7,
+        "322": 1,
+        "324": 1,
+        "216": 1,
+        "234": 1,
+        "236": 1,
+        "238": 1
+      },
+      "first_time": "2021-05-08T15:04:34.518278Z",
+      "last_time": "2021-05-29T03:54:12.637948Z"
+    },
+    {
+      "file": "Microsoft-Windows-AppReadiness%4Operational.jsonl",
+      "sha256": "0302a934a1be203538422016a92dc25eeee022e8f7880a6c9b5772abf1935f22",
+      "records": 182,
+      "event_ids": {
+        "1013": 43,
+        "1014": 43,
+        "108": 43,
+        "103": 7,
+        "1015": 5,
+        "1016": 5,
+        "105": 12,
+        "1017": 7,
+        "1018": 7,
+        "11": 7,
+        "309": 1,
+        "310": 1,
+        "217": 1
+      },
+      "first_time": "2021-05-08T15:04:34.579329Z",
+      "last_time": "2021-05-29T03:54:12.637950Z"
+    },
+    {
+      "file": "Microsoft-Windows-AppXDeployment%4Operational.jsonl",
+      "sha256": "d19a8b8cba26f5248e2a810f50f39f20ba529750ad89a15b3a32f818f9135774",
+      "records": 1250,
+      "event_ids": {
+        "326": 7,
+        "327": 7,
+        "325": 1236
+      },
+      "first_time": "2021-05-08T15:07:59.037644Z",
+      "last_time": "2021-05-11T21:35:20.034029Z"
+    },
+    {
+      "file": "Microsoft-Windows-AppXDeploymentServer%4Operational.jsonl",
+      "sha256": "881bc194683aeba9f1eab2f26c133938de2bf1c8143ad4010d3dc38a91d76a17",
+      "records": 4194,
+      "event_ids": {
+        "819": 55,
+        "633": 1482,
+        "636": 38,
+        "603": 176,
+        "10002": 175,
+        "607": 201,
+        "614": 97,
+        "854": 184,
+        "400": 201,
+        "478": 97,
+        "649": 402,
+        "613": 158,
+        "8761": 2,
+        "627": 9,
+        "821": 40,
+        "822": 40,
+        "813": 24,
+        "508": 5,
+        "509": 1,
+        "471": 66,
+        "855": 60,
+        "472": 45,
+        "573": 22,
+        "9643": 64,
+        "10000": 46,
+        "540": 6,
+        "541": 6,
+        "10001": 207,
+        "5506": 12,
+        "5505": 12,
+        "8100": 46,
+        "8106": 46,
+        "8101": 46,
+        "5507": 92,
+        "5508": 5,
+        "818": 2,
+        "1230": 2,
+        "9645": 22
+      },
+      "first_time": "2021-05-09T21:59:37.169860Z",
+      "last_time": "2021-06-01T19:56:51.920935Z"
+    },
+    {
+      "file": "Microsoft-Windows-AppXDeploymentServer%4Restricted.jsonl",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "records": 0,
+      "event_ids": {},
+      "first_time": null,
+      "last_time": null
+    },
+    {
+      "file": "Microsoft-Windows-Application-Experience%4Program-Compatibility-Assistant.jsonl",
+      "sha256": "a3c89eef19a900e3881fa0921912dbbf6109a6b4be0e99dbcb14c59178de0115",
+      "records": 1,
+      "event_ids": {
+        "17": 1
+      },
+      "first_time": "2021-05-09T22:31:21.284621Z",
+      "last_time": "2021-05-09T22:31:21.284621Z"
+    },
+    {
+      "file": "Microsoft-Windows-Application-Experience%4Program-Compatibility-Troubleshooter.jsonl",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "records": 0,
+      "event_ids": {},
+      "first_time": null,
+      "last_time": null
+    },
+    {
+      "file": "Microsoft-Windows-Application-Experience%4Program-Inventory.jsonl",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "records": 0,
+      "event_ids": {},
+      "first_time": null,
+      "last_time": null
+    },
+    {
+      "file": "Microsoft-Windows-Application-Experience%4Program-Telemetry.jsonl",
+      "sha256": "93cb8f3311e7a4273f40120dea91c6179fcec8bbd862be4655b2fbc320c32884",
+      "records": 4,
+      "event_ids": {
+        "500": 3,
+        "505": 1
+      },
+      "first_time": "2021-05-08T15:08:01.496772Z",
+      "last_time": "2021-05-10T00:03:55.051064Z"
+    },
+    {
+      "file": "Microsoft-Windows-Application-Experience%4Steps-Recorder.jsonl",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "records": 0,
+      "event_ids": {},
+      "first_time": null,
+      "last_time": null
+    },
+    {
+      "file": "Microsoft-Windows-AppxPackaging%4Operational.jsonl",
+      "sha256": "cdd4d1be6835022ff85203fc4530bb4f6944d9ad96a84e7b7a3d082f85563e7f",
+      "records": 1328,
+      "event_ids": {
+        "157": 288,
+        "170": 288,
+        "216": 584,
+        "101": 8,
+        "164": 80,
+        "391": 80
+      },
+      "first_time": "2021-05-08T15:04:33.972779Z",
+      "last_time": "2021-06-01T19:56:51.672611Z"
+    },
+    {
+      "file": "Microsoft-Windows-Biometrics%4Operational.jsonl",
+      "sha256": "3fdc04e9223f2ff22bfd20e850ace65b74aaae3ca7ecdaed73efb3ee46dc6cc5",
+      "records": 4,
+      "event_ids": {
+        "1600": 1,
+        "1105": 1,
+        "1109": 1,
+        "1108": 1
+      },
+      "first_time": "2021-05-09T01:42:24.335414Z",
+      "last_time": "2021-05-09T01:42:24.522966Z"
+    },
+    {
+      "file": "Microsoft-Windows-BitLocker%4BitLocker Management.jsonl",
+      "sha256": "01fda6926bcbdfd5a7e90588ba8ef0b8855ea6c0c376ee65e9fba60e8c0740e0",
+      "records": 2,
+      "event_ids": {
+        "4122": 2
+      },
+      "first_time": "2021-05-08T15:08:05.825881Z",
+      "last_time": "2021-05-12T00:12:18.003252Z"
+    },
+    {
+      "file": "Microsoft-Windows-Bits-Client%4Operational.jsonl",
+      "sha256": "6024e4b0eaf45d8b6d3287b42bec69951e8920515d0ed98dae3be1a887298403",
+      "records": 218,
+      "event_ids": {
+        "306": 43,
+        "3": 31,
+        "209": 5,
+        "16403": 31,
+        "310": 15,
+        "59": 31,
+        "60": 31,
+        "4": 31
+      },
+      "first_time": "2021-05-08T15:07:15.550585Z",
+      "last_time": "2021-06-02T10:48:56.470768Z"
+    },
+    {
+      "file": "Microsoft-Windows-CloudStore%4Operational.jsonl",
+      "sha256": "c858c440140eb2e3df65c0375ce6218c7c48d050c9b1d961e979b2c8bafd980e",
+      "records": 13,
+      "event_ids": {
+        "1": 6,
+        "3013": 7
+      },
+      "first_time": "2021-05-09T21:43:08.867355Z",
+      "last_time": "2021-05-09T21:43:40.191753Z"
+    },
+    {
+      "file": "Microsoft-Windows-CodeIntegrity%4Operational.jsonl",
+      "sha256": "7091a285336e7de67b939def468b9b68d2387e850961c88032c80851add8722d",
+      "records": 3,
+      "event_ids": {
+        "3085": 3
+      },
+      "first_time": "2021-05-08T15:04:04.486271Z",
+      "last_time": "2021-05-11T21:43:50.675911Z"
+    },
+    {
+      "file": "Microsoft-Windows-Containers-BindFlt%4Operational.jsonl",
+      "sha256": "2d674e3877c07cfb4ff40cdb9156326bf5acdd150ddeb3f8066df63e6c4d9302",
+      "records": 3,
+      "event_ids": {
+        "2": 3
+      },
+      "first_time": "2021-05-08T15:04:30.199006Z",
+      "last_time": "2021-05-11T21:43:53.243141Z"
+    },
+    {
+      "file": "Microsoft-Windows-Containers-Wcifs%4Operational.jsonl",
+      "sha256": "9a4ba518eb5a849becd8fe4b6f452c8cd68976529f1efe434b33bf46d7e283e7",
+      "records": 3,
+      "event_ids": {
+        "2": 3
+      },
+      "first_time": "2021-05-08T15:04:30.173348Z",
+      "last_time": "2021-05-11T21:43:53.188242Z"
+    },
+    {
+      "file": "Microsoft-Windows-CoreSystem-SmsRouter-Events%4Operational.jsonl",
+      "sha256": "56dd0368b351bd6e8dd17207b2015773eeb6558132a2038dc76d104c7badadc3",
+      "records": 16,
+      "event_ids": {
+        "100": 4,
+        "200": 4,
+        "201": 4,
+        "101": 4
+      },
+      "first_time": "2021-05-08T15:07:44.346059Z",
+      "last_time": "2021-05-09T21:52:26.791409Z"
+    },
+    {
+      "file": "Microsoft-Windows-Crypto-DPAPI%4BackUpKeySvc.jsonl",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "records": 0,
+      "event_ids": {},
+      "first_time": null,
+      "last_time": null
+    },
+    {
+      "file": "Microsoft-Windows-Crypto-DPAPI%4Operational.jsonl",
+      "sha256": "b5f18394a38186336f524b8c4eccae8e2a3e2196bd8c474ca8ce6e3c36e8c37a",
+      "records": 26,
+      "event_ids": {
+        "12289": 26
+      },
+      "first_time": "2021-05-09T21:43:08.610371Z",
+      "last_time": "2021-05-11T13:44:24.350793Z"
+    },
+    {
+      "file": "Microsoft-Windows-Crypto-NCrypt%4Operational.jsonl",
+      "sha256": "e13431610f8c8a0086bdaa65b532191b5df164082e64674b2f2b9e42763262ca",
+      "records": 17,
+      "event_ids": {
+        "11": 1,
+        "3": 4,
+        "9": 2,
+        "2": 10
+      },
+      "first_time": "2021-05-08T15:07:57.692000Z",
+      "last_time": "2021-05-11T21:46:54.368969Z"
+    },
+    {
+      "file": "Microsoft-Windows-DeviceManagement-Enterprise-Diagnostics-Provider%4Admin.jsonl",
+      "sha256": "fcee6b3f473b937c93344bd65f457bd326bc6c007e31bbaafe886a5b3aa1bca7",
+      "records": 67,
+      "event_ids": {
+        "844": 1,
+        "2437": 14,
+        "2438": 14,
+        "2439": 14,
+        "839": 2,
+        "833": 2,
+        "813": 18,
+        "1700": 1,
+        "1708": 1
+      },
+      "first_time": "2021-05-08T15:07:44.613994Z",
+      "last_time": "2021-05-09T21:43:12.861874Z"
+    },
+    {
+      "file": "Microsoft-Windows-DeviceManagement-Enterprise-Diagnostics-Provider%4Operational.jsonl",
+      "sha256": "52d9f50d6f219cb1283cfb4093ce91afd731c4bd612bff9bf622f0529869f3f7",
+      "records": 56,
+      "event_ids": {
+        "524": 2,
+        "514": 8,
+        "512": 2,
+        "111": 8,
+        "511": 4,
+        "144": 2,
+        "507": 2,
+        "516": 2,
+        "101": 2,
+        "104": 2,
+        "518": 2,
+        "525": 2,
+        "509": 2,
+        "110": 2,
+        "112": 2,
+        "510": 2,
+        "106": 2,
+        "108": 2,
+        "522": 2,
+        "513": 2,
+        "520": 2
+      },
+      "first_time": "2021-05-08T15:07:44.298259Z",
+      "last_time": "2021-05-09T21:50:26.689739Z"
+    },
+    {
+      "file": "Microsoft-Windows-DeviceSetupManager%4Admin.jsonl",
+      "sha256": "f6e75e6e29b74b7b6d2eab5f4be927aa84ef6415a0b311b82165a004bef76d19",
+      "records": 204,
+      "event_ids": {
+        "109": 3,
+        "100": 21,
+        "123": 1,
+        "112": 82,
+        "101": 21,
+        "202": 29,
+        "200": 19,
+        "201": 10,
+        "105": 9,
+        "106": 9
+      },
+      "first_time": "2021-05-08T15:04:30.152534Z",
+      "last_time": "2021-06-02T14:55:17.906411Z"
+    },
+    {
+      "file": "Microsoft-Windows-DeviceSetupManager%4Operational.jsonl",
+      "sha256": "ed258309e879db80e79ae7d8f45fdef8728c1a6ceb056361a93c61832ed3c453",
+      "records": 111,
+      "event_ids": {
+        "300": 59,
+        "301": 52
+      },
+      "first_time": "2021-05-08T15:08:05.780511Z",
+      "last_time": "2021-06-02T14:53:59.812645Z"
+    },
+    {
+      "file": "Microsoft-Windows-Dhcp-Client%4Admin.jsonl",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "records": 0,
+      "event_ids": {},
+      "first_time": null,
+      "last_time": null
+    },
+    {
+      "file": "Microsoft-Windows-Dhcpv6-Client%4Admin.jsonl",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "records": 0,
+      "event_ids": {},
+      "first_time": null,
+      "last_time": null
+    },
+    {
+      "file": "Microsoft-Windows-Diagnosis-DPS%4Operational.jsonl",
+      "sha256": "a68526db618fe71c4d5c83224c4599a3e7c8b532f4dd77533e4f41dfa402c5fd",
+      "records": 9,
+      "event_ids": {
+        "135": 3,
+        "100": 3,
+        "105": 3
+      },
+      "first_time": "2021-05-08T15:05:08.275228Z",
+      "last_time": "2021-05-11T21:43:54.726455Z"
+    },
+    {
+      "file": "Microsoft-Windows-Diagnosis-Scheduled%4Operational.jsonl",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "records": 0,
+      "event_ids": {},
+      "first_time": null,
+      "last_time": null
+    },
+    {
+      "file": "Microsoft-Windows-DiskDiagnosticDataCollector%4Operational.jsonl",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "records": 0,
+      "event_ids": {},
+      "first_time": null,
+      "last_time": null
+    },
+    {
+      "file": "Microsoft-Windows-FileHistory-Core%4WHC.jsonl",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "records": 0,
+      "event_ids": {},
+      "first_time": null,
+      "last_time": null
+    },
+    {
+      "file": "Microsoft-Windows-GroupPolicy%4Operational.jsonl",
+      "sha256": "0d3781deb32818f5bab3e94befae931fdaf7bd4a90f70db276d8a15cb95ffdd9",
+      "records": 507,
+      "event_ids": {
+        "4116": 36,
+        "4115": 36,
+        "5116": 36,
+        "5320": 117,
+        "5321": 36,
+        "5325": 2,
+        "5115": 2,
+        "5324": 52,
+        "4117": 49,
+        "4000": 2,
+        "5340": 3,
+        "5311": 3,
+        "4126": 3,
+        "5257": 3,
+        "5126": 3,
+        "5312": 3,
+        "5313": 3,
+        "8000": 2,
+        "6338": 2,
+        "5351": 62,
+        "5117": 49,
+        "4001": 1,
+        "8001": 1,
+        "6339": 1
+      },
+      "first_time": "2021-05-08T15:04:30.265269Z",
+      "last_time": "2021-06-02T14:53:59.584804Z"
+    },
+    {
+      "file": "Microsoft-Windows-HelloForBusiness%4Operational.jsonl",
+      "sha256": "323a796eac0a58b234121673f4f27e93a284854530fb1663c1b2094b206a7f96",
+      "records": 7,
+      "event_ids": {
+        "5520": 2,
+        "3054": 1,
+        "7210": 1,
+        "7054": 1,
+        "8025": 2
+      },
+      "first_time": "2021-05-08T15:08:06.611691Z",
+      "last_time": "2021-05-11T21:45:09.751527Z"
+    },
+    {
+      "file": "Microsoft-Windows-HotspotAuth%4Operational.jsonl",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "records": 0,
+      "event_ids": {},
+      "first_time": null,
+      "last_time": null
+    },
+    {
+      "file": "Microsoft-Windows-Kernel-Boot%4Operational.jsonl",
+      "sha256": "ae135f17f4dabffaa0da5f5c9c4008b63d9e13615f7783544dccac2cd1ae112e",
+      "records": 12,
+      "event_ids": {
+        "235": 6,
+        "208": 6
+      },
+      "first_time": "2021-05-08T15:04:03.602764Z",
+      "last_time": "2021-05-11T21:43:49.833906Z"
+    },
+    {
+      "file": "Microsoft-Windows-Kernel-EventTracing%4Admin.jsonl",
+      "sha256": "84a38fbaa45cce800fe9c8ad8df58fb2d98d74fef3c193d44737e052c2051a1b",
+      "records": 10,
+      "event_ids": {
+        "2": 10
+      },
+      "first_time": "2021-05-08T15:04:29.234099Z",
+      "last_time": "2021-05-31T09:43:59.630306Z"
+    },
+    {
+      "file": "Microsoft-Windows-Kernel-PnP%4Configuration.jsonl",
+      "sha256": "d5ba2d2483891d2d765e046aafe06d9d961ff9eee512d1b7bf8f4b8a7339fd2f",
+      "records": 330,
+      "event_ids": {
+        "440": 70,
+        "403": 2,
+        "410": 111,
+        "400": 107,
+        "430": 14,
+        "411": 3,
+        "442": 1,
+        "420": 22
+      },
+      "first_time": "2021-05-08T15:04:03.604121Z",
+      "last_time": "2021-05-11T13:45:59.200843Z"
+    },
+    {
+      "file": "Microsoft-Windows-Kernel-PnP%4Driver Watchdog.jsonl",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "records": 0,
+      "event_ids": {},
+      "first_time": null,
+      "last_time": null
+    },
+    {
+      "file": "Microsoft-Windows-Kernel-Power%4Thermal-Operational.jsonl",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "records": 0,
+      "event_ids": {},
+      "first_time": null,
+      "last_time": null
+    },
+    {
+      "file": "Microsoft-Windows-Kernel-ShimEngine%4Operational.jsonl",
+      "sha256": "68cda5104c444ef4bb382f2516ac9788a4eaddb4bfc8762a1c3d82cf723941df",
+      "records": 1,
+      "event_ids": {
+        "3": 1
+      },
+      "first_time": "2021-05-08T15:04:04.353620Z",
+      "last_time": "2021-05-08T15:04:04.353620Z"
+    },
+    {
+      "file": "Microsoft-Windows-Kernel-StoreMgr%4Operational.jsonl",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "records": 0,
+      "event_ids": {},
+      "first_time": null,
+      "last_time": null
+    },
+    {
+      "file": "Microsoft-Windows-Kernel-WHEA%4Errors.jsonl",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "records": 0,
+      "event_ids": {},
+      "first_time": null,
+      "last_time": null
+    },
+    {
+      "file": "Microsoft-Windows-Kernel-WHEA%4Operational.jsonl",
+      "sha256": "ded327bcfadc66138f33ad8d1d4d4f8397fcf2aca9a98ab6f1bed095f8d335bb",
+      "records": 12,
+      "event_ids": {
+        "42": 9,
+        "5": 3
+      },
+      "first_time": "2021-05-08T15:04:03.721756Z",
+      "last_time": "2021-05-11T21:43:50.696260Z"
+    },
+    {
+      "file": "Microsoft-Windows-Known Folders API Service.jsonl",
+      "sha256": "3976f3ac76b860c3f9d8cd898d38276ab333d9b454667b2893947193cd63d882",
+      "records": 61,
+      "event_ids": {
+        "1002": 58,
+        "1003": 2,
+        "1000": 1
+      },
+      "first_time": "2021-05-08T15:05:56.271423Z",
+      "last_time": "2021-06-02T00:51:48.182175Z"
+    },
+    {
+      "file": "Microsoft-Windows-LanguagePackSetup%4Operational.jsonl",
+      "sha256": "6b6a8a9fc8060bc2c0badb1bc71b9a7cac02a8f193f5256aa0c5fa524d10f2f4",
+      "records": 18,
+      "event_ids": {
+        "4000": 9,
+        "4001": 9
+      },
+      "first_time": "2021-05-11T15:08:09.655013Z",
+      "last_time": "2021-06-02T15:46:17.435064Z"
+    },
+    {
+      "file": "Microsoft-Windows-LiveId%4Operational.jsonl",
+      "sha256": "464cc149b8951ae3705e040663f7196fa3e4af0f74474ec83116f82ef7434113",
+      "records": 675,
+      "event_ids": {
+        "6115": 214,
+        "6113": 214,
+        "2024": 247
+      },
+      "first_time": "2021-05-31T16:01:16.056868Z",
+      "last_time": "2021-06-02T20:37:10.499577Z"
+    },
+    {
+      "file": "Microsoft-Windows-MUI%4Admin.jsonl",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "records": 0,
+      "event_ids": {},
+      "first_time": null,
+      "last_time": null
+    },
+    {
+      "file": "Microsoft-Windows-MUI%4Operational.jsonl",
+      "sha256": "1ffe412131de918956a772d0db6628cbf9b793217fa4a6ef83309b610db62559",
+      "records": 29,
+      "event_ids": {
+        "3000": 4,
+        "3002": 22,
+        "3003": 3
+      },
+      "first_time": "2021-05-08T15:07:43.621700Z",
+      "last_time": "2021-05-11T15:08:21.526486Z"
+    },
+    {
+      "file": "Microsoft-Windows-NCSI%4Operational.jsonl",
+      "sha256": "ced3338e22ba9e01eb5c8f0dcd640c5ad8e2d0424b5e7b6dbc04d2d7d4c12af2",
+      "records": 4,
+      "event_ids": {
+        "4042": 4
+      },
+      "first_time": "2021-05-08T15:04:36.358753Z",
+      "last_time": "2021-05-14T13:38:07.634082Z"
+    },
+    {
+      "file": "Microsoft-Windows-NetworkProfile%4Operational.jsonl",
+      "sha256": "fe01a49f0b4611e1ceb6c9aa27f458a5bd0f82684ebe1d880646a331486ce6fc",
+      "records": 14,
+      "event_ids": {
+        "4002": 2,
+        "20002": 5,
+        "10000": 3,
+        "4004": 3,
+        "4001": 1
+      },
+      "first_time": "2021-05-08T15:05:23.227974Z",
+      "last_time": "2021-05-14T13:38:08.961796Z"
+    },
+    {
+      "file": "Microsoft-Windows-Ntfs%4Operational.jsonl",
+      "sha256": "6bd5dc4561105aa999cd54aac426619a4f4b225b434edca8ee4abcf6f64b4ea6",
+      "records": 2768,
+      "event_ids": {
+        "145": 7,
+        "142": 81,
+        "159": 3,
+        "501": 2,
+        "158": 56,
+        "151": 1949,
+        "146": 670
+      },
+      "first_time": "2021-05-08T15:04:04.473889Z",
+      "last_time": "2021-06-02T20:41:08.717452Z"
+    },
+    {
+      "file": "Microsoft-Windows-Ntfs%4WHC.jsonl",
+      "sha256": "31132d95cb1c0f534bee232e36c9ec23af6b6c52159a5bcbec01191088d981b7",
+      "records": 3,
+      "event_ids": {
+        "100": 3
+      },
+      "first_time": "2021-05-08T15:04:04.392758Z",
+      "last_time": "2021-05-11T21:43:50.529601Z"
+    },
+    {
+      "file": "Microsoft-Windows-Partition%4Diagnostic.jsonl",
+      "sha256": "308ef93963ffeadfc47b1d302782030e674fae7510a6c08548376bef504169a2",
+      "records": 7,
+      "event_ids": {
+        "1006": 7
+      },
+      "first_time": "2021-05-08T15:04:04.434627Z",
+      "last_time": "2021-05-11T21:43:50.562555Z"
+    },
+    {
+      "file": "Microsoft-Windows-PowerShell%4Admin.jsonl",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "records": 0,
+      "event_ids": {},
+      "first_time": null,
+      "last_time": null
+    },
+    {
+      "file": "Microsoft-Windows-PowerShell%4Operational.jsonl",
+      "sha256": "89d8479de0db5612705207ead9e76a582631069f0796ecf9840540acc0a9d4a5",
+      "records": 75,
+      "event_ids": {
+        "40961": 25,
+        "53504": 25,
+        "40962": 25
+      },
+      "first_time": "2021-05-09T01:42:41.837058Z",
+      "last_time": "2021-06-02T00:51:48.206934Z"
+    },
+    {
+      "file": "Microsoft-Windows-PrintService%4Admin.jsonl",
+      "sha256": "0351a93cbd025f88ce7e32974af537a72e2edc21fd7e363c42686ddf3d3436ef",
+      "records": 8,
+      "event_ids": {
+        "215": 2,
+        "318": 6
+      },
+      "first_time": "2021-05-08T15:07:26.020307Z",
+      "last_time": "2021-05-08T15:07:26.364358Z"
+    },
+    {
+      "file": "Microsoft-Windows-Privacy-Auditing%4Operational.jsonl",
+      "sha256": "d5865b70ab789179398acbd6b38766263c2243cc79d5b3c06e730b18e7123506",
+      "records": 104,
+      "event_ids": {
+        "1006": 28,
+        "1008": 29,
+        "1010": 1,
+        "1012": 38,
+        "2": 1,
+        "1000": 5,
+        "1002": 1,
+        "713": 1
+      },
+      "first_time": "2021-05-08T15:04:30.539522Z",
+      "last_time": "2021-05-10T02:27:22.327236Z"
+    },
+    {
+      "file": "Microsoft-Windows-Program-Compatibility-Assistant%4CompatAfterUpgrade.jsonl",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "records": 0,
+      "event_ids": {},
+      "first_time": null,
+      "last_time": null
+    },
+    {
+      "file": "Microsoft-Windows-Provisioning-Diagnostics-Provider%4Admin.jsonl",
+      "sha256": "78e79e819c5c39c4b225e4d7133e4e14b59954cad39c7e2c8ed7cc6d867a273f",
+      "records": 47,
+      "event_ids": {
+        "20": 38,
+        "91": 1,
+        "10": 3,
+        "11": 3,
+        "90": 2
+      },
+      "first_time": "2021-05-08T15:07:44.584663Z",
+      "last_time": "2021-05-09T21:46:29.245496Z"
+    },
+    {
+      "file": "Microsoft-Windows-Provisioning-Diagnostics-Provider%4AutoPilot.jsonl",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "records": 0,
+      "event_ids": {},
+      "first_time": null,
+      "last_time": null
+    },
+    {
+      "file": "Microsoft-Windows-Provisioning-Diagnostics-Provider%4ManagementService.jsonl",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "records": 0,
+      "event_ids": {},
+      "first_time": null,
+      "last_time": null
+    },
+    {
+      "file": "Microsoft-Windows-PushNotification-Platform%4Admin.jsonl",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "records": 0,
+      "event_ids": {},
+      "first_time": null,
+      "last_time": null
+    },
+    {
+      "file": "Microsoft-Windows-PushNotification-Platform%4Operational.jsonl",
+      "sha256": "eb329affe275d457c456e3e871d9bfabda361c9be9617dedeb368197852d278b",
+      "records": 1683,
+      "event_ids": {
+        "1267": 346,
+        "1223": 346,
+        "1225": 341,
+        "1268": 342,
+        "1264": 11,
+        "42": 26,
+        "1005": 18,
+        "37": 12,
+        "1022": 11,
+        "1113": 2,
+        "1207": 4,
+        "1208": 3,
+        "1211": 3,
+        "1212": 3,
+        "1217": 3,
+        "1257": 9,
+        "1218": 3,
+        "1258": 2,
+        "1117": 2,
+        "1246": 1,
+        "1023": 1,
+        "1024": 1,
+        "2003": 2,
+        "1252": 1,
+        "1205": 1,
+        "1206": 1,
+        "1025": 13,
+        "1261": 8,
+        "3006": 1,
+        "3007": 1,
+        "2414": 39,
+        "2413": 39,
+        "2415": 37,
+        "3000": 2,
+        "3001": 2,
+        "3056": 4,
+        "3053": 8,
+        "1262": 8,
+        "1265": 8,
+        "3052": 1,
+        "3049": 8,
+        "3055": 1,
+        "3057": 1,
+        "3058": 1,
+        "3004": 1,
+        "3005": 1,
+        "3008": 1,
+        "3009": 1,
+        "1254": 1,
+        "1239": 1
+      },
+      "first_time": "2021-05-08T15:20:16.238849Z",
+      "last_time": "2021-06-02T16:01:15.574492Z"
+    },
+    {
+      "file": "Microsoft-Windows-ReadyBoost%4Operational.jsonl",
+      "sha256": "246f089f9d0cec72f034f290ecbec28ad39080ea69e193caebae6f7b1cfd0f43",
+      "records": 23,
+      "event_ids": {
+        "1026": 3,
+        "1020": 1,
+        "1027": 2,
+        "1016": 15,
+        "1015": 1,
+        "1018": 1
+      },
+      "first_time": "2021-05-08T15:06:03.144093Z",
+      "last_time": "2021-06-02T13:58:12.828273Z"
+    },
+    {
+      "file": "Microsoft-Windows-RemoteDesktopServices-RdpCoreTS%4Admin.jsonl",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "records": 0,
+      "event_ids": {},
+      "first_time": null,
+      "last_time": null
+    },
+    {
+      "file": "Microsoft-Windows-RemoteDesktopServices-RdpCoreTS%4Operational.jsonl",
+      "sha256": "089539af738606972cc9eafc0a3931ba264c483319522549ac2b9aec1a6b6e0e",
+      "records": 2082,
+      "event_ids": {
+        "148": 417,
+        "103": 139,
+        "131": 141,
+        "65": 141,
+        "72": 423,
+        "141": 142,
+        "140": 142,
+        "143": 130,
+        "226": 129,
+        "102": 139,
+        "145": 139
+      },
+      "first_time": "2021-06-02T21:03:11.737436Z",
+      "last_time": "2021-06-02T21:11:34.029721Z"
+    },
+    {
+      "file": "Microsoft-Windows-Resource-Exhaustion-Detector%4Operational.jsonl",
+      "sha256": "41ba7c07cb46e4273e8027d6bcd0ad2a27ab9963ba2fd4382000878d28642caa",
+      "records": 3,
+      "event_ids": {
+        "1001": 2,
+        "1002": 1
+      },
+      "first_time": "2021-05-08T15:15:24.702421Z",
+      "last_time": "2021-05-11T21:53:55.608399Z"
+    },
+    {
+      "file": "Microsoft-Windows-RestartManager%4Operational.jsonl",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "records": 0,
+      "event_ids": {},
+      "first_time": null,
+      "last_time": null
+    },
+    {
+      "file": "Microsoft-Windows-SMBClient%4Operational.jsonl",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "records": 0,
+      "event_ids": {},
+      "first_time": null,
+      "last_time": null
+    },
+    {
+      "file": "Microsoft-Windows-SMBServer%4Audit.jsonl",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "records": 0,
+      "event_ids": {},
+      "first_time": null,
+      "last_time": null
+    },
+    {
+      "file": "Microsoft-Windows-SMBServer%4Connectivity.jsonl",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "records": 0,
+      "event_ids": {},
+      "first_time": null,
+      "last_time": null
+    },
+    {
+      "file": "Microsoft-Windows-SMBServer%4Operational.jsonl",
+      "sha256": "aa1453f2a5ce4c9a579c73c7fb47a2e5208aa4f87fb92992ba58ec873241911c",
+      "records": 12,
+      "event_ids": {
+        "1025": 3,
+        "1027": 3,
+        "1010": 6
+      },
+      "first_time": "2021-05-08T15:04:30.919940Z",
+      "last_time": "2021-05-11T21:43:57.918570Z"
+    },
+    {
+      "file": "Microsoft-Windows-SMBServer%4Security.jsonl",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "records": 0,
+      "event_ids": {},
+      "first_time": null,
+      "last_time": null
+    },
+    {
+      "file": "Microsoft-Windows-Security-Mitigations%4KernelMode.jsonl",
+      "sha256": "f43ac74ce60af452aea5f8d913d2d482de695034affdfb94ae84046b3e11dc3a",
+      "records": 45,
+      "event_ids": {
+        "3": 4,
+        "10": 41
+      },
+      "first_time": "2021-05-08T15:07:25.316201Z",
+      "last_time": "2021-05-09T22:41:33.474329Z"
+    },
+    {
+      "file": "Microsoft-Windows-Security-Mitigations%4UserMode.jsonl",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "records": 0,
+      "event_ids": {},
+      "first_time": null,
+      "last_time": null
+    },
+    {
+      "file": "Microsoft-Windows-Security-SPP-UX-Notifications%4ActionCenter.jsonl",
+      "sha256": "dea404841413dafadd8b3471c8d1bc34f4c89e0d164796baba45b65f0b0f8132",
+      "records": 1,
+      "event_ids": {
+        "100": 1
+      },
+      "first_time": "2021-05-09T21:43:36.172461Z",
+      "last_time": "2021-05-09T21:43:36.172461Z"
+    },
+    {
+      "file": "Microsoft-Windows-SettingSync%4Debug.jsonl",
+      "sha256": "c9d0353856f76ab50d9603af3ef7202a125e5ac5120cf2257d29a9a654ec5115",
+      "records": 20,
+      "event_ids": {
+        "6509": 6,
+        "6506": 1,
+        "6507": 1,
+        "6524": 3,
+        "6065": 9
+      },
+      "first_time": "2021-05-09T21:43:08.879112Z",
+      "last_time": "2021-05-11T15:08:09.059131Z"
+    },
+    {
+      "file": "Microsoft-Windows-SettingSync%4Operational.jsonl",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "records": 0,
+      "event_ids": {},
+      "first_time": null,
+      "last_time": null
+    },
+    {
+      "file": "Microsoft-Windows-Shell-ConnectedAccountState%4ActionCenter.jsonl",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "records": 0,
+      "event_ids": {},
+      "first_time": null,
+      "last_time": null
+    },
+    {
+      "file": "Microsoft-Windows-Shell-Core%4ActionCenter.jsonl",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "records": 0,
+      "event_ids": {},
+      "first_time": null,
+      "last_time": null
+    },
+    {
+      "file": "Microsoft-Windows-Shell-Core%4AppDefaults.jsonl",
+      "sha256": "5d2c3133700253d1eeda95a1c552b65229e431a00ad17b9848f289e5337a2928",
+      "records": 102,
+      "event_ids": {
+        "62443": 102
+      },
+      "first_time": "2021-05-09T21:43:10.316255Z",
+      "last_time": "2021-05-09T21:58:10.190071Z"
+    },
+    {
+      "file": "Microsoft-Windows-Shell-Core%4LogonTasksChannel.jsonl",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "records": 0,
+      "event_ids": {},
+      "first_time": null,
+      "last_time": null
+    },
+    {
+      "file": "Microsoft-Windows-Shell-Core%4Operational.jsonl",
+      "sha256": "a9f36784f421b34feda8798f216d03491d2645605275416b029840c689a055c9",
+      "records": 389,
+      "event_ids": {
+        "62460": 3,
+        "62170": 54,
+        "62171": 55,
+        "62144": 106,
+        "28125": 2,
+        "28017": 7,
+        "9707": 12,
+        "28032": 11,
+        "28115": 68,
+        "28018": 7,
+        "28019": 7,
+        "9708": 12,
+        "62164": 1,
+        "62403": 9,
+        "62402": 1,
+        "62400": 1,
+        "62404": 3,
+        "62407": 18,
+        "62405": 3,
+        "62406": 1,
+        "62401": 1,
+        "9705": 3,
+        "9706": 3,
+        "28117": 1
+      },
+      "first_time": "2021-05-08T15:07:58.641342Z",
+      "last_time": "2021-05-11T10:43:40.098095Z"
+    },
+    {
+      "file": "Microsoft-Windows-ShellCommon-StartLayoutPopulation%4Operational.jsonl",
+      "sha256": "da1d5ba56f2286d399e77b4321eb6a76c03d88cb845d2ae0833a6db0b0ca4b35",
+      "records": 21,
+      "event_ids": {
+        "1104": 1,
+        "1102": 2,
+        "1402": 2,
+        "1403": 2,
+        "47": 1,
+        "26": 1,
+        "31": 1,
+        "27": 1,
+        "48": 1,
+        "2152": 4,
+        "2151": 3,
+        "2153": 2
+      },
+      "first_time": "2021-05-09T21:43:16.003389Z",
+      "last_time": "2021-05-09T23:43:31.081380Z"
+    },
+    {
+      "file": "Microsoft-Windows-SmartCard-DeviceEnum%4Operational.jsonl",
+      "sha256": "d7db3c3fb096c10c32705e47a9bcee7baebd1fe8c8bb9746fb3afcad9f14ade8",
+      "records": 32,
+      "event_ids": {
+        "101": 16,
+        "103": 8,
+        "104": 8
+      },
+      "first_time": "2021-05-09T21:43:09.373495Z",
+      "last_time": "2021-05-11T13:46:58.694902Z"
+    },
+    {
+      "file": "Microsoft-Windows-SmbClient%4Audit.jsonl",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "records": 0,
+      "event_ids": {},
+      "first_time": null,
+      "last_time": null
+    },
+    {
+      "file": "Microsoft-Windows-SmbClient%4Connectivity.jsonl",
+      "sha256": "07cfb951be87c8f1d6d09ef3d8bb8d8828d63eaa23c1c980b2c8150d0867d348",
+      "records": 6,
+      "event_ids": {
+        "30812": 2,
+        "30810": 4
+      },
+      "first_time": "2021-05-08T15:07:57.369522Z",
+      "last_time": "2021-05-11T21:43:54.784890Z"
+    },
+    {
+      "file": "Microsoft-Windows-SmbClient%4Security.jsonl",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "records": 0,
+      "event_ids": {},
+      "first_time": null,
+      "last_time": null
+    },
+    {
+      "file": "Microsoft-Windows-StateRepository%4Operational.jsonl",
+      "sha256": "3b54963ca24b9dbf8f2f467bf8f50d40b76d6d485b3728dbc9ec9234ad0513c4",
+      "records": 1088,
+      "event_ids": {
+        "221": 136,
+        "225": 2,
+        "236": 3,
+        "237": 3,
+        "234": 1,
+        "265": 2,
+        "245": 3,
+        "269": 3,
+        "216": 3,
+        "231": 56,
+        "271": 702,
+        "242": 2,
+        "243": 2,
+        "223": 4,
+        "268": 122,
+        "263": 1,
+        "255": 2,
+        "258": 4,
+        "253": 4,
+        "267": 3,
+        "104": 19,
+        "105": 11
+      },
+      "first_time": "2021-05-08T15:04:31.338324Z",
+      "last_time": "2021-06-02T15:46:16.743929Z"
+    },
+    {
+      "file": "Microsoft-Windows-StateRepository%4Restricted.jsonl",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "records": 0,
+      "event_ids": {},
+      "first_time": null,
+      "last_time": null
+    },
+    {
+      "file": "Microsoft-Windows-Storage-Storport%4Health.jsonl",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "records": 0,
+      "event_ids": {},
+      "first_time": null,
+      "last_time": null
+    },
+    {
+      "file": "Microsoft-Windows-Storage-Storport%4Operational.jsonl",
+      "sha256": "272d20348517ab67a7efe2ffdbb79f4f00b7612eb4002bc850a0188c4841c813",
+      "records": 566,
+      "event_ids": {
+        "552": 3,
+        "553": 3,
+        "505": 560
+      },
+      "first_time": "2021-05-08T15:04:04.382619Z",
+      "last_time": "2021-06-02T20:19:02.576663Z"
+    },
+    {
+      "file": "Microsoft-Windows-StorageSpaces-Driver%4Diagnostic.jsonl",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "records": 0,
+      "event_ids": {},
+      "first_time": null,
+      "last_time": null
+    },
+    {
+      "file": "Microsoft-Windows-StorageSpaces-Driver%4Operational.jsonl",
+      "sha256": "4e8b8dac6ea0a5502f05034eee3a3bb71c33e1105a6dce41709bd6fdaf069c42",
+      "records": 3,
+      "event_ids": {
+        "207": 3
+      },
+      "first_time": "2021-05-08T15:04:04.434218Z",
+      "last_time": "2021-05-11T21:43:50.562086Z"
+    },
+    {
+      "file": "Microsoft-Windows-StorageSpaces-ManagementAgent%4WHC.jsonl",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "records": 0,
+      "event_ids": {},
+      "first_time": null,
+      "last_time": null
+    },
+    {
+      "file": "Microsoft-Windows-Store%4Operational.jsonl",
+      "sha256": "ca84ddc5ba3da48c3f4dfaee77ad207ae8e4deece97d9bd2e78fe169f0949cfc",
+      "records": 23900,
+      "event_ids": {
+        "6006": 4,
+        "6004": 12,
+        "8000": 3,
+        "8001": 5182,
+        "8002": 694,
+        "8011": 1085,
+        "8012": 780,
+        "8003": 8,
+        "2000": 72,
+        "2006": 11602,
+        "2007": 2536,
+        "2005": 1858,
+        "4": 18,
+        "3": 1,
+        "2": 3,
+        "2002": 24,
+        "2004": 14,
+        "2008": 2,
+        "6003": 2
+      },
+      "first_time": "2021-05-08T15:23:04.155147Z",
+      "last_time": "2021-06-02T05:06:17.584978Z"
+    },
+    {
+      "file": "Microsoft-Windows-Storsvc%4Diagnostic.jsonl",
+      "sha256": "49607d4c108bc77f21b579a502404a4d63d9193cc7271abe23427c0802992107",
+      "records": 27,
+      "event_ids": {
+        "1002": 27
+      },
+      "first_time": "2021-05-08T15:04:34.246537Z",
+      "last_time": "2021-06-01T21:45:18.516325Z"
+    },
+    {
+      "file": "Microsoft-Windows-TWinUI%4Operational.jsonl",
+      "sha256": "97830e7eb1c316babfa13bc3d0ec8c941086ab4cc5f375301da1492624cbb0c8",
+      "records": 1,
+      "event_ids": {
+        "105": 1
+      },
+      "first_time": "2021-05-11T21:43:01.981150Z",
+      "last_time": "2021-05-11T21:43:01.981150Z"
+    },
+    {
+      "file": "Microsoft-Windows-TZSync%4Operational.jsonl",
+      "sha256": "3ef7d4370eb358337396e1dfd67f51a3479933533ee4fc3241b713378f97c805",
+      "records": 8,
+      "event_ids": {
+        "1": 4,
+        "2": 4
+      },
+      "first_time": "2021-05-15T15:49:00.593928Z",
+      "last_time": "2021-06-01T15:46:17.567433Z"
+    },
+    {
+      "file": "Microsoft-Windows-TaskScheduler%4Maintenance.jsonl",
+      "sha256": "185f048e85160deb722781e2a317f4712e0ed28e9a62920fea8f22e17704a8ae",
+      "records": 202,
+      "event_ids": {
+        "808": 12,
+        "800": 190
+      },
+      "first_time": "2021-05-08T15:07:57.649057Z",
+      "last_time": "2021-06-02T16:02:23.339354Z"
+    },
+    {
+      "file": "Microsoft-Windows-TerminalServices-LocalSessionManager%4Admin.jsonl",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "records": 0,
+      "event_ids": {},
+      "first_time": null,
+      "last_time": null
+    },
+    {
+      "file": "Microsoft-Windows-TerminalServices-LocalSessionManager%4Operational.jsonl",
+      "sha256": "c41e26dea4d51484321c2ca963f36e24ee1e65c071dc9b883632857a8f2c4eac",
+      "records": 105,
+      "event_ids": {
+        "32": 3,
+        "34": 33,
+        "54": 2,
+        "40": 35,
+        "41": 7,
+        "42": 7,
+        "21": 1,
+        "22": 1,
+        "24": 8,
+        "25": 7,
+        "23": 1
+      },
+      "first_time": "2021-05-08T15:04:06.825279Z",
+      "last_time": "2021-06-02T14:54:07.484842Z"
+    },
+    {
+      "file": "Microsoft-Windows-TerminalServices-PnPDevices%4Admin.jsonl",
+      "sha256": "11bce6d3b872ec459fa4eef86c198c70ce244fb08be6a4d33ed0fe03b532fa0e",
+      "records": 2,
+      "event_ids": {
+        "36": 2
+      },
+      "first_time": "2021-05-08T23:23:48.172333Z",
+      "last_time": "2021-05-13T04:20:46.165063Z"
+    },
+    {
+      "file": "Microsoft-Windows-TerminalServices-PnPDevices%4Operational.jsonl",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "records": 0,
+      "event_ids": {},
+      "first_time": null,
+      "last_time": null
+    },
+    {
+      "file": "Microsoft-Windows-TerminalServices-RemoteConnectionManager%4Admin.jsonl",
+      "sha256": "83120fcc85d4875f54973b550fc8037ed53e775a574cd5f7e6ddc9def7ba2231",
+      "records": 21,
+      "event_ids": {
+        "1158": 14,
+        "20521": 7
+      },
+      "first_time": "2021-05-08T23:23:46.320929Z",
+      "last_time": "2021-06-02T14:53:57.016143Z"
+    },
+    {
+      "file": "Microsoft-Windows-TerminalServices-RemoteConnectionManager%4Operational.jsonl",
+      "sha256": "ab8555015c71059fc01332ccb3e161752e3173acf852939149000a1b5c98572a",
+      "records": 1964,
+      "event_ids": {
+        "261": 1964
+      },
+      "first_time": "2021-06-02T19:16:46.244193Z",
+      "last_time": "2021-06-02T21:11:15.742268Z"
+    },
+    {
+      "file": "Microsoft-Windows-TerminalServices-ServerUSBDevices%4Admin.jsonl",
+      "sha256": "57f7d0fb8f2d2125d1722ee3d924836706bcbadee4d5bf9c202409b5b68a7b04",
+      "records": 2,
+      "event_ids": {
+        "36": 2
+      },
+      "first_time": "2021-05-08T23:23:48.172739Z",
+      "last_time": "2021-05-13T04:20:46.166754Z"
+    },
+    {
+      "file": "Microsoft-Windows-TerminalServices-ServerUSBDevices%4Operational.jsonl",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "records": 0,
+      "event_ids": {},
+      "first_time": null,
+      "last_time": null
+    },
+    {
+      "file": "Microsoft-Windows-Time-Service%4Operational.jsonl",
+      "sha256": "1c6ed6d920a9c7c9b118fa42d2fceb199a2175a50f124486865ce4ef845ab45c",
+      "records": 247,
+      "event_ids": {
+        "272": 25,
+        "257": 25,
+        "266": 49,
+        "264": 25,
+        "261": 73,
+        "265": 25,
+        "258": 25
+      },
+      "first_time": "2021-05-09T21:46:29.913467Z",
+      "last_time": "2021-06-02T15:46:31.066886Z"
+    },
+    {
+      "file": "Microsoft-Windows-UniversalTelemetryClient%4Operational.jsonl",
+      "sha256": "ba291e66a9a10cfaf5dbdd5494d2f8d97899e283d106ada28f0130003dd5374e",
+      "records": 479,
+      "event_ids": {
+        "64": 2,
+        "50": 4,
+        "61": 8,
+        "62": 4,
+        "1": 67,
+        "56": 4,
+        "55": 4,
+        "66": 2,
+        "27": 383,
+        "28": 1
+      },
+      "first_time": "2021-05-08T15:04:31.362239Z",
+      "last_time": "2021-06-02T18:13:31.762445Z"
+    },
+    {
+      "file": "Microsoft-Windows-User Device Registration%4Admin.jsonl",
+      "sha256": "64b5a8863f2c6b09fb61c16c2ba105c70d1351c2967240abfa89d58d6701b602",
+      "records": 1,
+      "event_ids": {
+        "360": 1
+      },
+      "first_time": "2021-05-09T21:43:29.356781Z",
+      "last_time": "2021-05-09T21:43:29.356781Z"
+    },
+    {
+      "file": "Microsoft-Windows-User Profile Service%4Operational.jsonl",
+      "sha256": "8e39e97792be868cc610b72cf3d0f04a4027c219761d8c20283da8e724140f50",
+      "records": 9,
+      "event_ids": {
+        "5": 4,
+        "1": 1,
+        "67": 1,
+        "2": 1,
+        "3": 1,
+        "4": 1
+      },
+      "first_time": "2021-05-08T15:04:51.390916Z",
+      "last_time": "2021-05-11T21:43:02.303287Z"
+    },
+    {
+      "file": "Microsoft-Windows-UserPnp%4ActionCenter.jsonl",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "records": 0,
+      "event_ids": {},
+      "first_time": null,
+      "last_time": null
+    },
+    {
+      "file": "Microsoft-Windows-UserPnp%4DeviceInstall.jsonl",
+      "sha256": "b477973f9b6cc36f319a44342a42c705e97f86af75da886ae13b649591ed11f6",
+      "records": 10,
+      "event_ids": {
+        "8001": 2,
+        "8000": 4,
+        "8004": 2,
+        "8005": 2
+      },
+      "first_time": "2021-05-08T15:04:07.038289Z",
+      "last_time": "2021-05-11T21:43:02.413798Z"
+    },
+    {
+      "file": "Microsoft-Windows-VolumeSnapshot-Driver%4Operational.jsonl",
+      "sha256": "9090178480e796261a2b96d42c67df96f3e000e3ae9900f66639644cb2eb7e31",
+      "records": 22,
+      "event_ids": {
+        "100": 9,
+        "101": 9,
+        "114": 2,
+        "115": 2
+      },
+      "first_time": "2021-05-08T15:04:04.442407Z",
+      "last_time": "2021-05-11T21:43:50.571182Z"
+    },
+    {
+      "file": "Microsoft-Windows-WER-PayloadHealth%4Operational.jsonl",
+      "sha256": "10baacc81eff03747358edb60cfe3015f21a642d8d5d6d8eb3d81751c3855c7c",
+      "records": 8,
+      "event_ids": {
+        "1": 6,
+        "2": 2
+      },
+      "first_time": "2021-05-08T15:08:07.211321Z",
+      "last_time": "2021-05-17T19:49:28.172924Z"
+    },
+    {
+      "file": "Microsoft-Windows-WMI-Activity%4Operational.jsonl",
+      "sha256": "973931952e57b4910d6c3b0da269daf08cc595a668817c6abd375f8d32661452",
+      "records": 1774,
+      "event_ids": {
+        "5857": 1605,
+        "5858": 168,
+        "5860": 1
+      },
+      "first_time": "2021-05-09T01:42:17.113540Z",
+      "last_time": "2021-06-02T20:54:06.477419Z"
+    },
+    {
+      "file": "Microsoft-Windows-Wcmsvc%4Operational.jsonl",
+      "sha256": "e89b6b2b9971da5817bccefd0a34d87b2234c048c29223fe5f635540cfbfac1f",
+      "records": 83,
+      "event_ids": {
+        "10001": 3,
+        "1003": 6,
+        "10002": 3,
+        "1026": 3,
+        "1009": 3,
+        "1020": 1,
+        "1004": 1,
+        "10003": 2,
+        "1006": 60,
+        "10004": 1
+      },
+      "first_time": "2021-05-08T15:04:30.445815Z",
+      "last_time": "2021-06-02T14:54:07.570135Z"
+    },
+    {
+      "file": "Microsoft-Windows-WebAuthN%4Operational.jsonl",
+      "sha256": "b42a1a8be2dc0e28f08a810ccad3666aa7e0f58bef46aff7ff7a87201ab6b0e5",
+      "records": 5,
+      "event_ids": {
+        "2000": 3,
+        "2001": 2
+      },
+      "first_time": "2021-05-08T15:04:30.870884Z",
+      "last_time": "2021-05-11T21:43:54.585240Z"
+    },
+    {
+      "file": "Microsoft-Windows-WinINet-Config%4ProxyConfigChanged.jsonl",
+      "sha256": "bba5ac97ab8a9be6af18338f79798788c24c363084a945d52640c7c4a3f84a67",
+      "records": 1,
+      "event_ids": {
+        "5600": 1
+      },
+      "first_time": "2021-05-09T23:43:10.970304Z",
+      "last_time": "2021-05-09T23:43:10.970304Z"
+    },
+    {
+      "file": "Microsoft-Windows-WinRM%4Operational.jsonl",
+      "sha256": "7ceee44c9676804bcc6a51e4f232fc1cd6d4ed4faf1d0d823a1909500b778149",
+      "records": 172,
+      "event_ids": {
+        "145": 43,
+        "254": 43,
+        "161": 43,
+        "142": 43
+      },
+      "first_time": "2021-05-08T15:07:15.560610Z",
+      "last_time": "2021-06-02T10:49:00.517082Z"
+    },
+    {
+      "file": "Microsoft-Windows-Windows Defender%4Operational.jsonl",
+      "sha256": "9c667d703528accd6110e0af53580717ff728a6329b7680e801e7c3173b4e67f",
+      "records": 1106,
+      "event_ids": {
+        "1151": 487,
+        "1150": 486,
+        "2000": 74,
+        "1013": 12,
+        "1000": 20,
+        "1002": 16,
+        "1001": 4,
+        "5007": 7
+      },
+      "first_time": "2021-05-13T14:44:00.723409Z",
+      "last_time": "2021-06-02T20:53:57.376473Z"
+    },
+    {
+      "file": "Microsoft-Windows-Windows Defender%4WHC.jsonl",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "records": 0,
+      "event_ids": {},
+      "first_time": null,
+      "last_time": null
+    },
+    {
+      "file": "Microsoft-Windows-Windows Firewall With Advanced Security%4ConnectionSecurity.jsonl",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "records": 0,
+      "event_ids": {},
+      "first_time": null,
+      "last_time": null
+    },
+    {
+      "file": "Microsoft-Windows-Windows Firewall With Advanced Security%4Firewall.jsonl",
+      "sha256": "a4df7fb98e68c7a74d1f282553769c453cb25f9a01006ac3a7ae1f77fcedd388",
+      "records": 719,
+      "event_ids": {
+        "2004": 385,
+        "2010": 2,
+        "2006": 320,
+        "2005": 12
+      },
+      "first_time": "2021-05-08T15:04:32.873660Z",
+      "last_time": "2021-06-02T14:53:59.471379Z"
+    },
+    {
+      "file": "Microsoft-Windows-Windows Firewall With Advanced Security%4FirewallDiagnostics.jsonl",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "records": 0,
+      "event_ids": {},
+      "first_time": null,
+      "last_time": null
+    },
+    {
+      "file": "Microsoft-Windows-WindowsBackup%4ActionCenter.jsonl",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "records": 0,
+      "event_ids": {},
+      "first_time": null,
+      "last_time": null
+    },
+    {
+      "file": "Microsoft-Windows-WindowsSystemAssessmentTool%4Operational.jsonl",
+      "sha256": "2f2787c81827496f12556851cbea638691b559389e6631c9831489f28760fb77",
+      "records": 19,
+      "event_ids": {
+        "1": 1,
+        "9": 8,
+        "2": 1,
+        "10": 8,
+        "3": 1
+      },
+      "first_time": "2021-05-09T15:15:23.142614Z",
+      "last_time": "2021-05-09T15:15:23.366093Z"
+    },
+    {
+      "file": "Microsoft-Windows-WindowsUpdateClient%4Operational.jsonl",
+      "sha256": "6002703598bb635ad489e38a2313b58880922a07c6ccd5603ec3ae63886706ce",
+      "records": 323,
+      "event_ids": {
+        "26": 156,
+        "41": 165,
+        "31": 2
+      },
+      "first_time": "2021-05-08T15:08:35.872176Z",
+      "last_time": "2021-06-02T03:24:23.089124Z"
+    },
+    {
+      "file": "Microsoft-Windows-Winlogon%4Operational.jsonl",
+      "sha256": "d60f4b131742b8be141e5492d22b4d5594881ae002bb29a3890a56663fd4cefb",
+      "records": 354,
+      "event_ids": {
+        "811": 170,
+        "812": 170,
+        "1": 7,
+        "2": 7
+      },
+      "first_time": "2021-05-08T15:08:03.610344Z",
+      "last_time": "2021-06-02T14:54:07.546347Z"
+    },
+    {
+      "file": "Microsoft-Windows-WorkFolders%4WHC.jsonl",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "records": 0,
+      "event_ids": {},
+      "first_time": null,
+      "last_time": null
+    },
+    {
+      "file": "Security.jsonl",
+      "sha256": "8cb82ae13837de89ed3bd315bfa06e50663a80160cdac0d04133f5df97640ae1",
+      "records": 34916,
+      "event_ids": {
+        "4625": 33456,
+        "4624": 185,
+        "4672": 184,
+        "5379": 1075,
+        "4799": 4,
+        "4648": 2,
+        "4798": 1,
+        "4634": 3,
+        "4616": 6
+      },
+      "first_time": "2021-06-01T00:09:15.930903Z",
+      "last_time": "2021-06-02T21:11:10.516024Z"
+    },
+    {
+      "file": "Setup.jsonl",
+      "sha256": "59e78630d095356be7aa8d2c4842120709a2e332db6510d413b52c6cbecb7a41",
+      "records": 13,
+      "event_ids": {
+        "1": 5,
+        "2": 5,
+        "8": 1,
+        "10": 1,
+        "4": 1
+      },
+      "first_time": "2021-05-09T23:48:49.771585Z",
+      "last_time": "2021-05-11T21:45:09.051311Z"
+    },
+    {
+      "file": "System.jsonl",
+      "sha256": "ccb4ef27f9054d8af0016c8f69e5cd47f43b0c32a5a9ea3d6031da35e1578d43",
+      "records": 1036,
+      "event_ids": {
+        "6009": 3,
+        "6005": 3,
+        "12": 3,
+        "153": 3,
+        "20": 6,
+        "25": 3,
+        "27": 3,
+        "26": 2,
+        "32": 3,
+        "16": 172,
+        "6": 34,
+        "98": 10,
+        "172": 3,
+        "55": 9,
+        "24": 76,
+        "14": 3,
+        "16962": 3,
+        "16977": 3,
+        "16403": 2,
+        "2005": 1,
+        "1": 78,
+        "50036": 3,
+        "50103": 3,
+        "51046": 3,
+        "7026": 3,
+        "7045": 16,
+        "7023": 1,
+        "20003": 2,
+        "2004": 1,
+        "6006": 2,
+        "1074": 2,
+        "50104": 2,
+        "50105": 2,
+        "51047": 2,
+        "50106": 2,
+        "6013": 27,
+        "51057": 2,
+        "50037": 2,
+        "109": 2,
+        "13": 2,
+        "7040": 123,
+        "7030": 1,
+        "22": 1,
+        "1056": 1,
+        "1500": 1,
+        "19": 69,
+        "7001": 1,
+        "1501": 1,
+        "10016": 6,
+        "44": 172,
+        "43": 65,
+        "37": 25,
+        "35": 25,
+        "7002": 1,
+        "18": 1,
+        "15008": 2,
+        "15007": 2,
+        "36874": 32,
+        "1014": 1,
+        "15": 4
+      },
+      "first_time": "2021-05-08T15:04:03.602627Z",
+      "last_time": "2021-06-02T15:46:31.064557Z"
+    },
+    {
+      "file": "Windows PowerShell.jsonl",
+      "sha256": "f0b6d8489d428ebe97e7c52fa912bd0d079b994d3d4cde88db4ba090fb2bf64e",
+      "records": 200,
+      "event_ids": {
+        "600": 150,
+        "400": 25,
+        "403": 25
+      },
+      "first_time": "2021-05-09T01:42:42.362795Z",
+      "last_time": "2021-06-02T00:51:48.641007Z"
+    }
+  ]
+}

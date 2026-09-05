@@ -1,0 +1,729 @@
+[
+  {
+    "run": "r1",
+    "local_root": "/Users/a/hack/sherlock-qwen-hook-smoke-20260905-r1",
+    "results": [
+      {
+        "mode": "allow",
+        "exit_code": 0,
+        "elapsed_s": 8.302008964004926,
+        "requests": 2,
+        "marker_exists": true,
+        "hooks": []
+      },
+      {
+        "mode": "deny",
+        "exit_code": 0,
+        "elapsed_s": 7.531646567047574,
+        "requests": 2,
+        "marker_exists": true,
+        "hooks": []
+      },
+      {
+        "mode": "error",
+        "exit_code": 0,
+        "elapsed_s": 5.555510316975415,
+        "requests": 2,
+        "marker_exists": true,
+        "hooks": []
+      }
+    ],
+    "artifacts": [
+      {
+        "path": "allow/.qwen/settings.json",
+        "bytes": 1008,
+        "sha256": "026ea563eb64c59f6d2a07b893494a5d721af2ff217f87c722de6adfe6da1394"
+      },
+      {
+        "path": "allow/home/.openai-logs-cleanup-4f815c952943b152",
+        "bytes": 24,
+        "sha256": "fcecd042ceb33243ba7e6693d66cf1c33d1e7bcbe63761b654f6584aafd10fdc"
+      },
+      {
+        "path": "allow/home/extension-store/lock",
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      {
+        "path": "allow/home/extension-store/state.json",
+        "bytes": 151,
+        "sha256": "ba873559697359376b0516eac37417b45f7ced6415556fcf69e21bf0e453c4fc"
+      },
+      {
+        "path": "allow/home/extensions/extension-enablement.json",
+        "bytes": 2,
+        "sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+      },
+      {
+        "path": "allow/home/installation_id",
+        "bytes": 36,
+        "sha256": "d7a6e6f26097b5a1935931840e46d92a435370b65e8df5d33d85dd004cb7bc6b"
+      },
+      {
+        "path": "allow/home/output-language.md",
+        "bytes": 841,
+        "sha256": "0c61823b23e53d1d056f31d28904e7170e7bb26d76e349598bc2927c8fabd005"
+      },
+      {
+        "path": "allow/home/projects/-home-claude-developer-hack-sherlock-qwen-hook-smoke-20260905-r1-allow/chats/817f728f-5ae9-4130-b4fc-dfa4284a9a7a.jsonl",
+        "bytes": 5249,
+        "sha256": "c5730b9497d653b8b604ee5c5d81f193b4618f451b8000762bbba38b10808b8b"
+      },
+      {
+        "path": "allow/home/usage/token-usage-2026-09.jsonl",
+        "bytes": 735,
+        "sha256": "d64baf65919caced23b957450811596c0be7d5e7cdf34d2e7b0c5a1e176934f7"
+      },
+      {
+        "path": "allow/home/usage_record.jsonl",
+        "bytes": 642,
+        "sha256": "8aaf1fea444c25e9695e6fe7b9ad079fe11b38eea125b0af417caff2bfeb1785"
+      },
+      {
+        "path": "allow/hook.py",
+        "bytes": 585,
+        "sha256": "a34aab387fddc2f19ce4b6575a3ea82333895a185252a159d25e54f00d683477"
+      },
+      {
+        "path": "allow/launch.json",
+        "bytes": 494,
+        "sha256": "414b4a9077b8012fea59bcf6c0fc84f3f1682ec7a4627901476d2deade7c9cde"
+      },
+      {
+        "path": "allow/marker.txt",
+        "bytes": 4,
+        "sha256": "ec864fe99b539704b8872ac591067ef22d836a8d942087f2dba274b301ebe6e5"
+      },
+      {
+        "path": "allow/request-0.json",
+        "bytes": 137945,
+        "sha256": "82644729171a2a72b9f079d14291394d37d754c1e4d0379d5c979ecd5420ff58"
+      },
+      {
+        "path": "allow/request-1.json",
+        "bytes": 138364,
+        "sha256": "3b3d65c2ae5b904678d2bd906eb815a2ac061775c0109539bb6d16fd956a2ebd"
+      },
+      {
+        "path": "allow/response-0.sse",
+        "bytes": 631,
+        "sha256": "5e502ef8110c0a84c17966d4d0bf67cb53c9cb5c7fc8b11315d0f3971ffa95ae"
+      },
+      {
+        "path": "allow/response-1.sse",
+        "bytes": 496,
+        "sha256": "e95a5c8139d94e909801f4c1726cd0152f2befd2365a4d8213a5bad3d60db203"
+      },
+      {
+        "path": "allow/result.json",
+        "bytes": 131,
+        "sha256": "e733d3683a86a570cf5cf1ecbc45006f9434c3b9b81e4e7ab1c8bc2f82c808d5"
+      },
+      {
+        "path": "allow/stderr.txt",
+        "bytes": 271,
+        "sha256": "1b07e81e433d6818ba717c8c82342fe055fd839f4f428ece4f60efd9b1a55ef3"
+      },
+      {
+        "path": "allow/stdout.json",
+        "bytes": 4850,
+        "sha256": "de47fe7fb20019343d31a5ab33a68cdf47f68f85526048fdd95f3a2ed30eabff"
+      },
+      {
+        "path": "deny/.qwen/settings.json",
+        "bytes": 1005,
+        "sha256": "2ae7c0721cd51ad30c04a2e825aea3fb0b830031fe63d668cc7c150ca2006fca"
+      },
+      {
+        "path": "deny/home/.openai-logs-cleanup-9370a287d166cfa6",
+        "bytes": 24,
+        "sha256": "e0f1c0f3bb7d775a389cf999e4fdc63b741b25885c71f389dfc1ea57214b1f3c"
+      },
+      {
+        "path": "deny/home/extension-store/lock",
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      {
+        "path": "deny/home/extension-store/state.json",
+        "bytes": 151,
+        "sha256": "ba873559697359376b0516eac37417b45f7ced6415556fcf69e21bf0e453c4fc"
+      },
+      {
+        "path": "deny/home/extensions/extension-enablement.json",
+        "bytes": 2,
+        "sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+      },
+      {
+        "path": "deny/home/installation_id",
+        "bytes": 36,
+        "sha256": "2488af7b1b0b412943414fb8039f225f14b730f26db4bc3e5831ae4860104f40"
+      },
+      {
+        "path": "deny/home/output-language.md",
+        "bytes": 841,
+        "sha256": "0c61823b23e53d1d056f31d28904e7170e7bb26d76e349598bc2927c8fabd005"
+      },
+      {
+        "path": "deny/home/projects/-home-claude-developer-hack-sherlock-qwen-hook-smoke-20260905-r1-deny/chats/ff4aeb8e-a841-4f9e-aa8d-9caf8a57f354.jsonl",
+        "bytes": 5240,
+        "sha256": "b8545b7317c624b3ed3f9a0608ac49fb64345e72ee13e5c18d8f7b9c3953aa03"
+      },
+      {
+        "path": "deny/home/usage/token-usage-2026-09.jsonl",
+        "bytes": 735,
+        "sha256": "722173fd96513ed37ce81ade87a2b5d01daebe2f753cc11855438fed360de2e0"
+      },
+      {
+        "path": "deny/home/usage_record.jsonl",
+        "bytes": 640,
+        "sha256": "be34e48aa08be7cb513087703ecbe00def6ff5b1b75f5eced4c477517537e145"
+      },
+      {
+        "path": "deny/hook.py",
+        "bytes": 585,
+        "sha256": "a34aab387fddc2f19ce4b6575a3ea82333895a185252a159d25e54f00d683477"
+      },
+      {
+        "path": "deny/launch.json",
+        "bytes": 492,
+        "sha256": "7923f3c3e506984851687e70913a6492b19e93215092290f30521e239b856b1e"
+      },
+      {
+        "path": "deny/marker.txt",
+        "bytes": 4,
+        "sha256": "ec864fe99b539704b8872ac591067ef22d836a8d942087f2dba274b301ebe6e5"
+      },
+      {
+        "path": "deny/request-0.json",
+        "bytes": 137937,
+        "sha256": "0a9e6659f1f2fda81385b29d21b9f52779942abe90426398b05f86e87a7d6878"
+      },
+      {
+        "path": "deny/request-1.json",
+        "bytes": 138356,
+        "sha256": "6a65ad68f35011009571600cd6aa6dcda3954d01c6e2507bf83c0b2490b4fada"
+      },
+      {
+        "path": "deny/response-0.sse",
+        "bytes": 631,
+        "sha256": "36ef67e0eb22db5b17972f426a91b2424a9caf74e2ead855a37c45438396aa26"
+      },
+      {
+        "path": "deny/response-1.sse",
+        "bytes": 496,
+        "sha256": "a83c9928a70d47adc433ff909612d64253ab31571d724d7064762d426e68106a"
+      },
+      {
+        "path": "deny/result.json",
+        "bytes": 130,
+        "sha256": "e173903d00cf842c42c0980cc05ef080f892db743cb6c8e35c994b8b1f0b8e2a"
+      },
+      {
+        "path": "deny/stderr.txt",
+        "bytes": 271,
+        "sha256": "1b07e81e433d6818ba717c8c82342fe055fd839f4f428ece4f60efd9b1a55ef3"
+      },
+      {
+        "path": "deny/stdout.json",
+        "bytes": 4847,
+        "sha256": "4d9b300853ce3843a9ce12884b72fdbb24081444dc9c81091e4669c78f88425d"
+      },
+      {
+        "path": "error/.qwen/settings.json",
+        "bytes": 1008,
+        "sha256": "961412442314fe510fa1c827a4e8fa13dd09d81e0720b9198df05f0a79b6ebd1"
+      },
+      {
+        "path": "error/home/.openai-logs-cleanup-792f8345a7ce94fd",
+        "bytes": 24,
+        "sha256": "f30b4beee03a327d8efb5d7115a9242cf157f55b57304f587075e1cd8cc2bffa"
+      },
+      {
+        "path": "error/home/extension-store/lock",
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      {
+        "path": "error/home/extension-store/state.json",
+        "bytes": 151,
+        "sha256": "ba873559697359376b0516eac37417b45f7ced6415556fcf69e21bf0e453c4fc"
+      },
+      {
+        "path": "error/home/extensions/extension-enablement.json",
+        "bytes": 2,
+        "sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+      },
+      {
+        "path": "error/home/installation_id",
+        "bytes": 36,
+        "sha256": "ecb4e1653877a2ba6280e793983355469a915787209f444ff1ad569060127b04"
+      },
+      {
+        "path": "error/home/output-language.md",
+        "bytes": 841,
+        "sha256": "0c61823b23e53d1d056f31d28904e7170e7bb26d76e349598bc2927c8fabd005"
+      },
+      {
+        "path": "error/home/projects/-home-claude-developer-hack-sherlock-qwen-hook-smoke-20260905-r1-error/chats/eec18cc9-8615-4236-8766-881a35efe991.jsonl",
+        "bytes": 5246,
+        "sha256": "f05ac6cecfcc5e0c3f312b753906734329232feb41fd21e03897ea376c3f3b69"
+      },
+      {
+        "path": "error/home/usage/token-usage-2026-09.jsonl",
+        "bytes": 734,
+        "sha256": "3a7a6dbcd934f3c0c101aa979f6f4fc31ef5ff35c6ef47892ea0b94d79954701"
+      },
+      {
+        "path": "error/home/usage_record.jsonl",
+        "bytes": 641,
+        "sha256": "ba7e4c44c122c2fbababc12d1ace783aa6ae4cff72f6bb4a05aaa3697cd7f14d"
+      },
+      {
+        "path": "error/hook.py",
+        "bytes": 585,
+        "sha256": "a34aab387fddc2f19ce4b6575a3ea82333895a185252a159d25e54f00d683477"
+      },
+      {
+        "path": "error/launch.json",
+        "bytes": 494,
+        "sha256": "c940cd395f951b4e5303ee17fb25a9cc80010203122df7acfd3990afb30cd0ae"
+      },
+      {
+        "path": "error/marker.txt",
+        "bytes": 4,
+        "sha256": "ec864fe99b539704b8872ac591067ef22d836a8d942087f2dba274b301ebe6e5"
+      },
+      {
+        "path": "error/request-0.json",
+        "bytes": 137945,
+        "sha256": "270a37acb451887f4fe808389e434d427178864480c95ed71260db8ee399ef4c"
+      },
+      {
+        "path": "error/request-1.json",
+        "bytes": 138364,
+        "sha256": "673c9d30f4d660894253000ecaa09e5ce84f4760bf237d98b7f0ac592b42649e"
+      },
+      {
+        "path": "error/response-0.sse",
+        "bytes": 631,
+        "sha256": "bb012f19a66bbecc9a34fbac21099bc043145a87e46e9ebe919269c93d385780"
+      },
+      {
+        "path": "error/response-1.sse",
+        "bytes": 496,
+        "sha256": "7d70071b352e9eaa68403e320ddc5ea0c6b47d02fb2ef99ec6eecb38515d6151"
+      },
+      {
+        "path": "error/result.json",
+        "bytes": 131,
+        "sha256": "819e9c5c55a998e33cbf221d074c7d30bea70df7f1dbc37951a6f37f296e023d"
+      },
+      {
+        "path": "error/stderr.txt",
+        "bytes": 271,
+        "sha256": "1b07e81e433d6818ba717c8c82342fe055fd839f4f428ece4f60efd9b1a55ef3"
+      },
+      {
+        "path": "error/stdout.json",
+        "bytes": 4847,
+        "sha256": "02ac36426278c74c32c25c16d3ab9e53d5eb176d8544489b3e915c7d3cb9ad6a"
+      },
+      {
+        "path": "results.json",
+        "bytes": 446,
+        "sha256": "6fc04a7f941d68a227d8090a15e61a991ccc059b5dec17677df4491afd510b1f"
+      }
+    ]
+  },
+  {
+    "run": "r2",
+    "local_root": "/Users/a/hack/sherlock-qwen-hook-smoke-20260905-r2",
+    "results": [
+      {
+        "mode": "allow",
+        "exit_code": 0,
+        "elapsed_s": 5.4247619869420305,
+        "requests": 2,
+        "marker_exists": true,
+        "hooks": [
+          {
+            "hook_event_name": "PreToolUse",
+            "session_id": "4a0501a4-f6fe-411b-9982-7b1d62adbbaf",
+            "tool_name": "run_shell_command",
+            "tool_use_id": "toolu_1788640941156_ryadgfkrx"
+          },
+          {
+            "hook_event_name": "PostToolUse",
+            "session_id": "4a0501a4-f6fe-411b-9982-7b1d62adbbaf",
+            "tool_name": "run_shell_command",
+            "tool_use_id": "toolu_1788640941156_ryadgfkrx"
+          }
+        ]
+      },
+      {
+        "mode": "deny",
+        "exit_code": 0,
+        "elapsed_s": 4.618256465997547,
+        "requests": 2,
+        "marker_exists": false,
+        "hooks": [
+          {
+            "hook_event_name": "PreToolUse",
+            "session_id": "4f81bc19-cb3a-44b8-ad3d-a4479dfdebd9",
+            "tool_name": "run_shell_command",
+            "tool_use_id": "toolu_1788640946046_i6eixds8q"
+          }
+        ]
+      },
+      {
+        "mode": "error",
+        "exit_code": 0,
+        "elapsed_s": 5.002958312048577,
+        "requests": 2,
+        "marker_exists": true,
+        "hooks": [
+          {
+            "hook_event_name": "PreToolUse",
+            "session_id": "d8653028-128a-4c6d-bb7d-7c2852ec8121",
+            "tool_name": "run_shell_command",
+            "tool_use_id": "toolu_1788640950796_clp61ld6w"
+          },
+          {
+            "hook_event_name": "PostToolUse",
+            "session_id": "d8653028-128a-4c6d-bb7d-7c2852ec8121",
+            "tool_name": "run_shell_command",
+            "tool_use_id": "toolu_1788640950796_clp61ld6w"
+          }
+        ]
+      }
+    ],
+    "artifacts": [
+      {
+        "path": "allow/.qwen/settings.json",
+        "bytes": 1017,
+        "sha256": "c62d374a1ac427c0b78d4816429192d4c11133d534801a2ffae3b95ba0fb4139"
+      },
+      {
+        "path": "allow/home/.openai-logs-cleanup-fca935feceb3e376",
+        "bytes": 24,
+        "sha256": "09cba5e1a233e5741b1e6027dc3a61f966543ce77794b9851292d63af7d8a449"
+      },
+      {
+        "path": "allow/home/extension-store/lock",
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      {
+        "path": "allow/home/extension-store/state.json",
+        "bytes": 151,
+        "sha256": "ba873559697359376b0516eac37417b45f7ced6415556fcf69e21bf0e453c4fc"
+      },
+      {
+        "path": "allow/home/extensions/extension-enablement.json",
+        "bytes": 2,
+        "sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+      },
+      {
+        "path": "allow/home/installation_id",
+        "bytes": 36,
+        "sha256": "b61caf5276a851222c2919c332656bbc152dee7291b4bcbaacc142e20e948ad0"
+      },
+      {
+        "path": "allow/home/output-language.md",
+        "bytes": 841,
+        "sha256": "0c61823b23e53d1d056f31d28904e7170e7bb26d76e349598bc2927c8fabd005"
+      },
+      {
+        "path": "allow/home/projects/-home-claude-developer-hack-sherlock-qwen-hook-smoke-20260905-r2-allow/chats/4a0501a4-f6fe-411b-9982-7b1d62adbbaf.jsonl",
+        "bytes": 5248,
+        "sha256": "83b9cd0a286ed202402a2763afa081c397bd981b9c8a5243d72f649243e3bdce"
+      },
+      {
+        "path": "allow/home/usage/token-usage-2026-09.jsonl",
+        "bytes": 735,
+        "sha256": "0a6f7858a672e2525559df9bbe391ff86915cdab68b34c278d8feaaff881fcb9"
+      },
+      {
+        "path": "allow/home/usage_record.jsonl",
+        "bytes": 641,
+        "sha256": "45e8f24c2e60eec16ba4b7d5f2ac99e217e431e6b71eb0a4b01054166e72022b"
+      },
+      {
+        "path": "allow/hook-1788640941257193951.json",
+        "bytes": 614,
+        "sha256": "1ff16ac1078be2e924191e5a218738f4af856f41698049d560c9e85775a94a01"
+      },
+      {
+        "path": "allow/hook-1788640941490870946.json",
+        "bytes": 811,
+        "sha256": "96a38c826aa5a68f49e612a8ac16dcf6192c69d7d40d9261495d2a2edfc45a14"
+      },
+      {
+        "path": "allow/hook.py",
+        "bytes": 585,
+        "sha256": "a34aab387fddc2f19ce4b6575a3ea82333895a185252a159d25e54f00d683477"
+      },
+      {
+        "path": "allow/launch.json",
+        "bytes": 494,
+        "sha256": "58736e10d4d2767fa8efe05114174c920fb3c8d99d4a0fb881660bdb421735ac"
+      },
+      {
+        "path": "allow/marker.txt",
+        "bytes": 4,
+        "sha256": "ec864fe99b539704b8872ac591067ef22d836a8d942087f2dba274b301ebe6e5"
+      },
+      {
+        "path": "allow/request-0.json",
+        "bytes": 137945,
+        "sha256": "2388ce653ae35b446df49e93d9cf8bf8685498b4bc82a00c3dbf2951fd5bfa72"
+      },
+      {
+        "path": "allow/request-1.json",
+        "bytes": 138364,
+        "sha256": "caa4d4493a7234464695fac58badd6bea0217370a6352d75dbb36fd03edf414c"
+      },
+      {
+        "path": "allow/response-0.sse",
+        "bytes": 631,
+        "sha256": "c77db85e0c23d615c05b270927516eead65a743381421d9d02a9c682978523c7"
+      },
+      {
+        "path": "allow/response-1.sse",
+        "bytes": 496,
+        "sha256": "4b5d680065c0d8dd48bc21d27a9fff61ac88cd280a5032e850d313313bfafdda"
+      },
+      {
+        "path": "allow/result.json",
+        "bytes": 545,
+        "sha256": "5a10bf9d0f3a3a080b9af8eadf041783b4ceb6ba3d7ca8336a1e9052d6e966b0"
+      },
+      {
+        "path": "allow/stderr.txt",
+        "bytes": 271,
+        "sha256": "1b07e81e433d6818ba717c8c82342fe055fd839f4f428ece4f60efd9b1a55ef3"
+      },
+      {
+        "path": "allow/stdout.json",
+        "bytes": 4847,
+        "sha256": "ebb462062a39286c7475c41b2cae63163446470e104386bcabe1c4e03461a1b7"
+      },
+      {
+        "path": "deny/.qwen/settings.json",
+        "bytes": 1014,
+        "sha256": "d9ec451c0f70b12dd4ccfffd68c040697f7a9a325d287f23be67fc5ca458a063"
+      },
+      {
+        "path": "deny/home/.openai-logs-cleanup-6a16b518c375826d",
+        "bytes": 24,
+        "sha256": "85c82192c8917ef20f37df9685d7e0fabffe28402a060b2e7ddb403c49f9844c"
+      },
+      {
+        "path": "deny/home/extension-store/lock",
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      {
+        "path": "deny/home/extension-store/state.json",
+        "bytes": 151,
+        "sha256": "ba873559697359376b0516eac37417b45f7ced6415556fcf69e21bf0e453c4fc"
+      },
+      {
+        "path": "deny/home/extensions/extension-enablement.json",
+        "bytes": 2,
+        "sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+      },
+      {
+        "path": "deny/home/installation_id",
+        "bytes": 36,
+        "sha256": "c986ea528c39a26e7a2a8998230cdbcf7510a89718d693fe80847a908d3c5885"
+      },
+      {
+        "path": "deny/home/output-language.md",
+        "bytes": 841,
+        "sha256": "0c61823b23e53d1d056f31d28904e7170e7bb26d76e349598bc2927c8fabd005"
+      },
+      {
+        "path": "deny/home/projects/-home-claude-developer-hack-sherlock-qwen-hook-smoke-20260905-r2-deny/chats/4f81bc19-cb3a-44b8-ad3d-a4479dfdebd9.jsonl",
+        "bytes": 5243,
+        "sha256": "6c5a84ff0eb5c048bd641b662aa76894efb88779322a51a150c1761585c2ee54"
+      },
+      {
+        "path": "deny/home/usage/token-usage-2026-09.jsonl",
+        "bytes": 734,
+        "sha256": "fa4c6617c5fffb48e37c2c6a8a5429386b29e9fb4ca174df6ad620c5b8da445d"
+      },
+      {
+        "path": "deny/home/usage_record.jsonl",
+        "bytes": 638,
+        "sha256": "7d5edcb32077913f08ba26b0770d59f36d87c3de451f92a0da6cacfca1a762c1"
+      },
+      {
+        "path": "deny/hook-1788640946116043618.json",
+        "bytes": 611,
+        "sha256": "1e335f97abff074f634140a3201dc157232aa74a4070890077d17fec169dc3ad"
+      },
+      {
+        "path": "deny/hook.py",
+        "bytes": 585,
+        "sha256": "a34aab387fddc2f19ce4b6575a3ea82333895a185252a159d25e54f00d683477"
+      },
+      {
+        "path": "deny/launch.json",
+        "bytes": 492,
+        "sha256": "dcc4ee54e04641c73b9ab19d01cedfe69340619e0930b02c3e8708b756be654b"
+      },
+      {
+        "path": "deny/request-0.json",
+        "bytes": 137937,
+        "sha256": "ee06ba182111beade227ea8bf21661c7a70bf73b7999198398e0adc37d453518"
+      },
+      {
+        "path": "deny/request-1.json",
+        "bytes": 138233,
+        "sha256": "545ddec335cb903d1c004b13560408036270a1b1672fc91b4f4324fc7dc360a1"
+      },
+      {
+        "path": "deny/response-0.sse",
+        "bytes": 631,
+        "sha256": "f2892d7459bf5800b1333912e6ac10c0160c8ca6b59b9d8664a8cef72bc03217"
+      },
+      {
+        "path": "deny/response-1.sse",
+        "bytes": 496,
+        "sha256": "f3b8aacf3e3f5be4aa2f80ddd5d97d051db12e5222747de0add36620b308c49c"
+      },
+      {
+        "path": "deny/result.json",
+        "bytes": 338,
+        "sha256": "97e6393853476ae884e77efb20f9ffa58fa43c62d89713dc2bf52eec756c024a"
+      },
+      {
+        "path": "deny/stderr.txt",
+        "bytes": 271,
+        "sha256": "1b07e81e433d6818ba717c8c82342fe055fd839f4f428ece4f60efd9b1a55ef3"
+      },
+      {
+        "path": "deny/stdout.json",
+        "bytes": 4834,
+        "sha256": "ee725ad89d547ca30cb3c427fe78d660597898d685a3b0e5df658cfa08b8cc1a"
+      },
+      {
+        "path": "error/.qwen/settings.json",
+        "bytes": 1017,
+        "sha256": "53ebe4388576e37a8480bcf06c174e992dad75a1152ae8114831e84ddafa69c3"
+      },
+      {
+        "path": "error/home/.openai-logs-cleanup-8602f00a113dbab2",
+        "bytes": 24,
+        "sha256": "12a9d5fdbb79d1b6ab19b3b5da1e888bdaf07e422cc5ecb19a62e1ef93e95a73"
+      },
+      {
+        "path": "error/home/extension-store/lock",
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      {
+        "path": "error/home/extension-store/state.json",
+        "bytes": 151,
+        "sha256": "ba873559697359376b0516eac37417b45f7ced6415556fcf69e21bf0e453c4fc"
+      },
+      {
+        "path": "error/home/extensions/extension-enablement.json",
+        "bytes": 2,
+        "sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+      },
+      {
+        "path": "error/home/installation_id",
+        "bytes": 36,
+        "sha256": "b525466aff56d3145a848c2b5ac19897ac4384eb2188235edb1026882c334c13"
+      },
+      {
+        "path": "error/home/output-language.md",
+        "bytes": 841,
+        "sha256": "0c61823b23e53d1d056f31d28904e7170e7bb26d76e349598bc2927c8fabd005"
+      },
+      {
+        "path": "error/home/projects/-home-claude-developer-hack-sherlock-qwen-hook-smoke-20260905-r2-error/chats/d8653028-128a-4c6d-bb7d-7c2852ec8121.jsonl",
+        "bytes": 5248,
+        "sha256": "ebdd6ffbad33b115c574ad14f938f3857a05837d5a474134c2d8f61ade11a849"
+      },
+      {
+        "path": "error/home/usage/token-usage-2026-09.jsonl",
+        "bytes": 735,
+        "sha256": "62580a5ecd9f471a0bb32ebacbd7908d6dd1fe6507987ae3871d1091c3eb043e"
+      },
+      {
+        "path": "error/home/usage_record.jsonl",
+        "bytes": 641,
+        "sha256": "4869ffa30dce09ef14d84ef4dc999d9376fa1902695d8f7340e0a2c82a6aa9eb"
+      },
+      {
+        "path": "error/hook-1788640950891535024.json",
+        "bytes": 614,
+        "sha256": "ee668f475d0d4785acca4e77aa8e00b068c5399856c510658d3b7df3cbe3e9e6"
+      },
+      {
+        "path": "error/hook-1788640951111338988.json",
+        "bytes": 811,
+        "sha256": "235f3e6bbdcc186417e7ed7e74a2937c1382c614543a70896bd51537eebac0d6"
+      },
+      {
+        "path": "error/hook.py",
+        "bytes": 585,
+        "sha256": "a34aab387fddc2f19ce4b6575a3ea82333895a185252a159d25e54f00d683477"
+      },
+      {
+        "path": "error/launch.json",
+        "bytes": 494,
+        "sha256": "6126483e3f8313da040da9ea99fe2f67ea5fad86220a8ce06ddb01ebecb62447"
+      },
+      {
+        "path": "error/marker.txt",
+        "bytes": 4,
+        "sha256": "ec864fe99b539704b8872ac591067ef22d836a8d942087f2dba274b301ebe6e5"
+      },
+      {
+        "path": "error/request-0.json",
+        "bytes": 137945,
+        "sha256": "1473e0137808cd7a6a8d2fc7322bc3a47c3fad91e20b2edffa863dc17f3f4588"
+      },
+      {
+        "path": "error/request-1.json",
+        "bytes": 138364,
+        "sha256": "23b942cfbfd0e8b18b518759a9932af22dfb7d7aadd619a6061987b7d1d3395c"
+      },
+      {
+        "path": "error/response-0.sse",
+        "bytes": 631,
+        "sha256": "6b953b476d9858aec571bbe25a9f475cf668ed120ba6d0121c4a76265ae1e292"
+      },
+      {
+        "path": "error/response-1.sse",
+        "bytes": 496,
+        "sha256": "86358a0076d13ecd6b45b09341e3a19db9240a28c4d2cd9b50f75659eaa739ca"
+      },
+      {
+        "path": "error/result.json",
+        "bytes": 544,
+        "sha256": "ea8b1631ee910f88c75a8a7b7f9691073ad5b06b280d512cf2294c71331aa46d"
+      },
+      {
+        "path": "error/stderr.txt",
+        "bytes": 271,
+        "sha256": "1b07e81e433d6818ba717c8c82342fe055fd839f4f428ece4f60efd9b1a55ef3"
+      },
+      {
+        "path": "error/stdout.json",
+        "bytes": 4847,
+        "sha256": "dc04c59abec39253e6b363212d37bbf0f658da9909d3d684dcc0f15fda6a65cf"
+      },
+      {
+        "path": "results.json",
+        "bytes": 1547,
+        "sha256": "fbfab9eeeb2a21102eb000fd8eb5fe75550fb45c490c8e48e696e4da19063f88"
+      }
+    ]
+  }
+]
