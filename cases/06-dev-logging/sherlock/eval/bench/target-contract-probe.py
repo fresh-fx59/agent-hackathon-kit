@@ -66,18 +66,40 @@ def _terminate_owned_process_group(child, cleanup_grace_s=CONTROLLER_TERM_GRACE_
     except ProcessLookupError:
         child.poll()
         return
+    except PermissionError:
+        # A numeric pgid may be reused after the owned leader exits. Never
+        # interpret EPERM as success while our leader is still alive, and
+        # never signal a group we can no longer authenticate as ours.
+        if child.poll() is None:
+            raise
+        return
     deadline = time.monotonic() + cleanup_grace_s
     while time.monotonic() < deadline:
         child.poll()
-        if not _process_group_exists(pgid):
+        try:
+            exists = _process_group_exists(pgid)
+        except PermissionError:
+            if child.poll() is None:
+                raise
+            break
+        if not exists:
             break
         time.sleep(0.02)
     child.poll()
-    if _process_group_exists(pgid):
+    try:
+        exists = _process_group_exists(pgid)
+    except PermissionError:
+        if child.poll() is None:
+            raise
+        exists = False
+    if exists:
         try:
             os.killpg(pgid, signal.SIGKILL)
         except ProcessLookupError:
             pass
+        except PermissionError:
+            if child.poll() is None:
+                raise
     try:
         child.wait(timeout=kill_reap_grace_s)
     except subprocess.TimeoutExpired:
@@ -86,19 +108,40 @@ def _terminate_owned_process_group(child, cleanup_grace_s=CONTROLLER_TERM_GRACE_
 
 def run_owned_process(command, timeout, cleanup_grace_s=CONTROLLER_TERM_GRACE_S,
                       kill_reap_grace_s=KILL_REAP_GRACE_S, **kwargs):
-    """Run a command in a fresh session and leave no owned group on timeout."""
+    """Run a command in a fresh session and leave no owned group on any exit."""
     if kwargs.pop("capture_output", False):
         if kwargs.get("stdout") is not None or kwargs.get("stderr") is not None:
             raise ValueError("stdout and stderr arguments may not be used with capture_output")
         kwargs.update(stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    child = subprocess.Popen(command, start_new_session=True, **kwargs)
+    ownership = {"child": None, "pending_signal": None}
+    previous = {}
+    def forward(signum, _frame):
+        child = ownership["child"]
+        if child is None:
+            ownership["pending_signal"] = signum
+            return
+        _terminate_owned_process_group(child, cleanup_grace_s, kill_reap_grace_s)
+        raise KeyboardInterrupt() if signum == signal.SIGINT else SystemExit(128 + signum)
+    for signum in (signal.SIGINT, signal.SIGTERM):
+        previous[signum] = signal.signal(signum, forward)
+    child = None
     try:
+        child = subprocess.Popen(command, start_new_session=True, **kwargs)
+        ownership["child"] = child
+        if ownership["pending_signal"] is not None:
+            forward(ownership["pending_signal"], None)
         stdout, stderr = child.communicate(timeout=timeout)
     except subprocess.TimeoutExpired as exc:
         _terminate_owned_process_group(child, cleanup_grace_s, kill_reap_grace_s)
         stdout, stderr = child.communicate()
         raise subprocess.TimeoutExpired(command, timeout, output=stdout, stderr=stderr) from exc
-    return subprocess.CompletedProcess(command, child.returncode, stdout, stderr)
+    else:
+        return subprocess.CompletedProcess(command, child.returncode, stdout, stderr)
+    finally:
+        if child is not None and child.poll() is None:
+            _terminate_owned_process_group(child, cleanup_grace_s, kill_reap_grace_s)
+        for signum, handler in previous.items():
+            signal.signal(signum, handler)
 
 
 class ProbeFailure(ValueError):
@@ -569,7 +612,7 @@ def _profile(args, settings_sha):
         raise ProbeFailure("TARGET_PROBE_PREPARE", "invalid target profile") from exc
 
 
-def _sealed_rate_snapshot(path, run_tag="target-contract-probe"):
+def _sealed_rate_snapshot(path, run_tag="target-contract-probe", fresh_at=None):
     """Accept only Task 3's exact, current, self-hashed configured rate card."""
     raw = safe_read_regular(path)
     row = _strict_json(raw)
@@ -586,7 +629,7 @@ def _sealed_rate_snapshot(path, run_tag="target-contract-probe"):
         effective = _iso(row["effective_at"])
     except ProbeFailure as exc:
         raise ProbeFailure("TARGET_PROBE_PREPARE", "rate snapshot") from exc
-    age = (_now() - effective).total_seconds()
+    age = ((fresh_at or _now()) - effective).total_seconds()
     if age > 86400 or age < -300:
         raise ProbeFailure("TARGET_PROBE_PREPARE", "rate snapshot")
     return raw, row
@@ -739,15 +782,74 @@ def _record_action_authorization(root, nonce_root, manifest, supplied_hash, auth
         raise ProbeFailure("TARGET_PROBE_NOT_AUTHORIZED", "nonce evidence")
     probe_root = Path(root if authority_root is None else authority_root).resolve()
     token = token.resolve()
-    _atomic_no_replace(Path(root) / "action-authorization.json", canonical({
-        "schema": 1, "action_nonce": manifest["nonce"],
+    authorization = {
+        "schema": 2 if manifest.get("schema") == 2 else 1,
+        "action_nonce": manifest["nonce"],
         "manifest_raw_sha256": supplied_hash,
         "nonce_record_path": str(token), "nonce_record_sha256": sha256(raw),
         "nonce_root": str(Path(nonce_root).resolve()), "probe_root": str(probe_root),
         "trace_path": str(probe_root / "probe-work" / "runs" / "target-contract-probe"),
         "bench_status_sha256": sha256((HERE / "bench-status.py").read_bytes()),
         "run_verdict_sha256": sha256((HERE / "run-verdict.py").read_bytes()),
-    }) + b"\n")
+    }
+    if manifest.get("schema") == 2:
+        authorization["authorized_at"] = _time_text(_now())
+    _atomic_no_replace(Path(root) / "action-authorization.json", canonical(authorization) + b"\n")
+
+
+def _validate_launch_authority(root, supplied_hash, nonce_root, *, record_start=False,
+                               code="TARGET_PROBE_NOT_AUTHORIZED"):
+    """Authenticate the existing approval/nonce at each actual launch boundary."""
+    root = Path(root)
+    raw_manifest, digest = _asset(root / "probe-manifest.json", code)
+    if not _hex(supplied_hash) or not hmac.compare_digest(digest, supplied_hash):
+        raise ProbeFailure(code, "manifest approval")
+    manifest = _strict_json(raw_manifest, PROBE_MANIFEST_KEYS)
+    package = _verify_package(root, manifest, code)
+    raw_auth, _ = _asset(root / "action-authorization.json", code)
+    auth = _strict_json(raw_auth)
+    monitored = manifest.get("schema") == 2
+    required = {"schema", "action_nonce", "manifest_raw_sha256",
+                "nonce_record_path", "nonce_record_sha256", "nonce_root", "probe_root", "trace_path",
+                "bench_status_sha256", "run_verdict_sha256"}
+    if monitored: required.add("authorized_at")
+    created = _iso(manifest["created_at"]); expires = _iso(manifest["expires_at"])
+    authorized = _iso(auth.get("authorized_at")) if monitored else None
+    expected_nonce_root = str(Path(nonce_root).resolve())
+    expected_record = str((Path(expected_nonce_root) / (manifest["nonce"] + ".json")).resolve())
+    resolved_root = root.resolve()
+    copied_trace = resolved_root.parent.name == "runs" and resolved_root.parent.parent.name == "probe-work"
+    sealed_copy = resolved_root.name == "sealed-input" and resolved_root.parent.name == "probe-work"
+    expected_probe_root = (resolved_root.parents[2] if copied_trace else
+                           resolved_root.parent.parent if sealed_copy else resolved_root)
+    expected_trace = (resolved_root if copied_trace else
+                      resolved_root.parent / "runs" / "target-contract-probe" if sealed_copy else
+                      expected_probe_root / "probe-work" / "runs" / "target-contract-probe")
+    if (set(auth) != required or auth.get("schema") != (2 if monitored else 1) or auth.get("action_nonce") != manifest["nonce"]
+            or auth.get("manifest_raw_sha256") != supplied_hash or auth.get("nonce_root") != expected_nonce_root
+            or auth.get("nonce_record_path") != expected_record
+            or auth.get("probe_root") != str(expected_probe_root)
+            or auth.get("trace_path") != str(expected_trace)
+            or (monitored and not (created <= authorized < expires))
+            or auth.get("bench_status_sha256") != _asset(HERE / "bench-status.py")[1]
+            or auth.get("run_verdict_sha256") != _asset(HERE / "run-verdict.py")[1]):
+        raise ProbeFailure(code, "action authorization")
+    nonce_raw = safe_read_regular(expected_record)
+    wanted = canonical({"nonce": manifest["nonce"], "manifest_sha256": supplied_hash}) + b"\n"
+    if not hmac.compare_digest(nonce_raw, wanted) or not hmac.compare_digest(sha256(nonce_raw), auth.get("nonce_record_sha256", "")):
+        raise ProbeFailure(code, "consumed nonce")
+    if _now() >= expires:
+        raise ProbeFailure(code, "launch expired")
+    _, rate = _sealed_rate_snapshot(root / "probe-rate-snapshot.json")
+    effective = _iso(rate["effective_at"])
+    now = _now()
+    if effective > now + dt.timedelta(minutes=5) or now - effective > dt.timedelta(hours=24):
+        raise ProbeFailure(code, "launch rate")
+    if record_start and monitored:
+        launch = {"schema": 1, "manifest_raw_sha256": supplied_hash,
+                  "action_authorization_sha256": sha256(raw_auth), "started_at": _time_text(now)}
+        _atomic_no_replace(root / "launch-start.json", canonical(launch) + b"\n")
+    return {"manifest": manifest, "package": package, "authorization": auth}
 
 
 def authorize(manifest_path, supplied_hash, nonce_root, action=None, *, consume=True):
@@ -792,7 +894,7 @@ def authorize(manifest_path, supplied_hash, nonce_root, action=None, *, consume=
     return row
 
 
-def _verify_package(root, manifest, code="TARGET_PROBE_NOT_AUTHORIZED"):
+def _verify_package(root, manifest, code="TARGET_PROBE_NOT_AUTHORIZED", *, rate_fresh_at=None):
     names = {"target-profile.json": "target_profile_sha256", "probe-budget.json": "probe_budget_sha256",
              "probe-rate-snapshot.json": "rate_snapshot_sha256",
              "fixture-manifest.json": "fixture_manifest_sha256", "input-package.json": "input_package_sha256"}
@@ -811,7 +913,7 @@ def _verify_package(root, manifest, code="TARGET_PROBE_NOT_AUTHORIZED"):
     if values["probe-budget.json"] != expected_budget:
         raise ProbeFailure(code, "probe budget invalid")
     try:
-        _sealed_rate_snapshot(Path(root) / "probe-rate-snapshot.json")
+        _sealed_rate_snapshot(Path(root) / "probe-rate-snapshot.json", fresh_at=rate_fresh_at)
     except ProbeFailure as exc:
         raise ProbeFailure(code, "rate snapshot invalid") from exc
     package = values["input-package.json"]
@@ -949,7 +1051,7 @@ def _finite_number(value):
     return type(value) in (int, float) and not isinstance(value, bool) and math.isfinite(value) and value >= 0
 
 
-def _strict_budget(row, monitored=False):
+def _strict_budget(row, monitored=False, *, launch_started=None, sealed_rate=None):
     fields = {"schema", "run_tag", "updated_at", "limits", "rate_snapshot", "budget_assurance",
               "projected", "observed", "completed_overshoot", "observed_usage_unknown",
               "completed_attempt_ids", "verdict", "reason"}
@@ -971,12 +1073,15 @@ def _strict_budget(row, monitored=False):
     rate = row["rate_snapshot"]
     rate_fields = {"schema", "run_tag", "effective_at", "source", "sha256", "prompt_rub_per_token", "completion_rub_per_token"}
     unsigned = {key: rate[key] for key in rate_fields - {"sha256"}} if set(rate) == rate_fields else {}
+    rate_reference = launch_started if launch_started is not None else _now()
     if (set(rate) != rate_fields or rate.get("schema") != 1 or rate.get("run_tag") != row["run_tag"]
             or not isinstance(rate.get("source"), str) or not rate["source"] or not _hex(rate.get("sha256"))
             or any(not _finite_number(rate.get(key)) for key in ("prompt_rub_per_token", "completion_rub_per_token"))
             or not hmac.compare_digest(rate["sha256"], sha256(canonical(unsigned)))
-            or updated > _now() + dt.timedelta(minutes=5) or effective > _now() + dt.timedelta(minutes=5)
-            or _now() - effective > dt.timedelta(hours=24)):
+            or updated > _now() + dt.timedelta(minutes=5)
+            or effective > rate_reference + dt.timedelta(minutes=5)
+            or rate_reference - effective > dt.timedelta(hours=24)
+            or (sealed_rate is not None and rate != sealed_rate)):
         raise ProbeFailure("TARGET_PROBE_BUDGET")
     expected_limits = {key: (None if monitored else DEFAULT_BUDGET[key]) for key in limits}
     if row["limits"] != expected_limits:
@@ -1023,14 +1128,18 @@ def _audit_authorization(trace, manifest, raw_manifest):
     """Require the durable action token that admitted this exact manifest."""
     raw, _ = _asset(Path(trace) / "action-authorization.json", "TARGET_CONTRACT_FAILED")
     row = _strict_json(raw)
+    monitored = manifest.get("schema") == 2
     required = {"schema", "action_nonce", "manifest_raw_sha256",
                 "nonce_record_path", "nonce_record_sha256", "nonce_root", "probe_root", "trace_path",
                 "bench_status_sha256", "run_verdict_sha256"}
+    if monitored: required.add("authorized_at")
     expected_root = Path(trace).resolve().parents[2]
     expected_trace = expected_root / "probe-work" / "runs" / "target-contract-probe"
-    if set(row) != required or row.get("schema") != 1 \
+    authorized = _iso(row.get("authorized_at")) if monitored else None
+    if set(row) != required or row.get("schema") != (2 if monitored else 1) \
             or row.get("action_nonce") != manifest.get("nonce") \
             or row.get("manifest_raw_sha256") != sha256(raw_manifest) \
+            or (monitored and not (_iso(manifest["created_at"]) <= authorized < _iso(manifest["expires_at"]))) \
             or row.get("probe_root") != str(expected_root) or row.get("trace_path") != str(expected_trace) \
             or not _hex(row.get("nonce_record_sha256")) or not isinstance(row.get("nonce_root"), str) \
             or row.get("nonce_record_path") != str((Path(row["nonce_root"]) / (manifest["nonce"] + ".json")).resolve()) \
@@ -1042,6 +1151,20 @@ def _audit_authorization(trace, manifest, raw_manifest):
     if not hmac.compare_digest(nonce_raw, wanted) or not hmac.compare_digest(sha256(nonce_raw), row["nonce_record_sha256"]):
         raise ProbeFailure("TARGET_CONTRACT_FAILED", "action authorization")
     return row, raw
+
+
+def _audit_launch_start(trace, manifest, raw_manifest, raw_authorization):
+    raw, _ = _asset(Path(trace) / "launch-start.json", "TARGET_CONTRACT_FAILED")
+    row = _strict_json(raw, {"schema", "manifest_raw_sha256", "action_authorization_sha256", "started_at"})
+    try:
+        started = _iso(row.get("started_at"))
+    except ProbeFailure as exc:
+        raise ProbeFailure("TARGET_CONTRACT_FAILED", "launch start") from exc
+    if (row.get("schema") != 1 or row.get("manifest_raw_sha256") != sha256(raw_manifest)
+            or row.get("action_authorization_sha256") != sha256(raw_authorization)
+            or not (_iso(manifest["created_at"]) <= started < _iso(manifest["expires_at"]))):
+        raise ProbeFailure("TARGET_CONTRACT_FAILED", "launch start")
+    return row, raw, started
 
 
 def _real_gates(trace, report, fixture):
@@ -1161,6 +1284,37 @@ def _task3_observations(trace):
     return journal_raw, journal_hash, rows
 
 
+def _reservation_observations(trace):
+    """Recompute projected accounting from the proxy's append-only journal."""
+    raw, raw_hash = _asset(Path(trace) / "upstream-budget-state.json.reservations.jsonl",
+                           "TARGET_PROBE_BUDGET")
+    rows, ids = [], set()
+    estimate_fields = {"provider_calls", "prompt_tokens", "completion_tokens",
+                       "wall_time_s", "estimated_cost_rub"}
+    for line in raw.splitlines():
+        if not line.strip():
+            raise ProbeFailure("TARGET_PROBE_BUDGET", "reservation blank row")
+        row = _strict_json(line)
+        if (set(row) != {"schema", "run_tag", "action_reservation_id", "action_estimate"}
+                or row.get("schema") != 1 or row.get("run_tag") != Path(trace).name
+                or not isinstance(row.get("action_reservation_id"), str)
+                or re.fullmatch(r"[0-9a-f]{32}", row["action_reservation_id"]) is None
+                or row["action_reservation_id"] in ids
+                or not isinstance(row.get("action_estimate"), dict)
+                or set(row["action_estimate"]) != estimate_fields):
+            raise ProbeFailure("TARGET_PROBE_BUDGET", "reservation row")
+        estimate = row["action_estimate"]
+        if (estimate["provider_calls"] != 1
+                or any(type(estimate[key]) is not int or estimate[key] < 0
+                       for key in ("prompt_tokens", "completion_tokens"))
+                or any(not _finite_number(estimate[key])
+                       for key in ("wall_time_s", "estimated_cost_rub"))):
+            raise ProbeFailure("TARGET_PROBE_BUDGET", "reservation estimate")
+        ids.add(row["action_reservation_id"]); rows.append(row)
+    totals = {key: sum(row["action_estimate"][key] for row in rows) for key in estimate_fields}
+    return raw, raw_hash, rows, totals
+
+
 def _ordinary_usage(usage):
     """Accept normal provider counters without allowing malformed accounting."""
     if not isinstance(usage, dict) or not {"prompt_tokens", "completion_tokens"}.issubset(usage):
@@ -1207,9 +1361,15 @@ def audit(trace):
         raw_manifest, _ = _asset(trace / "probe-manifest.json", "TARGET_CONTRACT_FAILED")
         manifest = _strict_json(raw_manifest, PROBE_MANIFEST_KEYS)
         action_authorization, action_authorization_raw = _audit_authorization(trace, manifest, raw_manifest)
-        package = _verify_package(trace, manifest, "TARGET_CONTRACT_FAILED")
-        if _iso(manifest["expires_at"]) <= _now():
-            raise ProbeFailure("TARGET_CONTRACT_FAILED", "expired")
+        monitored = manifest.get("schema") == 2
+        if monitored:
+            launch_start, launch_start_raw, launch_started = _audit_launch_start(
+                trace, manifest, raw_manifest, action_authorization_raw)
+        else:
+            if _iso(manifest["expires_at"]) <= _now():
+                raise ProbeFailure("TARGET_CONTRACT_FAILED", "expired")
+            launch_start_raw, launch_started = None, None
+        package = _verify_package(trace, manifest, "TARGET_CONTRACT_FAILED", rate_fresh_at=launch_started)
         # The runner's normal path is the only authoritative report artifact.
         report = trace / "work" / "report.md"
         fixture = trace / "fixture"
@@ -1260,7 +1420,13 @@ def audit(trace):
         monitored = package["target-profile.json"].get("execution_mode") == "operator_monitored"
         budget = _strict_budget(
             _strict_json(_asset(trace / "upstream-budget-state.json", "TARGET_CONTRACT_FAILED")[0]),
-            monitored=monitored)
+            monitored=monitored, launch_started=launch_started,
+            sealed_rate=package["probe-rate-snapshot.json"])
+        reservation_raw, reservation_hash, reservations, reservation_totals = _reservation_observations(trace)
+        if (not reservations or reservation_totals != budget["projected"]
+                or len(reservations) != budget["projected"]["provider_calls"]
+                or len(task3_rows) > len(reservations)):
+            raise ProbeFailure("TARGET_PROBE_BUDGET", "reservation correlation")
         if set(ledger) != {"provider_calls_observed", "usage", "returned_identities", "sent_models", "call_ids"} or \
                 not isinstance(ledger.get("usage"), dict) or set(ledger["usage"]) != {"prompt_tokens", "completion_tokens"} or \
                 any(type(ledger["usage"][key]) is not int or ledger["usage"][key] < 0 for key in ledger["usage"]):
@@ -1366,6 +1532,7 @@ def audit(trace):
                    "oracle_sha256": sha256(canonical(oracle)), "probe_oracle_sha256": sha256((trace / "probe-oracle.json").read_bytes()),
                    "probe_gates_sha256": sha256((trace / "probe-gates.json").read_bytes()),
                    "final_report_sha256": report_hash, "ledger_sha256": sha256(ledger_raw),
+                   "reservation_ledger_sha256": reservation_hash,
                    "request_body_tree_sha256": request_tree, "response_body_tree_sha256": response_tree,
                    "provider_calls_observed": calls, "usage": usage,
                    "estimated_cost_rub": estimated_cost,
@@ -1381,6 +1548,8 @@ def audit(trace):
                    "rate_assurance": budget["budget_assurance"],
                    "provider_billed_calls": None, "provider_billed_rub": None,
                    "audit_tool_sha256": sha256(Path(__file__).read_bytes())}
+        if monitored:
+            receipt["launch_start_sha256"] = sha256(launch_start_raw)
         if os.path.lexists(receipt_path) or os.path.lexists(checksum_path):
             raise ProbeFailure("TARGET_CONTRACT_FAILED", "receipt transaction already exists")
         receipt["checksum_path"] = str(checksum_path)
@@ -1435,6 +1604,9 @@ def main(argv=None):
     approval = sub.add_parser("authorize")
     approval.add_argument("--manifest", required=True); approval.add_argument("--operator-approved-probe", required=True)
     approval.add_argument("--nonce-root", required=True)
+    launch = sub.add_parser("verify-launch")
+    launch.add_argument("--sealed-input", required=True); launch.add_argument("--operator-approved-probe", required=True)
+    launch.add_argument("--nonce-root", required=True); launch.add_argument("--record-start", action="store_true")
     check = sub.add_parser("audit"); check.add_argument("--trace", required=True); check.add_argument("--json", action="store_true")
     args = parser.parse_args(argv)
     try:
@@ -1444,6 +1616,9 @@ def main(argv=None):
             row = audit(args.trace)
         elif args.command == "authorize":
             row = authorize(args.manifest, args.operator_approved_probe, args.nonce_root)
+        elif args.command == "verify-launch":
+            row = _validate_launch_authority(args.sealed_input, args.operator_approved_probe,
+                                             args.nonce_root, record_start=args.record_start)
         else:
             def secret_reader(reference):
                 value = os.environ.get(reference)
@@ -1456,7 +1631,9 @@ def main(argv=None):
                 return {"route": profile["route"], "budget_path": str(budget), "secret": secret}
             def runner(**kwargs):
                 command = ["bash", str(HERE / "bench-controller.sh"), "--target-contract-probe",
-                           "--sealed-input", str(kwargs["profile_path"].parent), "--work", str(kwargs["work"])]
+                           "--sealed-input", str(kwargs["profile_path"].parent), "--work", str(kwargs["work"]),
+                           "--operator-approved-probe", args.operator_approved_probe,
+                           "--nonce-root", str(Path(args.nonce_root).resolve())]
                 if args.transport_base_url:
                     command.extend(["--transport-base-url", args.transport_base_url])
                 profile = _strict_json(kwargs["profile_path"].read_bytes())

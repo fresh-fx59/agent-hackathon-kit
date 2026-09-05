@@ -376,7 +376,25 @@ def _budget_estimate(trace, run_tag):
     elif budget.get("schema") != 2 or budget.get("budget_assurance") != "client_pre_dispatch":
         return None, None
     snapshot = budget.get("rate_snapshot")
+    launch_rate_valid = True
+    if monitored:
+        launch = _optional_json(trace, "launch-start.json")
+        sealed_snapshot = _optional_json(trace, "probe-rate-snapshot.json")
+        started_at = launch.get("started_at") if isinstance(launch, dict) else None
+        try:
+            started = dt.datetime.fromisoformat(started_at.replace("Z", "+00:00"))
+            effective = dt.datetime.fromisoformat(snapshot.get("effective_at", "").replace("Z", "+00:00")) \
+                if isinstance(snapshot, dict) else None
+            launch_rate_valid = (started.tzinfo is not None and started.utcoffset() == dt.timedelta(0)
+                                 and effective is not None and effective.tzinfo is not None
+                                 and effective.utcoffset() == dt.timedelta(0)
+                                 and effective <= started + dt.timedelta(minutes=5)
+                                 and started - effective <= dt.timedelta(hours=24)
+                                 and snapshot == sealed_snapshot)
+        except (AttributeError, TypeError, ValueError, OverflowError):
+            launch_rate_valid = False
     if (not _fresh_timestamp(budget.get("updated_at")) or not isinstance(snapshot, dict)
+            or not launch_rate_valid
             or not isinstance(budget.get("limits"), dict)
             or set(budget["limits"]) != set(limits)
             or (monitored and any(budget["limits"].get(name) is not None for name in limits))
@@ -418,7 +436,7 @@ def _budget_estimate(trace, run_tag):
             or snapshot.get("run_tag") != run_tag
             or not all(isinstance(snapshot.get(name), str) and snapshot[name]
                        for name in ("effective_at", "source", "sha256"))
-            or not _fresh_timestamp(snapshot.get("effective_at"))):
+            or (not monitored and not _fresh_timestamp(snapshot.get("effective_at")))):
         return None, None
     if any(isinstance(snapshot.get(name), bool)
            or not isinstance(snapshot.get(name), (int, float))

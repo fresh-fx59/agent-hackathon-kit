@@ -129,6 +129,53 @@ class TargetContractProbeTest(unittest.TestCase):
             with self.assertRaises(ProcessLookupError):
                 os.kill(int(pid_path.read_text()), 0)
 
+    def test_outer_explicit_stop_cascades_through_controller_to_stubborn_real_runner(self):
+        """A real monitored outer TERM cannot orphan its Qwen process tree."""
+        pid_path = self.temp / "real-stubborn-qwen.pid"
+        qwen = self.temp / "real-stubborn-qwen.py"
+        qwen.write_text(
+            "#!/usr/bin/env python3\n"
+            "import os,signal,sys,time\n"
+            "if '--sherlock-flag-probe-sentinel' in sys.argv: raise SystemExit(0)\n"
+            "signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
+            "open(%r,'w').write(str(os.getpid()))\n"
+            "time.sleep(60)\n" % str(pid_path), encoding="utf-8")
+        qwen.chmod(0o700)
+        root = (self.temp / "real-explicit-stop").resolve()
+        args = self.probe.PrepareArgs(**dict(self.args.__dict__, root=root,
+                                             qwen_bin=str(qwen), operator_monitored=True,
+                                             arm="v44"))
+        self.probe.prepare(args)
+        manifest = root / "probe-manifest.json"
+        outer = subprocess.Popen([
+            sys.executable, str(PROBE_PATH), "run", "--manifest", str(manifest),
+            "--operator-approved-probe", self._sha(manifest), "--nonce-root", str(root / "nonces"),
+            "--transport-base-url", "http://127.0.0.1:9/v1", "--json",
+        ], text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+           env=dict(os.environ, SHERLOCK_API_KEY="test-only"))
+        qwen_pid = None
+        try:
+            deadline = time.monotonic() + 15
+            while time.monotonic() < deadline and not pid_path.exists(): time.sleep(0.05)
+            self.assertTrue(pid_path.exists(), "real runner never reached stubborn Qwen")
+            qwen_pid = int(pid_path.read_text())
+            outer.send_signal(signal.SIGTERM)
+            outer.communicate(timeout=25)
+            deadline = time.monotonic() + 3
+            while time.monotonic() < deadline:
+                status = subprocess.run(["ps", "-o", "stat=", "-p", str(qwen_pid)],
+                                        text=True, capture_output=True).stdout.strip()
+                if not status or status.startswith("Z"): break
+                time.sleep(0.05)
+            status = subprocess.run(["ps", "-o", "stat=", "-p", str(qwen_pid)],
+                                    text=True, capture_output=True).stdout.strip()
+            self.assertTrue(not status or status.startswith("Z"), status)
+        finally:
+            if outer.poll() is None: outer.kill(); outer.communicate(timeout=5)
+            if qwen_pid is not None:
+                try: os.kill(qwen_pid, signal.SIGKILL)
+                except ProcessLookupError: pass
+
     def test_outer_watchdog_cascades_before_and_after_runner_registration(self):
         """Outer TERM cannot orphan the runner across either registration interleaving."""
         controller_source = CONTROLLER_PATH.read_text(encoding="utf-8")
@@ -321,6 +368,42 @@ class TargetContractProbeTest(unittest.TestCase):
         outcomes.sort()
         self.assertEqual(outcomes, ["APPROVAL_REPLAYED", "accepted"])
 
+    def test_actual_controller_and_runner_refuse_unsealed_monitored_entrypoints_before_contact(self):
+        """Ambient unlimited mode cannot bypass the approval/consumed-nonce contract."""
+        marker = self.temp / "provider-contact"
+        qwen = self.temp / "contact-tripwire.sh"
+        qwen.write_text("#!/usr/bin/env bash\n[ \"${1:-}\" = --sherlock-flag-probe-sentinel ] && exit 0\nprintf contacted > %s\nexit 97\n" % marker, encoding="utf-8")
+        qwen.chmod(0o755)
+        root = (self.temp / "fabricated-unlimited").resolve()
+        args = self.probe.PrepareArgs(**dict(self.args.__dict__, root=root,
+                                             qwen_bin=str(qwen), operator_monitored=True,
+                                             arm="v44"))
+        self.probe.prepare(args)
+        manifest = root / "probe-manifest.json"
+        nonce_root = root / "nonces"
+        # A file with the expected name is not authority. c6f9c2b checked only
+        # this shape and would launch through the old four-argument entrypoint.
+        (root / "action-authorization.json").write_text("{}\n")
+        work = root / "direct-controller-work"; work.mkdir()
+        env = dict(os.environ, SHERLOCK_API_KEY="fixture-token")
+        controller = subprocess.run([
+            "bash", str(BENCH / "bench-controller.sh"), "--target-contract-probe",
+            "--sealed-input", str(root), "--work", str(work),
+        ], text=True, capture_output=True, timeout=20, env=env)
+        self.assertNotEqual(controller.returncode, 0)
+        self.assertFalse(marker.exists())
+        self.assertIn("PROBE_AUTHORITY", controller.stderr)
+
+        trace = self.temp / "ambient-trace"
+        runner_env = dict(os.environ, SHERLOCK_TARGET_PROBE_MODE="1",
+                          SHERLOCK_OPERATOR_MONITORED_MODE="1", SHERLOCK_TRACE=str(trace),
+                          SHERLOCK_RUN_TAG="ambient-trace", SHERLOCK_PROBE_ARM="v44",
+                          SHERLOCK_PROBE_SEALED_INPUT=str(root), QWEN_BIN=str(qwen))
+        runner = subprocess.run(["bash", str(BENCH / "run-bench.sh"), "v44"],
+                                text=True, capture_output=True, timeout=20, env=runner_env)
+        self.assertNotEqual(runner.returncode, 0)
+        self.assertFalse(marker.exists())
+
     def test_refusals_happen_before_secret_proxy_runner_or_network(self):
         for case in ("missing_approval", "wrong_hash", "expired", "wrong_action",
                      "tampered_profile", "tampered_fixture", "used_nonce", "missing_rates"):
@@ -493,13 +576,35 @@ class TargetContractProbeTest(unittest.TestCase):
                     "returned_identities", "usage", "cost_inputs", "authenticated", "authority",
                     "status_exit_code", "attempt_exit_code", "driver_exit_code", "gate_exit_codes",
                     "wrapper_exit_code", "primary_failure", "terminal_observation", "rate_assurance",
-                    "budget_assurance", "provider_billed_calls", "provider_billed_rub"}
+                    "budget_assurance", "reservation_ledger_sha256", "provider_billed_calls", "provider_billed_rub"}
         self.assertTrue(required.issubset(receipt))
         self.assertEqual(receipt["probe_prompt_sha256"], self._sha(trace / "probe" / "prompt.txt"))
         self.assertEqual(receipt["probe_budget_sha256"], self._sha(trace / "probe-budget.json"))
         self.assertEqual(receipt["probe_rate_snapshot_sha256"], self._sha(trace / "probe-rate-snapshot.json"))
         self.assertEqual(receipt["provider_billed_calls"], None)
         self.assertEqual(receipt["provider_billed_rub"], None)
+
+    def test_audit_recomputes_exact_projected_totals_from_reservation_journal(self):
+        for index, mutation in enumerate(("missing", "counter", "cost", "duplicate")):
+            with self.subTest(mutation=mutation):
+                root = self.temp / ("reservation-" + str(index))
+                args = self.probe.PrepareArgs(**dict(self.args.__dict__, root=root))
+                self.probe.prepare(args)
+                manifest = root / "probe-manifest.json"
+                self.probe.authorize(manifest, self._sha(manifest), root / "nonces")
+                trace = root / "probe-work" / "runs" / "target-contract-probe"
+                self._accepted_trace(trace, root)
+                journal = trace / "upstream-budget-state.json.reservations.jsonl"
+                if mutation == "missing":
+                    journal.unlink()
+                else:
+                    row = json.loads(journal.read_text())
+                    if mutation == "counter": row["action_estimate"]["prompt_tokens"] += 1
+                    if mutation == "cost": row["action_estimate"]["estimated_cost_rub"] += 0.01
+                    line = json.dumps(row, sort_keys=True, separators=(",", ":")) + "\n"
+                    journal.write_text(line + (line if mutation == "duplicate" else ""))
+                with self.assertRaisesRegex(self.probe.ProbeFailure, "TARGET_PROBE_BUDGET"):
+                    self.probe.audit(trace)
 
     def test_task3_usage_accepts_ordinary_totals_but_rejects_inconsistent_or_negative_fields(self):
         for index, (extra, accepted) in enumerate((({"total_tokens": 2, "prompt_tokens_details": {"cached_tokens": 0}}, True),
@@ -742,7 +847,13 @@ raise SystemExit(1)
     def test_provider_free_monitored_e2e_uses_real_runner_lane_proxy_and_task7(self):
         self._provider_free_e2e_uses_real_runner_lane_proxy_and_task7(True)
 
-    def _provider_free_e2e_uses_real_runner_lane_proxy_and_task7(self, operator_monitored):
+    def test_monitored_completion_after_authorization_window_uses_authenticated_start(self):
+        """A timely authorized dispatch may finish after manifest/rate admission windows."""
+        self._provider_free_e2e_uses_real_runner_lane_proxy_and_task7(
+            True, cross_launch_window=True)
+
+    def _provider_free_e2e_uses_real_runner_lane_proxy_and_task7(
+            self, operator_monitored, cross_launch_window=False):
         """One local call crosses the same sealed path as a paid target probe."""
         canonical_report = (ROOT / "tools" / "tests" / "fixtures" /
                             "target-contract-reports" / "canonical.md").read_text(encoding="utf-8")
@@ -817,6 +928,8 @@ print(json.dumps([{'type':'result','result':'ok','is_error':False,'session_id':'
                 payload = json.loads(inner.rfile.read(length))
                 prompt_raw = payload['messages'][0]['content'].encode('utf-8')
                 seen.append({'payload': payload, 'prompt_sha256': hashlib.sha256(prompt_raw).hexdigest()})
+                if cross_launch_window:
+                    time.sleep(9)
                 response = json.dumps({"id": "fixture-response", "object": "chat.completion",
                     "model": "deepseek-v4-20260901", "choices": [{"index": 0, "message": {"role": "assistant", "content": canonical_report}, "finish_reason": "stop"}],
                     "usage": {"prompt_tokens": 3, "completion_tokens": 2}}).encode()
@@ -834,6 +947,19 @@ print(json.dumps([{'type':'result','result':'ok','is_error':False,'session_id':'
                 operator_monitored=operator_monitored))
             self.probe.prepare(args)
             manifest = root / "probe-manifest.json"
+            if cross_launch_window:
+                # Both inputs are timely at authorization/dispatch, then expire
+                # while the already-contacted localhost fixture is responding.
+                now = dt.datetime.now(dt.timezone.utc)
+                rate = json.loads((root / "probe-rate-snapshot.json").read_text())
+                rate["effective_at"] = self.probe._time_text(now - dt.timedelta(days=1) + dt.timedelta(seconds=8))
+                rate.pop("sha256")
+                rate["sha256"] = self._sha_bytes(self.probe.canonical(rate))
+                (root / "probe-rate-snapshot.json").write_bytes(self.probe.canonical(rate) + b"\n")
+                manifest_row = json.loads(manifest.read_text())
+                manifest_row["expires_at"] = self.probe._time_text(now + dt.timedelta(seconds=8))
+                manifest_row["rate_snapshot_sha256"] = self._sha(root / "probe-rate-snapshot.json")
+                manifest.write_bytes(self.probe.canonical(manifest_row) + b"\n")
             done = subprocess.run([sys.executable, str(PROBE_PATH), "run", "--manifest", str(manifest),
                 "--operator-approved-probe", self._sha(manifest), "--nonce-root", str(root / "nonces"),
                 "--transport-base-url", "http://127.0.0.1:%d/v1" % server.server_port, "--json"],
@@ -875,6 +1001,22 @@ print(json.dumps([{'type':'result','result':'ok','is_error':False,'session_id':'
         self.assertEqual(done.returncode, 0, (done.stdout, done.stderr, diagnostic))
         result = json.loads(done.stdout); trace = Path(result["trace"])
         self.assertTrue(result["audit"]["accepted"])
+        manifest_row = json.loads((trace / "probe-manifest.json").read_text())
+        authorization = json.loads((trace / "action-authorization.json").read_text())
+        if operator_monitored:
+            launch = json.loads((trace / "launch-start.json").read_text())
+            created = self.probe._iso(manifest_row["created_at"])
+            expires = self.probe._iso(manifest_row["expires_at"])
+            authorized_at = self.probe._iso(authorization["authorized_at"])
+            started_at = self.probe._iso(launch["started_at"])
+            self.assertLessEqual(created, authorized_at)
+            self.assertLessEqual(authorized_at, started_at)
+            self.assertLess(started_at, expires)
+            self.assertEqual(launch["manifest_raw_sha256"], self._sha(trace / "probe-manifest.json"))
+            self.assertEqual(launch["action_authorization_sha256"],
+                             self._sha(trace / "action-authorization.json"))
+        else:
+            self.assertFalse((trace / "launch-start.json").exists())
         sealed_prompt = trace / "probe" / "prompt.txt"
         self.assertEqual(len(seen), 1); self.assertEqual(seen[0]["payload"]["model"], "deepseek-v4-20260901")
         expected_prompt = "/sherlock\n\n" + sealed_prompt.read_text(encoding="utf-8")
@@ -1286,6 +1428,15 @@ print(json.dumps([{'type':'result','result':'ok','is_error':False,'session_id':'
             shutil.copy2(source_root / name, trace / name)
         if (source_root / "action-authorization.json").is_file():
             shutil.copy2(source_root / "action-authorization.json", trace / "action-authorization.json")
+            manifest_raw = (trace / "probe-manifest.json").read_bytes()
+            auth_raw = (trace / "action-authorization.json").read_bytes()
+            auth = json.loads(auth_raw)
+            if auth.get("schema") == 2:
+                (trace / "launch-start.json").write_text(json.dumps({
+                    "schema": 1, "manifest_raw_sha256": self._sha_bytes(manifest_raw),
+                    "action_authorization_sha256": self._sha_bytes(auth_raw),
+                    "started_at": auth["authorized_at"],
+                }, sort_keys=True, separators=(",", ":")) + "\n")
         (trace / "probe").mkdir()
         shutil.copy2(source_root / "probe" / "prompt.txt", trace / "probe" / "prompt.txt")
         shutil.copytree(source_root / "fixture", trace / "fixture")
@@ -1341,10 +1492,8 @@ print(json.dumps([{'type':'result','result':'ok','is_error':False,'session_id':'
                 return subprocess.CompletedProcess(command, 0, (trace / "run-verdict.json").read_text(), "")
             return original(command, *args, **kwargs)
         self.probe.subprocess.run = fresh_task7
+        rate = json.loads((trace / "probe-rate-snapshot.json").read_text())
         effective = dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
-        rate = {"schema": 1, "run_tag": trace.name, "effective_at": effective, "source": "local-test",
-                "prompt_rub_per_token": 0.0, "completion_rub_per_token": 0.0}
-        rate["sha256"] = self._sha_bytes(self.probe.canonical(rate))
         profile = json.loads((trace / "target-profile.json").read_text())
         monitored = profile.get("execution_mode") == "operator_monitored"
         (trace / "upstream-budget-state.json").write_text(json.dumps({"schema": 3 if monitored else 2,
@@ -1359,6 +1508,13 @@ print(json.dumps([{'type':'result','result':'ok','is_error':False,'session_id':'
             "observed_usage_unknown": 0, "completed_attempt_ids": [call_id],
             "verdict": "WITHIN", "reason": None,
             "rate_snapshot": rate}))
+        reservation = {"schema": 1, "run_tag": trace.name,
+                       "action_reservation_id": "1" * 32,
+                       "action_estimate": {"provider_calls": 1, "prompt_tokens": 1,
+                                           "completion_tokens": 1, "wall_time_s": 1.0,
+                                           "estimated_cost_rub": 0.1}}
+        (trace / "upstream-budget-state.json.reservations.jsonl").write_text(
+            json.dumps(reservation, sort_keys=True, separators=(",", ":")) + "\n")
 
     @property
     def trips(self):

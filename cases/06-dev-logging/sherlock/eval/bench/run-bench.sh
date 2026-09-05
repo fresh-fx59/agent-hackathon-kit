@@ -410,6 +410,13 @@ fi
 # package alongside the real trace.  Copy it only after controlled-trace
 # ownership has been verified; no report or proxy evidence is synthesized.
 if [ "${SHERLOCK_TARGET_PROBE_MODE:-0}" = "1" ]; then
+  [ -n "${SHERLOCK_PROBE_APPROVAL:-}" ] && [ -n "${SHERLOCK_PROBE_NONCE_ROOT:-}" ] || {
+    echo "✗ target probe authority is incomplete" >&2; exit 2;
+  }
+  python3 "$HERE/target-contract-probe.py" verify-launch \
+    --sealed-input "$SHERLOCK_PROBE_SEALED_INPUT" \
+    --operator-approved-probe "$SHERLOCK_PROBE_APPROVAL" \
+    --nonce-root "$SHERLOCK_PROBE_NONCE_ROOT" >/dev/null || exit 2
   python3 - "$SHERLOCK_PROBE_SEALED_INPUT" "$TRACE" <<'PY' || exit 2
 import os, shutil, stat, sys
 from pathlib import Path
@@ -1709,11 +1716,16 @@ run_qwen() {
   state_event ATTEMPT_STARTED --run-tag "$STAMP" --phase QWEN_RUNNING --dataset "$DATASET" --arm "$ARM" \
     --trace-dir "$TRACE" --attempt "$attempt" --session-id "$session" --reason "$ATTEMPT_REASON" \
     --upstream-log "$TRACE.upstream.jsonl" --inflight-path "$TRACE/upstream-inflight.json"
+  if [ "$TARGET_PROBE_MODE" = 1 ]; then
+    python3 "$HERE/target-contract-probe.py" verify-launch --sealed-input "$TRACE" \
+      --operator-approved-probe "$SHERLOCK_PROBE_APPROVAL" \
+      --nonce-root "$SHERLOCK_PROBE_NONCE_ROOT" --record-start >/dev/null || return 2
+  fi
   # key via environment, never argv (visible in ps; this box has a guest account)
   if [ "$OPERATOR_MONITORED_MODE" = 1 ]; then
     ( cd "$W" && OPENAI_API_KEY="$SHERLOCK_API_KEY" OPENAI_BASE_URL="$BASE_URL" \
       SHERLOCK_STRICT_MARKER_LIFECYCLE="$STRICT_MARKER_LIFECYCLE" \
-      timeout 0 "$QWEN" --auth-type openai --model "$CLIENT_MODEL" \
+      "$QWEN" --auth-type openai --model "$CLIENT_MODEL" \
         --approval-mode yolo --max-session-turns -1 --max-tool-calls -1 \
         "$@" --output-format json </dev/null \
     ) >"$W/out.json" 2>"$W/err.txt"

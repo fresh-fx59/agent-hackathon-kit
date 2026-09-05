@@ -1021,11 +1021,17 @@ def target_contract_probe(argv):
     arbitrary executable, configuration root, or resume identifier must never
     be interpreted as a probe instruction.
     """
-    if len(argv) not in (4, 6) or tuple(argv[:4:2]) != ("--sealed-input", "--work") or \
-            (len(argv) == 6 and argv[4] != "--transport-base-url"):
+    approved_syntax = len(argv) in (8, 10) and tuple(argv[:8:2]) == \
+        ("--sealed-input", "--work", "--operator-approved-probe", "--nonce-root") and \
+        (len(argv) == 8 or argv[8] == "--transport-base-url")
+    legacy_syntax = len(argv) in (4, 6) and tuple(argv[:4:2]) == ("--sealed-input", "--work") and \
+        (len(argv) == 4 or argv[4] == "--transport-base-url")
+    if not approved_syntax and not legacy_syntax:
         print("PROBE_ARGUMENTS", file=sys.stderr)
         return 2
     sealed, work = (Path(argv[1]), Path(argv[3]))
+    approval = argv[5] if approved_syntax else None
+    nonce_root = Path(argv[7]) if approved_syntax else None
     if not sealed.is_absolute() or not work.is_absolute() or not sealed.is_dir() or os.path.islink(sealed):
         print("PROBE_INPUT", file=sys.stderr)
         return 1
@@ -1053,9 +1059,10 @@ def target_contract_probe(argv):
         print("PROBE_PACKAGE", file=sys.stderr)
         return 1
     transport = profile["provider_base_url"]
-    if len(argv) == 6:
+    transport_index = 9 if approved_syntax and len(argv) == 10 else 5 if legacy_syntax and len(argv) == 6 else None
+    if transport_index is not None:
         try:
-            parsed = urlparse(argv[5]); port = parsed.port
+            parsed = urlparse(argv[transport_index]); port = parsed.port
         except ValueError:
             parsed = None; port = None
         if (parsed is None or parsed.scheme != "http" or parsed.hostname not in {"127.0.0.1", "::1"}
@@ -1063,7 +1070,7 @@ def target_contract_probe(argv):
                 or parsed.params or parsed.fragment):
             print("PROBE_TRANSPORT", file=sys.stderr)
             return 1
-        transport = argv[5]
+        transport = argv[transport_index]
     # The probe is sealed input, not a general purpose bench invocation.  Do
     # not let ambient SHERLOCK switches change the model, prompt, arm, retries,
     # settings, or proxy after approval.
@@ -1075,6 +1082,16 @@ def target_contract_probe(argv):
     conflicts = sorted(name for name in os.environ if name.startswith("SHERLOCK_") and name not in allowed_probe_env)
     if conflicts:
         print("PROBE_ENV_CONFLICT", file=sys.stderr)
+        return 1
+    if not approved_syntax:
+        print("PROBE_AUTHORITY", file=sys.stderr)
+        return 1
+    launch_check = subprocess.run(
+        [sys.executable, str(HERE / "target-contract-probe.py"), "verify-launch",
+         "--sealed-input", str(sealed), "--operator-approved-probe", approval,
+         "--nonce-root", str(nonce_root)], text=True, capture_output=True)
+    if launch_check.returncode:
+        print("PROBE_AUTHORITY", file=sys.stderr)
         return 1
     # Nothing outside the read-only sealed package is touched until all
     # controller inputs have passed.  In particular an invalid secret/env must
@@ -1151,6 +1168,8 @@ def target_contract_probe(argv):
                 "UPSTREAM_READ_TIMEOUT": str(per_dispatch_timeout),
                 "SHERLOCK_API_KEY": os.environ[secret_ref],
                 "SHERLOCK_PROBE_SEALED_INPUT": str(sealed),
+                "SHERLOCK_PROBE_APPROVAL": approval,
+                "SHERLOCK_PROBE_NONCE_ROOT": str(nonce_root.resolve()),
                 # The probe question is itself sealed evidence.  Give the
                 # ordinary runner this exact copied file, never its dataset
                 # fallback prompt or an ambient caller override.

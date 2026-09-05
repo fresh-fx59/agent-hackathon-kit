@@ -6,6 +6,7 @@ import hashlib
 import hmac
 import importlib.util
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -737,7 +738,7 @@ def target_probe_projection(path):
                 not isinstance(manifest.get("nonce"), str) or not re.fullmatch(r"[0-9a-f]{64}", manifest["nonce"]) or
                 timestamp(manifest.get("created_at")) is None or timestamp(manifest.get("expires_at")) is None or
                 timestamp(manifest["expires_at"]) <= timestamp(manifest["created_at"]) or
-                timestamp(manifest["expires_at"]) <= dt.datetime.now(dt.timezone.utc) or
+                (manifest.get("schema") == 1 and timestamp(manifest["expires_at"]) <= dt.datetime.now(dt.timezone.utc)) or
                 not all(is_hex(manifest.get(name)) for name in TARGET_PROBE_MANIFEST_KEYS if name.endswith("_sha256"))):
             raise ValueError("TRACE_UNRESOLVED")
         package_rows = {}
@@ -761,7 +762,9 @@ def target_probe_projection(path):
         if not hmac.compare_digest(digest(target_raw(prompt, "prompt.txt")), manifest["prompt_sha256"]):
             raise ValueError("TRACE_UNRESOLVED")
         raw_auth, authorization = target_read(trace, "action-authorization.json")
-        if set(authorization) != TARGET_PROBE_AUTH_KEYS or authorization.get("schema") != 1:
+        expected_auth_keys = set(TARGET_PROBE_AUTH_KEYS)
+        if monitored: expected_auth_keys.add("authorized_at")
+        if set(authorization) != expected_auth_keys or authorization.get("schema") != (2 if monitored else 1):
             raise ValueError("TRACE_UNRESOLVED")
         nonce_root = authorization.get("nonce_root"); nonce_path = authorization.get("nonce_record_path")
         expected_nonce_path = (os.path.join(nonce_root, manifest["nonce"] + ".json")
@@ -777,12 +780,44 @@ def target_probe_projection(path):
                 not hmac.compare_digest(authorization["bench_status_sha256"], digest(Path(__file__).read_bytes())) or
                 not hmac.compare_digest(authorization["run_verdict_sha256"], digest((HERE / "run-verdict.py").read_bytes()))):
             raise ValueError("TRACE_UNRESOLVED")
+        authorized = timestamp(authorization.get("authorized_at")) if monitored else None
+        created = timestamp(manifest["created_at"]); expires = timestamp(manifest["expires_at"])
+        if monitored and (authorized is None or not (created <= authorized < expires)):
+            raise ValueError("TRACE_UNRESOLVED")
         nonce_raw = target_external_nonce(nonce_path)
         wanted = (json.dumps({"nonce": manifest["nonce"], "manifest_sha256": digest(raw_manifest)},
                              sort_keys=True, separators=(",", ":")) + "\n").encode("utf-8")
         if (not hmac.compare_digest(nonce_raw, wanted) or
                 not hmac.compare_digest(digest(nonce_raw), authorization["nonce_record_sha256"])):
             raise ValueError("TRACE_UNRESOLVED")
+        if monitored:
+            raw_launch, launch = target_read(trace, "launch-start.json")
+            if (set(launch) != {"schema", "manifest_raw_sha256", "action_authorization_sha256", "started_at"}
+                    or launch.get("schema") != 1 or launch.get("manifest_raw_sha256") != digest(raw_manifest)
+                    or launch.get("action_authorization_sha256") != digest(raw_auth)):
+                raise ValueError("TRACE_UNRESOLVED")
+            started = timestamp(launch.get("started_at"))
+            if started is None or not (created <= authorized <= started < expires):
+                raise ValueError("TRACE_UNRESOLVED")
+            rate = package_rows["probe-rate-snapshot.json"]
+            rate_fields = {"schema", "run_tag", "effective_at", "source", "sha256",
+                           "prompt_rub_per_token", "completion_rub_per_token"}
+            effective = timestamp(rate.get("effective_at")) if isinstance(rate, dict) else None
+            unsigned = {name: rate[name] for name in rate_fields - {"sha256"}} \
+                if isinstance(rate, dict) and set(rate) == rate_fields else None
+            if (unsigned is None or rate.get("schema") != 1 or rate.get("run_tag") != os.path.basename(trace.path)
+                    or not isinstance(rate.get("source"), str) or not rate["source"]
+                    or any(isinstance(rate.get(name), bool)
+                           or not isinstance(rate.get(name), (int, float))
+                           or not math.isfinite(rate[name]) or rate[name] < 0
+                           for name in ("prompt_rub_per_token", "completion_rub_per_token"))
+                    or not is_hex(rate.get("sha256"))
+                    or not hmac.compare_digest(rate["sha256"], digest(json.dumps(
+                        unsigned, ensure_ascii=False, sort_keys=True,
+                        separators=(",", ":")).encode("utf-8")))
+                    or effective is None or effective > started + dt.timedelta(minutes=5)
+                    or started - effective > dt.timedelta(hours=24)):
+                raise ValueError("TRACE_UNRESOLVED")
         state, _, _ = status_projection(trace, {"run_tag": "target-contract-probe"})
         row = {"schema": 1, "selection": "target-probe", "run_tag": "target-contract-probe",
                "phase": state["phase"] if state else "UNKNOWN",
