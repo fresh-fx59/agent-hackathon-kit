@@ -1,0 +1,408 @@
+{
+  "run": "r3",
+  "local_root": "/Users/a/hack/sherlock-qwen-hook-smoke-20260906-r3",
+  "results": [
+    {
+      "mode": "allow",
+      "exit_code": 0,
+      "elapsed_s": 5.955971003975719,
+      "requests": 2,
+      "marker_exists": true,
+      "hooks": [
+        {
+          "hook_event_name": "PreToolUse",
+          "session_id": "48d009f3-c79f-4e4f-85d6-e48f7f9c2d91",
+          "tool_name": "run_shell_command",
+          "tool_use_id": "toolu_1788642323034_jumdlgzz0"
+        },
+        {
+          "hook_event_name": "PostToolUse",
+          "session_id": "48d009f3-c79f-4e4f-85d6-e48f7f9c2d91",
+          "tool_name": "run_shell_command",
+          "tool_use_id": "toolu_1788642323034_jumdlgzz0"
+        }
+      ],
+      "relative_skill_visible": true
+    },
+    {
+      "mode": "deny",
+      "exit_code": 0,
+      "elapsed_s": 4.890425576013513,
+      "requests": 2,
+      "marker_exists": false,
+      "hooks": [
+        {
+          "hook_event_name": "PreToolUse",
+          "session_id": "aac43f1e-c25c-4629-b3df-286bfc7f4f77",
+          "tool_name": "run_shell_command",
+          "tool_use_id": "toolu_1788642328085_a9s8p4ulo"
+        }
+      ],
+      "relative_skill_visible": true
+    },
+    {
+      "mode": "error",
+      "exit_code": 0,
+      "elapsed_s": 4.818497519940138,
+      "requests": 2,
+      "marker_exists": true,
+      "hooks": [
+        {
+          "hook_event_name": "PreToolUse",
+          "session_id": "067bb365-5df4-41c5-a3f4-5b13c6cba798",
+          "tool_name": "run_shell_command",
+          "tool_use_id": "toolu_1788642332776_sy4olbqfv"
+        },
+        {
+          "hook_event_name": "PostToolUse",
+          "session_id": "067bb365-5df4-41c5-a3f4-5b13c6cba798",
+          "tool_name": "run_shell_command",
+          "tool_use_id": "toolu_1788642332776_sy4olbqfv"
+        }
+      ],
+      "relative_skill_visible": true
+    }
+  ],
+  "artifacts": [
+    {
+      "path": "allow/skill-catalogue/relative-smoke/SKILL.md",
+      "bytes": 95,
+      "sha256": "22dc1f7e7e3ae01ccbe0a91aba6f7a13cd2d933beb451fcd6465be8c2dd521e0"
+    },
+    {
+      "path": "allow/workspace/.qwen/settings.json",
+      "bytes": 1203,
+      "sha256": "0ec92e24a64829b82dd84ddc312cd367dff6a0108005e4f6c645d0886e3bd40e"
+    },
+    {
+      "path": "allow/workspace/home/.openai-logs-cleanup-a25c811e265a34f9",
+      "bytes": 24,
+      "sha256": "ebd4f0d39f1a634814879b70c8039fb1eaf9ba693151351ad97f65e30ff528b7"
+    },
+    {
+      "path": "allow/workspace/home/extension-store/lock",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "allow/workspace/home/extension-store/state.json",
+      "bytes": 151,
+      "sha256": "ba873559697359376b0516eac37417b45f7ced6415556fcf69e21bf0e453c4fc"
+    },
+    {
+      "path": "allow/workspace/home/extensions/extension-enablement.json",
+      "bytes": 2,
+      "sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+    },
+    {
+      "path": "allow/workspace/home/installation_id",
+      "bytes": 36,
+      "sha256": "fb001317cefe66aee48d216c373dd925fd6956f5ccc319f1026003ab141de964"
+    },
+    {
+      "path": "allow/workspace/home/output-language.md",
+      "bytes": 841,
+      "sha256": "0c61823b23e53d1d056f31d28904e7170e7bb26d76e349598bc2927c8fabd005"
+    },
+    {
+      "path": "allow/workspace/home/projects/-home-claude-developer-hack-sherlock-qwen-hook-smoke-20260906-r3-allow-workspace/chats/48d009f3-c79f-4e4f-85d6-e48f7f9c2d91.jsonl",
+      "bytes": 5328,
+      "sha256": "8aeb4b7f689c982f3c93fbde87d6ee6f8994f7e22937fdde2d0d62810bdf1672"
+    },
+    {
+      "path": "allow/workspace/home/usage/token-usage-2026-09.jsonl",
+      "bytes": 735,
+      "sha256": "e973daaa7b0dd9d2946ed587b71c6f27fb8090eed7c23fb8acc442ea17ac60b6"
+    },
+    {
+      "path": "allow/workspace/home/usage_record.jsonl",
+      "bytes": 651,
+      "sha256": "04f9c1434c6d664fe82f273a36cf5272442f9c89f5f11d370cbba81041b6755a"
+    },
+    {
+      "path": "allow/workspace/hook-1788642323128650894.json",
+      "bytes": 644,
+      "sha256": "c2a2c986f1cb5cdfc8b6edab9036f4071d6d92eaf4972e2770eada4c991abffb"
+    },
+    {
+      "path": "allow/workspace/hook-1788642323325665449.json",
+      "bytes": 841,
+      "sha256": "091f9c12cbc014067827d8fa84fd1a5cbf249d1b61fdc64d690c6731843dc5cf"
+    },
+    {
+      "path": "allow/workspace/hook.py",
+      "bytes": 635,
+      "sha256": "d917e05d6f049e5a7b3d1b7a028b4fee974eeb1486e8fc4e8bddc680afb74458"
+    },
+    {
+      "path": "allow/workspace/launch.json",
+      "bytes": 514,
+      "sha256": "c86d162316709c543baec4c00200efc063542fda11ead7c44a813fb20c7b89fe"
+    },
+    {
+      "path": "allow/workspace/marker.txt",
+      "bytes": 4,
+      "sha256": "ec864fe99b539704b8872ac591067ef22d836a8d942087f2dba274b301ebe6e5"
+    },
+    {
+      "path": "allow/workspace/request-0.json",
+      "bytes": 134194,
+      "sha256": "0b0f402d51d54bad003c067dae7fc08a6c95acf8c93e88ce23bd8886f898c6b6"
+    },
+    {
+      "path": "allow/workspace/request-1.json",
+      "bytes": 134613,
+      "sha256": "7d0e4f05ae1f02c885d6f1b1c7c6c863a8ab5d2db88ee4725c9dcc8bcafbc881"
+    },
+    {
+      "path": "allow/workspace/response-0.sse",
+      "bytes": 631,
+      "sha256": "f04fa2cdc29bd9fb5fb0fa9f0b4c8e079d40d844649895cb7e06f831708995dd"
+    },
+    {
+      "path": "allow/workspace/response-1.sse",
+      "bytes": 496,
+      "sha256": "48c44e0a16ba99ca35cd0aedaad6324129ff947baa9fcf7e50ce3c351b8fb70e"
+    },
+    {
+      "path": "allow/workspace/result.json",
+      "bytes": 578,
+      "sha256": "b9a777b5768856caf494c9ec2eb9c40d24e9878e771f2ff5bab97b3ebd58e7e8"
+    },
+    {
+      "path": "allow/workspace/stderr.txt",
+      "bytes": 271,
+      "sha256": "1b07e81e433d6818ba717c8c82342fe055fd839f4f428ece4f60efd9b1a55ef3"
+    },
+    {
+      "path": "allow/workspace/stdout.json",
+      "bytes": 4766,
+      "sha256": "008a6dff73d19208bd8d565f4ba0814c2e9437e60eed26b01fc80a110560b047"
+    },
+    {
+      "path": "deny/skill-catalogue/relative-smoke/SKILL.md",
+      "bytes": 95,
+      "sha256": "22dc1f7e7e3ae01ccbe0a91aba6f7a13cd2d933beb451fcd6465be8c2dd521e0"
+    },
+    {
+      "path": "deny/workspace/.qwen/settings.json",
+      "bytes": 1200,
+      "sha256": "806beb47699cc2ef2cc358ef3ab2fe8ea116ae4afdafbdca358659f524ccafcf"
+    },
+    {
+      "path": "deny/workspace/home/.openai-logs-cleanup-1120464d77797d4f",
+      "bytes": 24,
+      "sha256": "154331f23375ac58f8a3358378a92d36d9cddda5f35c47b969975973026958f1"
+    },
+    {
+      "path": "deny/workspace/home/extension-store/lock",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "deny/workspace/home/extension-store/state.json",
+      "bytes": 151,
+      "sha256": "ba873559697359376b0516eac37417b45f7ced6415556fcf69e21bf0e453c4fc"
+    },
+    {
+      "path": "deny/workspace/home/extensions/extension-enablement.json",
+      "bytes": 2,
+      "sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+    },
+    {
+      "path": "deny/workspace/home/installation_id",
+      "bytes": 36,
+      "sha256": "4702aa8cf434723231b70f57f532d267c65141ace1713dfcb4d763c609b70360"
+    },
+    {
+      "path": "deny/workspace/home/output-language.md",
+      "bytes": 841,
+      "sha256": "0c61823b23e53d1d056f31d28904e7170e7bb26d76e349598bc2927c8fabd005"
+    },
+    {
+      "path": "deny/workspace/home/projects/-home-claude-developer-hack-sherlock-qwen-hook-smoke-20260906-r3-deny-workspace/chats/aac43f1e-c25c-4629-b3df-286bfc7f4f77.jsonl",
+      "bytes": 5323,
+      "sha256": "d68dc1383058cb7ac38feddbea997ba4d9dbb78b2b63e2f7f6ea10a5110d4b78"
+    },
+    {
+      "path": "deny/workspace/home/usage/token-usage-2026-09.jsonl",
+      "bytes": 734,
+      "sha256": "da037058662d028084ae2d98710eace94a338395cd955708b08df298d40b56b3"
+    },
+    {
+      "path": "deny/workspace/home/usage_record.jsonl",
+      "bytes": 650,
+      "sha256": "af213079c2d25db22f5b00d2f61687a67f076f6ba461b5139b64ef20932b2ac2"
+    },
+    {
+      "path": "deny/workspace/hook-1788642328219732326.json",
+      "bytes": 641,
+      "sha256": "9be8e51be2b06488f7dbb1aecea59c04b9fc5f17fa99f0a53a9a27ef84d7b1b6"
+    },
+    {
+      "path": "deny/workspace/hook.py",
+      "bytes": 635,
+      "sha256": "d917e05d6f049e5a7b3d1b7a028b4fee974eeb1486e8fc4e8bddc680afb74458"
+    },
+    {
+      "path": "deny/workspace/launch.json",
+      "bytes": 512,
+      "sha256": "5fff9476b929c1d7d729f477f60d94d75d19524af0d2b8c26b72f6b02bfecffb"
+    },
+    {
+      "path": "deny/workspace/request-0.json",
+      "bytes": 134186,
+      "sha256": "6345922609de7d3a3361181bb494f3fee2b3b816816c9251ac6226ce64477ab5"
+    },
+    {
+      "path": "deny/workspace/request-1.json",
+      "bytes": 134482,
+      "sha256": "66d888dba368318a99fe8d85a9f56974ac59b7b33d16ec97329fcdd51a72b083"
+    },
+    {
+      "path": "deny/workspace/response-0.sse",
+      "bytes": 631,
+      "sha256": "ec2f9f91b23420f7f0725e780ba41b5b6c3d717c9f5b1086a49818bfcc4c0645"
+    },
+    {
+      "path": "deny/workspace/response-1.sse",
+      "bytes": 496,
+      "sha256": "33a02058686be0dd16202ae1acbf1f9b50ae4cfd414c58d164d278297d029c6c"
+    },
+    {
+      "path": "deny/workspace/result.json",
+      "bytes": 372,
+      "sha256": "1f3182184e2a66591f222ba9e5b1ad5141b3b25af6846bb13385823316ad4ffe"
+    },
+    {
+      "path": "deny/workspace/stderr.txt",
+      "bytes": 271,
+      "sha256": "1b07e81e433d6818ba717c8c82342fe055fd839f4f428ece4f60efd9b1a55ef3"
+    },
+    {
+      "path": "deny/workspace/stdout.json",
+      "bytes": 4756,
+      "sha256": "17c49fbf53ebef94c0c1e9d831d09671ac5c5148b07aa8d5231fdc03439798ab"
+    },
+    {
+      "path": "error/skill-catalogue/relative-smoke/SKILL.md",
+      "bytes": 95,
+      "sha256": "22dc1f7e7e3ae01ccbe0a91aba6f7a13cd2d933beb451fcd6465be8c2dd521e0"
+    },
+    {
+      "path": "error/workspace/.qwen/settings.json",
+      "bytes": 1203,
+      "sha256": "e28672ebc2a36fce6d5174cff0f694b840542a577d2b2f7abe65f3824c717921"
+    },
+    {
+      "path": "error/workspace/home/.openai-logs-cleanup-5cd8552632a95dbc",
+      "bytes": 24,
+      "sha256": "3004adc373fab7d91d7a998ff1539cc88da2d6d1dd047dac7bfc94da5eeadf6a"
+    },
+    {
+      "path": "error/workspace/home/extension-store/lock",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "error/workspace/home/extension-store/state.json",
+      "bytes": 151,
+      "sha256": "ba873559697359376b0516eac37417b45f7ced6415556fcf69e21bf0e453c4fc"
+    },
+    {
+      "path": "error/workspace/home/extensions/extension-enablement.json",
+      "bytes": 2,
+      "sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+    },
+    {
+      "path": "error/workspace/home/installation_id",
+      "bytes": 36,
+      "sha256": "e26e14a5bd139817d6a80ab6eb77aed4572c7f158b5f0a522d74626c09b3f55a"
+    },
+    {
+      "path": "error/workspace/home/output-language.md",
+      "bytes": 841,
+      "sha256": "0c61823b23e53d1d056f31d28904e7170e7bb26d76e349598bc2927c8fabd005"
+    },
+    {
+      "path": "error/workspace/home/projects/-home-claude-developer-hack-sherlock-qwen-hook-smoke-20260906-r3-error-workspace/chats/067bb365-5df4-41c5-a3f4-5b13c6cba798.jsonl",
+      "bytes": 5326,
+      "sha256": "704d356c22380d7adee3ae3bf6f4ff781b7e594616fa243d53f3910f1542d720"
+    },
+    {
+      "path": "error/workspace/home/usage/token-usage-2026-09.jsonl",
+      "bytes": 734,
+      "sha256": "1f8dd968250d5fc55db9b8f71e573943ad3d866418d71941d4f949df4567f73b"
+    },
+    {
+      "path": "error/workspace/home/usage_record.jsonl",
+      "bytes": 651,
+      "sha256": "80935ae2dc6c68d2f0030c93ab76b051fc33fabe4aecf0af309231c95dec7ca9"
+    },
+    {
+      "path": "error/workspace/hook-1788642332856954300.json",
+      "bytes": 644,
+      "sha256": "5d549982820eded9d7082303ef49208cd0198d836f92e16a30f789bc6f9c33d3"
+    },
+    {
+      "path": "error/workspace/hook-1788642333044714802.json",
+      "bytes": 841,
+      "sha256": "029ce41e645fa00fe251694ca1eb6b0cd3f6ee4579f6def51babfb0de6ea1ba0"
+    },
+    {
+      "path": "error/workspace/hook.py",
+      "bytes": 635,
+      "sha256": "d917e05d6f049e5a7b3d1b7a028b4fee974eeb1486e8fc4e8bddc680afb74458"
+    },
+    {
+      "path": "error/workspace/launch.json",
+      "bytes": 514,
+      "sha256": "d8dd345f72dbd631fab78e78c3d635f0bb6537607b934d3a984b3b9d5d54d57d"
+    },
+    {
+      "path": "error/workspace/marker.txt",
+      "bytes": 4,
+      "sha256": "ec864fe99b539704b8872ac591067ef22d836a8d942087f2dba274b301ebe6e5"
+    },
+    {
+      "path": "error/workspace/request-0.json",
+      "bytes": 134194,
+      "sha256": "eadbcb2ed542f0ec38588d8d2f218a8567d4ca2c9251e26d9119893822d37b15"
+    },
+    {
+      "path": "error/workspace/request-1.json",
+      "bytes": 134613,
+      "sha256": "341435b0bf19851d9629f3722cd9cd809e169b1666b763ecd9a39d32c35bb978"
+    },
+    {
+      "path": "error/workspace/response-0.sse",
+      "bytes": 631,
+      "sha256": "c1241f4a9eb3b778c69a1527e35dba8f54d0c63dc6c455d43e2adaef3bda4a99"
+    },
+    {
+      "path": "error/workspace/response-1.sse",
+      "bytes": 496,
+      "sha256": "1309178beb1afa06591a08e6e388e90210667d2e38c1a37f9e152003c624228a"
+    },
+    {
+      "path": "error/workspace/result.json",
+      "bytes": 578,
+      "sha256": "5f2c640f5b3db5898a9c7270f180ae341284a5670370657eec528f316bfcf43f"
+    },
+    {
+      "path": "error/workspace/stderr.txt",
+      "bytes": 271,
+      "sha256": "1b07e81e433d6818ba717c8c82342fe055fd839f4f428ece4f60efd9b1a55ef3"
+    },
+    {
+      "path": "error/workspace/stdout.json",
+      "bytes": 4766,
+      "sha256": "936f65c4e1039ea68f05c24591c2cc76c725ba3812621bffbc41645fdbdac03a"
+    },
+    {
+      "path": "results.json",
+      "bytes": 1654,
+      "sha256": "95c0268f829ad883cdd93702cfc2f170d48c6cabf86160330dc8ff5a1bb38468"
+    }
+  ]
+}

@@ -20,7 +20,7 @@ raw = sys.stdin.buffer.read()
 root = pathlib.Path(__file__).parent
 (root / ("hook-" + str(time.time_ns()) + ".json")).write_bytes(raw)
 event = json.loads(raw)
-mode = root.name
+mode = root.parent.name if root.name == "workspace" else root.name
 if event.get("hook_event_name") == "PreToolUse" and mode == "deny":
  print(json.dumps({"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"mock explicit denial"}}))
 elif event.get("hook_event_name") == "PreToolUse" and mode == "error":
@@ -31,15 +31,25 @@ else:
 '''
 
 
-def scenario(qwen, root, mode):
+def scenario(qwen, root, mode, relative_skill=False):
     work = root / mode
     work.mkdir()
+    if relative_skill:
+        case_root = work
+        work = case_root / "workspace"
+        work.mkdir()
+        catalogue = case_root / "skill-catalogue" / "relative-smoke"
+        catalogue.mkdir(parents=True)
+        (catalogue / "SKILL.md").write_text("---\nname: relative-smoke\ndescription: RELATIVE_SKILL_DISCOVERY_20260906\n---\nA mock-only skill.\n")
     home = work / "home"
     home.mkdir()
     (work / "hook.py").write_text(HOOK)
     settings = {"hooks": {event: [{"matcher": "*", "hooks": [{
         "type": "command", "command": f'{sys.executable} "{work / "hook.py"}"',
         "timeout": 10000}]}] for event in ("PreToolUse", "PostToolUse", "PostToolUseFailure")}}
+    if relative_skill:
+        settings["skills"] = {"directories": ["../skill-catalogue"],
+                              "disabledLevels": ["project", "bundled", "extension"]}
     (work / ".qwen").mkdir()
     (work / ".qwen/settings.json").write_text(json.dumps(settings))
     requests = []
@@ -109,6 +119,8 @@ def scenario(qwen, root, mode):
               "requests": len(requests), "marker_exists": (work / "marker.txt").exists(),
               "hooks": [{key: hook.get(key) for key in
                          ("hook_event_name", "session_id", "tool_name", "tool_use_id")} for hook in hooks]}
+    if relative_skill:
+        result["relative_skill_visible"] = "RELATIVE_SKILL_DISCOVERY_20260906" in (work / "request-0.json").read_text()
     (work / "result.json").write_text(json.dumps(result, indent=2) + "\n")
     return result
 
@@ -117,14 +129,16 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--qwen", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--relative-skill", action="store_true")
     args = parser.parse_args()
     root = args.output.resolve()
     root.mkdir(mode=0o700)
-    results = [scenario(args.qwen, root, mode) for mode in ("allow", "deny", "error")]
+    results = [scenario(args.qwen, root, mode, args.relative_skill) for mode in ("allow", "deny", "error")]
     (root / "results.json").write_text(json.dumps(results, indent=2) + "\n")
     print(json.dumps(results, indent=2))
     return 0 if (results[0]["marker_exists"] and not results[1]["marker_exists"]
-                 and results[0]["hooks"] and results[1]["hooks"]) else 1
+                 and results[0]["hooks"] and results[1]["hooks"]
+                 and (not args.relative_skill or all(row["relative_skill_visible"] for row in results))) else 1
 
 
 if __name__ == "__main__":

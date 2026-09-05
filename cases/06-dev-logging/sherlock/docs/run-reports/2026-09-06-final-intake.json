@@ -1,0 +1,91 @@
+{
+  "experiment": "fresh-v45-raw-intake",
+  "status": "rendering_verified_not_investigation_acceptance",
+  "runs": [
+    {
+      "run_id": "winevtx",
+      "record_count": 90267,
+      "event_files": 143,
+      "metadata_excluded": [
+        {
+          "path": "_ingest-manifest.tsv",
+          "bytes": 57004,
+          "sha256": "1ca7ecc427e6a537db1a88c73bdae884fc819e882698701f0ac90da1762f5d45",
+          "lines": 287
+        }
+      ],
+      "complete_file_set_equal": true,
+      "all_rendered_bytes_equal": true,
+      "raw_sources_unchanged": true,
+      "original_result_sha256": "9b431a1398bf901dedce1374dfcd0342c33d6d7dd2bb88319221cc682522ecea",
+      "reason": "Original total_records incorrectly included ingest manifest metadata lines. Original result retained unchanged.",
+      "package_sha256": "36a0dfe2c674ac11a13d1dc1b6a0b8c3e720fdb08577c8c9ec5d386cd317e40e",
+      "elapsed_s": 3.7788197500631213,
+      "exit_code": 0
+    },
+    {
+      "run_id": "independent",
+      "record_count": 469,
+      "event_files": 1,
+      "metadata_excluded": [
+        {
+          "path": "_ingest-manifest.tsv",
+          "bytes": 375,
+          "sha256": "ff4f3b17b12ecab5362704e12178dd04f04135e568e74f2de1b3e687f442a2e0",
+          "lines": 3
+        }
+      ],
+      "complete_file_set_equal": true,
+      "all_rendered_bytes_equal": true,
+      "raw_sources_unchanged": true,
+      "original_result_sha256": "1c910c231ddb15271e0d71c81cffa6675efdba3017f9982d88bc886e143d570e",
+      "reason": "Original total_records incorrectly included ingest manifest metadata lines. Original result retained unchanged.",
+      "package_sha256": "36a0dfe2c674ac11a13d1dc1b6a0b8c3e720fdb08577c8c9ec5d386cd317e40e",
+      "elapsed_s": 0.06393679208122194,
+      "exit_code": 0
+    }
+  ],
+  "raw_root": "/Users/a/hack/sherlock-final-intake-20260906",
+  "artifacts": [
+    {
+      "path": "/Users/a/hack/sherlock-final-intake-20260906/winevtx/record-count-correction.json",
+      "sha256": "ed8d65b547d067756567ffa52635a7a2246e0622259ef016da90f4f6b8d33b98"
+    },
+    {
+      "path": "/Users/a/hack/sherlock-final-intake-20260906/winevtx/result.json",
+      "sha256": "9b431a1398bf901dedce1374dfcd0342c33d6d7dd2bb88319221cc682522ecea"
+    },
+    {
+      "path": "/Users/a/hack/sherlock-final-intake-20260906/winevtx/start.json",
+      "sha256": "03dce72453feec7c7d6cf5e0eb422fa492846d1cef38316fb5724e982fac226f"
+    },
+    {
+      "path": "/Users/a/hack/sherlock-final-intake-20260906/winevtx/stderr.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "/Users/a/hack/sherlock-final-intake-20260906/winevtx/stdout.log",
+      "sha256": "c5d7d52620d28b313efe19ad74f8c3dc5fa272cc867f2150b7e767e5ce76d327"
+    },
+    {
+      "path": "/Users/a/hack/sherlock-final-intake-20260906/independent/record-count-correction.json",
+      "sha256": "06626319bb3bef88e846a348bcf9308ebaf50465f2695db4eb4f9c9e00354432"
+    },
+    {
+      "path": "/Users/a/hack/sherlock-final-intake-20260906/independent/result.json",
+      "sha256": "1c910c231ddb15271e0d71c81cffa6675efdba3017f9982d88bc886e143d570e"
+    },
+    {
+      "path": "/Users/a/hack/sherlock-final-intake-20260906/independent/start.json",
+      "sha256": "468e043b6a9753040616616b91b0ef8fc50104c61568b50a810b03ee97b50c99"
+    },
+    {
+      "path": "/Users/a/hack/sherlock-final-intake-20260906/independent/stderr.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "/Users/a/hack/sherlock-final-intake-20260906/independent/stdout.log",
+      "sha256": "2676b8736e3e7d289bbd812881254e4562dce1f3b496e638e7e6c4af5c4fe384"
+    }
+  ]
+}
