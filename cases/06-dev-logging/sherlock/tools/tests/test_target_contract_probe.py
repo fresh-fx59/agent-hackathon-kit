@@ -15,6 +15,7 @@ import datetime as dt
 import gzip
 import http.server
 import threading
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -77,6 +78,50 @@ class TargetContractProbeTest(unittest.TestCase):
         self.assertEqual(result["manifest_sha256"], self._sha(self.root / "probe-manifest.json"))
         with self.assertRaises(self.probe.ProbeFailure):
             self.probe.prepare(self.args)
+
+    def test_prepare_seals_isolated_parent_and_disables_ambient_skills(self):
+        ambient = self.temp / "ambient"
+        skill = ambient / ".agents" / "skills" / "unrelated"
+        skill.mkdir(parents=True)
+        (skill / "SKILL.md").write_text("---\nname: unrelated\ndescription: fixture\n---\n")
+        with mock.patch.object(self.probe.Path, "home", return_value=ambient):
+            self.probe.prepare(self.args)
+        settings = json.loads((self.root / "corporate-settings.json").read_text())
+        self.assertEqual(settings["skills"]["directories"],
+                         [str(self.root / "probe-work" / "skill-catalogue")])
+        self.assertIn("unrelated", settings["skills"]["disabled"])
+
+    def test_ambient_sherlock_collision_rejected_but_hidden_qwen_home_ignored(self):
+        ambient = self.temp / "ambient"
+        for base in (".qwen", ".agents"):
+            skill = ambient / base / "skills" / "other"
+            skill.mkdir(parents=True)
+            (skill / "SKILL.md").write_text("---\nname: sherlock\n---\n")
+        with mock.patch.object(self.probe.Path, "home", return_value=ambient):
+            with self.assertRaisesRegex(self.probe.ProbeFailure, "ambient Sherlock"):
+                self.probe.ambient_skill_names()
+            (ambient / ".agents" / "skills" / "other" / "SKILL.md").unlink()
+            self.assertEqual(self.probe.ambient_skill_names(), [])
+
+    def test_new_ambient_skill_after_prepare_rejected_before_authorization(self):
+        ambient = self.temp / "ambient"
+        with mock.patch.object(self.probe.Path, "home", return_value=ambient):
+            self.probe.prepare(self.args)
+            skill = ambient / ".agents" / "skills" / "new"
+            skill.mkdir(parents=True)
+            (skill / "SKILL.md").write_text("---\nname: new\n---\n")
+            manifest = json.loads((self.root / "probe-manifest.json").read_text())
+            with self.assertRaisesRegex(self.probe.ProbeFailure, "ambient skills changed"):
+                self.probe._verify_package(self.root, manifest)
+
+    def test_unreadable_ambient_metadata_fails_closed(self):
+        ambient = self.temp / "ambient"
+        skill = ambient / ".claude" / "skills" / "bad"
+        skill.mkdir(parents=True)
+        (skill / "SKILL.md").write_bytes(b"\xff")
+        with mock.patch.object(self.probe.Path, "home", return_value=ambient):
+            with self.assertRaisesRegex(self.probe.ProbeFailure, "ambient skill metadata"):
+                self.probe.ambient_skill_names()
 
     def test_skill_tree_digest_ignores_generated_python_bytecode(self):
         skill = self.temp / "skill"
@@ -504,6 +549,11 @@ import json, os, subprocess, sys, urllib.request
 from pathlib import Path
 if '--sherlock-flag-probe-sentinel' in sys.argv:
     raise SystemExit(0)
+settings = json.loads(Path('.qwen/settings.json').read_text())
+skill_root = Path(os.environ['QWEN_SKILL_ROOT'])
+assert settings['skills']['directories'] == [str(skill_root.parent)]
+assert skill_root.parent.name == 'skill-catalogue'
+assert (skill_root / 'SKILL.md').is_file()
 try:
     prompt = sys.argv[sys.argv.index('-p') + 1]
 except (ValueError, IndexError):

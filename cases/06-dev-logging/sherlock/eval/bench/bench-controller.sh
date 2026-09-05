@@ -1047,6 +1047,7 @@ def target_contract_probe(argv):
         print("PROBE_BUDGET", file=sys.stderr)
         return 1
     env.update({"BENCH_RUNS": str(runs), "SHERLOCK_RUN_TAG": trace.name,
+                "SHERLOCK_ARM_HOME": str(work / "skill-catalogue" / "log-rca"),
                 "SHERLOCK_TRACE": str(trace), "SHERLOCK_CORPUS": str(sealed / "fixture"),
                 "SHERLOCK_BASE_URL": transport, "SHERLOCK_MODEL": profile["requested_model"],
                 "SHERLOCK_EXPECTED_RETURNED_IDENTITY": profile["expected_returned_identity"],

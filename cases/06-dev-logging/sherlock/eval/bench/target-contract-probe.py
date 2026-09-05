@@ -524,6 +524,28 @@ def _sealed_rate_snapshot(path, run_tag="target-contract-probe"):
     return raw, row
 
 
+def ambient_skill_names():
+    """Mute user-level skills without disabling custom-directory discovery."""
+    names = set()
+    # run-bench gives Qwen a fresh QWEN_HOME, so the real ~/.qwen is hidden.
+    # The other default user directories still precede our custom catalogue.
+    for base in (".agents", ".claude"):
+        for path in (Path.home() / base / "skills").glob("*/SKILL.md"):
+            name = path.parent.name
+            try:
+                lines = path.read_text(encoding="utf-8").splitlines()
+            except (OSError, UnicodeError) as exc:
+                raise ProbeFailure("TARGET_PROBE_PREPARE", "ambient skill metadata unreadable") from exc
+            for line in lines:
+                if line.startswith("name:"):
+                    name = line[5:].strip().strip("\"'")
+                    break
+            if name.lower() == "sherlock":
+                raise ProbeFailure("TARGET_PROBE_PREPARE", "ambient Sherlock would shadow sealed skill")
+            names.add(name)
+    return sorted(names)
+
+
 def prepare(args, secret_reader=None):
     """Build a fresh, immutable probe package; `secret_reader` is intentionally unused."""
     # Do not create even a parent directory until the operator-configured rate
@@ -549,10 +571,12 @@ def prepare(args, secret_reader=None):
         fixture_dir = root / "fixture"
         fixture = FIXTURE.build_fixture(args.source_corpus, fixture_dir, HERE / "probe" / "recipe.json", 4401)
         settings_tool = HERE.parent.parent / "measure" / "corporate-settings.py"
+        mute_args = [arg for name in ambient_skill_names() for arg in ("--disable-skill", name)]
         settings_run = subprocess.run(["python3", str(settings_tool), "emit-run", "--max-retries", "0",
                                        "--max-tokens", str(PROBE_MAX_OUTPUT_TOKENS),
                                        "--session-token-limit", str(PROBE_SESSION_TOKEN_LIMIT),
-                                       "--skill-directory", str(HERE.parent.parent / "skills" / "v44")],
+                                       "--skill-directory", str(root / "probe-work" / "skill-catalogue"),
+                                       *mute_args],
                                       text=True, capture_output=True, timeout=30)
         if settings_run.returncode:
             raise ProbeFailure("TARGET_PROBE_PREPARE", "corporate settings")
@@ -745,6 +769,10 @@ def _verify_package(root, manifest, code="TARGET_PROBE_NOT_AUTHORIZED"):
     if not hmac.compare_digest(_asset(Path(root) / "corporate-settings.json", code)[1], package["settings_sha256"]) or \
             not hmac.compare_digest(package["settings_sha256"], values["target-profile.json"]["settings_sha256"]):
         raise ProbeFailure(code, "settings changed")
+    settings = _strict_json(_asset(Path(root) / "corporate-settings.json", code)[0])
+    if not set(name.lower() for name in ambient_skill_names()).issubset(
+            settings.get("skills", {}).get("disabled", [])):
+        raise ProbeFailure(code, "ambient skills changed after preparation")
     dependencies = {
         "runner_sha256": HERE / "bench-controller.sh", "driver_sha256": HERE / "run-bench.sh",
         "proxy_sha256": HERE.parent.parent / "measure" / "upstream-log-proxy.py",
