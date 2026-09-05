@@ -465,7 +465,12 @@ def _process_group_exists(pgid):
         return False
 
 
-def terminate_owned_process_group(child, cleanup_grace_s=10):
+RUNNER_TERM_GRACE_S = 5
+KILL_REAP_GRACE_S = 2
+
+
+def terminate_owned_process_group(child, cleanup_grace_s=RUNNER_TERM_GRACE_S,
+                                  kill_reap_grace_s=KILL_REAP_GRACE_S):
     """Stop a child created with start_new_session, including all descendants."""
     pgid = child.pid
     try:
@@ -474,34 +479,58 @@ def terminate_owned_process_group(child, cleanup_grace_s=10):
         child.poll()
         return
     deadline = time.monotonic() + cleanup_grace_s
-    while _process_group_exists(pgid) and time.monotonic() < deadline:
+    while time.monotonic() < deadline:
         child.poll()
+        if not _process_group_exists(pgid):
+            break
         time.sleep(.02)
+    child.poll()
     if _process_group_exists(pgid):
         try:
             os.killpg(pgid, signal.SIGKILL)
         except ProcessLookupError:
             pass
     try:
-        child.wait(timeout=max(1, cleanup_grace_s))
+        child.wait(timeout=kill_reap_grace_s)
     except subprocess.TimeoutExpired:
         pass
 
 
-def communicate_owned_process(child, timeout, cleanup_grace_s=10):
+def communicate_owned_process(child, timeout, cleanup_grace_s=RUNNER_TERM_GRACE_S,
+                              kill_reap_grace_s=KILL_REAP_GRACE_S):
     try:
         return child.communicate(timeout=timeout)
     except subprocess.TimeoutExpired:
-        terminate_owned_process_group(child, cleanup_grace_s)
+        terminate_owned_process_group(child, cleanup_grace_s, kill_reap_grace_s)
         child.communicate()
         raise
 
 
-def owned_child_signal_handler(child, cleanup_grace_s=10):
+def install_owned_child_signal_handler(cleanup_grace_s=RUNNER_TERM_GRACE_S,
+                                       kill_reap_grace_s=KILL_REAP_GRACE_S):
+    """Install before spawn; defer TERM until the fresh child group is registered."""
+    ownership = {"child": None, "pending_signal": None,
+                 "cleanup_grace_s": cleanup_grace_s,
+                 "kill_reap_grace_s": kill_reap_grace_s}
+
     def stop(signum, _frame):
-        terminate_owned_process_group(child, cleanup_grace_s)
+        child = ownership["child"]
+        if child is None:
+            ownership["pending_signal"] = signum
+            return
+        terminate_owned_process_group(child, cleanup_grace_s, kill_reap_grace_s)
         raise SystemExit(128 + signum)
-    return stop
+
+    return ownership, signal.signal(signal.SIGTERM, stop)
+
+
+def register_owned_child(ownership, child):
+    ownership["child"] = child
+    signum = ownership["pending_signal"]
+    if signum is not None:
+        terminate_owned_process_group(
+            child, ownership["cleanup_grace_s"], ownership["kill_reap_grace_s"])
+        raise SystemExit(128 + signum)
 
 
 def artifact_rows(trace):
@@ -1126,10 +1155,13 @@ def target_contract_probe(argv):
                 "SHERLOCK_PROBE_BUDGET": str(sealed / "probe-budget.json"),
                 "UPSTREAM_ACTION_BUDGET": str(action), "UPSTREAM_RATE_SNAPSHOT": str(trace / "probe-rate-snapshot.json"),
                 "SHERLOCK_PROBE_ARM": json.loads((sealed / "input-package.json").read_text(encoding="utf-8")).get("arm", "")})
+    child = None
+    ownership, prior_sigterm = install_owned_child_signal_handler()
     try:
         child = subprocess.Popen(["bash", str(HERE / "run-bench.sh"), env["SHERLOCK_PROBE_ARM"]],
                                  env=env, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                  start_new_session=True)
+        register_owned_child(ownership, child)
         try:
             proof = proc_snapshot(child.pid, Path("/proc"), leader=True)
         except Blocked:
@@ -1140,20 +1172,18 @@ def target_contract_probe(argv):
                      "boot_id_sha256": digest(b"target-contract-probe"),
                      "command_sha256": digest(" ".join(child.args).encode("utf-8"))}
         atomic_replace(trace / "controller-process.json", canonical(proof) + b"\n")
-        prior_sigterm = signal.signal(signal.SIGTERM, owned_child_signal_handler(child))
-        try:
-            stdout, stderr = communicate_owned_process(child, timeout=600)
-        finally:
-            signal.signal(signal.SIGTERM, prior_sigterm)
+        stdout, stderr = communicate_owned_process(child, timeout=600)
         done = subprocess.CompletedProcess(child.args, child.returncode, stdout, stderr)
     except (Blocked, OSError, subprocess.TimeoutExpired):
         try:
-            if 'child' in locals() and _process_group_exists(child.pid):
+            if child is not None and _process_group_exists(child.pid):
                 terminate_owned_process_group(child)
         except OSError:
             pass
         print("PROBE_RUNNER_START", file=sys.stderr)
         return 1
+    finally:
+        signal.signal(signal.SIGTERM, prior_sigterm)
     # Task 7 is the terminal interpreter for the ordinary trace.  Its raw
     # projection, not a controller-written summary, is what the target-probe
     # audit later consumes.  Publish it before declaring this runner healthy.

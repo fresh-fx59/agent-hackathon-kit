@@ -41,6 +41,8 @@ DEFAULT_BUDGET = {"schema": 2, "max_provider_calls": PROBE_MAX_PROVIDER_CALLS,
                   "max_prompt_tokens": PROBE_MAX_PROVIDER_CALLS * PROBE_SESSION_TOKEN_LIMIT,
                   "max_completion_tokens": PROBE_MAX_PROVIDER_CALLS * PROBE_MAX_OUTPUT_TOKENS,
                   "max_wall_time_s": 600, "max_estimated_cost_rub": 55.0}
+CONTROLLER_TERM_GRACE_S = 15
+KILL_REAP_GRACE_S = 2
 
 
 def _process_group_exists(pgid):
@@ -51,7 +53,8 @@ def _process_group_exists(pgid):
         return False
 
 
-def _terminate_owned_process_group(child, cleanup_grace_s=10):
+def _terminate_owned_process_group(child, cleanup_grace_s=CONTROLLER_TERM_GRACE_S,
+                                   kill_reap_grace_s=KILL_REAP_GRACE_S):
     """Stop the fresh session created for a controlled child, including descendants."""
     pgid = child.pid
     try:
@@ -60,21 +63,25 @@ def _terminate_owned_process_group(child, cleanup_grace_s=10):
         child.poll()
         return
     deadline = time.monotonic() + cleanup_grace_s
-    while _process_group_exists(pgid) and time.monotonic() < deadline:
+    while time.monotonic() < deadline:
         child.poll()
+        if not _process_group_exists(pgid):
+            break
         time.sleep(0.02)
+    child.poll()
     if _process_group_exists(pgid):
         try:
             os.killpg(pgid, signal.SIGKILL)
         except ProcessLookupError:
             pass
     try:
-        child.wait(timeout=max(1, cleanup_grace_s))
+        child.wait(timeout=kill_reap_grace_s)
     except subprocess.TimeoutExpired:
         pass
 
 
-def run_owned_process(command, timeout, cleanup_grace_s=10, **kwargs):
+def run_owned_process(command, timeout, cleanup_grace_s=CONTROLLER_TERM_GRACE_S,
+                      kill_reap_grace_s=KILL_REAP_GRACE_S, **kwargs):
     """Run a command in a fresh session and leave no owned group on timeout."""
     if kwargs.pop("capture_output", False):
         if kwargs.get("stdout") is not None or kwargs.get("stderr") is not None:
@@ -84,7 +91,7 @@ def run_owned_process(command, timeout, cleanup_grace_s=10, **kwargs):
     try:
         stdout, stderr = child.communicate(timeout=timeout)
     except subprocess.TimeoutExpired as exc:
-        _terminate_owned_process_group(child, cleanup_grace_s)
+        _terminate_owned_process_group(child, cleanup_grace_s, kill_reap_grace_s)
         stdout, stderr = child.communicate()
         raise subprocess.TimeoutExpired(command, timeout, output=stdout, stderr=stderr) from exc
     return subprocess.CompletedProcess(command, child.returncode, stdout, stderr)

@@ -1227,10 +1227,12 @@ class TargetContractProbeControllerTests(unittest.TestCase):
                     os.kill(int(pid_path.read_text()), 0)
 
     def test_probe_sigterm_handler_cleans_runner_in_its_separate_session(self):
-        """Outer watchdog TERM must cascade into the runner's distinct group."""
+        """TERM before registration is deferred, then cleans the distinct runner group."""
         namespace = controller_namespace()
-        handler_factory = namespace.get("owned_child_signal_handler")
-        self.assertTrue(callable(handler_factory), "owned child signal handler is missing")
+        install = namespace.get("install_owned_child_signal_handler")
+        register = namespace.get("register_owned_child")
+        self.assertTrue(callable(install), "pre-spawn signal handler installer is missing")
+        self.assertTrue(callable(register), "owned child registration is missing")
         temporary = tempfile.TemporaryDirectory()
         ready = Path(temporary.name) / "ready"
         child = subprocess.Popen(
@@ -1244,8 +1246,14 @@ class TargetContractProbeControllerTests(unittest.TestCase):
                 time.sleep(.01)
             self.assertTrue(ready.exists())
             self.assertEqual(os.getpgid(child.pid), child.pid)
-            with self.assertRaises(SystemExit):
-                handler_factory(child, cleanup_grace_s=0.1)(signal.SIGTERM, None)
+            ownership, prior = install(cleanup_grace_s=0.1, kill_reap_grace_s=0.2)
+            try:
+                os.kill(os.getpid(), signal.SIGTERM)
+                self.assertEqual(ownership["pending_signal"], signal.SIGTERM)
+                with self.assertRaises(SystemExit):
+                    register(ownership, child)
+            finally:
+                signal.signal(signal.SIGTERM, prior)
             with self.assertRaises(ProcessLookupError):
                 os.killpg(child.pid, 0)
         finally:

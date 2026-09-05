@@ -23,6 +23,7 @@ from unittest import mock
 ROOT = Path(__file__).resolve().parents[2]
 BENCH = ROOT / "eval" / "bench"
 PROBE_PATH = BENCH / "target-contract-probe.py"
+CONTROLLER_PATH = BENCH / "bench-controller.sh"
 
 
 def load_probe():
@@ -98,6 +99,57 @@ class TargetContractProbeTest(unittest.TestCase):
         if pid_path.exists():
             with self.assertRaises(ProcessLookupError):
                 os.kill(int(pid_path.read_text()), 0)
+
+    def test_outer_watchdog_cascades_before_and_after_runner_registration(self):
+        """Outer TERM cannot orphan the runner across either registration interleaving."""
+        controller_source = CONTROLLER_PATH.read_text(encoding="utf-8")
+        runner_grace = int(re.search(r"RUNNER_TERM_GRACE_S = (\d+)", controller_source).group(1))
+        kill_grace = int(re.search(r"KILL_REAP_GRACE_S = (\d+)", controller_source).group(1))
+        self.assertGreater(self.probe.CONTROLLER_TERM_GRACE_S, runner_grace + kill_grace)
+        for mode in ("registered", "deferred"):
+            with self.subTest(mode=mode):
+                root = self.temp / ("nested-" + mode); root.mkdir()
+                runner_pid = root / "runner.pid"
+                sleeper = root / "runner.py"
+                sleeper.write_text(
+                    "import os,signal,time\n"
+                    "signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
+                    "open(%r,'w').write(str(os.getpid()))\n"
+                    "time.sleep(30)\n" % str(runner_pid), encoding="utf-8")
+                harness = root / "controller.py"
+                harness.write_text(
+                    "import os,pathlib,signal,subprocess,sys,time\n"
+                    "path=pathlib.Path(%r)\n"
+                    "source=path.read_text().split(\"<<'PY'\\n\",1)[1].rsplit('\\nPY',1)[0]\n"
+                    "source=source.rsplit('raise SystemExit(main())',1)[0]\n"
+                    "os.environ['BENCH_CONTROLLER_HERE']=str(path.parent)\n"
+                    "ns={'__name__':'nested_watchdog'}; exec(compile(source,str(path),'exec'),ns)\n"
+                    "mode=%r\n"
+                    "if 'install_owned_child_signal_handler' in ns:\n"
+                    " ownership,prior=ns['install_owned_child_signal_handler'](cleanup_grace_s=.15)\n"
+                    " child=subprocess.Popen([sys.executable,%r],start_new_session=True)\n"
+                    " if mode == 'deferred': time.sleep(.6)\n"
+                    " ns['register_owned_child'](ownership,child)\n"
+                    "else:\n"
+                    " child=subprocess.Popen([sys.executable,%r],start_new_session=True)\n"
+                    " if mode == 'deferred': time.sleep(.6)\n"
+                    " signal.signal(signal.SIGTERM,ns['owned_child_signal_handler'](child,cleanup_grace_s=1))\n"
+                    "time.sleep(30)\n" % (str(CONTROLLER_PATH), mode, str(sleeper), str(sleeper)), encoding="utf-8")
+                try:
+                    with self.assertRaises(subprocess.TimeoutExpired):
+                        self.probe.run_owned_process(
+                            [sys.executable, str(harness)], timeout=.3,
+                            cleanup_grace_s=.8, stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL)
+                    self.assertTrue(runner_pid.exists(), "runner did not reach the tested interleaving")
+                    with self.assertRaises(ProcessLookupError):
+                        os.killpg(int(runner_pid.read_text()), 0)
+                finally:
+                    if runner_pid.exists():
+                        try:
+                            os.killpg(int(runner_pid.read_text()), signal.SIGKILL)
+                        except ProcessLookupError:
+                            pass
 
     def test_prepare_is_secret_free_and_seals_exact_manifest_assets(self):
         result = self.probe.prepare(self.args, secret_reader=self._tripwire)
