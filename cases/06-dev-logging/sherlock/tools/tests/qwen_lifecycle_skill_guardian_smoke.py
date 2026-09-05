@@ -20,6 +20,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_HELPER = ROOT / "eval/bench/lifecycle-supervisor.py"
+INVALID_DIRECTORY_MODES = ("invalid-then-repaired", "invalid-no-batch")
+BATCH_ONLY_MODE = "batch-no-execution-hooks"
 
 
 def load(path):
@@ -70,9 +72,21 @@ def run_case(qwen, output, helper_path, mode, registration_timeout_seconds=15, c
     (skill / "SKILL.md").write_text("---\nname: mockskill\ndescription: fixture only\n---\n# mock\n", encoding="utf-8")
     hook = (f'{sys.executable} {helper_path} hook --observer-dir "$SHERLOCK_OBSERVER_DIR" '
             '--workspace "$PWD" --nonce "$SHERLOCK_RUN_NONCE" --boot-id "$SHERLOCK_BOOT_ID"')
-    settings = {"skills": {"directories": ["skills"]}, "hooks": ({} if mode == "missing-hook" else {event: [{"matcher": "*", "hooks": [{
-        "type": "command", "command": hook, "timeout": 10000}]}] for event in
-        ("PreToolUse", "PostToolUse", "PostToolUseFailure")})}
+    if mode == "missing-hook":
+        hook_events = ()
+    elif mode in ("invalid-no-batch", "executed-no-batch"):
+        # These are the two explicit no-batch negative controls.  The latter
+        # still has a real execution pair, so batch accounting cannot be
+        # inferred merely from Pre/Post completion.
+        hook_events = ("PreToolUse", "PostToolUse", "PostToolUseFailure")
+    elif mode == BATCH_ONLY_MODE:
+        hook_events = ("PostToolBatch",)
+    else:
+        hook_events = ("PreToolUse", "PostToolUse", "PostToolUseFailure", "PostToolBatch")
+    settings = {"skills": {"directories": ["skills"]}, "hooks": {
+        event: [{"matcher": "*", "hooks": [{"type": "command", "command": hook,
+                                                "timeout": 10000}]}]
+        for event in hook_events}}
     (workspace / ".qwen").mkdir()
     settings_raw = (json.dumps(settings, sort_keys=True) + "\n").encode()
     (workspace / ".qwen/settings.json").write_bytes(settings_raw)
@@ -84,7 +98,24 @@ def run_case(qwen, output, helper_path, mode, registration_timeout_seconds=15, c
         def do_POST(self):
             raw = self.rfile.read(int(self.headers["Content-Length"])); index = len(requests)
             requests.append(index); once(trace / f"request-{index}.json", raw)
-            if index == 0:
+            if mode == "invalid-then-repaired" and index in (0, 1):
+                call_id = "call_invalid" if index == 0 else "call_repaired"
+                directory = "/outside-fixture-workspace" if index == 0 else str(workspace)
+                args = {"command": "printf repaired > repaired.txt", "directory": directory}
+                delta = {"role": "assistant", "tool_calls": [{"index": 0, "id": call_id,
+                    "type": "function", "function": {"name": "run_shell_command", "arguments": json.dumps(args)}}]}
+                finish = "tool_calls"
+            elif mode == "invalid-no-batch" and index == 0:
+                args = {"command": "printf rejected", "directory": "/outside-fixture-workspace"}
+                delta = {"role": "assistant", "tool_calls": [{"index": 0, "id": "call_invalid",
+                    "type": "function", "function": {"name": "run_shell_command", "arguments": json.dumps(args)}}]}
+                finish = "tool_calls"
+            elif mode == BATCH_ONLY_MODE and index == 0:
+                args = {"command": "printf executed > batch-only.txt", "directory": str(workspace)}
+                delta = {"role": "assistant", "tool_calls": [{"index": 0, "id": "call_executed_without_hooks",
+                    "type": "function", "function": {"name": "run_shell_command", "arguments": json.dumps(args)}}]}
+                finish = "tool_calls"
+            elif index == 0:
                 name = "skill" if mode in ("skill", "missing-hook") else "run_shell_command"
                 args = {"skill": "mockskill"} if mode in ("skill", "missing-hook") else {"command": "sleep 0.6; printf slow > marker.txt"}
                 delta = {"role": "assistant", "tool_calls": [{"index": 0, "id": "call_" + mode,
@@ -109,12 +140,21 @@ def run_case(qwen, output, helper_path, mode, registration_timeout_seconds=15, c
                      "choices": [{"index": 0, "delta": {}, "finish_reason": finish}]}]
             body = b"".join(b"data: " + json.dumps(row).encode() + b"\n\n" for row in rows) + b"data: [DONE]\n\n"
             once(trace / f"response-{index}.sse", body)
-            self.send_response(200); self.send_header("Content-Type", "text/event-stream"); self.send_header("Content-Length", str(len(body))); self.end_headers(); self.wfile.write(body)
-            if index == 0:
-                # This represents proxy registration after the completed SSE
-                # response is durably captured, before Qwen dispatches the tool.
-                helper.register_expected_tools(observer, nonce, boot, f"response-{index}", ["call_" + mode])
+            # Proxy semantics: make the provider call durable and register its
+            # exact ID before Qwen can receive the response and begin either
+            # prevalidation or execution.  An invalid directory still has an
+            # expectation; only its PostToolBatch outcome may discharge it.
+            if index == 0 and mode != "invalid-then-repaired":
+                call_id = ("call_invalid" if mode == "invalid-no-batch" else
+                           "call_executed_without_hooks" if mode == BATCH_ONLY_MODE else
+                           "call_" + mode)
+                helper.register_expected_tools(observer, nonce, boot, f"response-{index}", [call_id])
                 registered.set()
+            elif mode == "invalid-then-repaired" and index in (0, 1):
+                call_id = "call_invalid" if index == 0 else "call_repaired"
+                helper.register_expected_tools(observer, nonce, boot, f"response-{index}", [call_id])
+                registered.set()
+            self.send_response(200); self.send_header("Content-Type", "text/event-stream"); self.send_header("Content-Length", str(len(body))); self.end_headers(); self.wfile.write(body)
 
     server = ThreadingHTTPServer(("127.0.0.1", 0), Provider)
     server_thread = threading.Thread(target=server.serve_forever, daemon=True); server_thread.start()
@@ -173,6 +213,8 @@ def run_case(qwen, output, helper_path, mode, registration_timeout_seconds=15, c
     once(trace / "guardian.stdout.txt", guardian_stdout); once(trace / "guardian.stderr.txt", guardian_stderr)
     events = [json.loads(line) for line in (observer / "hook-events.jsonl").read_text().splitlines()] if (observer / "hook-events.jsonl").exists() else []
     starts = [json.loads(line) for line in (observer / "hook-starts.jsonl").read_text().splitlines()] if (observer / "hook-starts.jsonl").exists() else []
+    batches = [json.loads(line) for line in (observer / "post-tool-batch-events.jsonl").read_text().splitlines()] if (observer / "post-tool-batch-events.jsonl").exists() else []
+    rejections = json.loads((observer / "rejections.json").read_text()) if (observer / "rejections.json").exists() else {}
     fault = json.loads((observer / "fault.json").read_text())["reason"] if (observer / "fault.json").exists() else None
     decoded = []; correlations = []
     for event in events:
@@ -196,7 +238,8 @@ def run_case(qwen, output, helper_path, mode, registration_timeout_seconds=15, c
               "guardian_exit_code": guardian.returncode if guardian is not None else None, "cleanup_errors": cleanup_errors,
               "marker": (workspace / "marker.txt").read_text() if (workspace / "marker.txt").exists() else None,
               "successful_responses": len(list(trace.glob("response-*.sse"))),
-              "lifecycle_helper_sha256": digest(helper_path), "correlations": correlations}
+              "lifecycle_helper_sha256": digest(helper_path), "correlations": correlations,
+              "post_tool_batch_events": batches, "rejections": rejections}
     once(trace / "result.json", json.dumps(result, indent=2) + "\n")
     return result
 
@@ -205,20 +248,56 @@ def main():
     parser = argparse.ArgumentParser(); parser.add_argument("--qwen", type=Path, required=True); parser.add_argument("--output", type=Path, required=True); parser.add_argument("--helper", type=Path, default=DEFAULT_HELPER)
     args = parser.parse_args(); args.output.mkdir(mode=0o700)
     helper_path = args.helper.resolve(strict=True)
-    rows = [run_case(args.qwen, args.output, helper_path, mode) for mode in ("skill", "slow-shell")]
+    rows = [run_case(args.qwen, args.output, helper_path, mode)
+            for mode in ("skill", "slow-shell", "invalid-then-repaired")]
     missing = run_case(args.qwen, args.output, helper_path, "missing-hook")
-    ok = all(row["exit_code"] == 0 and row["requests"] == 2 and row["fault"] is None and row["guardian_started"] and row["guardian_alive_at_client_completion"] and row["hook_starts"] and row["hook_events"] and row["exact_pre_post_pair"] and not row["dispatch_error"] and row["exception"] is None for row in rows)
+    absent_batch = run_case(args.qwen, args.output, helper_path, "invalid-no-batch")
+    executed_without_batch = run_case(args.qwen, args.output, helper_path, "executed-no-batch")
+    batch_without_pairs = run_case(args.qwen, args.output, helper_path, BATCH_ONLY_MODE)
+    positive_rows = rows[:2]
+    def batch_has(row, provider_call_id):
+        return any(provider_call_id in event.get("tool_call_ids", [])
+                   for event in row["post_tool_batch_events"])
+    ok = all(row["exit_code"] == 0 and row["requests"] == 2 and row["fault"] is None and row["guardian_started"] and row["guardian_alive_at_client_completion"] and row["hook_starts"] and row["hook_events"] and row["exact_pre_post_pair"] and batch_has(row, "call_" + row["mode"]) and not row["dispatch_error"] and row["exception"] is None for row in positive_rows)
     if rows[1]["marker"] != "slow": ok = False
+    correction = rows[2]
+    correction_ok = (correction["exit_code"] == 0 and correction["requests"] == 3 and
+                     correction["fault"] is None and correction["exact_pre_post_pair"] and
+                     not correction["dispatch_error"] and correction["exception"] is None and
+                     correction["rejections"].get("rejected", {}).get("call_invalid", {}).get("execution_status") == "not_started" and
+                     correction["rejections"].get("rejected", {}).get("call_invalid", {}).get("error_type") == "invalid_tool_params" and
+                     any("call_invalid" in event.get("rejected_tool_call_ids", []) for event in correction["post_tool_batch_events"]) and
+                     batch_has(correction, "call_repaired"))
     missing_ok = (missing["requests"] == 2 and missing["successful_responses"] == 1 and
-                  missing["fault"] == "EXPECTED_TOOL_HOOK_MISSING" and bool(missing["dispatch_error"]))
-    all_rows = rows + [missing]
-    ok = ok and missing_ok
+                  missing["fault"] == "EXPECTED_TOOL_BATCH_MISSING" and bool(missing["dispatch_error"]))
+    absent_batch_ok = (absent_batch["requests"] == 2 and absent_batch["successful_responses"] == 1 and
+                       absent_batch["fault"] == "EXPECTED_TOOL_BATCH_MISSING" and bool(absent_batch["dispatch_error"]))
+    executed_without_batch_ok = (executed_without_batch["requests"] == 2 and
+                                 executed_without_batch["successful_responses"] == 1 and
+                                 executed_without_batch["fault"] == "EXPECTED_TOOL_BATCH_MISSING" and
+                                 executed_without_batch["exact_pre_post_pair"] and
+                                 bool(executed_without_batch["dispatch_error"]))
+    batch_without_pairs_ok = (batch_without_pairs["successful_responses"] == 1 and
+                              batch_without_pairs["fault"] == "EXPECTED_TOOL_HOOK_MISSING")
+    all_rows = rows + [missing, absent_batch, executed_without_batch, batch_without_pairs]
+    ok = ok and correction_ok and missing_ok and absent_batch_ok and executed_without_batch_ok and batch_without_pairs_ok
     summary = {"lifecycle_helper_sha256": digest(helper_path), "successful_scenarios": [
         {"mode": row["mode"], "provider_to_qwen_ids": row["correlations"],
-         "guardian_alive_at_client_completion": row["guardian_alive_at_client_completion"]} for row in rows],
+         "guardian_alive_at_client_completion": row["guardian_alive_at_client_completion"]} for row in positive_rows],
+        "invalid_then_repaired": {"rejected_provider_id": "call_invalid",
+                                   "rejection": correction["rejections"].get("rejected", {}).get("call_invalid"),
+                                   "provider_to_qwen_ids": correction["correlations"],
+                                   "guardian_alive_at_client_completion": correction["guardian_alive_at_client_completion"]},
         "missing_hook": {"dispatch_error": missing["dispatch_error"],
                          "successful_response_count": missing["successful_responses"],
-                         "second_successful_response_absent": missing["successful_responses"] == 1}}
+                         "second_successful_response_absent": missing["successful_responses"] == 1},
+        "absent_batch_rejection": {"dispatch_error": absent_batch["dispatch_error"],
+                                     "second_successful_response_absent": absent_batch["successful_responses"] == 1},
+        "executed_without_batch": {"dispatch_error": executed_without_batch["dispatch_error"],
+                                     "provider_to_qwen_ids": executed_without_batch["correlations"],
+                                     "second_successful_response_absent": executed_without_batch["successful_responses"] == 1},
+        "batch_without_execution_hooks": {"fault": batch_without_pairs["fault"],
+                                            "successful_response_count": batch_without_pairs["successful_responses"]} }
     record = {"scenarios": all_rows, "summary": summary, "pass": ok}
     once(args.output / "results.json", json.dumps(record, indent=2) + "\n")
     print(json.dumps(record, indent=2)); return 0 if ok else 1

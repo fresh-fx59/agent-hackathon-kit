@@ -1,0 +1,178 @@
+{
+  "schema": 1,
+  "kind": "installed-qwen-post-tool-batch-loopback-smoke",
+  "run_id": "20260906-remote-r1",
+  "provider_contact": "none: localhost SSE loopback only",
+  "qwen": {
+    "path": "/home/claude-developer/.local/lib/node_modules/@qwen-code/qwen-code/cli-entry.js",
+    "sha256": "68cb29eb7ccc936d78ece5564ef55cae41a55b630e6657dc417c1f2e561cf4c9",
+    "version": "0.22.0"
+  },
+  "lifecycle_helper_sha256": "9e91112fe810b505b5cce9e37a42d8f5838d0e2d33a781e46e5f2da4d96ee685",
+  "runner_exit_code": 0,
+  "pass": true,
+  "scenarios": [
+    {
+      "mode": "skill",
+      "exit_code": 0,
+      "requests": 2,
+      "successful_responses": 2,
+      "fault": null,
+      "dispatch_error": [],
+      "exception": null,
+      "guardian_alive_at_client_completion": true,
+      "lifecycle_helper_sha256": "9e91112fe810b505b5cce9e37a42d8f5838d0e2d33a781e46e5f2da4d96ee685",
+      "correlations": [
+        {
+          "phase": "PreToolUse",
+          "tool_name": "skill",
+          "provider_tool_call_id": "call_skill",
+          "qwen_tool_use_id": "toolu_1788650641185_m1m6g0fki"
+        },
+        {
+          "phase": "PostToolUse",
+          "tool_name": "skill",
+          "provider_tool_call_id": "call_skill",
+          "qwen_tool_use_id": "toolu_1788650641185_m1m6g0fki"
+        }
+      ]
+    },
+    {
+      "mode": "slow-shell",
+      "exit_code": 0,
+      "requests": 2,
+      "successful_responses": 2,
+      "fault": null,
+      "dispatch_error": [],
+      "exception": null,
+      "guardian_alive_at_client_completion": true,
+      "lifecycle_helper_sha256": "9e91112fe810b505b5cce9e37a42d8f5838d0e2d33a781e46e5f2da4d96ee685",
+      "correlations": [
+        {
+          "phase": "PreToolUse",
+          "tool_name": "run_shell_command",
+          "provider_tool_call_id": "call_slow-shell",
+          "qwen_tool_use_id": "toolu_1788650648426_iiphp84g6"
+        },
+        {
+          "phase": "PostToolUse",
+          "tool_name": "run_shell_command",
+          "provider_tool_call_id": "call_slow-shell",
+          "qwen_tool_use_id": "toolu_1788650648426_iiphp84g6"
+        }
+      ]
+    },
+    {
+      "mode": "invalid-then-repaired",
+      "exit_code": 0,
+      "requests": 3,
+      "successful_responses": 3,
+      "fault": null,
+      "dispatch_error": [],
+      "exception": null,
+      "guardian_alive_at_client_completion": true,
+      "lifecycle_helper_sha256": "9e91112fe810b505b5cce9e37a42d8f5838d0e2d33a781e46e5f2da4d96ee685",
+      "correlations": [
+        {
+          "phase": "PreToolUse",
+          "tool_name": "run_shell_command",
+          "provider_tool_call_id": "call_repaired",
+          "qwen_tool_use_id": "toolu_1788650657828_a652iuw1k"
+        },
+        {
+          "phase": "PostToolUse",
+          "tool_name": "run_shell_command",
+          "provider_tool_call_id": "call_repaired",
+          "qwen_tool_use_id": "toolu_1788650657828_a652iuw1k"
+        }
+      ]
+    },
+    {
+      "mode": "missing-hook",
+      "exit_code": -15,
+      "requests": 2,
+      "successful_responses": 1,
+      "fault": "EXPECTED_TOOL_HOOK_MISSING",
+      "dispatch_error": [
+        {
+          "reason": "EXPECTED_TOOL_HOOK_MISSING",
+          "detail": "expected tool has no completed hook pair: call_missing-hook"
+        }
+      ],
+      "exception": null,
+      "guardian_alive_at_client_completion": false,
+      "lifecycle_helper_sha256": "9e91112fe810b505b5cce9e37a42d8f5838d0e2d33a781e46e5f2da4d96ee685",
+      "correlations": []
+    },
+    {
+      "mode": "invalid-no-batch",
+      "exit_code": -15,
+      "requests": 2,
+      "successful_responses": 1,
+      "fault": "EXPECTED_TOOL_HOOK_MISSING",
+      "dispatch_error": [
+        {
+          "reason": "EXPECTED_TOOL_HOOK_MISSING",
+          "detail": "expected tool has no completed hook pair: call_invalid"
+        }
+      ],
+      "exception": null,
+      "guardian_alive_at_client_completion": false,
+      "lifecycle_helper_sha256": "9e91112fe810b505b5cce9e37a42d8f5838d0e2d33a781e46e5f2da4d96ee685",
+      "correlations": []
+    },
+    {
+      "mode": "batch-no-execution-hooks",
+      "exit_code": -15,
+      "requests": 2,
+      "successful_responses": 1,
+      "fault": "EXPECTED_TOOL_HOOK_MISSING",
+      "dispatch_error": [
+        {
+          "reason": "TERMINAL",
+          "detail": "terminal lifecycle fault: EXPECTED_TOOL_HOOK_MISSING"
+        }
+      ],
+      "exception": null,
+      "guardian_alive_at_client_completion": false,
+      "lifecycle_helper_sha256": "9e91112fe810b505b5cce9e37a42d8f5838d0e2d33a781e46e5f2da4d96ee685",
+      "correlations": []
+    }
+  ],
+  "accepted_rejection": {
+    "error_type": "invalid_tool_params",
+    "execution_status": "not_started",
+    "input_sha256": "c60f2497fd3d4c3e0f5928f0c1edf9a26ece732946b3d7ed9a394a3bdbd4c69e",
+    "request_reference": "response-0",
+    "sequence": 0,
+    "status": "error",
+    "tool_call_id": "call_invalid",
+    "tool_name": "run_shell_command"
+  },
+  "denied_post_tool_batch": {
+    "journal": "hook-fault-events.jsonl",
+    "phase": "PostToolBatch",
+    "reason": "EXPECTED_TOOL_HOOK_MISSING",
+    "input_sha256": "58401ca9e71f28d347980c5b1cc0ac51c3ebe8264bec4e3d8c05efce2d293081",
+    "computed_sha256": "58401ca9e71f28d347980c5b1cc0ac51c3ebe8264bec4e3d8c05efce2d293081",
+    "sha_matches": true,
+    "output": {
+      "continue": false,
+      "hookSpecificOutput": {
+        "hookEventName": "PostToolBatch",
+        "permissionDecision": "deny",
+        "permissionDecisionReason": "EXPECTED_TOOL_HOOK_MISSING: PostToolBatch terminal tool has no completed hook pair: call_executed_without_hooks"
+      },
+      "stopReason": "EXPECTED_TOOL_HOOK_MISSING: PostToolBatch terminal tool has no completed hook pair: call_executed_without_hooks"
+    }
+  },
+  "mirror": {
+    "schema": 1,
+    "remote_regular_file_count": 232,
+    "local_regular_file_count": 232,
+    "same_relative_paths": true,
+    "same_sha256": true
+  },
+  "regular_file_inventory_sha256": "3ac1bbc711b08e5ddc3265f5c1a1cf6f8968b8a9c5d8e81a3452498a48c47000",
+  "evidence_root": "/Users/a/hack/sherlock-qwen-posttoolbatch-20260906-remote-r1"
+}

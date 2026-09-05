@@ -1,0 +1,164 @@
+{
+  "schema": 1,
+  "run_id": "20260906-remote-r3",
+  "provider_contact": "none: localhost scripted SSE only",
+  "remote_evidence_root": "/tmp/sherlock-qwen-posttoolbatch-20260906-remote-r3",
+  "lifecycle_helper_sha256": "c8fb1cd4e6f149b9f1c49c3d9b6e2974412bc7c76c5c92646b21f3957f599eda",
+  "runner_exit_code": 0,
+  "fixture_pass": true,
+  "expected_fixture_pass": true,
+  "note": "Final c8fb run passed all seven scenarios.",
+  "scenarios": [
+    {
+      "mode": "skill",
+      "exit_code": 0,
+      "requests": 2,
+      "successful_responses": 2,
+      "fault": null,
+      "dispatch_error": [],
+      "guardian_alive_at_client_completion": true,
+      "correlations": [
+        {
+          "phase": "PreToolUse",
+          "tool_name": "skill",
+          "provider_tool_call_id": "call_skill",
+          "qwen_tool_use_id": "toolu_1788651344684_3km9h0hgt"
+        },
+        {
+          "phase": "PostToolUse",
+          "tool_name": "skill",
+          "provider_tool_call_id": "call_skill",
+          "qwen_tool_use_id": "toolu_1788651344684_3km9h0hgt"
+        }
+      ]
+    },
+    {
+      "mode": "slow-shell",
+      "exit_code": 0,
+      "requests": 2,
+      "successful_responses": 2,
+      "fault": null,
+      "dispatch_error": [],
+      "guardian_alive_at_client_completion": true,
+      "correlations": [
+        {
+          "phase": "PreToolUse",
+          "tool_name": "run_shell_command",
+          "provider_tool_call_id": "call_slow-shell",
+          "qwen_tool_use_id": "toolu_1788651350867_twwk1a448"
+        },
+        {
+          "phase": "PostToolUse",
+          "tool_name": "run_shell_command",
+          "provider_tool_call_id": "call_slow-shell",
+          "qwen_tool_use_id": "toolu_1788651350867_twwk1a448"
+        }
+      ]
+    },
+    {
+      "mode": "invalid-then-repaired",
+      "exit_code": 0,
+      "requests": 3,
+      "successful_responses": 3,
+      "fault": null,
+      "dispatch_error": [],
+      "guardian_alive_at_client_completion": true,
+      "correlations": [
+        {
+          "phase": "PreToolUse",
+          "tool_name": "run_shell_command",
+          "provider_tool_call_id": "call_repaired",
+          "qwen_tool_use_id": "toolu_1788651360220_pni7d8f8l"
+        },
+        {
+          "phase": "PostToolUse",
+          "tool_name": "run_shell_command",
+          "provider_tool_call_id": "call_repaired",
+          "qwen_tool_use_id": "toolu_1788651360220_pni7d8f8l"
+        }
+      ]
+    },
+    {
+      "mode": "missing-hook",
+      "exit_code": -15,
+      "requests": 2,
+      "successful_responses": 1,
+      "fault": "EXPECTED_TOOL_BATCH_MISSING",
+      "dispatch_error": [
+        {
+          "reason": "EXPECTED_TOOL_BATCH_MISSING",
+          "detail": "call_missing-hook"
+        }
+      ],
+      "guardian_alive_at_client_completion": false,
+      "correlations": []
+    },
+    {
+      "mode": "invalid-no-batch",
+      "exit_code": -15,
+      "requests": 2,
+      "successful_responses": 1,
+      "fault": "EXPECTED_TOOL_BATCH_MISSING",
+      "dispatch_error": [
+        {
+          "reason": "EXPECTED_TOOL_BATCH_MISSING",
+          "detail": "call_invalid"
+        }
+      ],
+      "guardian_alive_at_client_completion": false,
+      "correlations": []
+    },
+    {
+      "mode": "executed-no-batch",
+      "exit_code": -15,
+      "requests": 2,
+      "successful_responses": 1,
+      "fault": "EXPECTED_TOOL_BATCH_MISSING",
+      "dispatch_error": [
+        {
+          "reason": "EXPECTED_TOOL_BATCH_MISSING",
+          "detail": "call_executed-no-batch"
+        }
+      ],
+      "guardian_alive_at_client_completion": false,
+      "correlations": [
+        {
+          "phase": "PreToolUse",
+          "tool_name": "run_shell_command",
+          "provider_tool_call_id": "call_executed-no-batch",
+          "qwen_tool_use_id": "toolu_1788651381712_xdb3wq6j3"
+        },
+        {
+          "phase": "PostToolUse",
+          "tool_name": "run_shell_command",
+          "provider_tool_call_id": "call_executed-no-batch",
+          "qwen_tool_use_id": "toolu_1788651381712_xdb3wq6j3"
+        }
+      ]
+    },
+    {
+      "mode": "batch-no-execution-hooks",
+      "exit_code": -15,
+      "requests": 2,
+      "successful_responses": 1,
+      "fault": "EXPECTED_TOOL_HOOK_MISSING",
+      "dispatch_error": [
+        {
+          "reason": "TERMINAL",
+          "detail": "terminal lifecycle fault: EXPECTED_TOOL_HOOK_MISSING"
+        }
+      ],
+      "guardian_alive_at_client_completion": false,
+      "correlations": []
+    }
+  ],
+  "local_evidence_root": "/Users/a/hack/sherlock-qwen-posttoolbatch-20260906-remote-r3",
+  "mirror": {
+    "schema": 1,
+    "remote_regular_file_count": 280,
+    "local_regular_file_count": 280,
+    "same_relative_paths": true,
+    "same_sha256": true
+  },
+  "regular_file_inventory_sha256": "49338b2450b67eb49f1d2b66e10ea15f287df86a8af572ee7d326aedcaf2d4fc"
+}

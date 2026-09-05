@@ -67,6 +67,95 @@ time.sleep(30)
             with self.assertRaises(ProcessLookupError):
                 os.kill(child, 0)
 
+    def test_invalid_directory_mode_configures_post_tool_batch(self):
+        smoke = load_smoke()
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp); evidence = root / "evidence"; evidence.mkdir()
+            fake = root / "qwen-sleeper.py"; fake.write_text("#!/usr/bin/env python3\nimport sys,time\nif '--version' in sys.argv: print('fixture'); raise SystemExit(0)\ntime.sleep(30)\n"); fake.chmod(0o700)
+            result = smoke.run_case(fake, evidence, HELPER, "invalid-then-repaired", registration_timeout_seconds=.05, client_timeout_seconds=.1)
+            settings = __import__("json").loads((evidence / "invalid-then-repaired/settings.input.json").read_text())
+            self.assertIn("PostToolBatch", settings["hooks"])
+
+    def test_post_tool_batch_negative_modes_keep_the_required_hook_boundary(self):
+        smoke = load_smoke()
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp); evidence = root / "evidence"; evidence.mkdir()
+            fake = root / "qwen-sleeper.py"
+            fake.write_text("#!/usr/bin/env python3\nimport sys,time\nif '--version' in sys.argv: print('fixture'); raise SystemExit(0)\ntime.sleep(30)\n")
+            fake.chmod(0o700)
+            for mode in ("invalid-no-batch", "executed-no-batch", "batch-no-execution-hooks"):
+                smoke.run_case(fake, evidence, HELPER, mode,
+                               registration_timeout_seconds=.05, client_timeout_seconds=.1)
+            rejected_settings = __import__("json").loads(
+                (evidence / "invalid-no-batch/settings.input.json").read_text())
+            batch_only_settings = __import__("json").loads(
+                (evidence / "batch-no-execution-hooks/settings.input.json").read_text())
+            executed_settings = __import__("json").loads(
+                (evidence / "executed-no-batch/settings.input.json").read_text())
+            self.assertNotIn("PostToolBatch", rejected_settings["hooks"])
+            self.assertNotIn("PostToolBatch", executed_settings["hooks"])
+            self.assertIn("PreToolUse", executed_settings["hooks"])
+            self.assertIn("PostToolUse", executed_settings["hooks"])
+            self.assertEqual(["PostToolBatch"], sorted(batch_only_settings["hooks"]))
+
+    def test_successful_tool_modes_install_post_tool_batch(self):
+        smoke = load_smoke()
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp); evidence = root / "evidence"; evidence.mkdir()
+            fake = root / "qwen-sleeper.py"
+            fake.write_text("#!/usr/bin/env python3\nimport sys,time\nif '--version' in sys.argv: print('fixture'); raise SystemExit(0)\ntime.sleep(30)\n")
+            fake.chmod(0o700)
+            for mode in ("skill", "slow-shell"):
+                smoke.run_case(fake, evidence, HELPER, mode,
+                               registration_timeout_seconds=.05, client_timeout_seconds=.1)
+                settings = __import__("json").loads(
+                    (evidence / mode / "settings.input.json").read_text())
+                self.assertIn("PostToolBatch", settings["hooks"])
+
+    def test_invalid_directory_mode_registers_rejected_and_repaired_calls(self):
+        smoke = load_smoke()
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp); evidence = root / "evidence"; evidence.mkdir()
+            fake = root / "qwen-three.py"
+            fake.write_text("""#!/usr/bin/env python3
+import json, os, sys, time, urllib.request
+if "--version" in sys.argv: print("fixture"); raise SystemExit(0)
+for _ in range(3):
+ try: urllib.request.urlopen(urllib.request.Request(os.environ["OPENAI_BASE_URL"]+"/chat/completions",data=b"{}",method="POST"),timeout=2).read()
+ except Exception: pass
+time.sleep(.5)
+"""); fake.chmod(0o700)
+            result = smoke.run_case(fake, evidence, HELPER, "invalid-then-repaired", client_timeout_seconds=2)
+            expected = (evidence / "invalid-then-repaired" / "observer-invalid-then-repaired-nonce-20260906" / "expected-tools.jsonl").read_text()
+            self.assertIn("call_repaired", expected)
+            # The proxy must register both provider IDs before relaying each
+            # response.  PostToolBatch discharges only the prevalidation
+            # rejection; it does not make an unregistered call disappear.
+            self.assertIn("call_invalid", expected)
+            self.assertTrue((evidence / "invalid-then-repaired/response-1.sse").is_file())
+
+    def test_negative_modes_register_the_exact_provider_ids_before_relay(self):
+        smoke = load_smoke()
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp); evidence = root / "evidence"; evidence.mkdir()
+            fake = root / "qwen-two.py"
+            fake.write_text("""#!/usr/bin/env python3
+import os, sys, time, urllib.request
+if "--version" in sys.argv: print("fixture"); raise SystemExit(0)
+for _ in range(2):
+ try: urllib.request.urlopen(urllib.request.Request(os.environ["OPENAI_BASE_URL"] + "/chat/completions", data=b"{}", method="POST"), timeout=2).read()
+ except Exception: pass
+time.sleep(.2)
+""")
+            fake.chmod(0o700)
+            for mode, call_id in (("invalid-no-batch", "call_invalid"),
+                                  ("executed-no-batch", "call_executed-no-batch"),
+                                  ("batch-no-execution-hooks", "call_executed_without_hooks")):
+                smoke.run_case(fake, evidence, HELPER, mode, client_timeout_seconds=2)
+                expected = (evidence / mode / ("observer-" + mode + "-nonce-20260906") /
+                            "expected-tools.jsonl").read_text()
+                self.assertIn(call_id, expected)
+
     def test_missing_hook_mode_omits_hooks_and_refuses_next_dispatch(self):
         smoke = load_smoke()
         with tempfile.TemporaryDirectory() as temp:
