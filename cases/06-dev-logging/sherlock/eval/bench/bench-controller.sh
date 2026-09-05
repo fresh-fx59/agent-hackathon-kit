@@ -1180,7 +1180,8 @@ def target_contract_probe(argv):
                 "SHERLOCK_PROBE_SETTINGS": str(sealed / "corporate-settings.json"),
                 "SHERLOCK_PROBE_BUDGET": str(sealed / "probe-budget.json"),
                 "UPSTREAM_ACTION_BUDGET": str(action), "UPSTREAM_RATE_SNAPSHOT": str(trace / "probe-rate-snapshot.json"),
-                "SHERLOCK_PROBE_ARM": json.loads((sealed / "input-package.json").read_text(encoding="utf-8")).get("arm", "")})
+                "SHERLOCK_PROBE_ARM": json.loads((sealed / "input-package.json").read_text(encoding="utf-8")).get("arm", ""),
+                "SHERLOCK_PACKAGE_VERSION": json.loads((sealed / "input-package.json").read_text(encoding="utf-8")).get("package_version", "")})
     if monitored:
         env.update({"SHERLOCK_OPERATOR_MONITORED_MODE": "1", "SHERLOCK_TIMEOUT": "0",
                     "SHERLOCK_MAX_SESSION_TURNS": "-1", "SHERLOCK_MAX_WALL_TIME_S": "-1",

@@ -53,7 +53,7 @@ class TargetContractProbeTest(unittest.TestCase):
             root=self.root, source_corpus=self.source, provider_base_url="http://127.0.0.1:9",
             route="paid-route", secret_ref="SHERLOCK_API_KEY", requested_model="deepseek-v4-20260901",
             expected_returned_identity="deepseek-v4-20260901",
-            identity_mode="provider_pinned_version", qwen_bin=str(self.qwen_stub), arm="target",
+            identity_mode="provider_pinned_version", qwen_bin=str(self.qwen_stub), arm="target", package_version="v44",
             rate_snapshot=self.rate_snapshot,
         )
 
@@ -251,6 +251,36 @@ class TargetContractProbeTest(unittest.TestCase):
         self.assertEqual(settings["skills"]["directories"],
                          [str(self.root / "probe-work" / "skill-catalogue")])
         self.assertIn("unrelated", settings["skills"]["disabled"])
+
+    def test_prepare_identity_uses_snapshot_if_source_changes_after_sealing(self):
+        source_package = self.temp / "synthetic-source" / "v44"
+        shutil.copytree(ROOT / "skills" / "v44", source_package)
+        digest = self.probe.VERSION_GATE.tree_digest(source_package)
+        verified = self.probe.VERSION_GATE.VerifiedVersion("v44", source_package, digest)
+        original_seal = self.probe.VERSION_GATE.seal_snapshot
+
+        def seal_then_mutate_source(selected, snapshot_root):
+            snapshot = original_seal(selected, snapshot_root)
+            source_gate = source_package / "tools" / "citecheck.py"
+            source_gate.chmod(0o644)
+            source_gate.write_text("mutated only after snapshot publication\n", encoding="utf-8")
+            return snapshot
+
+        with mock.patch.object(self.probe.VERSION_GATE, "verify_version", return_value=verified), \
+                mock.patch.object(self.probe.VERSION_GATE, "seal_snapshot", side_effect=seal_then_mutate_source):
+            self.probe.prepare(self.args)
+
+        runtime = self.root / "runtime-package"
+        profile = json.loads((self.root / "target-profile.json").read_text())
+        package = json.loads((self.root / "input-package.json").read_text())
+        actual_gates = self.probe._gate_digests(runtime)
+        self.assertEqual(profile["package_sha256"], digest)
+        self.assertEqual(profile["skill_sha256"], digest)
+        self.assertEqual(package["skill_sha256"], digest)
+        self.assertEqual(profile["tool_schema_sha256"],
+                         self.probe.VERSION_GATE.tree_digest(runtime / "tools"))
+        self.assertEqual(profile["gate_sha256"], actual_gates)
+        self.assertEqual(package["gate_sha256"], actual_gates)
 
     def test_ambient_sherlock_collision_rejected_but_hidden_qwen_home_ignored(self):
         ambient = self.temp / "ambient"
@@ -824,7 +854,8 @@ class TargetContractProbeTest(unittest.TestCase):
                    "--route", "paid-route", "--secret-ref", "SHERLOCK_API_KEY",
                    "--requested-model", "deepseek-v4-20260901", "--expected-returned-identity",
                    "deepseek-v4-20260901", "--identity-mode", "provider_pinned_version",
-                   "--qwen-bin", str(self.qwen_stub), "--arm", "target", "--rate-snapshot", str(self.rate_snapshot), "--json"]
+                   "--qwen-bin", str(self.qwen_stub), "--arm", "target", "--package-version", "v44",
+                   "--rate-snapshot", str(self.rate_snapshot), "--json"]
         done = subprocess.run(command, text=True, capture_output=True)
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertEqual(json.loads(done.stdout)["root"], str(root))
@@ -1286,6 +1317,38 @@ print(json.dumps([{'type':'result','result':'ok','is_error':False,'session_id':'
                            self.root / "nonces", secret_reader=secret, proxy_starter=proxy,
                            runner=self._tripwire)
         self.assertEqual(observed, [])
+
+    def test_run_rejects_changed_runtime_package_before_secret_or_contact(self):
+        self.probe.prepare(self.args)
+        runtime_skill = self.root / "runtime-package" / "SKILL.md"
+        runtime_skill.chmod(0o644)
+        runtime_skill.write_text("changed registered runtime package\n", encoding="utf-8")
+
+        with self.assertRaises(self.probe.ProbeFailure):
+            self.probe.run(self.root / "probe-manifest.json", self._sha(self.root / "probe-manifest.json"),
+                           self.root / "nonces", secret_reader=self._tripwire,
+                           proxy_starter=self._tripwire, runner=self._tripwire)
+
+        self.assertEqual(self.trips, [])
+
+    def test_deleted_private_runtime_snapshot_cannot_fall_back_to_preparation_copy(self):
+        self.probe.prepare(self.args)
+
+        def delete_private_snapshot(_reference):
+            package = self.root / "probe-work" / "sealed-input" / "runtime-package"
+            for current, directories, files in os.walk(package):
+                os.chmod(current, 0o700)
+                for name in files:
+                    os.chmod(Path(current) / name, 0o600)
+            shutil.rmtree(package)
+            return "test-only"
+
+        with self.assertRaises(self.probe.ProbeFailure):
+            self.probe.run(self.root / "probe-manifest.json", self._sha(self.root / "probe-manifest.json"),
+                           self.root / "nonces", secret_reader=delete_private_snapshot,
+                           proxy_starter=self._tripwire, runner=self._tripwire)
+
+        self.assertEqual(self.trips, [])
 
     def test_run_revalidates_snapshot_after_proxy_callback(self):
         """The proxy callback is not allowed to substitute last-use input bytes."""

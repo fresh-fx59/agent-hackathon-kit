@@ -40,11 +40,12 @@ TARGET_PROFILE_KEYS = {
     "expected_returned_identity", "identity_mode", "temperature", "top_p",
     "max_output_tokens", "session_token_limit", "cache", "interactive",
     "qwen", "limits", "settings_sha256", "system_prompt_sha256",
-    "skill_sha256", "tool_schema_sha256", "gate_sha256", "lane_guard",
+    "package_version", "package_sha256", "skill_sha256", "tool_schema_sha256", "gate_sha256", "lane_guard",
 }
 MONITORED_TARGET_PROFILE_KEYS = TARGET_PROFILE_KEYS | {
     "execution_mode", "request_read_timeout_s",
 }
+PACKAGE_IDENTITY_KEYS = {"package_version", "package_sha256"}
 GATE_SHA256_KEYS = {"reportcheck", "citecheck", "statecheck", "triagecheck"}
 INPUT_IDENTITY_KEYS = {
     "schema", "raw_prompt_sha256", "canonical_prompt_sha256", "source_corpus_sha256",
@@ -208,7 +209,11 @@ def _control_objects(cache, interactive, qwen, limits, lane_guard, code, schema=
 def validate_target_profile(value):
     schema = value.get("schema") if isinstance(value, dict) else None
     expected_keys = TARGET_PROFILE_KEYS if schema == 1 else MONITORED_TARGET_PROFILE_KEYS
-    if (not isinstance(value, dict) or set(value) != expected_keys or
+    supplied_keys = set(value) if isinstance(value, dict) else set()
+    # Profiles sealed before immutable package selection remain readable. New
+    # profiles bind both identity fields as an inseparable pair.
+    if (not isinstance(value, dict) or supplied_keys not in
+            (expected_keys, expected_keys - PACKAGE_IDENTITY_KEYS) or
             isinstance(schema, bool) or schema not in (1, 2)):
         fail("E_TARGET_PROFILE_SCHEMA", "target profile fields are invalid")
     if schema == 2 and (value.get("execution_mode") != "operator_monitored" or
@@ -237,6 +242,11 @@ def validate_target_profile(value):
         _positive_int(value.get(field))
     if not isinstance(value.get("gate_sha256"), dict) or set(value["gate_sha256"]) != GATE_SHA256_KEYS:
         fail("E_TARGET_PROFILE_SCHEMA", "four gate digests are required")
+    if PACKAGE_IDENTITY_KEYS.issubset(supplied_keys):
+        if (not isinstance(value.get("package_version"), str) or
+                not re.fullmatch(r"v[1-9][0-9]*", value["package_version"])):
+            fail("E_TARGET_PROFILE_SCHEMA", "target package version is invalid")
+        _sha256(value.get("package_sha256"))
     for field in ("settings_sha256", "system_prompt_sha256", "skill_sha256", "tool_schema_sha256"):
         _sha256(value.get(field))
     for digest_value in value["gate_sha256"].values():

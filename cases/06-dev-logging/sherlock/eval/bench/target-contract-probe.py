@@ -166,6 +166,7 @@ def _load(name, filename):
 RUN_MANIFEST = _load("sherlock_run_manifest", "run-manifest.py")
 FIXTURE = _load("sherlock_contract_probe_fixture", "contract-probe-fixture.py")
 ORACLE = _load("sherlock_target_contract_oracle", "target-contract-oracle.py")
+VERSION_GATE = _load("sherlock_version_gate", "version-gate.py")
 
 
 def canonical(value):
@@ -569,16 +570,16 @@ def validate_test_transport(value):
     return value
 
 
-def _gate_digests():
-    return {name: sha256((HERE.parent.parent / "skills" / "v44" / "tools" / (name + ".py")).read_bytes())
+def _gate_digests(package):
+    return {name: sha256((Path(package) / "tools" / (name + ".py")).read_bytes())
             for name in GATES}
 
 
-def _profile(args, settings_sha):
+def _profile(args, settings_sha, package):
     qwen = Path(args.qwen_bin)
     _, qwen_sha = _asset(qwen, "TARGET_PROBE_PREPARE")
     settings = HERE.parent.parent / "measure" / "corporate-settings.py"
-    skill = HERE.parent.parent / "skills" / "v44"
+    skill = Path(package.path)
     monitored = bool(getattr(args, "operator_monitored", False))
     profile = {"schema": 2 if monitored else 1,
                "provider_base_url": args.provider_base_url.rstrip("/"),
@@ -596,9 +597,11 @@ def _profile(args, settings_sha):
                          if monitored else {"cli": str(qwen)}),
                "limits": {"requests": None if monitored else PROBE_MAX_PROVIDER_CALLS},
                "settings_sha256": settings_sha,
+               "package_version": package.version, "package_sha256": package.digest,
                "system_prompt_sha256": sha256((skill / "SKILL.md").read_bytes()),
-               "skill_sha256": _tree_digest(skill),
-               "tool_schema_sha256": _tree_digest(HERE.parent.parent / "skills" / "v44" / "tools"), "gate_sha256": _gate_digests(),
+               "skill_sha256": package.digest,
+               "tool_schema_sha256": VERSION_GATE.tree_digest(skill / "tools"),
+               "gate_sha256": _gate_digests(skill),
                "lane_guard": {"enabled": True}}
     if monitored:
         profile.update(execution_mode="operator_monitored", request_read_timeout_s=600)
@@ -679,6 +682,16 @@ def prepare(args, secret_reader=None):
             raise ProbeFailure("TARGET_PROBE_PREPARE", "root already exists") from exc
         root_fd = os.open(root.name, os.O_RDONLY | os.O_DIRECTORY | getattr(os, "O_NOFOLLOW", 0), dir_fd=parent_fd)
         os.fsync(parent_fd)
+        try:
+            verified = VERSION_GATE.verify_version(args.package_version, HERE.parent.parent / "skills")
+            snapshot = VERSION_GATE.seal_snapshot(verified, root / ".package-snapshots")
+            shutil.copytree(snapshot.path, root / "runtime-package", symlinks=True)
+            if VERSION_GATE.tree_digest(root / "runtime-package") != verified.digest:
+                raise VERSION_GATE.VersionGateError("runtime package copy changed")
+            runtime_package = VERSION_GATE.VerifiedVersion(
+                verified.version, root / "runtime-package", verified.digest)
+        except VERSION_GATE.VersionGateError as exc:
+            raise ProbeFailure("TARGET_PROBE_PREPARE", "package version") from exc
         fixture_dir = root / "fixture"
         fixture = FIXTURE.build_fixture(args.source_corpus, fixture_dir, HERE / "probe" / "recipe.json", 4401)
         settings_tool = HERE.parent.parent / "measure" / "corporate-settings.py"
@@ -698,7 +711,7 @@ def prepare(args, secret_reader=None):
             settings_row.setdefault("model", {})["maxSessionTurns"] = -1
             settings_row["model"]["maxWallTimeSeconds"] = -1
             settings_bytes = canonical(settings_row) + b"\n"
-        profile = _profile(args, sha256(settings_bytes))
+        profile = _profile(args, sha256(settings_bytes), runtime_package)
         budget = MONITORED_BUDGET if monitored else DEFAULT_BUDGET
         files = {"target-profile.json": canonical(profile) + b"\n",
                  "corporate-settings.json": settings_bytes,
@@ -707,6 +720,7 @@ def prepare(args, secret_reader=None):
                  "fixture-manifest.json": (fixture_dir / "probe-fixture-manifest.json").read_bytes(),
                  "probe/prompt.txt": (HERE / "probe" / "prompt.txt").read_bytes(),
                  "input-package.json": canonical({"schema": 1, "arm": args.arm,
+                     "package_version": verified.version, "package_sha256": verified.digest,
                      "fixture_tree_sha256": fixture["output_tree_sha256"],
                      "fixture_expectations_sha256": fixture["expectations_sha256"],
                      "settings_sha256": sha256(settings_bytes),
@@ -718,7 +732,8 @@ def prepare(args, secret_reader=None):
                      "bench_status_sha256": sha256((HERE / "bench-status.py").read_bytes()),
                      "run_verdict_sha256": sha256((HERE / "run-verdict.py").read_bytes()),
                      "qwen_sha256": _asset(args.qwen_bin, "TARGET_PROBE_PREPARE")[1],
-                     "skill_sha256": _tree_digest(HERE.parent.parent / "skills" / "v44"), "gate_sha256": _gate_digests()}) + b"\n"}
+                     "skill_sha256": runtime_package.digest,
+                     "gate_sha256": _gate_digests(runtime_package.path)}) + b"\n"}
         for name, data in files.items():
             _write_relative(root_fd, name, data)
         created = _now()
@@ -894,6 +909,25 @@ def authorize(manifest_path, supplied_hash, nonce_root, action=None, *, consume=
     return row
 
 
+def _runtime_package_for(root):
+    """Locate the sealed package from either a preparation root or copied trace."""
+    root = Path(root)
+    for parent in (root, *root.parents):
+        direct = parent / "runtime-package"
+        if direct.is_dir() and not direct.is_symlink():
+            return direct
+        # Once verification is inside a private sealed-input, absence is a
+        # failure. Never climb to the earlier preparation copy. Likewise, the
+        # presence of sealed-input at a work root makes that snapshot
+        # authoritative even if its runtime package was deleted or aliased.
+        if parent.name == "sealed-input":
+            return direct
+        sealed = parent / "sealed-input"
+        if os.path.lexists(sealed):
+            return sealed if sealed.is_symlink() else sealed / "runtime-package"
+    return root / "runtime-package"
+
+
 def _verify_package(root, manifest, code="TARGET_PROBE_NOT_AUTHORIZED", *, rate_fresh_at=None):
     names = {"target-profile.json": "target_profile_sha256", "probe-budget.json": "probe_budget_sha256",
              "probe-rate-snapshot.json": "rate_snapshot_sha256",
@@ -917,12 +951,13 @@ def _verify_package(root, manifest, code="TARGET_PROBE_NOT_AUTHORIZED", *, rate_
     except ProbeFailure as exc:
         raise ProbeFailure(code, "rate snapshot invalid") from exc
     package = values["input-package.json"]
-    expected_package = {"schema", "arm", "fixture_tree_sha256", "fixture_expectations_sha256",
+    expected_package = {"schema", "arm", "package_version", "package_sha256", "fixture_tree_sha256", "fixture_expectations_sha256",
                         "settings_sha256", "runner_sha256", "driver_sha256", "proxy_sha256",
                         "oracle_sha256", "audit_sha256", "bench_status_sha256", "run_verdict_sha256",
                         "qwen_sha256", "skill_sha256", "gate_sha256"}
     if not isinstance(package, dict) or set(package) != expected_package or package.get("schema") != 1 or \
-            not isinstance(package.get("arm"), str) or not _hex(package.get("fixture_tree_sha256")) or \
+            not isinstance(package.get("arm"), str) or not isinstance(package.get("package_version"), str) or \
+            not _hex(package.get("package_sha256")) or not _hex(package.get("fixture_tree_sha256")) or \
             not _hex(package.get("fixture_expectations_sha256")) or \
             any(not _hex(package.get(name)) for name in ("settings_sha256", "runner_sha256", "driver_sha256", "proxy_sha256", "oracle_sha256", "audit_sha256", "qwen_sha256", "skill_sha256")) or \
             not isinstance(package.get("gate_sha256"), dict) or set(package["gate_sha256"]) != set(GATES) or \
@@ -966,8 +1001,25 @@ def _verify_package(root, manifest, code="TARGET_PROBE_NOT_AUTHORIZED", *, rate_
     for field, path in dependencies.items():
         if not hmac.compare_digest(_asset(path, code)[1], package[field]):
             raise ProbeFailure(code, "stable dependency changed")
-    if not hmac.compare_digest(_asset(values["target-profile.json"]["qwen"]["cli"], code)[1], package["qwen_sha256"]) or \
-            not hmac.compare_digest(_tree_digest(HERE.parent.parent / "skills" / "v44"), package["skill_sha256"]):
+    runtime_package = _runtime_package_for(root)
+    try:
+        runtime_digest = VERSION_GATE.tree_digest(runtime_package)
+        runtime_tools_digest = VERSION_GATE.tree_digest(runtime_package / "tools")
+    except VERSION_GATE.VersionGateError as exc:
+        raise ProbeFailure(code, "stable dependency changed") from exc
+    actual_gate_digests = {
+        name: _asset(runtime_package / "tools" / (name + ".py"), code)[1]
+        for name in GATES}
+    profile = values["target-profile.json"]
+    if (not hmac.compare_digest(_asset(values["target-profile.json"]["qwen"]["cli"], code)[1], package["qwen_sha256"]) or
+            not hmac.compare_digest(runtime_digest, package["skill_sha256"]) or
+            package["package_version"] != values["target-profile.json"]["package_version"] or
+            not hmac.compare_digest(package["package_sha256"], package["skill_sha256"]) or
+            not hmac.compare_digest(package["package_sha256"], profile["package_sha256"]) or
+            not hmac.compare_digest(profile["skill_sha256"], runtime_digest) or
+            not hmac.compare_digest(profile["tool_schema_sha256"], runtime_tools_digest) or
+            package["gate_sha256"] != profile["gate_sha256"] or
+            package["gate_sha256"] != actual_gate_digests):
         raise ProbeFailure(code, "stable dependency changed")
     return values
 
@@ -999,6 +1051,7 @@ def run(manifest_path, supplied_hash, nonce_root, *, secret_reader, proxy_starte
             (sealed / name).parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(root / name, sealed / name)
         shutil.copytree(root / "fixture", sealed / "fixture", symlinks=False)
+        shutil.copytree(root / "runtime-package", sealed / "runtime-package", symlinks=True)
         _verify_package(sealed, manifest)
         _nonce_is_available(nonce_root, manifest["nonce"])
     # All knowable validation, snapshots, and secret availability precede the
@@ -1168,8 +1221,9 @@ def _audit_launch_start(trace, manifest, raw_manifest, raw_authorization):
 
 
 def _real_gates(trace, report, fixture):
-    """Run the bound v44 programs; caller supplied gate summaries are never evidence."""
-    tools = HERE.parent.parent / "skills" / "v44" / "tools"
+    """Run the bound package programs; caller supplied gate summaries are never evidence."""
+    runtime_package = _runtime_package_for(trace)
+    tools = runtime_package / "tools"
     profile = _strict_json(_asset(Path(trace) / "target-profile.json", "TARGET_CONTRACT_FAILED")[0])
     for name in GATES:
         _, digest = _asset(tools / (name + ".py"), "TARGET_CONTRACT_FAILED")
@@ -1643,7 +1697,7 @@ def main(argv=None):
     sub = parser.add_subparsers(dest="command", required=True)
     prep = sub.add_parser("prepare")
     for name in ("root", "source-corpus", "provider-base-url", "route", "secret-ref", "requested-model",
-                 "expected-returned-identity", "identity-mode", "qwen-bin", "arm", "rate-snapshot"):
+                 "expected-returned-identity", "identity-mode", "qwen-bin", "arm", "package-version", "rate-snapshot"):
         prep.add_argument("--" + name, required=True)
     prep.add_argument("--json", action="store_true")
     prep.add_argument("--operator-monitored", action="store_true")

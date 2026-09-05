@@ -21,6 +21,45 @@ OPERATOR_MONITORED_MODE="${SHERLOCK_OPERATOR_MONITORED_MODE:-0}"
 [ "$OPERATOR_MONITORED_MODE" = 0 ] || [ "$TARGET_PROBE_MODE" = 1 ] || {
   echo "✗ operator-monitored mode requires the sealed target probe" >&2; exit 2;
 }
+PACKAGE_SELECTOR_EXPLICIT=0
+if [ "${SHERLOCK_PACKAGE_VERSION+x}" = x ]; then
+  PACKAGE_SELECTOR_EXPLICIT=1
+  PACKAGE_VERSION="$SHERLOCK_PACKAGE_VERSION"
+else
+  # Backward compatibility for the historical `run-bench.sh vNN` interface.
+  # New package selection uses SHERLOCK_PACKAGE_VERSION and leaves ARM as the
+  # independent run label.
+  PACKAGE_VERSION="$ARM"
+fi
+PACKAGE_PATH="$SKILLS/$PACKAGE_VERSION"
+PACKAGE_DIGEST=""
+if [ "$TARGET_PROBE_MODE" = "1" ]; then
+  [ -n "${SHERLOCK_PROBE_SEALED_INPUT:-}" ] && [ -n "${SHERLOCK_PROBE_APPROVAL:-}" ] \
+    && [ -n "${SHERLOCK_PROBE_NONCE_ROOT:-}" ] || {
+      echo "✗ target probe authority is incomplete" >&2; exit 2;
+    }
+  python3 "$HERE/target-contract-probe.py" verify-launch \
+    --sealed-input "$SHERLOCK_PROBE_SEALED_INPUT" \
+    --operator-approved-probe "$SHERLOCK_PROBE_APPROVAL" \
+    --nonce-root "$SHERLOCK_PROBE_NONCE_ROOT" >/dev/null || exit 2
+  package_values="$(python3 - "$SHERLOCK_PROBE_SEALED_INPUT/input-package.json" <<'PY'
+import json, re, sys
+with open(sys.argv[1], encoding="utf-8") as handle:
+    row = json.load(handle)
+version, digest = row.get("package_version"), row.get("package_sha256")
+if not isinstance(version, str) or re.fullmatch(r"v[1-9][0-9]*", version) is None:
+    raise SystemExit("TARGET_PROBE_PACKAGE")
+if not isinstance(digest, str) or re.fullmatch(r"[0-9a-f]{64}", digest) is None:
+    raise SystemExit("TARGET_PROBE_PACKAGE")
+print(version, digest)
+PY
+)" || exit 2
+  read -r PACKAGE_VERSION PACKAGE_DIGEST <<EOF
+$package_values
+EOF
+  PACKAGE_PATH="$SHERLOCK_PROBE_SEALED_INPUT/runtime-package"
+  [ -d "$PACKAGE_PATH" ] && [ ! -L "$PACKAGE_PATH" ] || { echo "✗ sealed package is absent" >&2; exit 2; }
+fi
 # Target-contract probe mode uses the ordinary v44 runner.  It never fabricates
 # a report, capture, ledger, budget, or verdict: those are only valid when
 # emitted by the Task 3 proxy and Task 7 terminal verifier below.
@@ -52,9 +91,9 @@ arm_ge() {   # arm_ge <arm> <floor> - true when <arm> is v<floor> or newer
   [ "$_arm_n" -ge "$2" ]
 }
 # <<< ARM VERSION GATE <<<
-arm_num "$ARM" >/dev/null   # abort now, not at the first branch
+arm_num "$PACKAGE_VERSION" >/dev/null   # abort now, not at the first branch
 STRICT_MARKER_LIFECYCLE=0
-if arm_ge "$ARM" 44; then STRICT_MARKER_LIFECYCLE=1; fi
+if arm_ge "$PACKAGE_VERSION" 44; then STRICT_MARKER_LIFECYCLE=1; fi
 # >>> INTERACTIVE LANE >>>
 # THE CORPORATE HARNESS RUNS QWEN INTERACTIVELY (operator, 2026-08-27), so the
 # acceptance gate has to run THAT, not `qwen -p` (CLAUDE.md: a gate must run the
@@ -76,7 +115,7 @@ case "$INTERACTIVE" in
   0|1) ;;
   *) echo "✗ SHERLOCK_INTERACTIVE must be 0 or 1, got '$INTERACTIVE'" >&2; exit 2 ;;
 esac
-if [ "$INTERACTIVE" = "1" ] && ! arm_ge "$ARM" 40; then
+if [ "$INTERACTIVE" = "1" ] && ! arm_ge "$PACKAGE_VERSION" 40; then
   echo "✗ SHERLOCK_INTERACTIVE=1 needs v40 or newer (the stage machine); got $ARM" >&2
   exit 2
 fi
@@ -107,7 +146,7 @@ EXPECTED_RETURNED_IDENTITY="${SHERLOCK_EXPECTED_RETURNED_IDENTITY:-$MODEL}"
 export SHERLOCK_EXPECTED_RETURNED_IDENTITY="$EXPECTED_RETURNED_IDENTITY"
 if [ -n "${SHERLOCK_TIMEOUT+x}" ]; then
   TIMEOUT="$SHERLOCK_TIMEOUT"
-elif arm_ge "$ARM" 30; then
+elif arm_ge "$PACKAGE_VERSION" 30; then
   TIMEOUT=5400
 else
   TIMEOUT=2700
@@ -186,6 +225,31 @@ qwen_flag_preflight() {
 }
 echo "▶ budgets: --max-session-turns $MAX_SESSION_TURNS  --max-wall-time ${MAX_WALL_TIME_S}s  --max-tool-calls $MAX_TOOL_CALLS  QWEN_CODE_WORKFLOW_AGENT_MAX_TURNS=$WORKFLOW_AGENT_MAX_TURNS  (outer timeout ${TIMEOUT}s)"
 RUNS="${BENCH_RUNS:-$HERE/runs}"
+PACKAGE_GATE_REQUIRED=0
+if [ "$TARGET_PROBE_MODE" = "1" ]; then
+  PACKAGE_GATE_REQUIRED=1
+elif [ "$PACKAGE_SELECTOR_EXPLICIT" = "1" ]; then
+  [[ "$PACKAGE_VERSION" =~ ^v[1-9][0-9]*$ ]] || {
+    echo "✗ SHERLOCK_PACKAGE_VERSION must be v<number>" >&2; exit 2;
+  }
+  PACKAGE_GATE_REQUIRED=1
+elif [ "$PACKAGE_VERSION" = "v44" ]; then
+  # Preserve the pre-selector v44 invocation while enforcing its frozen
+  # baseline. Older arms retain their historical unregistered packages.
+  PACKAGE_GATE_REQUIRED=1
+elif [[ "$PACKAGE_VERSION" =~ ^v([1-9][0-9]*)$ ]] && [ "${BASH_REMATCH[1]}" -ge 45 ]; then
+  echo "✗ v45 and newer packages require explicit SHERLOCK_PACKAGE_VERSION" >&2
+  exit 2
+fi
+if [ "$TARGET_PROBE_MODE" != "1" ] && [ "$PACKAGE_GATE_REQUIRED" = "1" ]; then
+  PACKAGE_PATH="$(python3 "$HERE/version-gate.py" --version "$PACKAGE_VERSION" --skills-root "$SKILLS" \
+    --snapshot-root "$RUNS/.package-snapshots")" || exit 2
+  PACKAGE_DIGEST="${PACKAGE_PATH##*-}"
+fi
+if [ "$PACKAGE_GATE_REQUIRED" = "1" ] && [[ ! "$PACKAGE_DIGEST" =~ ^[0-9a-f]{64}$ ]]; then
+  echo "✗ verified package digest is absent" >&2
+  exit 2
+fi
 CONTROLLED=0
 if [ -n "${SHERLOCK_RUN_TAG:-}" ] || [ -n "${SHERLOCK_TRACE:-}" ]; then
   [ -n "${SHERLOCK_RUN_TAG:-}" ] && [ -n "${SHERLOCK_TRACE:-}" ] || {
@@ -410,13 +474,6 @@ fi
 # package alongside the real trace.  Copy it only after controlled-trace
 # ownership has been verified; no report or proxy evidence is synthesized.
 if [ "${SHERLOCK_TARGET_PROBE_MODE:-0}" = "1" ]; then
-  [ -n "${SHERLOCK_PROBE_APPROVAL:-}" ] && [ -n "${SHERLOCK_PROBE_NONCE_ROOT:-}" ] || {
-    echo "✗ target probe authority is incomplete" >&2; exit 2;
-  }
-  python3 "$HERE/target-contract-probe.py" verify-launch \
-    --sealed-input "$SHERLOCK_PROBE_SEALED_INPUT" \
-    --operator-approved-probe "$SHERLOCK_PROBE_APPROVAL" \
-    --nonce-root "$SHERLOCK_PROBE_NONCE_ROOT" >/dev/null || exit 2
   python3 - "$SHERLOCK_PROBE_SEALED_INPUT" "$TRACE" <<'PY' || exit 2
 import os, shutil, stat, sys
 from pathlib import Path
@@ -679,7 +736,7 @@ save_trace() {
   fi
   if [ -n "$marker_source" ]; then
     mkdir -p "$TRACE/.sherlock"
-    python3 - "$marker_source" "$TRACE/.sherlock/active.json" "$TRACE" "$CORPUS" "$SKILLS/$ARM" <<'PY'
+    python3 - "$marker_source" "$TRACE/.sherlock/active.json" "$TRACE" "$CORPUS" "$PACKAGE_PATH" <<'PY'
 import json, os, sys, tempfile
 source, target, trace, corpus, skill = sys.argv[1:]
 with open(source, encoding="utf-8") as handle:
@@ -828,15 +885,15 @@ PY
   # how this check first shipped, and it silently cost three artifacts — the
   # lane verdict, gates.json and replay.sh — on every arm=none run.
   ARM_SNAPSHOT="$ARM_HOME"
-  if [ "$ARM" != "none" ] && [ -n "$ARM_SNAPSHOT" ] && [ -d "$SKILLS/$ARM" ]; then
-    if ! python3 "$HERE/arm-integrity.py" --shipped "$SKILLS/$ARM" \
+  if [ "$PACKAGE_VERSION" != "none" ] && [ -n "$ARM_SNAPSHOT" ] && [ -d "$PACKAGE_PATH" ]; then
+    if ! python3 "$HERE/arm-integrity.py" --shipped "$PACKAGE_PATH" \
            --snapshot "$ARM_SNAPSHOT" --out "$TRACE/arm-integrity.json" \
            --evidence "$TRACE/arm-modified-by-model"; then
       ARM_INTACT=0
       echo "  ⚠ the model modified its own skill copy — $TRACE/arm-integrity.json" >&2
       echo "    its version is kept in $TRACE/arm-modified-by-model; restoring the shipped arm" >&2
       if ! (rm -rf "$ARM_SNAPSHOT" && mkdir -p "$ARM_SNAPSHOT" \
-              && cp -r "$SKILLS/$ARM/." "$ARM_SNAPSHOT"); then
+              && cp -r "$PACKAGE_PATH/." "$ARM_SNAPSHOT"); then
         echo "  ⚠ could not restore the shipped arm — the gates below are NOT trustworthy" >&2
       fi
     fi
@@ -1103,7 +1160,7 @@ except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError):
     raise SystemExit("TARGET_PROBE_CORPUS")
 PY
 fi
-if arm_ge "$ARM" 30; then
+if arm_ge "$PACKAGE_VERSION" 30; then
   mkdir -p "$W/work"
   if [ -n "${SHERLOCK_SEED_WORK:-}" ]; then
     [ -d "$SHERLOCK_SEED_WORK" ] && [ ! -L "$SHERLOCK_SEED_WORK" ] || {
@@ -1112,10 +1169,10 @@ if arm_ge "$ARM" 30; then
     }
     cp -a "$SHERLOCK_SEED_WORK/." "$W/work/" || exit 1
   fi
-  python3 "$SKILLS/$ARM/tools/stage-corpus.py" "$RUN_CORPUS" \
+  python3 "$PACKAGE_PATH/tools/stage-corpus.py" "$RUN_CORPUS" \
     --map "$W/work/path-map.tsv" > "$TRACE/path-stage.json" || exit 1
   if [ -n "${SHERLOCK_SEED_WORK:-}" ]; then
-    python3 "$SKILLS/$ARM/tools/checkpoint.py" init --work "$W/work" \
+    python3 "$PACKAGE_PATH/tools/checkpoint.py" init --work "$W/work" \
       > "$TRACE/checkpoint-pre.json" || exit 1
   fi
 fi
@@ -1335,7 +1392,7 @@ fi
 # ARM_HOME is resolved here, above the settings write, and reused by the
 # install block below.
 MUTE_ARGS=""
-if [ "$ARM" != "none" ]; then
+if [ "$PACKAGE_VERSION" != "none" ]; then
   ARM_HOME="${SHERLOCK_ARM_HOME:-$HOME/.qwen/skills/log-rca}"
   case "$ARM_HOME" in
     "$W"|"$W"/*) printf 'run-bench.sh: ARM_HOME %s is inside the writable root %s\n' \
@@ -1348,8 +1405,8 @@ if [ "$ARM" != "none" ]; then
   # `skills.disabled` is a NAME list, so it suppresses them without disabling
   # the level the arm needs. Enumerated from disk, not hard-coded, and the
   # arm's own name is never in it.
-  ARM_SKILL_NAME="$(sed -n 's/^name:[[:space:]]*//p' "$SKILLS/$ARM/SKILL.md" | head -1)"
-  [ -n "$ARM_SKILL_NAME" ] || { echo "✗ $SKILLS/$ARM/SKILL.md has no name:" >&2; exit 1; }
+  ARM_SKILL_NAME="$(sed -n 's/^name:[[:space:]]*//p' "$PACKAGE_PATH/SKILL.md" | head -1)"
+  [ -n "$ARM_SKILL_NAME" ] || { echo "✗ $PACKAGE_PATH/SKILL.md has no name:" >&2; exit 1; }
   for skdir in "$HOME/.qwen/skills" "$HOME/.agents/skills" "$HOME/.claude/skills"; do
     [ -d "$skdir" ] || continue
     for sk in "$skdir"/*/SKILL.md; do
@@ -1389,7 +1446,7 @@ fi
 # 38,403-token reseed floor. A proven key must be a shipped key.
 mkdir -p "$W/.qwen"
 EMIT_ARGS=""
-if [ "$ARM" != "none" ]; then
+if [ "$PACKAGE_VERSION" != "none" ]; then
   EMIT_ARGS="$EMIT_ARGS --skill-directory $(dirname "$ARM_HOME")"
 fi
 if [ "${SHERLOCK_ALLOW_SUBAGENT:-0}" != "1" ]; then
@@ -1504,7 +1561,7 @@ case "$HANDOFF_THRESHOLD" in
     exit 1 ;;
 esac
 
-if [ "$ARM" != "none" ]; then
+if [ "$PACKAGE_VERSION" != "none" ]; then
   # THE ARM DOES NOT LIVE IN THE MODEL'S WRITABLE ROOT. Two of five v42 runs
   # ended arm_intact:false because it did: $W is the model's own cwd and it has
   # an unrestricted shell under --approval-mode yolo. Corporate never had this
@@ -1527,22 +1584,22 @@ if [ "$ARM" != "none" ]; then
   # and use it as-is; a stale or divergent arm must abort, never run silently.
   if [ ! -e "$ARM_HOME" ]; then
     mkdir -p "$(dirname "$ARM_HOME")"
-    cp -r "$SKILLS/$ARM" "$ARM_HOME" || exit 1
+    cp -r "$PACKAGE_PATH" "$ARM_HOME" || exit 1
     chmod -R a-w "$ARM_HOME"
   elif chmod -R u+w "$ARM_HOME" 2>/dev/null && [ -w "$ARM_HOME" ]; then
     # We can actually reclaim write on it (mode bits only — a previous run of
     # OURS locked it with `chmod -R a-w` below). Idempotent: wipe and reinstall.
     rm -rf "$ARM_HOME"
     mkdir -p "$(dirname "$ARM_HOME")"
-    cp -r "$SKILLS/$ARM" "$ARM_HOME" || exit 1
+    cp -r "$PACKAGE_PATH" "$ARM_HOME" || exit 1
     chmod -R a-w "$ARM_HOME"
   else
     # We could NOT reclaim write — root-owned on contabo, or flagged immutable.
     # This is not ours to touch. Use it only if it is byte-identical to the
     # shipped arm; a stale or divergent copy must abort, never run silently.
-    if ! ARM_DIFF="$(diff -rq "$SKILLS/$ARM" "$ARM_HOME" 2>&1)"; then
+    if ! ARM_DIFF="$(diff -rq "$PACKAGE_PATH" "$ARM_HOME" 2>&1)"; then
       printf 'run-bench.sh: ARM_HOME %s is not writable by this process (not ours to reinstall) and its content diverges from the shipped arm %s — refusing to run against a stale or divergent grader:\n%s\n' \
-        "$ARM_HOME" "$SKILLS/$ARM" "$ARM_DIFF" >&2
+        "$ARM_HOME" "$PACKAGE_PATH" "$ARM_DIFF" >&2
       exit 2
     fi
   fi
@@ -1578,7 +1635,7 @@ else
   echo "  to a different question. Write the prompt file first." >&2
   exit 1
 fi
-if arm_ge "$ARM" 30 && [ -n "${SHERLOCK_SEED_WORK:-}" ]; then
+if arm_ge "$PACKAGE_VERSION" 30 && [ -n "${SHERLOCK_SEED_WORK:-}" ]; then
   PROMPT="$PROMPT
 
 Продолжи расследование из сохранённого checkpoint в $W/work. Сначала прочитай
@@ -1588,7 +1645,7 @@ work/checkpoint.json. Не повторяй MAP и TRIAGE, если state=ready_
 только ошибки проверки. Последний ответ должен дословно повторять work/report.md."
 fi
 
-if arm_ge "$ARM" 31 && [[ "$PROMPT" != "/sherlock" && "$PROMPT" != "/sherlock"$'\n'* ]]; then
+if arm_ge "$PACKAGE_VERSION" 31 && [[ "$PROMPT" != "/sherlock" && "$PROMPT" != "/sherlock"$'\n'* ]]; then
   # r4 answered in one request with stats.skills.totalCalls == 0. Name the skill.
   # Custom contract prompts need the same explicit invocation.  Supplying a
   # prompt file changes the task text; it must not silently disable the arm.
@@ -1630,18 +1687,21 @@ ARM_COMMIT="$(git -C "$HERE" rev-parse HEAD 2>/dev/null || echo unknown)"
 # trace alone, and -1 records "this lane declares no window" explicitly rather
 # than by the absence of a key.
 python3 - "$TRACE/run-inputs.json" "$CORPUS_SOURCE" "$RUN_CORPUS" "$PROMPT_SHA" "$ARM_COMMIT" "$ARM" \
+  "$PACKAGE_VERSION" "$PACKAGE_DIGEST" \
   "$MAX_SESSION_TURNS" "$MAX_WALL_TIME_S" "$MAX_TOOL_CALLS" "$WORKFLOW_AGENT_MAX_TURNS" "$TIMEOUT" \
   "$GEN_WINDOW_S" "$OUTPUT_TOKENS_PER_S" "$TTFT_RESERVE_S" "$MAX_OUT" "$GEN_FITTING" \
   "$SESSION_TOKEN_LIMIT" "$CTX_WINDOW" "$MEASURE_DIR" <<'PY'
 import json, hashlib, os, sys
 sys.path.insert(0, sys.argv[-1])
 from lane_guard import COMPACTION_SUMMARY_RESERVE
-(target, corpus_source, staged_root, prompt_sha, arm_commit, arm,
+(target, corpus_source, staged_root, prompt_sha, arm_commit, arm, package_version, package_digest,
  turns, wall_s, tool_calls, workflow_turns, outer_timeout,
  window_s, tokens_per_s, ttft_reserve_s, max_out, fitting,
  session_token_limit, context_window, _measure_dir) = sys.argv[1:]
 with open(target, "w", encoding="utf-8") as fh:
     json.dump({"schema": 1, "arm": arm,
+               "package_version": package_version if package_digest else None,
+               "package_sha256": package_digest or None,
                "corpus_source": corpus_source, "staged_root": staged_root,
                "prompt_sha256": prompt_sha, "prompt_file": "prompt-sent.txt",
                "arm_commit": arm_commit,
@@ -1720,7 +1780,7 @@ START=$(date +%s)
 # A stream can break after the agent has already mapped most of the corpus. Keep
 # its QWEN_HOME and resume the same session with bounded exponential backoff;
 # never replace useful mid-session work with a fresh, empty investigation.
-if arm_ge "$ARM" 30; then
+if arm_ge "$PACKAGE_VERSION" 30; then
   RESUME_MAX_ATTEMPTS="${SHERLOCK_RESUME_MAX_ATTEMPTS:-0}"
 else
   RESUME_MAX_ATTEMPTS="${SHERLOCK_RESUME_MAX_ATTEMPTS:-2}"
@@ -1836,7 +1896,7 @@ run_qwen_interactive() {
   # fallbacks (interactive-drive.py) cover the arm crashing mid-run, but there
   # is no checkpoint.py to call at all when ARM=none.
   HAVE_RESEED_CMD=""
-  if [ "$ARM" != "none" ]; then
+  if [ "$PACKAGE_VERSION" != "none" ]; then
     HAVE_RESEED_CMD=1
   fi
   ( cd "$W" && OPENAI_API_KEY="$SHERLOCK_API_KEY" OPENAI_BASE_URL="$BASE_URL" \
