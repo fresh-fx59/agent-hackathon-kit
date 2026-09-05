@@ -97,3 +97,17 @@ headings, and use empty schema placeholders. No addresses, accounts, services,
 timestamps, fixture rows or precomputed findings may enter it. Gate/oracle hashes
 remain unchanged across this task. Separate lifecycle spec must define snapshot
 location/session ownership, retention and hook failures before implementation.
+
+## Compatibility amendment from candidate review
+
+Root found a concrete existing-flow regression after the scoped Claude PASS:
+SKILL.md still requires per-host worklist files when logmap discovers several
+hosts; the new finalizer hardcodes worklist.tsv. Generic corpus support requires
+preserving that established flow. Both standalone and Stop finalization must
+select the exact active-manifest ledgers with the existing strict path and
+record-identity checks. Preserve the composed gate input inside the unique
+validation attempt, with identities for every source ledger. Do not change any
+gate semantics or erase source worklists. Single-worklist behavior stays the same.
+Tests must execute all four actual gates for a multi-host fixture and reject
+missing, duplicate or outside-work ledgers. This is a necessary compatibility
+correction before v45 is registered, not a separate feature or paid retry.

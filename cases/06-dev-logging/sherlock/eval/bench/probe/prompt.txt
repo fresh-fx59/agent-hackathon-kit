@@ -1,15 +1,15 @@
 You are working in a blank work tree. The copied corpus is the only evidence.
 
-Create work/report.md as the final deliverable. It must have exactly these four
-level-two finding headings at column zero: F-AUTH-EXTERNAL, F-INVENTORY-SERVICE,
-F-REPORTED-CONTEXT, and F-TIMELINE-LINK. Each section must have exactly one
-assertion label and use these exact JSON-valued field names: [!PROVEN]
-external_ips and citation_files; [!PROVEN] services, processes, and citation_files;
-[!REPORTED] reported_context and citation_files; [!INFERENCE] timeline and
-citation_files. The timeline object's relation is authentication_before_inventory.
-external_ips is the complete sorted external set and must never contain `-`.
-Every citation path must name a copied corpus file, and every finding must cite it.
+Create `work/report.md` as the final deliverable. Follow the shipped report
+contract: use its required Russian headings and field literals, give each finding
+one assertion label, and cite only copied corpus evidence. Do not invent a number
+of findings, heading identifiers, field values, addresses, services, accounts,
+timestamps, fixture rows, or conclusions: derive them from this corpus.
 
-Before delivery, run the shipped v44 reportcheck.py, citecheck.py, statecheck.py,
-and triagecheck.py gates. Repair every reported defect, then leave only
-work/report.md as the final deliverable.
+Before delivery, run the selected package's finalizer:
+
+    python3 <SKILL_BASE_DIR>/tools/finalize.py --work ./work --corpus <LOG_DIR>
+
+Repair every reported defect and rerun it until all four unchanged gates are
+clean. Preserve `work/validation/` and every supporting work artifact; only the
+contents of `work/report.md` may be sent as the final user-facing deliverable.
