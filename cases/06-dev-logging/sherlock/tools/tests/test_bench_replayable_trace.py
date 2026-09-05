@@ -166,6 +166,7 @@ class BenchReplayableTrace(unittest.TestCase):
             # inside the trajectory; a run whose input cannot be read back
             # cannot be reproduced or argued about.
             sent = (trace / "prompt-sent.txt").read_text(encoding="utf-8")
+            self.assertTrue(sent.startswith("/sherlock\n\nInvestigate"), sent[:100])
             self.assertIn("Investigate", sent)
             inputs = json.loads((trace / "run-inputs.json").read_text(encoding="utf-8"))
             self.assertEqual(inputs["corpus_source"], str(corpus.resolve()))

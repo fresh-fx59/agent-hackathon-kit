@@ -617,8 +617,10 @@ print(json.dumps([{'type':'result','result':'ok','is_error':False,'session_id':'
         self.assertTrue(result["audit"]["accepted"])
         sealed_prompt = trace / "probe" / "prompt.txt"
         self.assertEqual(len(seen), 1); self.assertEqual(seen[0]["payload"]["model"], "deepseek-v4-20260901")
-        self.assertEqual(seen[0]["prompt_sha256"], hashlib.sha256(sealed_prompt.read_bytes()).hexdigest())
-        self.assertEqual(seen[0]["payload"]["messages"][0]["content"], sealed_prompt.read_text(encoding="utf-8"))
+        expected_prompt = "/sherlock\n\n" + sealed_prompt.read_text(encoding="utf-8")
+        self.assertEqual(seen[0]["prompt_sha256"], hashlib.sha256(expected_prompt.encode()).hexdigest())
+        self.assertEqual((trace / "prompt-sent.txt").read_text(encoding="utf-8"), expected_prompt)
+        self.assertEqual(seen[0]["payload"]["messages"][0]["content"], expected_prompt)
         rows = [json.loads(line) for line in (trace / "upstream-completed.jsonl").read_text().splitlines()]
         self.assertEqual(len(rows), 1); row = rows[0]
         self.assertEqual(row["requested_model"], row["sent_model"])

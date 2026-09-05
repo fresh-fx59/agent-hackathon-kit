@@ -1524,8 +1524,10 @@ work/checkpoint.json. Не повторяй MAP и TRIAGE, если state=ready_
 только ошибки проверки. Последний ответ должен дословно повторять work/report.md."
 fi
 
-if arm_ge "$ARM" 31 && [ -z "${SHERLOCK_PROMPT_FILE:-}" ]; then
+if arm_ge "$ARM" 31 && [[ "$PROMPT" != "/sherlock" && "$PROMPT" != "/sherlock"$'\n'* ]]; then
   # r4 answered in one request with stats.skills.totalCalls == 0. Name the skill.
+  # Custom contract prompts need the same explicit invocation.  Supplying a
+  # prompt file changes the task text; it must not silently disable the arm.
   PROMPT="/sherlock
 
 $PROMPT"
