@@ -281,6 +281,38 @@ class LauncherTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertFalse((output / "harness-acceptance.json").exists())
 
+    def test_selected_launcher_passes_verified_values_without_finite_caps(self):
+        # First construct and check the existing fully isolated plumbing fixture.
+        # Preparation and controller are stubs here; real validation has its own
+        # selected-package CLI tests. This tests shell propagation, not acceptance.
+        self.test_one_argument_launcher_builds_complete_fixed_controller_bundle_and_input()
+        repo=self.root/'repo'; bench=repo/'eval/bench'
+        helper=bench/'harness-qualification.py'
+        source=helper.read_text().replace('import pathlib, sys','import pathlib, sys, json')
+        source=source.replace("if command == 'matrix':", """if command == 'prepare-selected':
+    profile=json.loads((out/'target-profile.json').read_text())
+    profile.update(package_version='v45',schema=2,execution_mode='operator_monitored')
+    (out/'target-profile.json').write_text(json.dumps(profile))
+    budget=json.loads((out/'probe-budget.json').read_text())
+    budget.update(schema=2,execution_mode='operator_monitored',request_timeout_ms=600000)
+    for name in ('max_upstream_attempts','max_request_bytes','max_wall_seconds','max_consecutive_provider_failures'):budget[name]=None
+    (out/'probe-budget.json').write_text(json.dumps(budget))
+elif command == 'matrix':""")
+        helper.write_text(source)
+        output=self.root/'selected-plumbing'
+        env={'PATH':str(self.root/'bin')+os.pathsep+os.environ['PATH'],
+             'HOME':str(self.root),'SHERLOCK_API_KEY':'dummy'}
+        result=subprocess.run([str(bench/LAUNCHER.name),str(output),'--target-input',str(self.root)],
+                              env=env,text=True,capture_output=True,cwd=repo)
+        self.assertEqual(result.returncode,0,result.stderr)
+        captured=json.loads((output/'captured-env.json').read_text())
+        self.assertEqual(captured['SHERLOCK_PACKAGE_VERSION'],'v45')
+        self.assertEqual(captured['SHERLOCK_OPERATOR_MONITORED_MODE'],'1')
+        self.assertEqual(captured['SHERLOCK_REQUEST_TIMEOUT_MS'],'600000')
+        self.assertEqual(captured['SHERLOCK_SKILL_ROOT'],str(output/'runtime-package'))
+        self.assertFalse(any(name.startswith('SHERLOCK_BUDGET_MAX_') for name in captured))
+        self.assertNotIn('SHERLOCK_TIMEOUT',captured)
+
     def test_one_argument_launcher_builds_complete_fixed_controller_bundle_and_input(self):
         repo = self.root / "repo"; bench = repo / "eval" / "bench"; bench.mkdir(parents=True)
         shutil.copy2(LAUNCHER, bench / LAUNCHER.name); (bench / LAUNCHER.name).chmod(0o700)

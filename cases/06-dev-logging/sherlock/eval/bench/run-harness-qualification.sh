@@ -5,10 +5,10 @@ HERE="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)"
 SHERLOCK="$(CDPATH= cd -- "$HERE/../.." && pwd -P)"
 
 die() { printf '%s\n' "$1" >&2; exit 2; }
-[[ $# -eq 1 ]] || die "usage: run-harness-qualification.sh ABSOLUTE_NEW_OUTPUT_ROOT"
+[[ $# -eq 1 || ( $# -eq 3 && "$2" = --target-input ) ]] || die "usage: run-harness-qualification.sh ABSOLUTE_NEW_OUTPUT_ROOT [--target-input SEALED_TARGET_INPUT]"
+SELECTED_INPUT="${3:-}"
 OUTPUT=$1
 [[ "$OUTPUT" = /* ]] || die "output root must be absolute"
-[[ -n "${SHERLOCK_API_KEY:-}" ]] || die "SHERLOCK_API_KEY is required"
 
 TOOL="$HERE/harness-qualification.py"
 CONTROLLER="$HERE/bench-controller.sh"
@@ -77,7 +77,6 @@ TREE="$(git -C "$SHERLOCK" rev-parse HEAD^{tree})" || die "repository tree unava
 DIRTY="$(git -C "$SHERLOCK" status --porcelain --untracked-files=no)"
 printf '%s\n' "$COMMIT" > "$OUTPUT/implementation-commit.txt"
 printf '%s\n' "$DIRTY" > "$OUTPUT/implementation-dirty.txt"
-"$QWEN_PATH" --version > "$OUTPUT/qwen-version.txt" || die "qwen version unavailable"
 python3 "$SETTINGS_TOOL" emit-run --window 262000 --max-tokens 32000 \
   --session-token-limit 230000 --timeout 900000 --max-retries 0 \
   --skill-directory "$TARGET_HOME/.qwen/skills" --exclude-tool agent \
@@ -150,6 +149,12 @@ package_row={"schema":1,"arm":"v44","implementation_commit":commit,
 package.write_text(json.dumps(package_row,sort_keys=True,separators=(",",":"))+"\n")
 PY
 
+if [[ -n "$SELECTED_INPUT" ]]; then
+  python3 "$TOOL" prepare-selected --target-input "$SELECTED_INPUT" --output "$OUTPUT" --qwen "$QWEN_PATH" > "$OUTPUT/selected-preparation.json" || die "selected input refused"
+fi
+[[ -n "${SHERLOCK_API_KEY:-}" ]] || die "SHERLOCK_API_KEY is required"
+"$QWEN_PATH" --version > "$OUTPUT/qwen-version.txt" || die "qwen version unavailable"
+
 cat > "$FREE_TEST" <<EOF
 #!/usr/bin/env bash
 set -euo pipefail
@@ -217,6 +222,40 @@ CONTROLLER_ENV=(
   "SHERLOCK_BUDGET_MAX_UPSTREAM_ATTEMPTS=512" "SHERLOCK_BUDGET_MAX_REQUEST_BYTES=536870912"
   "SHERLOCK_BUDGET_MAX_WALL_SECONDS=4500" "SHERLOCK_BUDGET_MAX_CONSECUTIVE_PROVIDER_FAILURES=3"
 )
+if [[ -n "$SELECTED_INPUT" ]]; then
+  # Values come only from the already validated local bundle; no shell evaluation.
+  mapfile_values="$(python3 - "$TARGET_PROFILE" "$BUDGET" <<'PYSELECT'
+import json,sys
+profile=json.load(open(sys.argv[1])); budget=json.load(open(sys.argv[2]))
+print(profile['package_version'])
+print(budget['context_window'])
+print(profile['max_output_tokens'])
+print(profile['session_token_limit'])
+PYSELECT
+)" || die "selected launch values unavailable"
+  SELECTED_VERSION="$(printf '%s\n' "$mapfile_values" | sed -n '1p')"
+  SELECTED_WINDOW="$(printf '%s\n' "$mapfile_values" | sed -n '2p')"
+  SELECTED_MAX_OUTPUT="$(printf '%s\n' "$mapfile_values" | sed -n '3p')"
+  SELECTED_SESSION="$(printf '%s\n' "$mapfile_values" | sed -n '4p')"
+  FILTERED_ENV=()
+  for setting in "${CONTROLLER_ENV[@]}"; do
+    case "$setting" in SHERLOCK_BUDGET_MAX_*|SHERLOCK_TIMEOUT=*) continue;; esac
+    FILTERED_ENV+=("$setting")
+  done
+  CONTROLLER_ENV=("${FILTERED_ENV[@]}"
+    "SHERLOCK_TARGET_COMMAND=$(printf '%q' "$RUNNER") $SELECTED_VERSION"
+    "SHERLOCK_ARM=$SELECTED_VERSION" "SHERLOCK_PACKAGE_VERSION=$SELECTED_VERSION"
+    "SHERLOCK_SKILL_ROOT=$OUTPUT/runtime-package"
+    "SHERLOCK_OPERATOR_MONITORED_MODE=1" "SHERLOCK_INTERACTIVE=0"
+    "SHERLOCK_CONTEXT_WINDOW=$SELECTED_WINDOW" "SHERLOCK_MAX_OUTPUT_TOKENS=$SELECTED_MAX_OUTPUT"
+    "SHERLOCK_SESSION_TOKEN_LIMIT=$SELECTED_SESSION" "SHERLOCK_REQUEST_TIMEOUT_MS=600000"
+    "SHERLOCK_MAX_SESSION_TURNS=-1" "SHERLOCK_MAX_TOOL_CALLS=-1" "SHERLOCK_MAX_WALL_TIME_S=-1"
+    "SHERLOCK_REPORT_CHECKER=$OUTPUT/runtime-package/tools/reportcheck.py"
+    "SHERLOCK_STATE_CHECKER=$OUTPUT/runtime-package/tools/statecheck.py"
+    "SHERLOCK_TRIAGE_CHECKER=$OUTPUT/runtime-package/tools/triagecheck.py"
+    "SHERLOCK_STOP_CHECKER=$OUTPUT/runtime-package/tools/stopcheck.py"
+    "SHERLOCK_CITATION_CHECKER=$OUTPUT/runtime-package/tools/citecheck.py")
+fi
 env -i "${CONTROLLER_ENV[@]}" "$CONTROLLER"
 
 TRACE="$(python3 - "$RUNS" <<'PY'

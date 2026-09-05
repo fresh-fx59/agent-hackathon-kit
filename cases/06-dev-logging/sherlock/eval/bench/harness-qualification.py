@@ -599,7 +599,7 @@ def _verify_trace(trace: Path, control):
     manifest = parse_json(input_manifest_raw, "INPUT_MANIFEST")
     profile = manifest.get("target") if isinstance(manifest, dict) else None
     if (not isinstance(manifest, dict) or manifest.get("run_tag") != run_id
-            or manifest.get("arm") != "v44"
+            or not isinstance(manifest.get("arm"), str)
             or not isinstance(profile, dict) or profile.get("provider") != "cliproxyapi"
             or profile.get("lane") != "subscription" or profile.get("requested_model") != "gpt-5.5"
             or profile.get("expected_returned_identity") != "gpt-5.5"):
@@ -614,7 +614,12 @@ def _verify_trace(trace: Path, control):
     settings_raw = _plain_file((trace / "corporate-settings.json").absolute(), "SETTINGS")
     tool_schema_raw = _plain_file((root / "tool-schema.json").absolute(), "TOOL_SCHEMA")
     prompt_raw = _plain_file((root / "prompt.txt").absolute(), "PROMPT")
-    skill_raw = _plain_file((SHERLOCK / "skills/v44/SKILL.md").absolute(), "SKILL_V44")
+    selected = _selected_identity(root, identity)
+    runtime = selected['runtime'] if selected else SHERLOCK / 'skills/v44'
+    if selected is None and manifest.get('arm') != 'v44':
+        raise QualificationFailure('INPUT_MANIFEST_IDENTITY')
+    skill_raw = selected['package_raw'] if selected else _plain_file((runtime / 'SKILL.md').absolute(), 'SKILL_V44')
+    system_prompt_sha = digest(_plain_file(runtime / 'SKILL.md', 'SKILL')) if selected else digest(prompt_raw)
     commit = identity.get("arm_commit")
     if (not isinstance(commit, str) or implementation_raw != (commit + "\n").encode()
             or arm != {"schema": 1, "arm": identity.get("arm"),
@@ -623,7 +628,7 @@ def _verify_trace(trace: Path, control):
                 _plain_file((HERE / "run-bench.sh").absolute(), "RUNNER"))
             or identity.get("settings_sha256") != digest(settings_raw)
             or identity.get("tool_schema_sha256") != digest(tool_schema_raw)
-            or identity.get("system_prompt_sha256") != digest(prompt_raw)
+            or identity.get("system_prompt_sha256") != system_prompt_sha
             or identity.get("skill_sha256") != digest(skill_raw)):
         raise QualificationFailure("BOUND_INPUT_IDENTITY")
     tests_raw = _plain_file((root / "provider-free-tests.json").absolute(), "TEST_MANIFEST")
@@ -699,8 +704,8 @@ def _verify_trace(trace: Path, control):
         "test_manifest": (root / "provider-free-tests.json", tests_raw),
         "qwen_binary": (qwen, qwen_raw), "qwen_version": (root / "qwen-version.txt", version_raw),
         "arm": (root / "arm.json", arm_raw),
-        "skill_v44": (SHERLOCK / "skills/v44/SKILL.md", skill_raw),
-        "report_contract": (SHERLOCK / "skills/v44/reference/report-contract.corporate.json", _plain_file((SHERLOCK / "skills/v44/reference/report-contract.corporate.json").absolute(), "REPORT_CONTRACT")),
+        "skill_v44": (runtime, skill_raw),
+        "report_contract": (runtime / "reference/report-contract.corporate.json", _plain_file((runtime / "reference/report-contract.corporate.json").absolute(), "REPORT_CONTRACT")),
         "settings": (trace / "corporate-settings.json", settings_raw),
         "tool_schema": (root / "tool-schema.json", tool_schema_raw),
         "input_manifest": (trace / "run-manifest.json", input_manifest_raw),
@@ -719,7 +724,7 @@ def _verify_trace(trace: Path, control):
     gate_tools = {"report": "reportcheck.py", "citation": "citecheck.py",
                   "state": "statecheck.py", "triage": "triagecheck.py"}
     for prefix, filename in gate_tools.items():
-        path = SHERLOCK / "skills/v44/tools" / filename
+        path = runtime / "tools" / filename
         files[prefix + "_gate_program"] = (path, _plain_file(path.absolute(), prefix.upper() + "_GATE_PROGRAM"))
         files[prefix + "_gate_result"] = (trace / "gates.json", gates_raw)
     if set(files) != set(BINDINGS):
@@ -893,6 +898,150 @@ def _default_fixtures(root: Path):
     (root / "manifest.json").write_bytes(canonical({"schema": 2, "inputs": rows}) + b"\n")
 
 
+def _load_local(name):
+    import importlib.util
+    spec = importlib.util.spec_from_file_location('hq_' + name.replace('-', '_'), HERE / (name + '.py'))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _version_gate():
+    return _load_local('version-gate')
+
+
+def _package_rows(root):
+    """Canonical preimage of version-gate.tree_digest, verified independently."""
+    gate = _version_gate()
+    expected = gate.tree_digest(root)
+    rows = []
+    for current, directories, files in os.walk(root, followlinks=False):
+        directories.sort(); files.sort()
+        for name in files:
+            path = Path(current) / name
+            relative = path.relative_to(root).as_posix()
+            if '__pycache__' in Path(relative).parts or name.endswith(('.pyc', '.pyo')):
+                continue
+            rows.append([relative, digest(_plain_file(path.absolute(), 'PACKAGE_MEMBER'))])
+    raw = canonical(rows)
+    if digest(raw) != expected or gate.tree_digest(root) != expected:
+        raise QualificationFailure('PACKAGE_CHANGED')
+    return raw
+
+
+def _selected_identity(root, identity):
+    """Resolve selection from manifest-bound profile, never from an arm label."""
+    profile_raw = _plain_file(root / 'target-profile.json', 'SELECTED_PROFILE')
+    profile = parse_json(profile_raw, 'SELECTED_PROFILE')
+    if not {'package_version', 'package_sha256'}.intersection(profile):
+        return None
+    try:
+        _load_local('run-manifest').validate_target_profile(profile)
+        record = parse_json(_plain_file(root / 'selected-package.json', 'SELECTED_IDENTITY'), 'SELECTED_IDENTITY')
+        runtime = root / 'runtime-package'
+        package_raw = _package_rows(runtime)
+        tools_raw = _package_rows(runtime / 'tools')
+        settings_raw = _plain_file(root / 'corporate-settings.json', 'SELECTED_SETTINGS')
+        if (digest(profile_raw) != identity.get('target_profile_sha256')
+                or record.get('target_profile_sha256') != digest(profile_raw)
+                or record.get('package_version') != profile['package_version']
+                or record.get('package_sha256') != profile['package_sha256']
+                or digest(package_raw) != profile['package_sha256']
+                or profile['skill_sha256'] != profile['package_sha256']
+                or digest(tools_raw) != profile['tool_schema_sha256']
+                or _plain_file(root / 'tool-schema.json', 'TOOL_SCHEMA') != tools_raw
+                or digest(settings_raw) != profile['settings_sha256']
+                or identity.get('settings_sha256') != profile['settings_sha256']
+                or any(digest(_plain_file(runtime / 'tools' / (name + '.py'), 'GATE')) != expected
+                       for name, expected in profile['gate_sha256'].items())):
+            raise QualificationFailure('SELECTED_IDENTITY')
+        return {'version': profile['package_version'], 'runtime': runtime,
+                'package_raw': package_raw, 'tools_raw': tools_raw,
+                'profile': profile}
+    except QualificationFailure:
+        raise
+    except (ValueError, OSError, KeyError, TypeError) as exc:
+        raise QualificationFailure('SELECTED_IDENTITY') from exc
+
+
+def prepare_selected(source: Path, output: Path, qwen: Path):
+    """Copy a validated target package for subscription harness qualification."""
+    source, output, qwen = map(Path, (source, output, qwen))
+    _real_directory(source, 'SELECTED_INPUT'); _real_directory(output, 'SELECTED_OUTPUT')
+    if (output / 'selected-package.json').exists() or (output / 'runtime-package').exists():
+        raise QualificationFailure('SELECTED_OUTPUT_EXISTS')
+    probe = _load_local('target-contract-probe')
+    gate = _version_gate()
+    try:
+        manifest_raw = _plain_file(source / 'probe-manifest.json', 'SELECTED_MANIFEST')
+        manifest = parse_json(manifest_raw, 'SELECTED_MANIFEST')
+        probe._verify_package(source, manifest)
+        original = parse_json(_plain_file(source / 'target-profile.json', 'SELECTED_PROFILE'), 'SELECTED_PROFILE')
+        if original.get('schema') != 2 or original.get('execution_mode') != 'operator_monitored':
+            raise QualificationFailure('SELECTED_PROFILE_MODE')
+        if Path(original['qwen']['cli']).resolve(strict=True) != qwen.resolve(strict=True):
+            raise QualificationFailure('SELECTED_QWEN_MISMATCH')
+        settings = _plain_file(source / 'corporate-settings.json', 'SELECTED_SETTINGS')
+        settings_row = parse_json(settings, 'SELECTED_SETTINGS')
+        if settings_row.get('model', {}).get('generationConfig', {}).get('timeout') != 600000:
+            raise QualificationFailure('SELECTED_REQUEST_TIMEOUT')
+        registered = gate.verify_version(original['package_version'], SHERLOCK / 'skills')
+        if registered.digest != original['package_sha256']:
+            raise QualificationFailure('SELECTED_REGISTRY_MISMATCH')
+        runtime = source / 'runtime-package'
+        if gate.tree_digest(runtime) != registered.digest:
+            raise QualificationFailure('SELECTED_PACKAGE_MISMATCH')
+        snapshot = gate.seal_snapshot(gate.VerifiedVersion(registered.version, runtime, registered.digest),
+                                      output / '.package-snapshots')
+        shutil.copytree(snapshot.path, output / 'runtime-package', symlinks=True)
+        package_rows = _package_rows(output / 'runtime-package')
+        tools_rows = _package_rows(output / 'runtime-package' / 'tools')
+        if digest(package_rows) != registered.digest or digest(tools_rows) != original['tool_schema_sha256']:
+            raise QualificationFailure('SELECTED_COPY_CHANGED')
+        # A changing source cannot publish a successful selected record.
+        probe._verify_package(source, manifest)
+        if _plain_file(source / 'probe-manifest.json', 'SELECTED_MANIFEST') != manifest_raw:
+            raise QualificationFailure('SELECTED_MANIFEST_CHANGED')
+    except QualificationFailure:
+        raise
+    except (ValueError, OSError, KeyError, TypeError) as exc:
+        raise QualificationFailure('SELECTED_INPUT_INVALID: ' + str(exc)) from exc
+    profile = dict(original)
+    profile.update(provider_base_url='http://127.0.0.1:8317/v1', route='/chat/completions',
+                   secret_ref='SHERLOCK_API_KEY', requested_model='gpt-5.5',
+                   expected_returned_identity='gpt-5.5', identity_mode='provider_pinned_version')
+    budget = {'schema': 2, 'execution_mode': 'operator_monitored',
+              'max_upstream_attempts': None, 'max_request_bytes': None,
+              'max_wall_seconds': None, 'max_consecutive_provider_failures': None,
+              'context_window': settings_row['model']['generationConfig']['contextWindowSize'],
+              'max_output_tokens': profile['max_output_tokens'],
+              'session_token_limit': profile['session_token_limit'], 'request_timeout_ms': 600000}
+    record = {'schema': 1, 'package_version': registered.version, 'package_sha256': registered.digest,
+              'source_manifest_sha256': digest(manifest_raw), 'settings_sha256': digest(settings),
+              'tool_schema_sha256': digest(tools_rows), 'target_profile_sha256': digest(canonical(profile) + b'\n')}
+    (output / 'corporate-settings.json').write_bytes(settings)
+    (output / 'target-profile.json').write_bytes(canonical(profile) + b'\n')
+    (output / 'tool-schema.json').write_bytes(tools_rows)
+    (output / 'probe-budget.json').write_bytes(canonical(budget) + b'\n')
+    (output / 'package-tree.json').write_bytes(package_rows)
+    (output / 'prompt.txt').write_text('Investigate the fresh local corpus using Sherlock. Retain evidence and satisfy all shipped report and validation requirements.\n')
+    package = parse_json(_plain_file(output / 'input-package.json', 'INPUT_PACKAGE'), 'INPUT_PACKAGE')
+    package.update(prompt_sha256=digest((output / 'prompt.txt').read_bytes()),
+                   arm=registered.version, package_version=registered.version, package_sha256=registered.digest,
+                   settings_sha256=digest(settings), tool_schema_sha256=digest(tools_rows),
+                   target_profile_sha256=record['target_profile_sha256'],
+                   probe_budget_sha256=digest(canonical(budget) + b'\n'), gate_sha256=profile['gate_sha256'])
+    (output / 'input-package.json').write_bytes(canonical(package) + b'\n')
+    arm_path = output / 'arm.json'
+    if arm_path.exists():
+        arm = parse_json(_plain_file(arm_path, 'ARM'), 'ARM')
+        arm['arm'] = registered.version
+        arm_path.write_bytes(canonical(arm) + b'\n')
+    with (output / 'selected-package.json').open('xb') as handle:
+        handle.write(canonical(record) + b'\n'); handle.flush(); os.fsync(handle.fileno())
+    return record
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser()
     sub = parser.add_subparsers(dest="command", required=True)
@@ -906,9 +1055,15 @@ def main(argv=None):
     verify_parser = sub.add_parser("verify")
     verify_parser.add_argument("--receipt", required=True)
     verify_parser.add_argument("--json", action="store_true")
+    selected_parser = sub.add_parser("prepare-selected")
+    selected_parser.add_argument("--target-input", required=True)
+    selected_parser.add_argument("--output", required=True)
+    selected_parser.add_argument("--qwen", required=True)
     args = parser.parse_args(argv)
     try:
-        if args.command == "matrix":
+        if args.command == "prepare-selected":
+            row = prepare_selected(Path(args.target_input), Path(args.output), Path(args.qwen))
+        elif args.command == "matrix":
             output = Path(args.output)
             if not output.is_absolute() or os.path.lexists(output):
                 raise QualificationFailure("MATRIX_OUTPUT_INVALID")

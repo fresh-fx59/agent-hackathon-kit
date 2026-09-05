@@ -1,0 +1,21 @@
+Concrete gaps:
+
+- The selected-mode CLI contract is undefined (line 19): no argument syntax, required filenames, manifest schema, or rule distinguishing legacy from selected mode. “Without a selector” (line 31) is therefore not implementable unambiguously.
+
+- “Sealed target input directory” and “snapshot” lack security semantics (lines 19–21): no symlink/hardlink policy, file/count/size bounds, race-resistant copy procedure, canonical digest algorithm reference, or post-copy verification. A package could change between validation and copying.
+
+- The exact source of package version/digest is unspecified. Audit cannot reliably distinguish a legitimate selected package from a relabeled tree without a defined, signed/sealed selector record.
+
+- Lines 22–27 conflict: settings bytes and settings identity must remain exact, yet provider/model fields change. The spec must state whether those fields live exclusively in the target profile or whether a derived settings file is permitted—and what hash admission expects.
+
+- Observer integration is incomplete (lines 22–24): required environment variable names, producer, validation rules, propagation boundary, and hashes for each “helper identity” are absent. “Helper” itself is not enumerated, so launcher, lifecycle supervisor, and admission can bind different sets.
+
+- The immutable catalogue requirement (lines 24–25) does not define location, ownership, permissions, atomic publication, collision behavior, or how investigation state/pattern cards are detected and excluded.
+
+- Tool identity has competing representations: “whole-package/tool-tree digests,” individual gate hashes, and “helper identities” are required, but their canonical relationship and precedence are not specified. A package digest match could coexist with a separately supplied mismatched tool schema.
+
+- The new mode requires validation before secret use (line 20), but acceptance only checks refusal before provider contact (line 42). Current launcher reads `SHERLOCK_API_KEY` before inputs. Acceptance needs an explicit secret-access tripwire/order test.
+
+- The 600-second watchdog requirement lacks an exact binding: current settings and budget use 900,000 ms. The spec should require `request_timeout_ms == 600000` in both selected settings/profile/budget and audit it, not merely preserve runtime behavior.
+
+- Acceptance omits adversarial snapshot tests (mutation during copy, symlink/hardlink, stale selector), observer/helper mismatch tests, and proof that audit reads exclusively from the snapshot rather than the original directory.
