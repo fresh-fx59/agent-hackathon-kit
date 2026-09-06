@@ -4,7 +4,7 @@
   "status": "development_evidence_only",
   "acceptance": false,
   "provider_calls": 0,
-  "runtime_lane": "v47 candidate",
+  "runtime_lane": "v48 candidate",
   "limitations": [
     "r1 and r2 used prior v46 driver snapshot 162d36a",
     "loopback-only",
@@ -64,7 +64,72 @@
       "fixture_sha256": "9126900768703d4d148344093cef463f1ec266188897fdfc8506a8eb9bfe61ec",
       "driver_sha256": "0de7043aad2431fb5342be94d57d62d5baf58ac341f2d8c3403f23c353fdaddf",
       "interpretation": "combined startup removed the r2 contextless request, but repeated auxiliary responses did not produce an accepted skill-scoped Stop"
+    },
+    {
+      "id": "r4",
+      "status": "rejected_incomplete_fixture_command",
+      "passed": false,
+      "provider": "loopback-only",
+      "provider_requests": 8,
+      "normal_request_indices": [
+        0,
+        1,
+        5,
+        6,
+        7
+      ],
+      "error": "AssertionError('unexpected investigation request 4')",
+      "provider_errors": [],
+      "inventory_entries": 1530,
+      "inventory_artifact": "artifacts/2026-09-06-single-invocation/inventory-r4.sha256.json",
+      "fixture_artifact": "artifacts/2026-09-06-single-invocation/r4/qwen_single_invocation_smoke.py",
+      "fixture_sha256": "3e742a037178fa7e2a700d9230bb90c229b4180f7aee4439425a6847f2b4b4d5",
+      "driver_sha256": "75d0c3dd65f69dddd551b0c15cbc7f4343231c8fde5930b01f267a6114640b9f",
+      "interpretation": "first Stop consumed receipt and clear-to-combined-fresh-reseed succeeded, but fixture omitted --done draft and PATH shim bypassed raw Qwen hook Stop capture"
+    },
+    {
+      "id": "r5",
+      "status": "rejected_capture_teardown_race",
+      "passed": false,
+      "provider": "loopback-only",
+      "provider_requests": 6,
+      "normal_request_indices": [
+        0,
+        1,
+        4,
+        5
+      ],
+      "error": "FileNotFoundError(2, No such file or directory)",
+      "provider_errors": [],
+      "inventory_entries": 1528,
+      "inventory_artifact": "artifacts/2026-09-06-single-invocation/inventory-r5.sha256.json",
+      "fixture_artifact": "artifacts/2026-09-06-single-invocation/r5/qwen_single_invocation_smoke.py",
+      "fixture_sha256": "ab68eaa238095f492f0f5e3cee893b0689cf49eabe16859fb50c791da8d4a341",
+      "driver_sha256": "75d0c3dd65f69dddd551b0c15cbc7f4343231c8fde5930b01f267a6114640b9f",
+      "interpretation": "both Stop receipts consumed and clear verified, but watcher SIGTERM raced second Stop output/exit capture"
+    },
+    {
+      "id": "r6",
+      "status": "passed_loopback_lifecycle",
+      "passed": true,
+      "provider": "loopback-only",
+      "provider_requests": 7,
+      "normal_request_indices": [
+        0,
+        1,
+        5,
+        6
+      ],
+      "error": null,
+      "provider_errors": [],
+      "inventory_entries": 1533,
+      "inventory_artifact": "artifacts/2026-09-06-single-invocation/inventory-r6.sha256.json",
+      "fixture_artifact": "artifacts/2026-09-06-single-invocation/r6/qwen_single_invocation_smoke.py",
+      "fixture_sha256": "0bacb99e748e3732de01baf6cc5b98e794367b39c3c9826bc52d772961297d30",
+      "driver_sha256": "75d0c3dd65f69dddd551b0c15cbc7f4343231c8fde5930b01f267a6114640b9f",
+      "interpretation": "corrected watcher waited for both Stop allow outputs and exit 0; marker and exact clear-to-new-session transitions verified before expected fixture SIGTERM"
     }
   ],
-  "next_step": "Run the corrected fixture against the v47 candidate; require an explicit skill-scoped Stop receipt before paid qualification."
+  "next_step": "Run fresh v48 paid qualification only after the passing r6 lifecycle fixture is accepted by the root review; then review corpus report gates.",
+  "v48_candidate_sha256": "be96db39"
 }

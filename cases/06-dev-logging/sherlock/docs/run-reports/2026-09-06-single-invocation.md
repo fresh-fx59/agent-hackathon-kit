@@ -29,9 +29,24 @@ The corrected startup produced two normal loopback requests and repeated auxilia
 - r1 local mirror: `/Users/a/hack/qwen-single-invocation-20260906-r1`; 1,454 entries after the terminal result was written; local/remote inventory equal.
 - r2 local mirror: `/Users/a/hack/qwen-single-invocation-20260906-r2`; 1,456 entries; local/remote inventory equal.
 - r3 local mirror: `/Users/a/hack/qwen-single-invocation-20260906-r3`; 1,499 entries; local/remote inventory equal.
+- r4 local mirror: `/Users/a/hack/qwen-single-invocation-20260906-r4`; 1,530 entries; local/remote inventory equal.
+- r5 local mirror: `/Users/a/hack/qwen-single-invocation-20260906-r5`; 1,528 entries; local/remote inventory equal.
+- r6 local mirror: `/Users/a/hack/qwen-single-invocation-20260906-r6`; 1,533 entries; local/remote inventory equal.
 - Both mirrors exclude only `home/updates`; the complete terminal directories remain outside Git.
 - Inventory artifacts, exact fixture sources, and r3 launch siblings are committed under `artifacts/2026-09-06-single-invocation/`.
 
 ## Decision and next step
 
-Preserve r1 as an invalid timing fixture, r2 as the expected red contextless-request reproduction, and r3 as a combined-startup run with no accepted skill-scoped Stop. Run the corrected fixture against the v47 candidate before any paid qualification. No corpus acceptance is recorded.
+Preserve r1 as an invalid timing fixture, r2 as the expected red contextless-request reproduction, and r3 as a combined-startup run with no accepted skill-scoped Stop. r4 is rejected for incomplete fixture command and shell capture bypass; r5 is rejected for watcher capture race; r6 passes the corrected v48 loopback lifecycle gate. Paid qualification still requires a fresh v48 run, and no corpus acceptance is recorded.
+
+## r4 — receipt consumed and fresh clear observed, fixture command incomplete
+
+The v48 candidate driver made eight loopback requests and five normal requests. The first Stop consumed the receipt and the clear-to-combined-fresh-reseed sequence succeeded. The fixture then failed because its partial command omitted the required `--done draft` argument; the resulting stale handoff was correctly denied. An unexpected normal request at index 4 produced the fixture assertion. The PATH capture shim bypassed the Qwen hook shell, so the raw Stop execution count was zero despite the receipt consumption. This is useful lifecycle evidence, but the fixture result is rejected and does not prove the hook path.
+
+## r5 — lifecycle passed, capture teardown raced
+
+The fixture made six loopback requests and four normal requests with no provider errors. Both Stop receipts were consumed and clear verification succeeded. The watcher sent SIGTERM while recording the second Stop; its input existed but its output and exit files did not, so the result ended in `FileNotFoundError`. This is a rejected capture race, not a lifecycle failure.
+
+## r6 — corrected watcher passes
+
+The corrected watcher waited for both Stop allow outputs and exit 0 before issuing the intentional fixture stop. The run made seven loopback requests and four normal requests, preserved the marker, consumed both receipts, and verified exact clear-to-new-session transitions. The expected fixture SIGTERM ended the run with driver exit 143 after the assertions had passed. This is a passing v48 loopback lifecycle fixture; it is not paid qualification or corpus acceptance.
