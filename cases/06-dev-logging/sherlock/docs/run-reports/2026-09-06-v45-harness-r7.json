@@ -1,0 +1,65 @@
+{
+  "schema": 1,
+  "report": "2026-09-06-v45-harness-r7.md",
+  "status": "rejected",
+  "run_tag": "run-20260906T114955Z-ee5f1ffc2ca7",
+  "launch_at": "2026-09-06T11:50:56.572653Z",
+  "runtime": {
+    "package_version": "v45",
+    "package_sha256": "36a0dfe2c674ac11a13d1dc1b6a0b8c3e720fdb08577c8c9ec5d386cd317e40e",
+    "implementation_commit": "a104458035fc19cf886dc8c60a6e68c759c0e99e",
+    "interactive_driver_sha256": "4ca7eb56657a3de81b900cddce89b813d3ab81e1c693bc1a5574595b3aebbec8",
+    "lifecycle_helper_sha256": "b67790b700d0406aa0909e799b0672b4be8a0ab45088e0400b40b3d3032e4d2c",
+    "qwen_entrypoint_sha256": "68cb29eb7ccc936d78ece5564ef55cae41a55b630e6657dc417c1f2e561cf4c9",
+    "requested_model": "gpt-5.5",
+    "returned_model": "gpt-5.5",
+    "deepseek_used": false
+  },
+  "verdict": {
+    "lifecycle_status": "FAULT",
+    "fault_reason": "OBSERVATION_STALE",
+    "guardian_exit_code": 2,
+    "guardian_observed_at": "2026-09-06T11:52:51.377896Z",
+    "stale_detail_ns": 60009433449,
+    "controller_verdict": "EXCEEDED",
+    "controller_reason": "OBSERVATION_STALE",
+    "controller_wall_seconds_field": 61,
+    "attempts_charged": 7,
+    "controller_survivors": []
+  },
+  "counts": {
+    "expected_tools": 2,
+    "batched_tools": 2,
+    "completed_tools": 1,
+    "rejected_tools": 1,
+    "nested_dispatches": 0,
+    "subagents": 0,
+    "root_boundaries": 5,
+    "session_starts": 1
+  },
+  "observations": [
+    {"sequence": 0, "at": "2026-09-06T11:51:51.367679Z", "pending_operation": "root inspected signed launch and all three successful preflight suites; awaiting Qwen startup"},
+    {"sequence": 1, "at": "2026-09-06T11:53:21.010485Z", "pending_operation": "root inspected completed request b0f4f94208ba42be96a82603d785bc61; skill reload retries and checkpoint resume failure", "late": true}
+  ],
+  "operator_monitoring_error": {
+    "unsupported_flag": "--last-completed-request",
+    "supported_flag": "--last-request",
+    "effect": "argument-validation exit 2 delayed the corrected observation past the deadline"
+  },
+  "secondary_observation": {
+    "checkpoint_resume": "failed: no readable checkpoint.json in requested new workspace",
+    "terminal_cause_claimed": "no; stale observation independently decided the run"
+  },
+  "next_repair": "Use supported observe flags, inspect and observe in one short round trip, observe every 10-20 seconds, and start the first observation earlier.",
+  "evidence": {
+    "mirror": "/Users/a/hack/sherlock-v45-qualification-development-20260906/sherlock-v45-harness-20260906-r7",
+    "inventory_sha256": "2387a7ee8a4ef645085d7ab9f1ef1f18822af7dc02feaab60065cf897d7a2fda",
+    "regular_file_count": 303,
+    "review_index": "/Users/a/hack/sherlock-v45-qualification-development-20260906/r7-review-index.json"
+  },
+  "review": {
+    "claude_model": "sonnet",
+    "claude_effort": "medium",
+    "result": "preserve controller wall_seconds verbatim and mark its definition unresolved; remaining summary internally consistent"
+  }
+}
