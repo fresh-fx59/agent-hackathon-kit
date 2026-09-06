@@ -1,0 +1,4 @@
+{"child_manifest_sha256":null,"child_run_tag":"run-20260906T185843Z-b54bb0961d87","controller_id":"controller-20260906T185843Z-b54bb0961d87","phase":"FIXING","reason":null,"schema":1,"updated_at":"2026-09-06T18:58:43.142Z"}
+{"child_manifest_sha256":null,"child_run_tag":"run-20260906T185843Z-b54bb0961d87","controller_id":"controller-20260906T185843Z-b54bb0961d87","phase":"TESTING","reason":null,"schema":1,"updated_at":"2026-09-06T18:58:43.154Z"}
+{"child_manifest_sha256":null,"child_run_tag":"run-20260906T185843Z-b54bb0961d87","controller_id":"controller-20260906T185843Z-b54bb0961d87","phase":"HEALTH_CHECKING","reason":null,"schema":1,"updated_at":"2026-09-06T18:59:11.274Z"}
+{"child_manifest_sha256":null,"child_run_tag":"run-20260906T185843Z-b54bb0961d87","controller_id":"controller-20260906T185843Z-b54bb0961d87","phase":"BLOCKED","reason":"HEALTH_COMMAND_FAILED","schema":1,"updated_at":"2026-09-06T18:59:21.244Z"}

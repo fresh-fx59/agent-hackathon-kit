@@ -1,0 +1,42 @@
+{
+  "schema": 1,
+  "report": "2026-09-06-v50-harness-r7.md",
+  "status": "rejected_health_command_failed",
+  "acceptance": false,
+  "runtime": {
+    "version": "v50",
+    "package_sha256": "0f95b5a59dcc41500168d3f2dc6df3e237b8c68e9d3666bf181716983d902ee7",
+    "arm_commit": "334d15e8a8f855c3267b38d19ac1ee2aee56d123",
+    "monitor_sha256": "dcf42026de753649a169d6499077e2f1f2570b7c9af5ed104fd7d97ccc3a388e"
+  },
+  "health": {
+    "checked_at": "2026-09-06T18:59:21.213232Z",
+    "lane": "subscription",
+    "requested_model": "gpt-5.5",
+    "sizes_kb": [100, 250, 400],
+    "checks": [
+      {"size_kb": 100, "status": 200, "response_bytes": 682, "returned_model": "gpt-5.5", "error_code": null},
+      {"size_kb": 250, "status": 200, "response_bytes": 681, "returned_model": "gpt-5.5", "error_code": null},
+      {"size_kb": 400, "status": 200, "response_bytes": 0, "returned_model": null, "error_code": "REQUEST_ERROR"}
+    ],
+    "verdict": "DEGRADED",
+    "total_request_bytes": 718819,
+    "total_response_bytes": 1363
+  },
+  "terminal": {
+    "controller_status_at": "2026-09-06T18:59:21.244Z",
+    "controller_phase": "BLOCKED",
+    "controller_reason": "HEALTH_COMMAND_FAILED",
+    "launcher_exit_code": 1,
+    "observer_created": false,
+    "qwen_launched": false,
+    "reviewer_launched": false,
+    "deepseek_requests": 0
+  },
+  "evidence": {
+    "run_tag": "run-20260906T185843Z-b54bb0961d87",
+    "artifact_directory": "artifacts/2026-09-06-v50-harness-subscription-r7-failed/",
+    "remote_inventory_files": 95,
+    "provider_free": true
+  }
+}
