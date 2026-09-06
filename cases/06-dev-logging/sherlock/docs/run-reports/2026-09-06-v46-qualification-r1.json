@@ -1,0 +1,28 @@
+{
+  "schema": 1,
+  "report": "2026-09-06-v46-qualification-r1.md",
+  "status": "launched",
+  "acceptance": false,
+  "model_under_test": "DeepSeek v4 Flash in Qwen Code",
+  "runtime": {
+    "version": "v46",
+    "canonical_sha256": "bc000c21e46c8da3312df80d18e7a833735af38787f6a950b3dbca96f8455bb3",
+    "commit": "162d36a",
+    "manifest_sha256": "5b85a178030a7bf6205b2a9ebf810e9a766ef23df1fe06608290770dc28b3396"
+  },
+  "trace": "run-20260906T132201Z-b3f54f8a4477",
+  "target": "/home/claude-developer/hack/sherlock-v46-qualification-20260906-r1",
+  "harness_output": "/home/claude-developer/hack/sherlock-v46-harness-20260906-r1",
+  "timeline": [
+    {
+      "at": "2026-09-06",
+      "event": "fresh v46 qualification launched; root monitoring signed lifecycle and raw outputs"
+    }
+  ],
+  "pending_gates": [
+    "signed launch and lifecycle verification",
+    "complete raw request/response/tool/report review",
+    "report and corpus acceptance gates",
+    "final verdict after all gates"
+  ]
+}
