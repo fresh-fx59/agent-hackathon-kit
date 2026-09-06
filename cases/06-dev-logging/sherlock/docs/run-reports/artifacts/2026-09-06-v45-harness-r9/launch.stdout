@@ -1,0 +1,20 @@
+shape=history tools=25
+size   ok/total   median s   returned
+ 100K  1/1           2.5     gpt-5.5
+ 250K  1/1           2.7     gpt-5.5
+ 400K  1/1           2.9     gpt-5.5
+
+uploaded 0.69 MB across 3 calls; worst-size fail rate 0.0%
+VERDICT: HEALTHY — fit to run
+▶ budgets: --max-session-turns -1  --max-wall-time -1s  --max-tool-calls -1  QWEN_CODE_WORKFLOW_AGENT_MAX_TURNS=200  (outer timeout 0s)
+▶ generation window: 3600s at 20 tok/s with 120s reserved for the first token ⇒ max_tokens 20000 (fits 69600)
+CONSTRAINT 1 — the provider's generation clock: a 3600s window at 20 tok/s with 120s reserved for the first token delivers at most 69600 output tokens.
+CONSTRAINT 2 — qwen's compaction reserve: COMPACT_MAX_OUTPUT_TOKENS = 20000, the budget a compaction summary needs to finish. Below it the summary is cut at finish_reason=length.
+declared max_tokens = 20000
+✓ the output budget 20000 satisfies every declared constraint
+▶ bench arm=v45  dataset=harness-qualification  corpus=12K  model=gpt-5.5
+  sealed 16 grader tool file(s) into gate-tools/
+  gates.json verdict=blocking
+  sealed 9 grader reference file(s) into reference/
+  trace sealed: active-marker=absent inflight=removed
+  trace self-containment audit: clean

@@ -1,0 +1,80 @@
+{
+  "schema": 1,
+  "report": "2026-09-06-v45-harness-r9.md",
+  "status": "rejected",
+  "run_tag": "run-20260906T123434Z-70189af21fbd",
+  "launch_at": "2026-09-06T12:35:23.667405Z",
+  "runtime": {
+    "package_version": "v45",
+    "package_sha256": "36a0dfe2c674ac11a13d1dc1b6a0b8c3e720fdb08577c8c9ec5d386cd317e40e",
+    "implementation_commit": "9cf727f47326ced3b0dcdf8b13f5e5e54af17f0b",
+    "interactive_driver_sha256": "b5f89ccd917248ba4ac1a0dd527d3062a92a3004c4bab15784f0acddc90da106",
+    "lifecycle_helper_sha256": "b67790b700d0406aa0909e799b0672b4be8a0ab45088e0400b40b3d3032e4d2c",
+    "qwen_sha256": "68cb29eb7ccc936d78ece5564ef55cae41a55b630e6657dc417c1f2e561cf4c9",
+    "requested_model": "gpt-5.5",
+    "returned_model": "gpt-5.5",
+    "deepseek_used": false
+  },
+  "mirror": {
+    "local": "/Users/a/hack/sherlock-v45-qualification-development-20260906/sherlock-v45-harness-20260906-r9",
+    "remote": "/home/claude-developer/hack/sherlock-v45-harness-20260906-r9",
+    "inventory_entries": 474,
+    "regular_files": 415,
+    "symlinks": 0,
+    "inventory_sha256": "96773ac4f3c6558ed65b2ebc78991662e117863565840fb83de23e87b6d46ea4"
+  },
+  "launch_artifacts": {
+    "stdout_sha256": "177de3b8fd7f4d950e6b0505977a145661bf48274ed0b8a1d5f86d804bfccf03",
+    "stderr_sha256": "cfab55922ab75a72aaeeeae31680f2d5f73dd3c002b89044baa51ae1cdd5edba"
+  },
+  "verdict": {
+    "lifecycle_status": "FAULT",
+    "fault_reason": "EXPECTED_TOOL_BATCH_MISSING",
+    "fault_detail": "call_4lI2N5sJW8smNtu70Yq4FiAO",
+    "fault_at": "2026-09-06T12:40:03.880981Z",
+    "controller_verdict": "EXCEEDED",
+    "controller_reason": "LIFECYCLE_GUARDIAN_EXITED",
+    "controller_observed_at": "2026-09-06T12:40:08.858Z",
+    "controller_wall_seconds": 268,
+    "attempts_charged": 27,
+    "status_phase": "RUN_FAILED",
+    "status_exit_code": 0,
+    "driver_return_code": 143
+  },
+  "counts": {
+    "expected_tools": 32,
+    "batched_tools": 28,
+    "completed_tools": 27,
+    "rejected_tools": 1,
+    "nested_dispatches": 10,
+    "subagents": 1,
+    "root_boundaries": 15,
+    "session_starts": 2,
+    "upstream_requests": 27,
+    "upstream_http_200": 27
+  },
+  "chain": [
+    {"at": "2026-09-06T12:39:32Z", "event": "draft_boundary_and_handoff_block_not_shown"},
+    {"at": "2026-09-06T12:39:33.516Z", "event": "stop_reinjection_root_boundary_row_12"},
+    {"at": "2026-09-06T12:39:54Z", "event": "escape_sent_idle"},
+    {"at": "2026-09-06T12:39:55.273034Z", "event": "clear_session_start", "session_id": "a93678d1-8e23-43b8-b495-7193ae82e5c4"},
+    {"at": "2026-09-06T12:39:59Z", "event": "old_request_completed", "request_id": "d494b885d6d54f6195be9845fcfb78bf", "tool_calls": 4},
+    {"at": "2026-09-06T12:40:03.880981Z", "event": "expected_tool_batch_missing"},
+    {"at": "2026-09-06T12:40:04Z", "event": "driver_stopped_sigterm"},
+    {"at": "2026-09-06T12:40:08.858Z", "event": "controller_blocked"}
+  ],
+  "causal_distinction": {
+    "stop_handoff_conflict_observed": true,
+    "missing_batch_single_cause_proven": false,
+    "accepted_report": false,
+    "deepseek_used": false
+  },
+  "evidence": {
+    "review_index": "/Users/a/hack/sherlock-v45-qualification-development-20260906/r9-review-index.json",
+    "run_trace": "runs/run-20260906T123434Z-70189af21fbd",
+    "inventory": "artifacts/2026-09-06-v45-harness-r9/sha256-inventory.json",
+    "launch_stdout": "artifacts/2026-09-06-v45-harness-r9/launch.stdout",
+    "launch_stderr": "artifacts/2026-09-06-v45-harness-r9/launch.stderr"
+  },
+  "next_repair": "Resolve Stop/handoff ordering, fail fast on Stop during handoff, then rerun qualification."
+}
