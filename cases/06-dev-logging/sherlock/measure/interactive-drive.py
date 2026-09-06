@@ -104,6 +104,26 @@ def skill_invocation(skill_command, arguments):
     return skill_command + " " + arguments
 
 
+# Qwen 0.22's interactive TUI derives the UserPromptSubmit projection with
+# `submittedPromptCandidate?.trim()` before it calls submitQuery
+# (startInteractiveUI-J2QSGWPU.js:46096-46100).  This is deliberately a
+# canonical expected value, not a permissive comparison: the hook field must
+# equal this one exact JavaScript-TrimString result.  Keep the typed invocation
+# separately in proof evidence because its original bytes are the driver input.
+QWEN_TRIM_CHARACTERS = (
+    "\u0009\u000a\u000b\u000c\u000d\u0020\u00a0\u1680\u2000\u2001\u2002\u2003"
+    "\u2004\u2005\u2006\u2007\u2008\u2009\u200a\u2028\u2029\u202f"
+    "\u205f\u3000\ufeff"
+)
+
+
+def qwen_submitted_invocation(typed_invocation):
+    """Return Qwen 0.22's exact interactive submitted-prompt projection."""
+    if not isinstance(typed_invocation, str):
+        raise ValueError("typed invocation is not text")
+    return typed_invocation.strip(QWEN_TRIM_CHARACTERS)
+
+
 def skill_body(skill_root):
     """Read the installed skill body and bind the exact bytes used as proof."""
     path = Path(skill_root) / "SKILL.md"
@@ -344,7 +364,8 @@ def monitored_start_evidence(observer_dir, run_nonce, expected_invocation,
     if not roots:
         return {"state": "await_invocation"}
     row, event = roots[0]
-    if event.get("submitted_prompt") != expected_invocation:
+    expected_submitted = qwen_submitted_invocation(expected_invocation)
+    if event.get("submitted_prompt") != expected_submitted:
         raise ClearProofError("first startup prompt is not the expected invocation")
     skill_body_sha256 = expanded_skill_body(skill_root, event.get("prompt"))
     _only_qwen_continuations(roots[1:], row["session_id"])
@@ -353,6 +374,8 @@ def monitored_start_evidence(observer_dir, run_nonce, expected_invocation,
         "startup_input_sha256": row["input_sha256"],
         "expected_invocation_sha256": hashlib.sha256(
             expected_invocation.encode("utf-8")).hexdigest(),
+        "submitted_invocation_sha256": hashlib.sha256(
+            expected_submitted.encode("utf-8")).hexdigest(),
         "skill_body_sha256": skill_body_sha256,
     }
 
@@ -400,8 +423,9 @@ def monitored_clear_evidence(observer_dir, run_nonce, anchor,
                 "new_session_id": clear_row["session_id"]}
 
     invocation_row, invocation_event = later_roots[0]
+    expected_submitted = qwen_submitted_invocation(expected_invocation)
     if (invocation_row["session_id"] != clear_row["session_id"]
-            or invocation_event.get("submitted_prompt") != expected_invocation):
+            or invocation_event.get("submitted_prompt") != expected_submitted):
         raise ClearProofError("first fresh-session prompt is not the expected invocation")
     skill_body_sha256 = expanded_skill_body(skill_root,
                                             invocation_event.get("prompt"))
@@ -414,6 +438,8 @@ def monitored_clear_evidence(observer_dir, run_nonce, anchor,
         "invocation_input_sha256": invocation_row["input_sha256"],
         "expected_invocation_sha256": hashlib.sha256(
             expected_invocation.encode("utf-8")).hexdigest(),
+        "submitted_invocation_sha256": hashlib.sha256(
+            expected_submitted.encode("utf-8")).hexdigest(),
         "skill_body_sha256": skill_body_sha256,
     }
 

@@ -80,6 +80,39 @@ class MonitoredClearProofTest(unittest.TestCase):
         self.assertEqual(proof["skill_body_sha256"],
                          hashlib.sha256(self.skill_body.encode()).hexdigest())
 
+    def test_terminal_newline_matches_exact_qwen_projection_and_retains_typed_hash(self):
+        typed = "/sherlock\n\nreseed exact\n"
+        submitted = "/sherlock\n\nreseed exact"
+        self.append("root-boundary-events.jsonl", phase="UserPromptSubmit",
+                    session="old", monotonic=10, prompt="initial")
+        anchor = DRIVE.capture_clear_anchor(self.observer, self.nonce)
+        self.append("session-start-events.jsonl", phase="SessionStart",
+                    session="new", monotonic=20, source="clear", cwd="/workspace")
+        self.append("root-boundary-events.jsonl", phase="UserPromptSubmit",
+                    session="new", monotonic=30, prompt=self.expanded(typed),
+                    submitted_prompt=submitted)
+
+        proof = DRIVE.monitored_clear_evidence(
+            self.observer, self.nonce, anchor, typed, self.skill_root)
+        self.assertEqual(proof["expected_invocation_sha256"],
+                         hashlib.sha256(typed.encode()).hexdigest())
+        self.assertEqual(proof["submitted_invocation_sha256"],
+                         hashlib.sha256(submitted.encode()).hexdigest())
+
+    def test_startup_terminal_newline_keeps_typed_and_canonical_hashes(self):
+        typed = "/sherlock\n\nstartup exact\n"
+        submitted = "/sherlock\n\nstartup exact"
+        self.append("root-boundary-events.jsonl", phase="UserPromptSubmit",
+                    session="new", monotonic=10, prompt=self.expanded(typed),
+                    submitted_prompt=submitted)
+
+        proof = DRIVE.monitored_start_evidence(
+            self.observer, self.nonce, typed, self.skill_root)
+        self.assertEqual(proof["expected_invocation_sha256"],
+                         hashlib.sha256(typed.encode()).hexdigest())
+        self.assertEqual(proof["submitted_invocation_sha256"],
+                         hashlib.sha256(submitted.encode()).hexdigest())
+
     def test_empty_qwen_continuation_after_combined_invocation_is_ignored(self):
         anchor = self.chain()
         self.append("root-boundary-events.jsonl", phase="UserPromptSubmit",

@@ -81,7 +81,7 @@ def main():
         hooks[event]=[{'hooks':[{'type':'command','command':command,'timeout':60000}]}]
     qdir=workspace/'.qwen'; qdir.mkdir()
     (qdir/'settings.json').write_text(json.dumps({'hooks':hooks,'skills':{'directories':[str(catalog)]}})+'\n')
-    task='SYNTHETIC-START-ONLY: run the toy triage handoff and end the turn.'
+    task='SYNTHETIC-START-ONLY: run the toy triage handoff and end the turn.\n'
     reseed='SYNTHETIC-RESEED-ONLY: run a partial draft handoff and end the turn.'
     normal_requests=[]
     requests=[]; provider_events=[]; errors=[]; inflight={}; lock=threading.Lock()
@@ -109,7 +109,7 @@ def main():
                 else:
                     with lock: ordinal=len(normal_requests);normal_requests.append(index)
                     if ordinal in (0,2):
-                        expected=task if ordinal==0 else reseed
+                        expected=task.rstrip('\n') if ordinal==0 else reseed
                         visible=json.dumps(body['messages'],ensure_ascii=False)
                         if expected not in visible: raise AssertionError('contextless skill request before task/reseed')
                         args=['--done','triage'] if ordinal==0 else ['--done','draft','--partial']
@@ -174,7 +174,7 @@ def main():
         if rc!=143 or not stop_requested:raise AssertionError('driver did not reach the intentional fixture stop')
         prompts=[r for _,r in rows('UserPromptSubmit') if 'submitted_prompt' in r]
         if len(prompts)!=2:raise AssertionError('expected exactly startup and combined reseed submissions')
-        if prompts[0]['submitted_prompt']!='/sherlock\n\n'+task:raise AssertionError('startup arguments changed')
+        if prompts[0]['submitted_prompt']!='/sherlock\n\n'+task.rstrip('\n'):raise AssertionError('startup arguments changed beyond Qwen terminal newline trimming')
         if prompts[1]['submitted_prompt']!='/sherlock '+reseed:raise AssertionError('combined reseed not exact')
         clear_rows=[(p,r) for p,r in rows('SessionStart') if r.get('source')=='clear']
         clears=[r for _,r in clear_rows]

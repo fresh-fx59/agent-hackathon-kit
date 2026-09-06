@@ -26,6 +26,23 @@ class SingleSkillInvocationTest(unittest.TestCase):
         invocation = "/sherlock\n\nInvestigate fresh corpus\n"
         self.assertEqual(DRIVE.skill_invocation("/sherlock", invocation), invocation)
 
+    def test_qwen_submission_projection_removes_terminal_newline_without_retyping(self):
+        typed = "/sherlock\n\nInvestigate fresh corpus\n"
+
+        self.assertEqual(DRIVE.qwen_submitted_invocation(typed),
+                         "/sherlock\n\nInvestigate fresh corpus")
+        self.assertEqual(DRIVE.skill_invocation("/sherlock", typed), typed)
+
+    def test_qwen_projection_uses_ecmascript_trim_character_set_exactly(self):
+        cases = (
+            ("\ufeff/sherlock task\u2029", "/sherlock task"),
+            ("\u0085/sherlock task\u0085", "\u0085/sherlock task\u0085"),
+            ("/sherlock  preserve\tinterior\nspacing", "/sherlock  preserve\tinterior\nspacing"),
+        )
+        for typed, expected in cases:
+            with self.subTest(typed=typed):
+                self.assertEqual(DRIVE.qwen_submitted_invocation(typed), expected)
+
     def test_requires_nonempty_arguments_and_only_recognizes_exact_prefix(self):
         for arguments in ("", "   ", "/sherlock", "/sherlock   "):
             with self.subTest(arguments=arguments):
