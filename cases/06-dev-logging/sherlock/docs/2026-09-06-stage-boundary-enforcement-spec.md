@@ -1,0 +1,143 @@
+# Scoped repair: enforce Sherlock stage boundaries
+
+Status: implementation authorized; critique addressed below.
+
+## Goal contribution and observed failure
+
+The generic Winevtx/independent corpus objective requires bounded fresh sessions
+without abandoning required evidence. V48 subscription qualification r5 proved
+startup, triage, tool capture and continuous supervision, then violated the
+runtime instruction to end the turn after a successful stage handoff.
+
+Root called checkpoint.py handoff --done triage at14:58:31UTC. Its exact successful
+result printed the required no-continuation block. The root model nevertheless
+continued report/citation/coverage tools in the same session. The driver correctly
+waited for a consumed Stop receipt and natural idle; it did not send Escape or
+force /clear. Root stopped the segment with STAGE_BOUNDARY_VIOLATION at15:01:14.
+No target-provider contact occurred. Original failures stay rejected.
+
+## Hypotheses and bounded choices
+
+1. More prose: weak option because the model already received an explicit stop
+   instruction in both skill and actual tool output.
+2. Portable workspace PreToolUse boundary gate: candidate. Deny tools once a
+   valid pending handoff exists, explain the exact block and required end-turn,
+   then allow the next stage only after receipt consumption and fresh session.
+   Inspect actual Qwen denied-tool lifecycle before selecting this design.
+3. PostToolUse native stop control: inspect installed Qwen semantics; only viable
+   if it preserves tool accounting, Stop validation and natural completion.
+
+Do not build a new orchestration service, alter findings/gates, add aggregate
+caps, force client interruption, or seed reports. Preserve v48; any runtime change
+becomes new immutable v49 before execution. Harness-only edits use code revision.
+
+## Expected files if candidate 2 is proven
+
+New-version runtime boundary hook and shared receipt validation, workspace hook
+installation in corporate-settings.py, new-version README/SKILL installation
+contract, focused tests plus the existing installed-Qwen localhost driver fixture.
+Final file scope depends on source findings; avoid unrelated cleanup.
+
+## Acceptance to prove before paid work
+
+- Reproduce current model continuing a tool after real handoff on pinned Qwen0.22.
+- The next forbidden tool has no effects; its exact denial and returned error
+  remain paired/accounted by the existing lifecycle capture.
+- Pending and consumed same-session receipts prevent stage work; a verified new
+  session after Stop consumption can continue. Unrelated sessions stay unaffected.
+- Invalid/stale/seal-mismatched handoffs cannot authorize advancement. Final
+  delivery still requires all four unchanged validators and retained evidence.
+- Root/child lifecycle and a response with multiple tool calls remain coherent;
+  do not silently lose already-inflight tool results.
+- Actual installed-Qwen fixture proves denial -> natural end/Stop -> /clear ->
+  fresh combined skill+task -> next stage, no forced Escape.
+- Focused regression checks and one Claude subscription review; version/hash then
+  fresh subscription qualification, approved paid partial/full and cold corpus.
+
+## Research and timeline
+
+- 2026-09-06 — Official Qwen hooks documentation inspected:
+  https://qwenlm.github.io/qwen-code-docs/en/users/features/hooks/ . It documents
+  PreToolUse permissionDecision deny returning an error to the model, and separate
+  PostToolUseFailure events. Installed0.22 implementation must decide whether a
+  denied invocation produces those events; current docs alone do not establish it.
+- 2026-09-06 — Terra high delegated installed-source/portable-design analysis;
+  Luna report worker traces the complete observed cause. Root owns final scope.
+
+## Selected implementation
+
+Use a portable `tools/boundarycheck.py` PreToolUse wrapper in new v49, sharing
+receipt validation with stopcheck. Wrapper presence is the explicit capability;
+never invoke older stopcheck with unknown arguments (v48 ignores arguments).
+Pending validated non-final handoff denies new tools. Consumed handoff denies
+its recorded stop session and allows a distinct fresh session. Missing/final
+handoffs preserve existing behavior. Invalid receipt/state/seal/history/work-path
+fails closed. Only Stop consumes receipts; stage pause preserves the marker.
+
+Monitored settings install ONE lifecycle-owned PreToolUse command. It invokes
+only the selected, bound absolute boundarycheck path with the exact incoming
+bytes, validates its JSON output, records that same output in the real pre pair,
+and emits it to Qwen. Runtime failure or invalid output is a permanent lifecycle
+fault with fail-closed output. No arbitrary supplied shell command is accepted.
+Standalone settings register the portable wrapper directly. Capability selection
+keeps older versions unchanged. Existing hook collisions remain errors except
+this explicitly recognized composition. Changed helper SHA is bound into every
+fresh preparation; old prepared attempts cannot be reused.
+
+Installed Qwen0.22 source proves Pre denial returns execution_denied/not_started
+without PostToolUseFailure; PostToolBatch retains the terminal error. Existing
+accounting recognizes a recorded pre continue:false as complete. Separate hooks
+would record allow before the other denial is aggregated, leaving a dangling pair.
+Thus composition is required, with no invented post event or blanket error bypass.
+
+The boundary applies to PreToolUse admissions after a committed receipt. Already
+admitted calls and subcommands cannot be retroactively cancelled; retain their
+results and require reconciliation before Stop/clear. Do not add serialization.
+Do not expand this repair to observer publication races or other unrelated fixes.
+
+Root owns the installed-Qwen fixture extension: deliberately request a sentinel
+write after handoff, prove it is denied without effects, then natural Stop, clear,
+fresh combined invocation and next-stage continuation. Implementation worker owns
+v49 runtime, settings/prepare composition, lifecycle capture and focused unit tests.
+One subscription Claude review follows verification. Register the reviewed v49
+snapshot before actual Qwen execution; any later runtime change needs v50.
+
+## Source verification
+
+- 2026-09-06 — Installed Qwen0.22 chunk-T6XLJRQY.js lines42100–42156 and
+  64034–64079 establish pre-denial behavior; lines65056 onward retain batch errors.
+  PostToolUse stop control converts successful execution into denial and was rejected.
+- 2026-09-06 — target-contract-probe.py lines717–727 reject hook collisions;
+  lifecycle-supervisor.py records its own output in pre pairs. Composed output is
+  necessary to preserve truthful denied-tool accounting. V48 stopcheck has no
+  argument parser, motivating a separate capability wrapper.
+
+## Critique disposition and precise limits
+
+2026-09-06 — Codex gpt-5.6-sol low critique returned four specification blockers
+(input17565, cached10624, output461). Addressed before implementation:
+
+1. Guarantee is explicitly admission-time, not retroactive cancellation. Test a
+   handoff plus another already-admitted call in one batch and retain/account its
+   result. Test a subsequent PreToolUse after committed receipt has no effects.
+2. Session identity comes from Qwen's hook event, not tool arguments. Stop stamps
+   stop_session_id; the gate compares the current hook session_id. Missing or
+   malformed identity with an active receipt denies. Child tools inherit the
+   workspace boundary; an active child must reconcile before root Stop/clear.
+   Fresh driver authorization additionally requires captured SessionStart(clear)
+   and combined skill/task proof; a portable hook alone does not authenticate
+   a malicious local process capable of changing workspace files/hook payloads.
+3. Denial does not guarantee model compliance. Actual fixture proves the supported
+   lifecycle; live qualification must reach natural Stop. Repeated unchanged
+   denied continuation with no progress is a demonstrated loop: supervisor records
+   terminal boundary fault and stops owned processes. No new aggregate cap.
+4. No active Sherlock marker: existing unrelated-work behavior. Active marker
+   with absent checkpoint or absent pending_handoff: no boundary claim, allow.
+   Existing unreadable/malformed checkpoint, nonobject receipt, invalid receipt,
+   stale hashes or unsafe paths: deny. Valid final receipt: existing final Stop
+   gates remain authoritative. Atomic checkpoint writes do not expose partial
+   JSON; externally corrupted/partial JSON denies until repaired outside the
+   blocked model turn. Missing required handoff/history for a receipt denies.
+
+The four original review points remain preserved; these are explicit scope and
+acceptance corrections, not a claim that pre-hooks cancel admitted operations.
