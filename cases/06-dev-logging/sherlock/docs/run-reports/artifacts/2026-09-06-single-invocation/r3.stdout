@@ -1,0 +1,2320 @@
+{"at": "2026-09-06T13:49:16Z", "event": "started", "detail": "node /home/claude-developer/.local/lib/node_modules/@qwen-code/qwen-code/cli-entry.js --auth-type openai --model mock --approval-mode yolo"}
+{"at": "2026-09-06T13:49:25Z", "event": "typed", "detail": "/sherlock\n\nSYNTHETIC-START-ONLY: run the toy triage handoff and end the turn."}
+{"at": "2026-09-06T13:49:30Z", "event": "stage_advanced", "detail": "draft"}
+{"at": "2026-09-06T13:49:30Z", "event": "progress", "detail": "draft — first boundary in this stage"}
+{"at": "2026-09-06T13:49:30Z", "event": "handoff_block_on_screen", "detail": "draft — closed triage, 368661 B on screen, 1 mark(s), witness latch"}
+{"at": "2026-09-06T13:49:30Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:49:30Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:49:31Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:49:31Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:49:32Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:49:32Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:49:33Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:49:33Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:49:33Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:49:34Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:49:34Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:49:35Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:49:35Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:49:36Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:49:36Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:49:36Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:49:37Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:49:37Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:49:38Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:49:38Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:49:38Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:49:39Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:49:39Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:49:40Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:49:40Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:49:40Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:49:41Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:49:41Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:49:42Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:49:42Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:49:43Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:49:43Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:49:43Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:49:44Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:49:44Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:49:45Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:49:45Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:49:45Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:49:46Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:49:46Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:49:47Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:49:47Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:49:47Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:49:48Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:49:48Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:49:49Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:49:49Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:49:49Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:49:50Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:49:50Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:49:51Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:49:51Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:49:51Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:49:52Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:49:52Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:49:53Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:49:53Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:49:54Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:49:54Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:49:54Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:49:55Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:49:55Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:49:56Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:49:56Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:49:56Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:49:57Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:49:57Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:49:58Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:49:58Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:49:58Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:49:59Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:49:59Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:50:00Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:50:00Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:50:01Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:50:01Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:50:02Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:50:02Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:50:02Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:50:03Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:50:03Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:50:04Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:50:04Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:50:05Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:50:05Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:50:05Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:50:06Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:50:06Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:50:07Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:50:07Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:50:08Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:50:08Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:50:08Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:50:09Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:50:09Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:50:10Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:50:10Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:50:11Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:50:11Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:50:12Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:50:12Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:50:12Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:50:13Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:50:13Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:50:14Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:50:14Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:50:15Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:50:15Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:50:16Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:50:16Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:50:16Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:50:17Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:50:17Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:50:18Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:50:18Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:50:18Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:50:19Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:50:19Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:50:20Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:50:20Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:50:21Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:50:21Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:50:21Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:50:22Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:50:22Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:50:23Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:50:23Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:50:23Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:50:24Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:50:24Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:50:25Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:50:25Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:50:25Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:50:26Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:50:26Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:50:27Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:50:27Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:50:27Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:50:28Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:50:28Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:50:29Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:50:29Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:50:29Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:50:30Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:50:30Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:50:31Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:50:31Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:50:32Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:50:32Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:50:32Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:50:33Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:50:33Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:50:34Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:50:34Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:50:34Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:50:35Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:50:35Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:50:36Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:50:36Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:50:36Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:50:37Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:50:37Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:50:37Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:50:38Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:50:38Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:50:39Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:50:39Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:50:40Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:50:40Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:50:40Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:50:41Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:50:41Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:50:42Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:50:42Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:50:42Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:50:43Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:50:43Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:50:44Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:50:44Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:50:44Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:50:45Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:50:45Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:50:46Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:50:46Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:50:47Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:50:47Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:50:47Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:50:48Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:50:48Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:50:48Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:50:49Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:50:49Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:50:50Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:50:50Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:50:51Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:50:51Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:50:51Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:50:52Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:50:52Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:50:53Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:50:53Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:50:53Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:50:54Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:50:54Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:50:55Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:50:55Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:50:55Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:50:56Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:50:56Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:50:57Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:50:57Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:50:58Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:50:58Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:50:58Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:50:59Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:50:59Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:51:00Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:51:00Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:51:00Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:51:01Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:51:01Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:51:02Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:51:02Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:51:02Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:51:03Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:51:03Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:51:04Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:51:04Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:51:05Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:51:05Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:51:05Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:51:06Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:51:06Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:51:07Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:51:07Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:51:07Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:51:08Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:51:08Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:51:09Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:51:09Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:51:09Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:51:10Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:51:10Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:51:11Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:51:11Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:51:12Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:51:12Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:51:12Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:51:13Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:51:13Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:51:14Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:51:14Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:51:14Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:51:15Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:51:15Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:51:16Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:51:16Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:51:17Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:51:17Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:51:17Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:51:18Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:51:18Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:51:19Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:51:19Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:51:20Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:51:20Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:51:20Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:51:21Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:51:21Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:51:22Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:51:22Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:51:22Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:51:23Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:51:23Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:51:24Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:51:24Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:51:24Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:51:25Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:51:25Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:51:26Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:51:26Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:51:27Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:51:27Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:51:27Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:51:28Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:51:28Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:51:29Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:51:29Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:51:29Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:51:30Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:51:30Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:51:30Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:51:31Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:51:31Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:51:32Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:51:32Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:51:33Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:51:33Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:51:33Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:51:34Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:51:34Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:51:35Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:51:35Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:51:36Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:51:36Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:51:36Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:51:37Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:51:37Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:51:38Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:51:38Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:51:39Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:51:39Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:51:39Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:51:40Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:51:40Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:51:41Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:51:41Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:51:41Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:51:42Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:51:42Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:51:43Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:51:43Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:51:44Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:51:44Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:51:44Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:51:45Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:51:45Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:51:46Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:51:46Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:51:47Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:51:47Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:51:47Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:51:48Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:51:48Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:51:49Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:51:49Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:51:50Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:51:50Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:51:50Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:51:51Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:51:51Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:51:52Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:51:52Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:51:53Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:51:53Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:51:53Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:51:54Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:51:54Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:51:55Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:51:55Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:51:55Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:51:56Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:51:56Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:51:57Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:51:57Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:51:58Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:51:58Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:51:58Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:51:59Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:51:59Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:52:00Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:52:00Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:52:01Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:52:01Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:52:01Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:52:02Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:52:02Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T13:52:03Z", "event": "STOPPED", "detail": "owner sent SIGTERM; terminating the PTY process group"}
+{
+  "driver_events": [
+    {
+      "at": "2026-09-06T13:49:16Z",
+      "detail": "node /home/claude-developer/.local/lib/node_modules/@qwen-code/qwen-code/cli-entry.js --auth-type openai --model mock --approval-mode yolo",
+      "event": "started"
+    },
+    {
+      "at": "2026-09-06T13:49:25Z",
+      "detail": "/sherlock\n\nSYNTHETIC-START-ONLY: run the toy triage handoff and end the turn.",
+      "event": "typed"
+    },
+    {
+      "at": "2026-09-06T13:49:30Z",
+      "detail": "draft",
+      "event": "stage_advanced"
+    },
+    {
+      "at": "2026-09-06T13:49:30Z",
+      "detail": "draft \u2014 first boundary in this stage",
+      "event": "progress"
+    },
+    {
+      "at": "2026-09-06T13:49:30Z",
+      "detail": "draft \u2014 closed triage, 368661 B on screen, 1 mark(s), witness latch",
+      "event": "handoff_block_on_screen"
+    },
+    {
+      "at": "2026-09-06T13:49:30Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:49:30Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:49:31Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:49:31Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:49:32Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:49:32Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:49:33Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:49:33Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:49:33Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:49:34Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:49:34Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:49:35Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:49:35Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:49:36Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:49:36Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:49:36Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:49:37Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:49:37Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:49:38Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:49:38Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:49:38Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:49:39Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:49:39Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:49:40Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:49:40Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:49:40Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:49:41Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:49:41Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:49:42Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:49:42Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:49:43Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:49:43Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:49:43Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:49:44Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:49:44Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:49:45Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:49:45Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:49:45Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:49:46Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:49:46Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:49:47Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:49:47Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:49:47Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:49:48Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:49:48Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:49:49Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:49:49Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:49:49Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:49:50Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:49:50Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:49:51Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:49:51Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:49:51Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:49:52Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:49:52Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:49:53Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:49:53Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:49:54Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:49:54Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:49:54Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:49:55Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:49:55Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:49:56Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:49:56Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:49:56Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:49:57Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:49:57Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:49:58Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:49:58Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:49:58Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:49:59Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:49:59Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:50:00Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:50:00Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:50:01Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:50:01Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:50:02Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:50:02Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:50:02Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:50:03Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:50:03Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:50:04Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:50:04Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:50:05Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:50:05Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:50:05Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:50:06Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:50:06Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:50:07Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:50:07Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:50:08Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:50:08Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:50:08Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:50:09Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:50:09Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:50:10Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:50:10Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:50:11Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:50:11Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:50:12Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:50:12Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:50:12Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:50:13Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:50:13Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:50:14Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:50:14Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:50:15Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:50:15Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:50:16Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:50:16Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:50:16Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:50:17Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:50:17Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:50:18Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:50:18Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:50:18Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:50:19Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:50:19Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:50:20Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:50:20Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:50:21Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:50:21Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:50:21Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:50:22Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:50:22Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:50:23Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:50:23Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:50:23Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:50:24Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:50:24Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:50:25Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:50:25Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:50:25Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:50:26Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:50:26Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:50:27Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:50:27Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:50:27Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:50:28Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:50:28Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:50:29Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:50:29Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:50:29Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:50:30Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:50:30Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:50:31Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:50:31Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:50:32Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:50:32Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:50:32Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:50:33Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:50:33Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:50:34Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:50:34Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:50:34Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:50:35Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:50:35Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:50:36Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:50:36Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:50:36Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:50:37Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:50:37Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:50:37Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:50:38Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:50:38Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:50:39Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:50:39Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:50:40Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:50:40Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:50:40Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:50:41Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:50:41Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:50:42Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:50:42Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:50:42Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:50:43Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:50:43Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:50:44Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:50:44Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:50:44Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:50:45Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:50:45Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:50:46Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:50:46Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:50:47Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:50:47Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:50:47Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:50:48Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:50:48Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:50:48Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:50:49Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:50:49Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:50:50Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:50:50Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:50:51Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:50:51Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:50:51Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:50:52Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:50:52Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:50:53Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:50:53Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:50:53Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:50:54Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:50:54Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:50:55Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:50:55Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:50:55Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:50:56Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:50:56Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:50:57Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:50:57Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:50:58Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:50:58Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:50:58Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:50:59Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:50:59Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:51:00Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:51:00Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:51:00Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:51:01Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:51:01Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:51:02Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:51:02Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:51:02Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:51:03Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:51:03Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:51:04Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:51:04Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:51:05Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:51:05Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:51:05Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:51:06Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:51:06Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:51:07Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:51:07Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:51:07Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:51:08Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:51:08Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:51:09Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:51:09Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:51:09Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:51:10Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:51:10Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:51:11Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:51:11Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:51:12Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:51:12Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:51:12Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:51:13Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:51:13Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:51:14Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:51:14Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:51:14Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:51:15Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:51:15Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:51:16Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:51:16Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:51:17Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:51:17Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:51:17Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:51:18Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:51:18Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:51:19Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:51:19Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:51:20Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:51:20Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:51:20Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:51:21Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:51:21Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:51:22Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:51:22Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:51:22Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:51:23Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:51:23Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:51:24Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:51:24Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:51:24Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:51:25Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:51:25Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:51:26Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:51:26Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:51:27Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:51:27Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:51:27Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:51:28Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:51:28Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:51:29Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:51:29Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:51:29Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:51:30Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:51:30Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:51:30Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:51:31Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:51:31Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:51:32Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:51:32Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:51:33Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:51:33Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:51:33Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:51:34Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:51:34Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:51:35Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:51:35Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:51:36Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:51:36Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:51:36Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:51:37Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:51:37Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:51:38Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:51:38Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:51:39Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:51:39Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:51:39Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:51:40Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:51:40Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:51:41Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:51:41Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:51:41Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:51:42Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:51:42Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:51:43Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:51:43Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:51:44Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:51:44Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:51:44Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:51:45Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:51:45Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:51:46Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:51:46Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:51:47Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:51:47Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:51:47Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:51:48Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:51:48Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:51:49Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:51:49Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:51:50Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:51:50Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:51:50Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:51:51Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:51:51Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:51:52Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:51:52Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:51:53Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:51:53Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:51:53Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:51:54Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:51:54Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:51:55Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:51:55Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:51:55Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:51:56Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:51:56Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:51:57Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:51:57Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:51:58Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:51:58Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:51:58Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:51:59Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:51:59Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:52:00Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:52:00Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:52:01Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:52:01Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:52:01Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:52:02Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:52:02Z",
+      "detail": "/clear: Stop has not accepted the stage pause",
+      "event": "waiting_for_monitored_idle"
+    },
+    {
+      "at": "2026-09-06T13:52:03Z",
+      "detail": "owner sent SIGTERM; terminating the PTY process group",
+      "event": "STOPPED"
+    }
+  ],
+  "driver_exit": 143,
+  "error": "AssertionError('driver did not reach the intentional fixture stop')",
+  "fixture_stop_requested": [],
+  "normal_request_indices": [
+    0,
+    1
+  ],
+  "passed": false,
+  "provider": "loopback-only",
+  "provider_errors": [],
+  "provider_events": [
+    {
+      "completed_at_ns": 1788702560779429020,
+      "index": 0
+    },
+    {
+      "completed_at_ns": 1788702569529640427,
+      "index": 1
+    },
+    {
+      "completed_at_ns": 1788702569782904723,
+      "index": 2
+    },
+    {
+      "completed_at_ns": 1788702571865070756,
+      "index": 3
+    },
+    {
+      "completed_at_ns": 1788702575903234189,
+      "index": 4
+    },
+    {
+      "completed_at_ns": 1788702581987332927,
+      "index": 5
+    },
+    {
+      "completed_at_ns": 1788702590033876548,
+      "index": 6
+    }
+  ],
+  "request_count": 7,
+  "scope": "full driver startup and first clear; intentional fixture stop after second pause",
+  "skill_files": {
+    "README.md": "24a876acafca7550299a8f2d56991fca7506fe613abc2f44aeb9d1fc6ec93faf",
+    "SKILL.md": "f11dcfb746b865629f93665338c42c0e0f6217f7620d701308262660db92c82f",
+    "agents/sherlock-triage.md": "1f4b6ff70b63d9ca297bbe546891cc305173bb1e3f09ee7ae9936302d1ffc67f",
+    "reference/bulk-closure.md": "a49ded52c39e19a9c63609e9a4bb9b582fda8a93e51c9b93b5ad67c57a799106",
+    "reference/code-and-spec.md": "7991bc2716114e3ec646b2d8d9e1b9279431ffc944ab0b6e15373d2bb4b43178",
+    "reference/draft-and-verify.md": "e015430f195efbc7524b3c2411825401d5f330bf5110ea488f10197f1e2e9a5a",
+    "reference/enum-tables.tsv": "17dc22b4ad6abe46d23ac094179d25ce3ae3f0fbb00f7add0e0fea55cb397619",
+    "reference/logon-failure-reason.json": "61043b304f4d42b89b958f56046dbfc7d73b1fb5170270045901f118b5c0fb55",
+    "reference/population-scope.json": "658313dbe6254b1c698664de92fe081bc6f1146b5e4633f988a57c144ed83d4c",
+    "reference/report-contract.corporate.json": "97063f3a5ac3bb8a4b2613f8352c5803d8de614ea9cb37f97a91728afabd432d",
+    "reference/report-format.md": "11180e3c12c09ce5000d87c7955a5755468c97327e10973207886d4862b40b23",
+    "reference/tools.md": "2a71215fc1d2dbe719eead81864df8e3e0ae18eb0df3e8ab14d27a1f2283e098",
+    "tools/brief.py": "276fef136bd929897921091e417de6d4aae6947b365b6a6b05abb7623f8295a5",
+    "tools/checkpoint.py": "62040bf4427eb67c1b7df4d12a9dbdfa1b185403f0879c6c3b7d21db9a658c3b",
+    "tools/cite.py": "4e160e28fee7c0320041d033caa150d018ca8ad8a0fd9168203f8158ff5974f5",
+    "tools/citecheck.py": "9bd54583d622007ce3679ea042b58446beb75a483119f0c7a2a2846647c9da37",
+    "tools/covermap.py": "5c688f4d26ab373c48be84e14b958b21191765e777a51fce0863f3a8ac111b92",
+    "tools/finalize.py": "fb23ba8dc70f9be882d9c08b728273ca0c3e7e5c0e0fd99911ab7d09c7f4354f",
+    "tools/ingest.py": "44efe1620c880378e291a0c0d873ebd4d4f307fb993222d8693436e2a6dfe409",
+    "tools/logjoin.py": "97216118ffff64d23eddbb3323d74d57090afe58c16a00648503755562207db6",
+    "tools/logmap.py": "74b911f8d93682f44b8101de7e3eb222b3285eed861affa747d872b93a9f31fd",
+    "tools/reportcheck.py": "5c762a0c1867ea691fcf107ccfb9fa17a5d55fcebdf505b114d72f73ce266dda",
+    "tools/rollover.py": "47804ab04f9b3f9caf933a219a7a3e946820ddd6a5a1dd91808e999226ef378b",
+    "tools/stage-corpus.py": "93f0348a706304fb0608f98588fe67ff716a7895e3ac76766b11b3a03d944a54",
+    "tools/statecheck.py": "895d27d242eb4a6bdf675c97d9995d26c3086be29df4ae2c894186f8d3dfa105",
+    "tools/stopcheck.py": "4b4d6dcfbfc6b0c6684d3d4b9f8f8edd5b764820a578df642e326cd35ca1bf4e",
+    "tools/triagecheck.py": "a22b745173df0549839bfcc622c1fd942dc166a26ff6a54e05e817729bcb2aaa",
+    "tools/worklist.py": "dbc6fdf959e21e460f143a9641d83044bd24971b85e905e22fa2f41b6b64b269"
+  },
+  "source_sha256": {
+    "driver": "0de7043aad2431fb5342be94d57d62d5baf58ac341f2d8c3403f23c353fdaddf",
+    "fixture": "9126900768703d4d148344093cef463f1ec266188897fdfc8506a8eb9bfe61ec",
+    "helper": "b67790b700d0406aa0909e799b0672b4be8a0ab45088e0400b40b3d3032e4d2c",
+    "qwen": "68cb29eb7ccc936d78ece5564ef55cae41a55b630e6657dc417c1f2e561cf4c9"
+  }
+}

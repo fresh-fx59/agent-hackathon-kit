@@ -1,0 +1,70 @@
+{
+  "schema": 1,
+  "report": "2026-09-06-single-invocation.md",
+  "status": "development_evidence_only",
+  "acceptance": false,
+  "provider_calls": 0,
+  "runtime_lane": "v47 candidate",
+  "limitations": [
+    "r1 and r2 used prior v46 driver snapshot 162d36a",
+    "loopback-only",
+    "no Winevent corpus acceptance"
+  ],
+  "experiments": [
+    {
+      "id": "r1",
+      "status": "rejected_fixture_timing",
+      "passed": false,
+      "settle_seconds": 0.5,
+      "typed_skill_at": "2026-09-06T13:40:49Z",
+      "typed_task_at": "2026-09-06T13:40:52Z",
+      "first_session_start_at": "2026-09-06T13:40:53.974Z",
+      "provider_requests": 0,
+      "termination": "initial SIGALRM swallowed; owned driver terminated by SIGTERM at 2026-09-06T14:01:51Z",
+      "inventory_entries": 1454,
+      "inventory_artifact": "artifacts/2026-09-06-single-invocation/inventory-r1.sha256.json",
+      "fixture_artifact": "artifacts/2026-09-06-single-invocation/r1/qwen_single_invocation_smoke.py",
+      "fixture_sha256": "ece22e74ec8756f6f0909ec68a1f6d5af50fe12f155075fca443e2254c44a793"
+    },
+    {
+      "id": "r2",
+      "status": "expected_red_contextless_request",
+      "passed": false,
+      "settle_seconds": 6,
+      "provider": "loopback-only",
+      "provider_requests": 1,
+      "provider_errors": [
+        "AssertionError('contextless skill request before task/reseed')"
+      ],
+      "driver_error": "AssertionError('driver did not reach the intentional fixture stop')",
+      "termination": "driver exit 143 after owned termination",
+      "inventory_entries": 1456,
+      "inventory_artifact": "artifacts/2026-09-06-single-invocation/inventory-r2.sha256.json",
+      "fixture_artifact": "artifacts/2026-09-06-single-invocation/r2/qwen_single_invocation_smoke.py",
+      "fixture_sha256": "9126900768703d4d148344093cef463f1ec266188897fdfc8506a8eb9bfe61ec"
+    },
+    {
+      "id": "r3",
+      "status": "combined_startup_no_skill_stop",
+      "passed": false,
+      "provider": "loopback-only",
+      "provider_requests": 7,
+      "normal_request_indices": [
+        0,
+        1
+      ],
+      "provider_errors": [],
+      "driver_error": "AssertionError('driver did not reach the intentional fixture stop')",
+      "termination": "owned driver SIGTERM at 2026-09-06T13:52:03Z after Stop remained unaccepted",
+      "skill_scoped_stop_executions": 0,
+      "receipt": "pending",
+      "inventory_entries": 1499,
+      "inventory_artifact": "artifacts/2026-09-06-single-invocation/inventory-r3.sha256.json",
+      "fixture_artifact": "artifacts/2026-09-06-single-invocation/r3/qwen_single_invocation_smoke.py",
+      "fixture_sha256": "9126900768703d4d148344093cef463f1ec266188897fdfc8506a8eb9bfe61ec",
+      "driver_sha256": "0de7043aad2431fb5342be94d57d62d5baf58ac341f2d8c3403f23c353fdaddf",
+      "interpretation": "combined startup removed the r2 contextless request, but repeated auxiliary responses did not produce an accepted skill-scoped Stop"
+    }
+  ],
+  "next_step": "Run the corrected fixture against the v47 candidate; require an explicit skill-scoped Stop receipt before paid qualification."
+}
