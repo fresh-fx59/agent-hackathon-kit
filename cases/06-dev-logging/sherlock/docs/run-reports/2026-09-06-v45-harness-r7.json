@@ -60,6 +60,14 @@
   "review": {
     "claude_model": "sonnet",
     "claude_effort": "medium",
-    "result": "preserve controller wall_seconds verbatim and mark its definition unresolved; remaining summary internally consistent"
+    "actual_model": "claude-sonnet-5",
+    "result": "preserve controller wall_seconds verbatim and mark its definition unresolved; remaining summary internally consistent",
+    "output_tokens": 1834,
+    "thinking_tokens": 1550,
+    "cache_read_input_tokens": 3289,
+    "cache_creation_input_tokens": 14186,
+    "reported_cost_usd": 0.0757458,
+    "raw_result_path": "/tmp/r7-critique.json",
+    "raw_result_sha256": "bcc2bac3dfd9dd305b7021544639124afb72e5f57ac095d464f3bc8ae1b63046"
   }
 }
