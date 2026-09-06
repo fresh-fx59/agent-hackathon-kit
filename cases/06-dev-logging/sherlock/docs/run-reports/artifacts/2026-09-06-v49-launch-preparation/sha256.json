@@ -1,0 +1,13 @@
+{
+  "sherlock-v49-launch-target-r1.sh": "640b568feda5be1374f03016ae6f913631a56b21a5f5127b2eb389445e9d18d9",
+  "sherlock-v49-launch-full-independent-r1.sh": "4d6dd635180a7c7e5f8f1a16af996820c6c204d253c029fd37df3aa9fa0f4cfa",
+  "sherlock-v49-launch-target-independent-r1.sh": "a875d023a40867e3a6ba25c04fbf642581aaff7564d050128e7e83e5ccb22347",
+  "sherlock-v49-prepare-r1.sh": "2c200b547c74a88211e328f9f1a24e9328a2b998189d8473f813c57c4edcf26a",
+  "sherlock-v49-launch-harness-r1.sh": "36419373d57dab95055461bcf6afbf166aaaf066518391e5dc44b8ceb701ccd7",
+  "sherlock-v49-launch-full-wine-r1.sh": "0c2e8999ad75d1f7a1693b5b1c504aec15e79b89060523a4ffbd1989459af94b",
+  "sherlock-v49-prepare-independent-r1.sh": "7f508ea98d1db678e729402c69fc96a0216f866cefe767ccec0d3a970c72fb31",
+  "sherlock-v49-prepare-r1.stdout": "52fd3829ced896646a90d0b5a2db7ba04010b68c1c2fc99507bb660b0f7cd8b0",
+  "sherlock-v49-prepare-r1.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "sherlock-v49-prepare-independent-r1.stdout": "1cb6008577143071effa183697f7379a7979b18501af890afb05ae11b6d2f73a",
+  "sherlock-v49-prepare-independent-r1.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+}
