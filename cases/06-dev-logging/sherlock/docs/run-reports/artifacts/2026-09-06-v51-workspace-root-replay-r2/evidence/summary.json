@@ -1,0 +1,42 @@
+{
+  "exit_code": 0,
+  "mode": "workspace-root-resume",
+  "requests": 2,
+  "batch_sha256": "8661b08356d8a00981e3987705357e3c1ed469e2cddc6ef803f2cb29d75e03f2",
+  "keys": [
+    "cwd",
+    "hook_event_name",
+    "permission_mode",
+    "session_id",
+    "timestamp",
+    "tool_calls",
+    "transcript_path"
+  ],
+  "tool_calls": [
+    {
+      "tool_name": "run_shell_command",
+      "tool_input": {
+        "command": "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3 /Users/a/hack/wt-v42/cases/06-dev-logging/sherlock/docs/run-reports/artifacts/2026-09-06-v51-workspace-root-replay-r2/evidence/skill-catalogue/log-rca/tools/checkpoint.py resume --work ./work"
+      },
+      "tool_use_id": "call_workspace_root_resume",
+      "tool_call_id": "call_workspace_root_resume",
+      "status": "success",
+      "tool_response": {
+        "response_parts": [
+          {
+            "functionResponse": {
+              "id": "call_workspace_root_resume",
+              "name": "run_shell_command",
+              "response": {
+                "output": "Command: /Library/Frameworks/Python.framework/Versions/3.12/bin/python3 /Users/a/hack/wt-v42/cases/06-dev-logging/sherlock/docs/run-reports/artifacts/2026-09-06-v51-workspace-root-replay-r2/evidence/skill-catalogue/log-rca/tools/checkpoint.py resume --work ./work\nDirectory: (root)\nOutput: (empty)\nError: (none)\nExit Code: 0\nSignal: 0\nProcess Group PGID: 66304"
+              }
+            }
+          }
+        ],
+        "result_display": "",
+        "content_length": 360
+      }
+    }
+  ],
+  "hook_event_name": "PostToolBatch"
+}

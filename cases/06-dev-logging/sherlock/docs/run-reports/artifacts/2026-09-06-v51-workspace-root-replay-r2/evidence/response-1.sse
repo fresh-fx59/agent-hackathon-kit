@@ -1,0 +1,6 @@
+data: {"id": "x1", "object": "chat.completion.chunk", "created": 1788726204, "model": "mock", "choices": [{"index": 0, "delta": {"role": "assistant", "content": "done"}, "finish_reason": null}]}
+
+data: {"id": "x1", "object": "chat.completion.chunk", "created": 1788726204, "model": "mock", "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]}
+
+data: [DONE]
+

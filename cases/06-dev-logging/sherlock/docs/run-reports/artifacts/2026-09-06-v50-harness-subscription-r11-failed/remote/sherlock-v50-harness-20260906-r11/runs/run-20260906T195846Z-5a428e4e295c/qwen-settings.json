@@ -1,0 +1,183 @@
+{
+  "context": {
+    "autoCompactThreshold": 0.7
+  },
+  "general": {
+    "enableAutoUpdate": false
+  },
+  "hooks": {
+    "PostToolBatch": [
+      {
+        "hooks": [
+          {
+            "command": "python3 \"/home/claude-developer/hack/wt-v42/cases/06-dev-logging/sherlock/eval/bench/lifecycle-supervisor.py\" hook --observer-dir \"$SHERLOCK_OBSERVER_DIR\" --workspace \"$PWD\" --nonce \"$SHERLOCK_RUN_NONCE\" --boot-id \"$SHERLOCK_BOOT_ID\"",
+            "timeout": 10000,
+            "type": "command"
+          }
+        ],
+        "matcher": "*"
+      }
+    ],
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "command": "python3 \"/home/claude-developer/hack/wt-v42/cases/06-dev-logging/sherlock/eval/bench/lifecycle-supervisor.py\" hook --observer-dir \"$SHERLOCK_OBSERVER_DIR\" --workspace \"$PWD\" --nonce \"$SHERLOCK_RUN_NONCE\" --boot-id \"$SHERLOCK_BOOT_ID\"",
+            "timeout": 10000,
+            "type": "command"
+          }
+        ],
+        "matcher": "*"
+      }
+    ],
+    "PostToolUseFailure": [
+      {
+        "hooks": [
+          {
+            "command": "python3 \"/home/claude-developer/hack/wt-v42/cases/06-dev-logging/sherlock/eval/bench/lifecycle-supervisor.py\" hook --observer-dir \"$SHERLOCK_OBSERVER_DIR\" --workspace \"$PWD\" --nonce \"$SHERLOCK_RUN_NONCE\" --boot-id \"$SHERLOCK_BOOT_ID\"",
+            "timeout": 10000,
+            "type": "command"
+          }
+        ],
+        "matcher": "*"
+      }
+    ],
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "command": "python3 \"/home/claude-developer/hack/wt-v42/cases/06-dev-logging/sherlock/eval/bench/lifecycle-supervisor.py\" hook --observer-dir \"$SHERLOCK_OBSERVER_DIR\" --workspace \"$PWD\" --nonce \"$SHERLOCK_RUN_NONCE\" --boot-id \"$SHERLOCK_BOOT_ID\" --boundary-gate \"/home/claude-developer/hack/sherlock-v50-qualification-20260906-r5/runtime-package/tools/boundarycheck.py\"",
+            "timeout": 10000,
+            "type": "command"
+          }
+        ],
+        "matcher": "*"
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "command": "python3 \"/home/claude-developer/hack/wt-v42/cases/06-dev-logging/sherlock/eval/bench/lifecycle-supervisor.py\" hook --observer-dir \"$SHERLOCK_OBSERVER_DIR\" --workspace \"$PWD\" --nonce \"$SHERLOCK_RUN_NONCE\" --boot-id \"$SHERLOCK_BOOT_ID\"",
+            "timeout": 10000,
+            "type": "command"
+          }
+        ],
+        "matcher": "*"
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "command": "python3 \"$QWEN_SKILL_ROOT/tools/stopcheck.py\"",
+            "type": "command"
+          }
+        ]
+      }
+    ],
+    "SubagentStart": [
+      {
+        "hooks": [
+          {
+            "command": "python3 \"/home/claude-developer/hack/wt-v42/cases/06-dev-logging/sherlock/eval/bench/lifecycle-supervisor.py\" hook --observer-dir \"$SHERLOCK_OBSERVER_DIR\" --workspace \"$PWD\" --nonce \"$SHERLOCK_RUN_NONCE\" --boot-id \"$SHERLOCK_BOOT_ID\"",
+            "timeout": 10000,
+            "type": "command"
+          }
+        ],
+        "matcher": "*"
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "command": "python3 \"/home/claude-developer/hack/wt-v42/cases/06-dev-logging/sherlock/eval/bench/lifecycle-supervisor.py\" hook --observer-dir \"$SHERLOCK_OBSERVER_DIR\" --workspace \"$PWD\" --nonce \"$SHERLOCK_RUN_NONCE\" --boot-id \"$SHERLOCK_BOOT_ID\"",
+            "timeout": 10000,
+            "type": "command"
+          }
+        ],
+        "matcher": "*"
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "command": "python3 \"/home/claude-developer/hack/wt-v42/cases/06-dev-logging/sherlock/eval/bench/lifecycle-supervisor.py\" hook --observer-dir \"$SHERLOCK_OBSERVER_DIR\" --workspace \"$PWD\" --nonce \"$SHERLOCK_RUN_NONCE\" --boot-id \"$SHERLOCK_BOOT_ID\"",
+            "timeout": 10000,
+            "type": "command"
+          }
+        ],
+        "matcher": "*"
+      }
+    ]
+  },
+  "mcp": {
+    "excluded": []
+  },
+  "memory": {
+    "enableDreams": false,
+    "enableManagedAutoMemory": false
+  },
+  "model": {
+    "chatCompression": {
+      "maxRecentFilesToRetain": 0
+    },
+    "generationConfig": {
+      "contextWindowSize": 262000,
+      "maxRetries": 0,
+      "samplingParams": {
+        "max_tokens": 20000
+      },
+      "timeout": 600000
+    },
+    "maxSessionTurns": -1,
+    "maxWallTimeSeconds": -1,
+    "model_fallback": {
+      "enabled": false
+    },
+    "sessionTokenLimit": 230000,
+    "skipStartupContext": true
+  },
+  "skills": {
+    "directories": [
+      "../skill-catalogue"
+    ],
+    "disabled": [
+      "checkpoint",
+      "claude-code-update-status",
+      "claude-codex-switch",
+      "dzen-publish",
+      "linear",
+      "publish-to-aiengineerhelper",
+      "scheduled-agent-switch",
+      "secret-use",
+      "secrets-console",
+      "spring-boot-engineer",
+      "tailscale-exit-node",
+      "telegram-export-mining",
+      "transcribe-media"
+    ],
+    "disabledLevels": [
+      "bundled",
+      "extension",
+      "project"
+    ]
+  },
+  "tools": {
+    "core": [
+      "read_file",
+      "write_file",
+      "edit",
+      "grep_search",
+      "glob",
+      "run_shell_command",
+      "todo_write",
+      "list_directory",
+      "skill",
+      "agent"
+    ]
+  },
+  "$version": 4
+}

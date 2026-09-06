@@ -1,0 +1,4 @@
+{"at": "2026-09-06T19:59:40Z", "event": "started", "detail": "/home/claude-developer/.local/lib/node_modules/@qwen-code/qwen-code/cli-entry.js --auth-type openai --model gpt-5.5 --approval-mode yolo --max-session-turns -1 --max-tool-calls -1"}
+{"at": "2026-09-06T19:59:48Z", "event": "typed", "detail": "/sherlock\n\nInvestigate the fresh local corpus using Sherlock. Retain evidence and satisfy all shipped report and validation requirements.\n"}
+{"at": "2026-09-06T19:59:48Z", "event": "skill_command_accepted", "detail": "attempt 1/3 — exact monitored invocation proof arrived during rejection probe"}
+{"at": "2026-09-06T20:00:08Z", "event": "STOPPED", "detail": "owner sent SIGTERM; terminating the PTY process group"}

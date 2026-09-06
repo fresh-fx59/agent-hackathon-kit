@@ -1,0 +1,9 @@
+{
+ "added": [],
+ "changed": [],
+ "deleted": [],
+ "intact": true,
+ "schema": 1,
+ "shipped": "/home/claude-developer/hack/sherlock-v50-harness-20260906-r11/runs/run-20260906T195846Z-5a428e4e295c/runtime-package",
+ "snapshot": "/home/claude-developer/hack/sherlock-v50-harness-20260906-r11/runs/run-20260906T195846Z-5a428e4e295c/skill-catalogue/log-rca"
+}

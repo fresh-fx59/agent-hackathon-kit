@@ -1,0 +1,6 @@
+data: {"id": "x0", "object": "chat.completion.chunk", "created": 1788726204, "model": "mock", "choices": [{"index": 0, "delta": {"role": "assistant", "tool_calls": [{"index": 0, "id": "call_workspace_root_resume", "type": "function", "function": {"name": "run_shell_command", "arguments": "{\"command\": \"/Library/Frameworks/Python.framework/Versions/3.12/bin/python3 /Users/a/hack/wt-v42/cases/06-dev-logging/sherlock/docs/run-reports/artifacts/2026-09-06-v51-workspace-root-replay-r2/evidence/skill-catalogue/log-rca/tools/checkpoint.py resume --work ./work\"}"}}]}, "finish_reason": null}]}
+
+data: {"id": "x0", "object": "chat.completion.chunk", "created": 1788726204, "model": "mock", "choices": [{"index": 0, "delta": {}, "finish_reason": "tool_calls"}]}
+
+data: [DONE]
+

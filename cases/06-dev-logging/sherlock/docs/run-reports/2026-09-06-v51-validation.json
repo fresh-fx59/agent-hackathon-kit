@@ -1,0 +1,21 @@
+{
+  "schema": 1,
+  "report": "v51-validation",
+  "status": "provider_free_mechanics_pass",
+  "v51_tree_sha256": "83aea5681f948f630785e4d22f164875ee25101f0bfdb86c7d4e116db98d6740",
+  "v50_tree_sha256": "0f95b5a59dcc41500168d3f2dc6df3e237b8c68e9d3666bf181716983d902ee7",
+  "workspace_contract_tests": {"passed": 2, "total": 2},
+  "workspace_root_replay_tests": {"passed": 2, "total": 2},
+  "version_gate": {"passed": 12, "total": 12},
+  "py_compile": "passed",
+  "git_diff_check": "passed",
+  "codex_critique": {
+    "model": "gpt-5.6-sol",
+    "verdict": "PASS",
+    "artifact": "docs/run-reports/artifacts/2026-09-06-v51-workspace-contract-critique-r1/"
+  },
+  "provider_contact": false,
+  "subscription_acceptance": false,
+  "corpus_report_acceptance": false,
+  "pending": "fresh reviewed v51 launch-preparation pins"
+}

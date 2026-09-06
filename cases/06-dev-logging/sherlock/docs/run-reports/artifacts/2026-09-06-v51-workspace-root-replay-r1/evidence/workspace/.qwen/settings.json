@@ -1,0 +1,1 @@
+{"hooks": {"PostToolBatch": [{"hooks": [{"type": "command", "command": "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3 /Users/a/hack/wt-v42/cases/06-dev-logging/sherlock/tools/tests/qwen_post_tool_batch_capture.py --capture", "timeout": 10000}]}]}}

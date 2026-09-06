@@ -1,0 +1,7 @@
+An unexpected critical error occurred:
+Error: ENOENT: no such file or directory, lstat '/Users/a/hack/wt-v42/cases/06-dev-logging/sherlock/docs/run-reports/artifacts/2026-09-06-v51-workspace-root-replay-r1/evidence/workspace/docs'
+    at Module.realpathSync (node:fs:2787:29)
+    at loadSettings (file:///Users/a/.npm-global/lib/node_modules/@qwen-code/qwen-code/chunks/chunk-EIF3FXTB.js:4709:27)
+    at main (file:///Users/a/.npm-global/lib/node_modules/@qwen-code/qwen-code/chunks/gemini-4BWIK4WD.js:2555:70)
+    at async runCliEntry (file:///Users/a/.npm-global/lib/node_modules/@qwen-code/qwen-code/cli.js:328:3)
+    at async runCliEntryPoint (file:///Users/a/.npm-global/lib/node_modules/@qwen-code/qwen-code/cli.js:397:5)

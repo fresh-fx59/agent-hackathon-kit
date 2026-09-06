@@ -1,0 +1,17 @@
+{
+  "sessionCount": 1,
+  "tips": {
+    "new-user-slash": {
+      "totalShown": 1,
+      "lastSessionTimestamp": 1788724778170
+    },
+    "new-user-qwenmd": {
+      "totalShown": 1,
+      "lastSessionTimestamp": 1788724778420
+    },
+    "new-user-resume": {
+      "totalShown": 1,
+      "lastSessionTimestamp": 1788724790707
+    }
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "artifact_dir": "docs/run-reports/artifacts/2026-09-06-deepseek-v4-flash-rate-snapshot-20260906T200907Z",
+  "effective_at": "2026-09-06T20:09:07.209162Z",
+  "expires_at": "2026-09-07T20:09:07.209162Z",
+  "fetched_at": "2026-09-06T20:09:07.209162Z",
+  "http_status": 200,
+  "old_snapshot_untouched": true,
+  "probe_snapshot_sha256": "a14cbcfdda02c6c627bf016f8447efffbcea330bab0315b7e30101959217e760",
+  "rates": {
+    "cached_input_rub_per_1m_tokens": 0.891,
+    "input_rub_per_1m_tokens": 29.546,
+    "output_rub_per_1m_tokens": 84.7
+  },
+  "raw_response_sha256": "7c068b39e54f62204a58f788b12e8321aa8136876cfc3bebc2127ad5da098fd4",
+  "report": "deepseek-v4-flash-rate-refresh",
+  "requested_model": "deepseek-v4-flash",
+  "schema": 1,
+  "source": "https://neuraldeep.ru/api/public/wallet-prices",
+  "status": "captured"
+}

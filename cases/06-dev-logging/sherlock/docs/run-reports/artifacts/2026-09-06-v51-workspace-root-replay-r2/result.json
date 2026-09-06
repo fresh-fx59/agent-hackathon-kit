@@ -1,0 +1,12 @@
+{
+  "directory_omitted": true,
+  "mode": "workspace-root-resume",
+  "post_tool_batch_sha256": "8661b08356d8a00981e3987705357e3c1ed469e2cddc6ef803f2cb29d75e03f2",
+  "provider": "loopback_only",
+  "purpose": "actual Qwen default-workspace behavior; not model-compliance evidence",
+  "qwen_binary": "/Users/a/.npm-global/bin/qwen",
+  "qwen_exit_code": 0,
+  "requests": 2,
+  "schema": 1,
+  "workspace_cwd": "/Users/a/hack/wt-v42/cases/06-dev-logging/sherlock/docs/run-reports/artifacts/2026-09-06-v51-workspace-root-replay-r2/evidence/workspace"
+}

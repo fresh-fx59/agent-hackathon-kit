@@ -1,0 +1,9 @@
+{
+  "command": "codex exec -m gpt-5.6 -s read-only -C /Users/a/hack/wt-v42/cases/06-dev-logging/sherlock --output-last-message <path> <bounded v51 critique>",
+  "error": "HTTP 400: The 'gpt-5.6' model is not supported when using Codex with a ChatGPT account.",
+  "exit_code": 1,
+  "model": "gpt-5.6",
+  "resolution": "Retried once with the root-specified gpt-5.6-sol invocation; see invocation.json and codex-sol-gpt-5.6-sol.json.",
+  "schema_version": 1,
+  "status": "failed_invocation_preserved"
+}

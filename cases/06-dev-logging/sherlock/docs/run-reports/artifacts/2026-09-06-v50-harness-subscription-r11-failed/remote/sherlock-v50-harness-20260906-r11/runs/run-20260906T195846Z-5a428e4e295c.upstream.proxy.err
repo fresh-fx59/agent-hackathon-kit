@@ -1,0 +1,2 @@
+upstream-log-proxy: 127.0.0.1:39153 -> http://127.0.0.1:8317/v1 (log /home/claude-developer/hack/sherlock-v50-harness-20260906-r11/runs/run-20260906T195846Z-5a428e4e295c.upstream.jsonl)
+upstream-log-proxy: route file /home/claude-developer/hack/sherlock-v50-harness-20260906-r11/runs/run-20260906T195846Z-5a428e4e295c.upstream.route.json (read per call; base/model/identity come from it, not the env)

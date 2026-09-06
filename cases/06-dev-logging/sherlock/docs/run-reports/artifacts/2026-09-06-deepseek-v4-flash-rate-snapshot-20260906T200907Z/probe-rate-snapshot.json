@@ -1,0 +1,9 @@
+{
+  "completion_rub_per_token": 8.47e-05,
+  "effective_at": "2026-09-06T20:09:07.209162Z",
+  "prompt_rub_per_token": 2.9545999999999998e-05,
+  "run_tag": "target-contract-probe",
+  "schema": 1,
+  "sha256": "dfacff6758efec3203df83ce25a608061115b54d1c601d935c0478017d7d0bba",
+  "source": "https://neuraldeep.ru/api/public/wallet-prices retrieved 2026-09-06T20:09:07.209162Z"
+}

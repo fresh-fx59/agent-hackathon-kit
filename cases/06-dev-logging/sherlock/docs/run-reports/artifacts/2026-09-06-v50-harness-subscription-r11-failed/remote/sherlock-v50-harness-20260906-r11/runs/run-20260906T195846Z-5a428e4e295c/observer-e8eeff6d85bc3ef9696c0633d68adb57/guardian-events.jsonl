@@ -1,0 +1,1 @@
+{"completed_monotonic_ns":814692068557335,"controller_pid":1169966,"detail":"terminal lifecycle fault: REVIEW_MONITOR_FAILED","detected_monotonic_ns":814692067168928,"ownership_verified":true,"reason":"TERMINAL","run_nonce":"e8eeff6d85bc3ef9696c0633d68adb57","schema":1,"signal":"SIGTERM","signal_sent":true}

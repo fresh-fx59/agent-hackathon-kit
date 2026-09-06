@@ -1,0 +1,7 @@
+{
+  "reason": "capture hook inherited a relative QWEN_BATCH_CAPTURE path and therefore wrote below the Qwen workspace; no provider contact and no product result claimed",
+  "repair": "resolve replay output before passing it to the hook",
+  "replacement": "2026-09-06-v51-workspace-root-replay-r2",
+  "schema": 1,
+  "status": "failed_fixture_construction"
+}

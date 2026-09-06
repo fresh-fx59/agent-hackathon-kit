@@ -1,0 +1,10 @@
+{
+  "command": "codex exec -m gpt-5.6-sol -c model_reasoning_effort=low --ephemeral --json",
+  "exit_code": 0,
+  "input": "bounded v51 workspace-contract critique",
+  "model": "gpt-5.6-sol",
+  "reasoning_effort": "low",
+  "schema_version": 1,
+  "stderr": "codex-sol-gpt-5.6-sol.stderr",
+  "stdout": "codex-sol-gpt-5.6-sol.json"
+}

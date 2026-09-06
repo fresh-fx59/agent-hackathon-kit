@@ -1,0 +1,9 @@
+{
+  "schema_version": 1,
+  "pid": 1170876,
+  "session_id": "e0632166-a94a-4efa-b1e7-f7f6dd5bfb73",
+  "work_dir": "/home/claude-developer/hack/sherlock-v50-harness-20260906-r11/runs/run-20260906T195846Z-5a428e4e295c/workspace",
+  "hostname": "contabo-prod",
+  "started_at": 1788724777.919,
+  "qwen_version": "0.22.0"
+}

@@ -12,8 +12,19 @@ def once(p, b):
 def capture():
  raw=sys.stdin.buffer.read(); out=Path(os.environ['QWEN_BATCH_CAPTURE']); once(out,raw); once(out.with_suffix('.sha256'),(hashlib.sha256(raw).hexdigest()+'\n').encode())
 
-def run(qwen,out):
- out.mkdir(mode=0o700); workspace=out/'workspace'; workspace.mkdir(); home=workspace/'home'; home.mkdir()
+def run(qwen,out,mode):
+ out=out.resolve(); out.mkdir(mode=0o700); workspace=out/'workspace'; workspace.mkdir(); home=workspace/'home'; home.mkdir()
+ if mode == 'workspace-root-resume':
+  (workspace/'work').mkdir()
+  checkpoint=out/'skill-catalogue'/'log-rca'/'tools'/'checkpoint.py'; checkpoint.parent.mkdir(parents=True)
+  checkpoint.write_text('''#!/usr/bin/env python3
+import argparse, json
+from pathlib import Path
+parser=argparse.ArgumentParser(); parser.add_argument('operation'); parser.add_argument('--work', required=True); args=parser.parse_args()
+work=Path(args.work)
+if args.operation != 'resume' or not work.is_dir(): raise SystemExit(2)
+(work/'resume-receipt.json').write_text(json.dumps({"cwd": str(Path.cwd())}, sort_keys=True)+'\\n')
+''')
  settings={'hooks':{'PostToolBatch':[{'hooks':[{'type':'command','command':f'{sys.executable} {Path(__file__).resolve()} --capture','timeout':10000}]}]}}
  (workspace/'.qwen').mkdir(); (workspace/'.qwen/settings.json').write_text(json.dumps(settings)+'\n')
  requests=[]
@@ -22,7 +33,11 @@ def run(qwen,out):
   def do_POST(self):
    raw=self.rfile.read(int(self.headers['Content-Length'])); i=len(requests); requests.append(i); once(out/f'request-{i}.json',raw)
    if i==0:
-    delta={'role':'assistant','tool_calls':[{'index':0,'id':'call_invalid_directory','type':'function','function':{'name':'run_shell_command','arguments':json.dumps({'command':'printf invalid','directory':'/outside-fixture-workspace'})}}]}; finish='tool_calls'
+    if mode == 'workspace-root-resume':
+     args={'command':f'{sys.executable} {checkpoint} resume --work ./work'}; call_id='call_workspace_root_resume'
+    else:
+     args={'command':'printf invalid','directory':'/outside-fixture-workspace'}; call_id='call_invalid_directory'
+    delta={'role':'assistant','tool_calls':[{'index':0,'id':call_id,'type':'function','function':{'name':'run_shell_command','arguments':json.dumps(args)}}]}; finish='tool_calls'
    else: delta={'role':'assistant','content':'done'}; finish='stop'
    rows=[{'id':f'x{i}','object':'chat.completion.chunk','created':int(time.time()),'model':'mock','choices':[{'index':0,'delta':delta,'finish_reason':None}]},{'id':f'x{i}','object':'chat.completion.chunk','created':int(time.time()),'model':'mock','choices':[{'index':0,'delta':{},'finish_reason':finish}]}]
    body=b''.join(b'data: '+json.dumps(x).encode()+b'\n\n' for x in rows)+b'data: [DONE]\n\n'; once(out/f'response-{i}.sse',body)
@@ -32,8 +47,8 @@ def run(qwen,out):
  p=subprocess.run([str(qwen),'--auth-type','openai','--model','mock','--approval-mode','yolo','--output-format','json','-p','Attempt the supplied tool then finish.'],cwd=workspace,env=env,text=True,capture_output=True,timeout=30)
  once(out/'stdout.json',p.stdout.encode()); once(out/'stderr.txt',p.stderr.encode()); server.shutdown(); server.server_close(); t.join()
  raw=(out/'post-tool-batch.stdin.json').read_bytes(); x=json.loads(raw)
- summary={'exit_code':p.returncode,'requests':len(requests),'batch_sha256':hashlib.sha256(raw).hexdigest(),'keys':sorted(x),'tool_calls':x.get('tool_calls'),'hook_event_name':x.get('hook_event_name')}
+ summary={'exit_code':p.returncode,'mode':mode,'requests':len(requests),'batch_sha256':hashlib.sha256(raw).hexdigest(),'keys':sorted(x),'tool_calls':x.get('tool_calls'),'hook_event_name':x.get('hook_event_name')}
  once(out/'summary.json',(json.dumps(summary,indent=2)+'\n').encode()); print(json.dumps(summary,indent=2)); return 0
 if __name__=='__main__':
- ap=argparse.ArgumentParser(); ap.add_argument('--capture',action='store_true'); ap.add_argument('--qwen',type=Path); ap.add_argument('--output',type=Path)
- a=ap.parse_args(); raise SystemExit(capture() if a.capture else run(a.qwen,a.output))
+ ap=argparse.ArgumentParser(); ap.add_argument('--capture',action='store_true'); ap.add_argument('--qwen',type=Path); ap.add_argument('--output',type=Path); ap.add_argument('--mode',choices=('invalid-directory','workspace-root-resume'),default='invalid-directory')
+ a=ap.parse_args(); raise SystemExit(capture() if a.capture else run(a.qwen,a.output,a.mode))

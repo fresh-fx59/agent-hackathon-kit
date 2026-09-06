@@ -1,0 +1,48 @@
+{
+  "schema": 1,
+  "report": "2026-09-06-v50-harness-r11.md",
+  "status": "rejected_workspace_boundary_preexecution",
+  "acceptance": false,
+  "runtime": {
+    "version": "v50",
+    "package_sha256": "0f95b5a59dcc41500168d3f2dc6df3e237b8c68e9d3666bf181716983d902ee7",
+    "arm_commit": "a790af7cd87fb28924c88a985abc45033a462c8f",
+    "monitor_sha256": "374dd08450e95d195cf338540821a5475b19c3a0c5f4dea539df08861667ec5f"
+  },
+  "observations": {"accepted_count": 4, "sequences": [0, 1, 2, 3], "all_decisions": "continue"},
+  "terminal": {
+    "review_finished_at": "2026-09-06T20:00:07.759274Z",
+    "review_duration_seconds": 9.258,
+    "decision": "stop",
+    "last_completed_request": "9f06c29bc6914ee58e73cb91bf7082b9",
+    "pending_tool": "call_n5xWqd0Hj9KXkfwMwMku8thB",
+    "rejection": "checkpoint.py resume --work ./work targeted a directory outside registered workspace",
+    "fault_at": "2026-09-06T20:00:07.971445Z",
+    "lifecycle_terminal_at": "2026-09-06T20:00:12.849797Z",
+    "controller_terminal_at": "2026-09-06T20:00:12.870Z",
+    "controller_reason": "REVIEW_MONITOR_FAILED",
+    "expected_tools": 3,
+    "completed_tools": 0,
+    "wrapper_lock_removed": true,
+    "active_processes": 0
+  },
+  "usage_list_price_usd": {
+    "accepted_reviews": [
+      {"sonnet": 0.0266258, "haiku": 0.005066},
+      {"sonnet": 0.0283978, "haiku": 0.005431},
+      {"sonnet": 0.0285338, "haiku": 0.005422},
+      {"sonnet": 0.3709018, "haiku": 0.083349}
+    ],
+    "final_stop": {"sonnet": 0.0845418, "haiku": 0.01759}
+  },
+  "evidence": {
+    "run_tag": "run-20260906T195846Z-5a428e4e295c",
+    "run_nonce": "e8eeff6d85bc3ef9696c0633d68adb57",
+    "artifact_directory": "artifacts/2026-09-06-v50-harness-subscription-r11-failed/",
+    "remote_inventory_files": 315,
+    "remote_manifest_sha256": "7f83d9f28e502af15d4c3d1d0cfcba8a47ff59843253a4ad8b8ba84092df5aa4",
+    "deepseek_requests": 0,
+    "paid_target_started": false,
+    "corpus_report_accepted": false
+  }
+}

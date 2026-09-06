@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "pid": 1170876,
+  "procStart": "e80750ce-3764-4f5a-ba88-6c0b55c55870:81465946",
+  "pidNs": 4026531836,
+  "sessionId": "e0632166-a94a-4efa-b1e7-f7f6dd5bfb73",
+  "cwd": "/home/claude-developer/hack/sherlock-v50-harness-20260906-r11/runs/run-20260906T195846Z-5a428e4e295c/workspace",
+  "name": "workspace-36",
+  "startedAt": 1788724778462,
+  "qwenVersion": "0.22.0"
+}
