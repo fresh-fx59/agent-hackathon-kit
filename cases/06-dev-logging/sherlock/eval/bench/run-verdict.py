@@ -175,13 +175,15 @@ def monitored_lifecycle_failures(trace):
                 or type(receipt.get("subagent_count")) is not int
                 or type(receipt.get("nested_dispatch_count")) is not int
                 or type(receipt.get("root_boundary_count")) is not int
+                or type(receipt.get("session_start_count")) is not int
                 or receipt["expected_tool_count"] < 0
                 or receipt["batched_tool_count"] < 0
                 or receipt["completed_tool_count"] < 0
                 or receipt["rejected_tool_count"] < 0
                 or receipt["subagent_count"] < 0
                 or receipt["nested_dispatch_count"] < 0
-                or receipt["root_boundary_count"] < 0):
+                or receipt["root_boundary_count"] < 0
+                or receipt["session_start_count"] < 0):
             raise ValueError("receipt identity")
         # Receipt digests cover the observer state the controller had at its
         # terminal decision.  A mismatch is invalid evidence even if the HMAC
@@ -202,6 +204,7 @@ def monitored_lifecycle_failures(trace):
                             ("subagent_events_sha256", "subagent-events.jsonl"),
                             ("nested_dispatches_sha256", "nested-dispatches.jsonl"),
                             ("root_boundary_events_sha256", "root-boundary-events.jsonl"),
+                            ("session_start_events_sha256", "session-start-events.jsonl"),
                             ("guardian_events_sha256", "guardian-events.jsonl"),
                             ("fault_sha256", "fault.json")):
             claimed = receipt.get(field)
@@ -544,9 +547,33 @@ def monitored_lifecycle_failures(trace):
                         or event.get("session_id") != row.get("session_id")):
                     raise ValueError("root boundary event")
                 root_rows += 1
+        session_start_rows = 0
+        session_start_path = observer / "session-start-events.jsonl"
+        if session_start_path.exists():
+            fields = {"schema", "run_nonce", "sequence", "phase", "session_id",
+                      "source", "cwd", "input_sha256", "input_base64", "output",
+                      "observed_at", "monotonic_ns"}
+            for sequence, raw_line in enumerate(
+                    lifecycle._read_regular(session_start_path, MAX_LEDGER).splitlines()):
+                row = lifecycle._strict_json(raw_line)
+                raw = base64.b64decode(row.get("input_base64", ""), validate=True)
+                event = lifecycle._strict_json(raw)
+                if (set(row) != fields or row.get("schema") != lifecycle.SCHEMA
+                        or row.get("run_nonce") != launch["run_nonce"]
+                        or row.get("sequence") != sequence
+                        or row.get("phase") != "SessionStart"
+                        or row.get("output", {}).get("continue") is not True
+                        or lifecycle.sha256(raw) != row.get("input_sha256")
+                        or event.get("hook_event_name") != "SessionStart"
+                        or event.get("session_id") != row.get("session_id")
+                        or event.get("source") != row.get("source")
+                        or str(Path(event.get("cwd", "")).resolve()) != row.get("cwd")):
+                    raise ValueError("session start event")
+                session_start_rows += 1
         if (receipt["subagent_count"] != len(completed_subagents)
                 or receipt["nested_dispatch_count"] != len(dispatch_rows)
-                or receipt["root_boundary_count"] != root_rows):
+                or receipt["root_boundary_count"] != root_rows
+                or receipt["session_start_count"] != session_start_rows):
             raise ValueError("nested lifecycle counts")
         if (completed_ids & rejected_ids or rejected_ids - expected_ids
                 or batch_ids - expected_ids):

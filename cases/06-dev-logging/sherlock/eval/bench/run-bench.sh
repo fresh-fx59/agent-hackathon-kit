@@ -104,6 +104,8 @@ if arm_ge "$PACKAGE_VERSION" 44; then STRICT_MARKER_LIFECYCLE=1; fi
 # Requires v40 or newer: without checkpoint.py's stage machine there is no
 # boundary to drive, and a driver with nothing to wait for would report a
 # STAGE_TIMEOUT on a healthy run.
+INTERACTIVE_EXPLICIT=0
+if [ "${SHERLOCK_INTERACTIVE+x}" = x ]; then INTERACTIVE_EXPLICIT=1; fi
 INTERACTIVE="${SHERLOCK_INTERACTIVE:-0}"
 # 0 = this lane declares no per-request ceiling (every lane before the corporate
 # one). A negative value aborts in lane-audit.py rather than reading as "off".
@@ -634,6 +636,51 @@ if [ "$OPERATOR_MONITORED_MODE" = 1 ]; then
   # lifecycle-launch.json.  Qwen's catalogue is installed from that exact
   # tree, never from a developer's HOME or a mutable checkout.
   PACKAGE_PATH="$TRACE/runtime-package"
+  MONITORED_PROFILE_INTERACTIVE="$(python3 - "$TRACE/target-profile.json" \
+    "$TRACE/input-package.json" "$HERE/../../measure/interactive-drive.py" <<'PY'
+import hashlib, json, re, sys
+
+def unique(pairs):
+    out = {}
+    for key, value in pairs:
+        if key in out: raise ValueError("duplicate")
+        out[key] = value
+    return out
+
+try:
+    with open(sys.argv[1], encoding="utf-8") as handle:
+        row = json.load(handle, object_pairs_hook=unique,
+                        parse_constant=lambda value: (_ for _ in ()).throw(ValueError(value)))
+    with open(sys.argv[2], "rb") as handle:
+        package_raw = handle.read()
+    package = json.loads(package_raw.decode("utf-8"), object_pairs_hook=unique,
+                         parse_constant=lambda value: (_ for _ in ()).throw(ValueError(value)))
+    with open(sys.argv[3], "rb") as handle:
+        driver_digest = hashlib.sha256(handle.read()).hexdigest()
+    enabled = row["interactive"]["enabled"]
+    if row.get("schema") != 2 or row.get("execution_mode") != "operator_monitored" \
+            or type(enabled) is not bool \
+            or re.fullmatch(r"[0-9a-f]{64}", package.get("interactive_driver_sha256", "")) is None \
+            or package["interactive_driver_sha256"] != driver_digest:
+        raise ValueError("profile")
+    print(1 if enabled else 0)
+except (OSError, UnicodeError, ValueError, TypeError, KeyError, json.JSONDecodeError) as exc:
+    raise SystemExit("MONITORED_PROFILE_INVALID") from exc
+PY
+)" || { echo "✗ monitored target profile or interactive driver binding is invalid" >&2; exit 2; }
+  if [ "$INTERACTIVE_EXPLICIT" = 1 ] && [ "$INTERACTIVE" != "$MONITORED_PROFILE_INTERACTIVE" ]; then
+    echo "✗ SHERLOCK_INTERACTIVE disagrees with sealed target profile" >&2
+    exit 2
+  fi
+  INTERACTIVE="$MONITORED_PROFILE_INTERACTIVE"
+  [ "$INTERACTIVE" = 0 ] || arm_ge "$PACKAGE_VERSION" 40 || {
+    echo "✗ monitored interactive profile needs v40 or newer" >&2; exit 2;
+  }
+  if [ "${SHERLOCK_STAGE_BUDGET_S+x}" = x ] && [ "$SHERLOCK_STAGE_BUDGET_S" != 0 ]; then
+    echo "✗ monitored stage budget must be 0 (no aggregate deadline)" >&2
+    exit 2
+  fi
+  MONITORED_STAGE_BUDGET=0
 fi
 # The target probe uses the same runner, but its audit needs the exact approved
 # package alongside the real trace.  Copy it only after controlled-trace
@@ -2084,7 +2131,9 @@ run_qwen() {
 # the gates read. An empty `result` is honest; a copied report would be a forged
 # transcript.
 run_qwen_interactive() {
-  local started rc finished
+  local started rc finished stage_budget
+  local lifecycle_driver_args=()
+  local timeout_command=(env)
   printf '0\n' > "$ATTEMPT_FILE"
   started="$(date +%s)"
   state_set --run-tag "$STAMP" --phase QWEN_RUNNING --dataset "$DATASET" --arm "$ARM" \
@@ -2105,15 +2154,31 @@ run_qwen_interactive() {
   if [ "$PACKAGE_VERSION" != "none" ]; then
     HAVE_RESEED_CMD=1
   fi
+  stage_budget="${SHERLOCK_STAGE_BUDGET_S:-5400}"
+  if [ "$OPERATOR_MONITORED_MODE" = 1 ]; then
+    stage_budget="$MONITORED_STAGE_BUDGET"
+    lifecycle_driver_args=(
+      --observer-dir "$SHERLOCK_OBSERVER_DIR"
+      --run-nonce "$SHERLOCK_RUN_NONCE")
+  fi
+  if [ "$TARGET_PROBE_MODE" = 1 ]; then
+    python3 "$HERE/target-contract-probe.py" verify-launch --sealed-input "$TRACE" \
+      --operator-approved-probe "$SHERLOCK_PROBE_APPROVAL" \
+      --nonce-root "$SHERLOCK_PROBE_NONCE_ROOT" --record-start >/dev/null || return 2
+  fi
+  if [ "$TIMEOUT" != 0 ]; then
+    timeout_command=(timeout "$TIMEOUT")
+  fi
   ( cd "$W" && OPENAI_API_KEY="$SHERLOCK_API_KEY" OPENAI_BASE_URL="$BASE_URL" \
     SHERLOCK_STRICT_MARKER_LIFECYCLE="$STRICT_MARKER_LIFECYCLE" \
-    timeout "$TIMEOUT" python3 "$MEASURE_DIR/interactive-drive.py" \
+    "${timeout_command[@]}" python3 "$MEASURE_DIR/interactive-drive.py" \
       --work "$W/work" --cwd "$W" \
       --prompt "$PROMPT" \
       --transcript "$W/interactive-transcript.log" \
       --events "$W/interactive-events.jsonl" \
-      --stage-budget-s "${SHERLOCK_STAGE_BUDGET_S:-5400}" \
+      --stage-budget-s "$stage_budget" \
       --ledger "$TRACE.upstream.jsonl" \
+      "${lifecycle_driver_args[@]}" \
       --threshold "$HANDOFF_THRESHOLD" \
       --idle-nudge-s "${SHERLOCK_IDLE_NUDGE_S:-0}" \
       --max-nudges "${SHERLOCK_MAX_NUDGES:-3}" \

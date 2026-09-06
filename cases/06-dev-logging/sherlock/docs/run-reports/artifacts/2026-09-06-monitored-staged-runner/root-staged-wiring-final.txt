@@ -1,0 +1,20 @@
+✓ run-bench.sh defines run_qwen_interactive
+✓ it drives measure/interactive-drive.py
+✓ it never passes --resume — the stage loop is the recovery
+✓ it never passes -p — an interactive session is typed into
+✓ it still writes attempts.jsonl, so the run stays comparable
+✓ it still writes out.json, so the run stays comparable
+✓ it still writes exit-attempt-0.txt, so the run stays comparable
+✓ it still writes ATTEMPT_FINISHED, so the run stays comparable
+✓ it keeps the same credential path as the headless arm
+✓ it is bounded by the same run timeout
+✓ target interactive launch consumes the signed one-use start
+✓ monitored clear proof receives the external observer and nonce
+✓ monitored branch derives interactive selection from the sealed profile
+✓ monitored stage budget is explicitly unbounded
+✓ selected subscription removes ambient interactive overrides
+✓ the interactive branch skips the resume loop
+✓ an SHERLOCK_INTERACTIVE that is not 0 or 1 aborts
+✓ interactive on a pre-v40 arm aborts — v39 has no stage machine
+✓ the headless default is untouched (it fails later, on the corpus)
+✓ one lane, two ways of typing into it

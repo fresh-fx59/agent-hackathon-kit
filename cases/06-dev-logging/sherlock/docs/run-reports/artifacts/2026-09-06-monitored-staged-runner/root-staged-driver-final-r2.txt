@@ -1,0 +1,24 @@
+✓ the driver exists
+✓ a full three-stage run exits 0
+✓ it reached stage=done on disk
+✓ it recorded every stage advance
+✓ it re-typed the skill command after each /clear — the loaded skill does not survive one
+✓ the transcript is kept for review
+✓ the stand-in never answered without a loaded skill
+✓ None -> triage is NOT an advance
+✓ triage -> draft IS an advance
+✓ a stage name the machine does not know cannot look like progress
+✓ a refused /clear is reported as CLEAR_REFUSED, not as success
+✓ a stage that hands off but shows nothing on screen still RUNS
+✓ ...and every such boundary is recorded as not shown
+✓ a stage advanced WITHOUT checkpoint.py handoff is NO_HANDOFF_BLOCK
+✓ an obedient run records the block ON SCREEN at every boundary
+✓ a child that exits early is DIED, not a pass
+✓ a stage that never advances is STAGE_TIMEOUT
+✓ ledger_prompt_tokens reads the last completed call
+✓ a missing ledger reads 0, not an exception
+✓ every threshold_handoff is immediately followed by batch_boundary — the latch fires once per crossing, not once per poll
+✓ the ledger stays over threshold the whole run, so every batched stage (triage, draft, repair) needed its own crossing — the fake never completes a stage on its own in this mode
+✓ no /clear was typed before boundary_seq advanced on disk — the checkpoint must be durable before the driver clears
+✓ the run still finishes: the threshold handoff did not strand it
+✓ the interactive driver is proven on a stand-in

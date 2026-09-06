@@ -92,6 +92,23 @@ class MonitoredTerminalAuditTest(unittest.TestCase):
         self.finish()
         self.assertEqual(VERDICT.monitored_lifecycle_failures(self.trace), [])
 
+    def test_session_start_raw_projection_is_independently_audited(self):
+        self.lifecycle_hook("SessionStart", source="clear", cwd=str(self.workspace))
+        receipt = self.finish()
+        self.assertEqual(receipt["session_start_count"], 1)
+        self.assertEqual(VERDICT.monitored_lifecycle_failures(self.trace), [])
+
+        journal = self.observer / "session-start-events.jsonl"
+        row = json.loads(journal.read_text())
+        row["source"] = "startup"
+        journal.write_bytes(LIFECYCLE._canonical(row) + b"\n")
+        receipt["session_start_events_sha256"] = LIFECYCLE.sha256(journal.read_bytes())
+        receipt = LIFECYCLE._sign_record(self.observer, receipt)
+        (self.trace / "lifecycle-receipt.json").write_bytes(
+            LIFECYCLE._canonical(receipt) + b"\n")
+        self.assertEqual(VERDICT.monitored_lifecycle_failures(self.trace),
+                         ["LIFECYCLE_AUDIT_INVALID"])
+
     def test_nested_foreground_journals_are_independently_audited(self):
         LIFECYCLE.register_expected_tools(
             self.observer, self.nonce, self.boot, "request-parent", ["call-parent"])
@@ -422,10 +439,11 @@ class FullMonitoredSelectedRunnerTest(unittest.TestCase):
     def _write_qwen(self, directory, tools):
         qwen = directory / "loopback-qwen.py"
         qwen.write_text("""#!/usr/bin/env python3
-import json, os, subprocess, sys, urllib.request
+import json, os, subprocess, sys, time, urllib.request
 from pathlib import Path
 if '--sherlock-flag-probe-sentinel' in sys.argv:
     raise SystemExit(0)
+Path(%r).write_text('contacted', encoding='utf-8')
 settings = json.loads(Path('.qwen/settings.json').read_text(encoding='utf-8'))
 assert os.environ['SHERLOCK_OPERATOR_MONITORED_MODE'] == '1'
 assert settings['skills']['directories'] == ['../skill-catalogue']
@@ -433,9 +451,16 @@ assert Path.cwd().name == 'workspace'
 skill_root = Path(os.environ['QWEN_SKILL_ROOT'])
 assert (Path.cwd() / '../skill-catalogue').resolve() == skill_root.parent.resolve()
 requested_model = os.environ.get('SHERLOCK_QWEN_MODEL', os.environ['SHERLOCK_MODEL'])
+if '-p' in sys.argv:
+    prompt = sys.argv[sys.argv.index('-p') + 1]
+else:
+    print('Enter to steer · fixture ready', flush=True)
+    skill = sys.stdin.readline().strip()
+    assert skill == '/sherlock', skill
+    prompt = sys.stdin.readline().strip()
 request = urllib.request.Request(os.environ['OPENAI_BASE_URL'].rstrip('/') + '/chat/completions',
     data=json.dumps({'model': requested_model,
-      'messages':[{'role':'user','content':sys.argv[sys.argv.index('-p') + 1]}]}).encode(),
+      'messages':[{'role':'user','content':prompt}]}).encode(),
     headers={'Authorization':'Bearer fixture', 'Content-Type':'application/json'})
 with urllib.request.urlopen(request, timeout=10) as response:
     model = json.loads(response.read().decode())
@@ -456,8 +481,19 @@ for source in rows:
     subprocess.run(['python3', %r, 'next', '--work', str(work)], check=True, stdout=subprocess.DEVNULL)
     subprocess.run(['python3', %r, 'verdict', '--work', str(work), '--id', row[0], '--cell', 'N n=1 %%s «%%s»' %% (row[3], quote)], check=True, stdout=subprocess.DEVNULL)
 (work/'report.md').write_text(model['choices'][0]['message']['content'], encoding='utf-8')
-print(json.dumps([{'type':'result','result':'ok','is_error':False,'session_id':'fixture-session','num_turns':1,'usage':{'input_tokens':1,'output_tokens':1}}]))
-""" % (str(tools / "logmap.py"), str(tools / "worklist.py"), str(tools / "worklist.py")), encoding="utf-8")
+(work/'handoff.txt').write_text('СТУПЕНЬ ЗАВЕРШЕНА: done\\n', encoding='utf-8')
+checkpoint={'schema':1,'stage':'done','boundary_seq':1,'resolved':len(rows),
+            'report_sections_written':4,'report_bytes':(work/'report.md').stat().st_size,
+            'gate_tools_run':['reportcheck','citecheck','statecheck','triagecheck']}
+(work/'checkpoint.json').write_text(json.dumps(checkpoint), encoding='utf-8')
+(work/'checkpoint.jsonl').write_text(json.dumps(checkpoint)+'\\n', encoding='utf-8')
+print('СТУПЕНЬ ЗАВЕРШЕНА: done', flush=True)
+if '-p' in sys.argv:
+    print(json.dumps([{'type':'result','result':'ok','is_error':False,'session_id':'fixture-session','num_turns':1,'usage':{'input_tokens':1,'output_tokens':1}}]))
+else:
+    while True: time.sleep(1)
+""" % (str(directory / "qwen-contacted"), str(tools / "logmap.py"),
+         str(tools / "worklist.py"), str(tools / "worklist.py")), encoding="utf-8")
         qwen.chmod(0o700)
         return qwen
 
@@ -513,6 +549,21 @@ print(json.dumps([{'type':'result','result':'ok','is_error':False,'session_id':'
             SHERLOCK_TIMEOUT="0", SHERLOCK_MAX_SESSION_TURNS="-1",
             SHERLOCK_MAX_TOOL_CALLS="-1", SHERLOCK_MAX_WALL_TIME_S="-1",
         )
+        package_path = output / "input-package.json"
+        package_bytes = package_path.read_bytes()
+        package = json.loads(package_bytes)
+        package["interactive_driver_sha256"] = "0" * 64
+        package_path.write_bytes(LIFECYCLE._canonical(package) + b"\n")
+        rejected = subprocess.Popen(["bash", str(controller)], env=env, text=True,
+                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        fixture.observe_until_exit(rejected)
+        rejected_out, rejected_err = rejected.communicate(timeout=90)
+        self.assertNotEqual(rejected.returncode, 0, (rejected_out, rejected_err))
+        self.assertIn("interactive driver binding", rejected_err)
+        self.assertFalse((fixture.base / "qwen-contacted").exists())
+        self.assertEqual(seen, [])
+        package_path.write_bytes(package_bytes)
+
         process = subprocess.Popen(["bash", str(controller)], env=env, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         observed = fixture.observe_until_exit(process)
         stdout, stderr = process.communicate(timeout=90)
@@ -523,7 +574,7 @@ print(json.dumps([{'type':'result','result':'ok','is_error':False,'session_id':'
         self.assertEqual(len(observed), 1)
         self.assertEqual(len(seen), 1)
         trace = next(path for path in fixture.runs.glob("run-*")
-                     if path.is_dir() and (path / "run-manifest.json").is_file())
+                     if path.is_dir() and (path / "candidate.json").is_file())
         receipt = json.loads((trace / "lifecycle-receipt.json").read_text(encoding="utf-8"))
         self.assertEqual(receipt["status"], "PASS")
         self.assertTrue((trace / "candidate.json").is_file())

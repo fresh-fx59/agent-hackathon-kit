@@ -27,7 +27,9 @@ FAIL LOUD, NEVER FAIL QUIET. Every terminal here is named and non-zero:
   DIED               the child exited before reaching stage=done
 """
 import argparse
+import base64
 import errno
+import hashlib
 import json
 import os
 import pty
@@ -38,6 +40,7 @@ import signal
 import subprocess
 import sys
 import time
+from pathlib import Path
 
 ANSI = re.compile(r"\x1b\[[0-9;?]*[a-zA-Z]|\x1b\][^\x07]*\x07|\r")
 HANDOFF_MARK = "СТУПЕНЬ ЗАВЕРШЕНА"
@@ -63,6 +66,160 @@ TARGET_REFUSAL_NEEDLES = (
     "this limit in your setting.json",
 )
 STAGES = ("triage", "draft", "repair", "done")
+
+
+class ClearProofError(ValueError):
+    """The retained lifecycle rows contradict an exact parent reset."""
+
+
+class DriverStopped(Exception):
+    """The owner stopped the PTY driver and its separately grouped child."""
+
+
+def _strict_object(raw):
+    def unique(pairs):
+        out = {}
+        for key, value in pairs:
+            if key in out:
+                raise ClearProofError("duplicate JSON key")
+            out[key] = value
+        return out
+    try:
+        value = json.loads(raw.decode("utf-8"), object_pairs_hook=unique,
+                           parse_constant=lambda token: (_ for _ in ()).throw(
+                               ClearProofError("non-finite JSON: " + token)))
+    except (UnicodeError, json.JSONDecodeError) as exc:
+        raise ClearProofError("invalid retained hook JSON") from exc
+    if not isinstance(value, dict):
+        raise ClearProofError("retained hook input is not an object")
+    return value
+
+
+def _lifecycle_rows(observer_dir, name, phase, run_nonce):
+    path = Path(observer_dir) / name
+    if not path.exists():
+        return []
+    try:
+        data = path.read_bytes()
+    except OSError as exc:
+        raise ClearProofError("cannot read lifecycle journal") from exc
+    if data and not data.endswith(b"\n"):
+        raise ClearProofError("incomplete lifecycle journal row")
+    rows = []
+    previous_mono = -1
+    for sequence, line in enumerate(data.splitlines()):
+        try:
+            row = _strict_object(line)
+            encoded = row["input_base64"]
+            if not isinstance(encoded, str):
+                raise ValueError("input_base64")
+            raw = base64.b64decode(encoded, validate=True)
+            event = _strict_object(raw)
+            mono = row["monotonic_ns"]
+            if (row.get("schema") != 1 or row.get("run_nonce") != run_nonce
+                    or row.get("sequence") != sequence
+                    or row.get("phase") != phase
+                    or event.get("hook_event_name") != phase
+                    or row.get("session_id") != event.get("session_id")
+                    or not isinstance(row.get("session_id"), str)
+                    or not row["session_id"]
+                    or not isinstance(mono, int) or isinstance(mono, bool)
+                    or mono <= previous_mono
+                    or row.get("input_sha256") != hashlib.sha256(raw).hexdigest()):
+                raise ValueError("row projection")
+            if phase == "SessionStart" and (
+                    row.get("source") != event.get("source")
+                    or row.get("cwd") != str(Path(event.get("cwd", "")).resolve())):
+                raise ValueError("session projection")
+        except (KeyError, TypeError, ValueError, base64.binascii.Error) as exc:
+            raise ClearProofError("invalid %s row %d" % (phase, sequence)) from exc
+        previous_mono = mono
+        rows.append((row, event))
+    return rows
+
+
+def capture_clear_anchor(observer_dir, run_nonce):
+    """Capture the exact latest root prompt before the driver types /clear."""
+    rows = _lifecycle_rows(observer_dir, "root-boundary-events.jsonl",
+                           "UserPromptSubmit", run_nonce)
+    if not rows:
+        raise ClearProofError("no root prompt exists before /clear")
+    row, _ = rows[-1]
+    return {key: row[key] for key in (
+        "run_nonce", "sequence", "session_id", "input_sha256", "monotonic_ns")}
+
+
+def monitored_clear_evidence(observer_dir, run_nonce, anchor, skill_command,
+                             reseed_line):
+    """Reconstruct the installed-client clear → skill → reseed chain.
+
+    The returned state is a polling state, never an inferred success. Any
+    observed event that conflicts with the expected next event raises.
+    """
+    roots = _lifecycle_rows(observer_dir, "root-boundary-events.jsonl",
+                            "UserPromptSubmit", run_nonce)
+    starts = _lifecycle_rows(observer_dir, "session-start-events.jsonl",
+                             "SessionStart", run_nonce)
+    try:
+        sequence = anchor["sequence"]
+        anchor_row, _ = roots[sequence]
+        exact = {key: anchor_row[key] for key in (
+            "run_nonce", "sequence", "session_id", "input_sha256", "monotonic_ns")}
+    except (KeyError, IndexError, TypeError) as exc:
+        raise ClearProofError("clear anchor is absent") from exc
+    if anchor != exact or anchor.get("run_nonce") != run_nonce:
+        raise ClearProofError("clear anchor changed")
+
+    later_starts = [(row, event) for row, event in starts
+                    if row["monotonic_ns"] > anchor["monotonic_ns"]]
+    later_roots = [(row, event) for row, event in roots
+                   if row["monotonic_ns"] > anchor["monotonic_ns"]]
+    if not later_starts:
+        if later_roots:
+            raise ClearProofError("root prompt arrived before clear SessionStart")
+        return {"state": "await_clear"}
+    clear_row, clear_event = later_starts[0]
+    if (clear_event.get("source") != "clear"
+            or clear_row["session_id"] == anchor["session_id"]):
+        raise ClearProofError("SessionStart is not a fresh /clear session")
+    if len(later_starts) > 1:
+        raise ClearProofError("another SessionStart interrupted reset proof")
+    if any(row["monotonic_ns"] <= clear_row["monotonic_ns"]
+           for row, _ in later_roots):
+        raise ClearProofError("root prompt arrived before clear completed")
+    if not later_roots:
+        return {"state": "await_skill", "new_session_id": clear_row["session_id"]}
+
+    slash_row, slash_event = later_roots[0]
+    if (slash_row["session_id"] != clear_row["session_id"]
+            or slash_event.get("submitted_prompt") != skill_command
+            or not isinstance(slash_event.get("prompt"), str)
+            or not slash_event["prompt"]):
+        raise ClearProofError("first fresh-session prompt is not the skill reload")
+    if len(later_roots) == 1:
+        return {"state": "await_reseed", "new_session_id": clear_row["session_id"]}
+
+    reseed_row, reseed_event = later_roots[1]
+    if (reseed_row["session_id"] != clear_row["session_id"]
+            or reseed_event.get("prompt") != reseed_line
+            or reseed_event.get("submitted_prompt") != reseed_line):
+        raise ClearProofError("fresh-session reseed prompt does not match")
+    return {
+        "state": "complete", "old_session_id": anchor["session_id"],
+        "new_session_id": clear_row["session_id"],
+        "anchor_input_sha256": anchor["input_sha256"],
+        "clear_input_sha256": clear_row["input_sha256"],
+        "skill_input_sha256": slash_row["input_sha256"],
+        "reseed_input_sha256": reseed_row["input_sha256"],
+    }
+
+
+def stage_deadline(stage_budget_s, now=None):
+    if stage_budget_s < 0:
+        raise ValueError("stage budget must be non-negative")
+    if stage_budget_s == 0:
+        return None
+    return (time.time() if now is None else now) + stage_budget_s
 # THE ROOT CAUSE OF v44's free-run block, run 20260902T021751Z-v44: qwen-code
 # 0.22.0 QUEUES typed input while a turn is in flight — «⏳ 2 queued» — instead
 # of executing it. This driver used to type `/clear` the instant
@@ -822,6 +979,11 @@ class Session(object):
             os.chdir(cwd)
             os.execvpe(argv[0], argv, env)
             os._exit(127)
+        # pty.fork() makes the child a session leader, so its PID is also the
+        # process-group ID we own. Keep that identity now: the leader can exit
+        # before a stubborn descendant, at which point getpgid(pid) no longer
+        # recovers the still-live group that cleanup must terminate.
+        self.pgid = self.pid
         self.transcript_path = transcript
         self.transcript = open(transcript, "wb")
         # NO SCREEN BUFFER AT ALL — and that is the fix, not an omission.
@@ -1080,10 +1242,42 @@ class Session(object):
         return done == 0
 
     def close(self):
+        # forkpty creates a new controlling-terminal process group. That is
+        # desirable while the TUI is alive, but it also means an outer TERM to
+        # the controller/runner group cannot reach Qwen. The driver owns this
+        # group and must terminate and reap it before returning.
+        pgid = self.pgid
         try:
-            os.kill(self.pid, signal.SIGTERM)
+            if pgid != os.getpgrp():
+                os.killpg(pgid, signal.SIGTERM)
+            else:
+                os.kill(self.pid, signal.SIGTERM)
         except OSError:
             pass
+        reaped = False
+        deadline = time.monotonic() + 0.5
+        while time.monotonic() < deadline:
+            if not reaped:
+                try:
+                    waited, _ = os.waitpid(self.pid, os.WNOHANG)
+                    reaped = waited == self.pid
+                except (ChildProcessError, OSError):
+                    reaped = True
+            time.sleep(0.02)
+        # The direct child may already be reaped while descendants in its
+        # group ignore TERM. Always close the group after the grace period.
+        try:
+            if pgid != os.getpgrp():
+                os.killpg(pgid, signal.SIGKILL)
+            elif not reaped:
+                os.kill(self.pid, signal.SIGKILL)
+        except OSError:
+            pass
+        if not reaped:
+            try:
+                os.waitpid(self.pid, 0)
+            except (ChildProcessError, OSError):
+                pass
         try:
             self.transcript.close()
         except OSError:
@@ -1096,9 +1290,32 @@ def drive(argv, cwd, work, first_prompt, reseed, stage_budget_s, settle_s,
           handoff_grace_s=8.0, threshold=0, reseed_command="",
           clear_idle_wait_s=20.0, clear_idle_settle_s=1.0,
           handoff_retry_window_s=HANDOFF_RETRY_WINDOW_S,
-          handoff_max_retries=HANDOFF_MAX_RETRIES):
-    ses = Session(argv, cwd, dict(os.environ), transcript)
+          handoff_max_retries=HANDOFF_MAX_RETRIES, observer_dir="",
+          run_nonce=""):
+    prior_term = signal.getsignal(signal.SIGTERM)
+    stopping = [False]
+    setup_stop = [False]
+    armed = [False]
+
+    def owner_stopped(signum, frame):
+        if stopping[0]:
+            return
+        # Install ownership before forkpty. The child can become externally
+        # visible before Session returns; remember a TERM in that setup window
+        # and raise only after the existing try/finally can close its group.
+        if not armed[0]:
+            setup_stop[0] = True
+            return
+        stopping[0] = True
+        raise DriverStopped()
+
+    signal.signal(signal.SIGTERM, owner_stopped)
     events = []
+    try:
+        ses = Session(argv, cwd, dict(os.environ), transcript)
+    except BaseException:
+        signal.signal(signal.SIGTERM, prior_term)
+        raise
     # THE LATCH: holds the boundary_seq the driver was at when it crossed the
     # threshold and typed `handoff --partial`, or None when no crossing is
     # pending. Its whole job is «one crossing produces one handoff» — without
@@ -1185,7 +1402,38 @@ def drive(argv, cwd, work, first_prompt, reseed, stage_budget_s, settle_s,
              "typing anyway (today's behaviour, never worse)"
              % (seen, clear_idle_wait_s, step_label))
 
+    def wait_for_reset_state(anchor, wanted, reseed_line=""):
+        """Poll exact external hook evidence while keeping the PTY alive."""
+        ranks = {"await_clear": 0, "await_skill": 1,
+                 "await_reseed": 2, "complete": 3}
+        end = time.time() + max(settle_s * 4, 60.0)
+        while time.time() < end:
+            try:
+                proof = monitored_clear_evidence(
+                    observer_dir, run_nonce, anchor, skill_command, reseed_line)
+            except ClearProofError as exc:
+                note("CLEAR_NOT_EFFECTIVE", str(exc))
+                return None
+            state = proof["state"]
+            if state == wanted:
+                return proof
+            if ranks[state] > ranks[wanted]:
+                note("CLEAR_NOT_EFFECTIVE",
+                     "reset hooks advanced to %s before driver expected %s"
+                     % (state, wanted))
+                return None
+            if not ses.pump(1.0) and not ses.alive():
+                break
+        note("CLEAR_NOT_EFFECTIVE",
+             "no exact lifecycle %s proof within the verification window"
+             % wanted)
+        return None
+
     try:
+        armed[0] = True
+        if setup_stop[0]:
+            stopping[0] = True
+            raise DriverStopped()
         ses.pump(settle_s)                     # let the UI come up
         note("started", " ".join(argv))
         # SNAPSHOT THE STAGE BEFORE TYPING, NEVER AFTER. Found on the stand-in:
@@ -1228,7 +1476,7 @@ def drive(argv, cwd, work, first_prompt, reseed, stage_budget_s, settle_s,
         # 21,600s timeout. Quiet is measured from this moment instead.
         started_at = time.time()
         while True:
-            deadline = time.time() + stage_budget_s
+            deadline = stage_deadline(stage_budget_s)
             nudges = 0
             # One note per blocked window, not one per poll: a mutable cell
             # because the branch that sets it sits inside the loop.
@@ -1245,7 +1493,7 @@ def drive(argv, cwd, work, first_prompt, reseed, stage_budget_s, settle_s,
             # target did: wait a full idle_nudge_s after sending one before
             # sending or escalating again.
             last_nudge = None
-            while time.time() < deadline:
+            while deadline is None or time.time() < deadline:
                 if not ses.pump(3.0) and not ses.alive():
                     note("DIED", "child exited at stage %s" % seen)
                     return 3, events
@@ -1509,13 +1757,26 @@ def drive(argv, cwd, work, first_prompt, reseed, stage_budget_s, settle_s,
             # can answer for itself.
             ses.refusal.reset()
             wait_before("/clear", allow_cancel=True)
+            clear_anchor = None
+            if observer_dir:
+                try:
+                    clear_anchor = capture_clear_anchor(observer_dir, run_nonce)
+                except ClearProofError as exc:
+                    note("CLEAR_NOT_EFFECTIVE", str(exc))
+                    return 8, events
             reseed_at_ms = int(time.time() * 1000)
             ses.type("/clear", settle=settle_s)
             if ses.refusal.seen:
                 note("CLEAR_REFUSED", "a background task was still alive")
                 return 6, events
+            if observer_dir and wait_for_reset_state(
+                    clear_anchor, "await_skill") is None:
+                return 8, events
             wait_before(skill_command)
             ses.type(skill_command, settle=settle_s)
+            if observer_dir and wait_for_reset_state(
+                    clear_anchor, "await_reseed") is None:
+                return 8, events
             line = reseed % {"work": os.path.abspath(work), "stage": seen}
             if reseed_command:
                 # BUILT AT RESEED TIME, so it carries THIS boundary's numbers.
@@ -1540,6 +1801,15 @@ def drive(argv, cwd, work, first_prompt, reseed, stage_budget_s, settle_s,
             wait_before("the reseed line")
             ses.type(line, settle=2.0)
             note("reseeded", seen)
+            if observer_dir:
+                proof = wait_for_reset_state(clear_anchor, "complete", line)
+                if proof is None:
+                    return 8, events
+                note("clear_verified",
+                     "%s — exact SessionStart(clear) %s -> %s and exact "
+                     "skill/reseed root prompts (%s)"
+                     % (seen, proof["old_session_id"], proof["new_session_id"],
+                        proof["reseed_input_sha256"]))
             # DO NOT BELIEVE YOUR OWN KEYSTROKES. The refusal needle above
             # catches a /clear that says no; it cannot catch one that says
             # nothing and keeps the conversation, which is exactly what run
@@ -1580,7 +1850,7 @@ def drive(argv, cwd, work, first_prompt, reseed, stage_budget_s, settle_s,
             # tokens are just as capable of dropping as a real reset's — it
             # would not close the false-negative gap, only add a new tunable
             # that could itself go stale and start flagging honest resets.
-            if ledger_path:
+            if ledger_path and not observer_dir:
                 rows = []
                 verify_end = time.time() + max(settle_s * 4, 60.0)
                 while time.time() < verify_end:
@@ -1616,8 +1886,13 @@ def drive(argv, cwd, work, first_prompt, reseed, stage_budget_s, settle_s,
                              "meaningless"
                              % [r.get("messages_count") for r in rows])
                         return 8, events
+    except DriverStopped:
+        note("STOPPED", "owner sent SIGTERM; terminating the PTY process group")
+        return 143, events
     finally:
+        stopping[0] = True
         ses.close()
+        signal.signal(signal.SIGTERM, prior_term)
 
 
 def main():
@@ -1641,6 +1916,10 @@ def main():
     ap.add_argument("--ledger", default="",
                     help="the proxy's upstream ledger; its mtime is the only "
                          "honest signal that the target has stopped talking")
+    ap.add_argument("--observer-dir", default="",
+                    help="monitored lifecycle observer holding exact root-reset hooks")
+    ap.add_argument("--run-nonce", default="",
+                    help="monitored lifecycle segment nonce bound to those hooks")
     ap.add_argument("--idle-nudge-s", type=int, default=0,
                     help="nudge when the ledger has been quiet this long "
                          "(0 = never nudge, the old behaviour)")
@@ -1684,6 +1963,10 @@ def main():
     ap.add_argument("command", nargs=argparse.REMAINDER,
                     help="-- the interactive command to drive (default: qwen)")
     args = ap.parse_args()
+    if args.stage_budget_s < 0:
+        ap.error("--stage-budget-s must be non-negative")
+    if bool(args.observer_dir) != bool(args.run_nonce):
+        ap.error("--observer-dir and --run-nonce must be supplied together")
     argv = [a for a in args.command if a != "--"] or ["qwen"]
     # Resolve the program BEFORE the child chdir's into --cwd: a relative
     # command would otherwise be looked up in the session's project directory
@@ -1703,7 +1986,8 @@ def main():
                        args.handoff_grace_s, args.threshold,
                        args.reseed_command, args.clear_idle_wait_s,
                        args.clear_idle_settle_s, args.handoff_retry_window_s,
-                       args.handoff_max_retries)
+                       args.handoff_max_retries, args.observer_dir,
+                       args.run_nonce)
     print("rc=%d" % rc)
     return rc
 

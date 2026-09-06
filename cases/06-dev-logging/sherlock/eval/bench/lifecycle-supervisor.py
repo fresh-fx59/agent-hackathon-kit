@@ -47,7 +47,8 @@ RECEIPT_FIELDS = {
     "hook_events_sha256", "post_tool_batch_events_sha256",
     "subagent_state_sha256", "subagent_events_sha256",
     "nested_dispatches_sha256", "root_boundary_events_sha256",
-    "subagent_count", "nested_dispatch_count", "root_boundary_count",
+    "session_start_events_sha256", "subagent_count", "nested_dispatch_count",
+    "root_boundary_count", "session_start_count",
     "expected_tool_count", "batched_tool_count", "completed_tool_count",
     "rejected_tool_count", "fault_sha256",
     "fault_reason", "guardian_events_sha256", "status", "key_id",
@@ -1075,6 +1076,56 @@ def _handle_subagent_event(observer, run_nonce, boot_id, event, raw_input):
         return output
 
 
+def _require_root_reconciled(observer):
+    if _subagent_state(observer)["active"] is not None:
+        raise LifecycleFault("SUBAGENT_STOP_MISSING", "root boundary while child active")
+    pairs = _load_json(observer / "pairs.json")
+    completed, pending = _completed_tool_ids(pairs)
+    owners = _expected_tool_owners(_load_json(observer / "expectations.json"))
+    batched = _batched_tool_ids(_load_json(observer / "batch-tools.json"))
+    rejected = _rejected_tool_ids(_load_json(observer / "rejections.json"))
+    if pending:
+        raise LifecycleFault("HOOK_PAIR_MISSING", pending[0])
+    if set(owners) != batched:
+        raise LifecycleFault("EXPECTED_TOOL_BATCH_MISSING",
+                             sorted(set(owners) - batched)[0])
+    missing = set(owners) - completed - rejected
+    if missing:
+        raise LifecycleFault("EXPECTED_TOOL_HOOK_MISSING", sorted(missing)[0])
+
+
+def _handle_session_start(observer, workspace, run_nonce, boot_id, event, raw_input):
+    session, source, cwd = (event.get("session_id"), event.get("source"),
+                            event.get("cwd"))
+    if (not isinstance(session, str) or not session or len(session) > 4096
+            or not isinstance(source, str) or not source or len(source) > 128
+            or not isinstance(cwd, str) or not cwd
+            or Path(cwd).resolve() != Path(workspace).resolve()):
+        raise LifecycleFault("INVALID_HOOK_INPUT", "SessionStart shape")
+    output = _hook_output("SessionStart", True)
+    with _locked(observer):
+        terminal = _load_json(observer / "fault.json", absent=None)
+        if terminal is not None:
+            return _hook_output("SessionStart", False,
+                                "terminal lifecycle fault: %s" % terminal.get("reason"))
+        identity = _identity(observer)
+        if identity.get("run_nonce") != run_nonce or identity.get("boot_id") != boot_id:
+            raise LifecycleFault("SEGMENT_IDENTITY_MISMATCH", "hook")
+        if source == "clear":
+            _require_root_reconciled(observer)
+        path = observer / "session-start-events.jsonl"
+        sequence = sum(1 for line in path.read_bytes().splitlines() if line) if path.exists() else 0
+        _append(path, {
+            "schema": SCHEMA, "run_nonce": run_nonce, "sequence": sequence,
+            "phase": "SessionStart", "session_id": session, "source": source,
+            "cwd": str(Path(cwd).resolve()), "input_sha256": sha256(raw_input),
+            "input_base64": base64.b64encode(raw_input).decode("ascii"),
+            "output": output, "observed_at": _wall_now(),
+            "monotonic_ns": time.monotonic_ns(),
+        })
+        return output
+
+
 def _handle_root_boundary(observer, run_nonce, boot_id, event, raw_input):
     session = event.get("session_id")
     if not isinstance(session, str) or not session or len(session) > 4096:
@@ -1088,21 +1139,7 @@ def _handle_root_boundary(observer, run_nonce, boot_id, event, raw_input):
         identity = _identity(observer)
         if identity.get("run_nonce") != run_nonce or identity.get("boot_id") != boot_id:
             raise LifecycleFault("SEGMENT_IDENTITY_MISMATCH", "hook")
-        if _subagent_state(observer)["active"] is not None:
-            raise LifecycleFault("SUBAGENT_STOP_MISSING", "root boundary while child active")
-        pairs = _load_json(observer / "pairs.json")
-        completed, pending = _completed_tool_ids(pairs)
-        owners = _expected_tool_owners(_load_json(observer / "expectations.json"))
-        batched = _batched_tool_ids(_load_json(observer / "batch-tools.json"))
-        rejected = _rejected_tool_ids(_load_json(observer / "rejections.json"))
-        if pending:
-            raise LifecycleFault("HOOK_PAIR_MISSING", pending[0])
-        if set(owners) != batched:
-            raise LifecycleFault("EXPECTED_TOOL_BATCH_MISSING",
-                                 sorted(set(owners) - batched)[0])
-        missing = set(owners) - completed - rejected
-        if missing:
-            raise LifecycleFault("EXPECTED_TOOL_HOOK_MISSING", sorted(missing)[0])
+        _require_root_reconciled(observer)
         path = observer / "root-boundary-events.jsonl"
         sequence = sum(1 for line in path.read_bytes().splitlines() if line) if path.exists() else 0
         _append(path, {
@@ -1260,8 +1297,11 @@ def handle_hook(observer, workspace, run_nonce, boot_id, raw_input):
         phase = event.get("hook_event_name")
         if phase not in ("PreToolUse", "PostToolUse", "PostToolUseFailure",
                          "PostToolBatch", "SubagentStart", "SubagentStop",
-                         "UserPromptSubmit"):
+                         "SessionStart", "UserPromptSubmit"):
             raise LifecycleFault("INVALID_HOOK_INPUT", "event phase")
+        if phase == "SessionStart":
+            return _handle_session_start(
+                observer, workspace, run_nonce, boot_id, event, raw_input)
         if phase in ("SubagentStart", "SubagentStop"):
             return _handle_subagent_event(
                 observer, run_nonce, boot_id, event, raw_input)
@@ -1470,6 +1510,8 @@ def finalize_segment(observer, trace, run_nonce, boot_id, *, run_tag,
                 observer / "nested-dispatches.jsonl"),
             "root_boundary_events_sha256": _optional_digest(
                 observer / "root-boundary-events.jsonl"),
+            "session_start_events_sha256": _optional_digest(
+                observer / "session-start-events.jsonl"),
             "subagent_count": len(subagent_state.get("completed", [])),
             "nested_dispatch_count": sum(
                 1 for line in (observer / "nested-dispatches.jsonl").read_bytes().splitlines()
@@ -1477,6 +1519,9 @@ def finalize_segment(observer, trace, run_nonce, boot_id, *, run_tag,
             "root_boundary_count": sum(
                 1 for line in (observer / "root-boundary-events.jsonl").read_bytes().splitlines()
                 if line) if (observer / "root-boundary-events.jsonl").exists() else 0,
+            "session_start_count": sum(
+                1 for line in (observer / "session-start-events.jsonl").read_bytes().splitlines()
+                if line) if (observer / "session-start-events.jsonl").exists() else 0,
             "expected_tool_count": len(expected_ids),
             "batched_tool_count": len(expected_ids & batched_ids),
             "completed_tool_count": len(expected_ids & completed_ids),

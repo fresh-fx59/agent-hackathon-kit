@@ -69,6 +69,22 @@ def main():
         check("it keeps the same credential path as the headless arm",
               "OPENAI_API_KEY" in fn and "OPENAI_BASE_URL" in fn)
         check("it is bounded by the same run timeout", '"$TIMEOUT"' in fn)
+        check("target interactive launch consumes the signed one-use start",
+              "--record-start" in fn)
+        check("monitored clear proof receives the external observer and nonce",
+              "--observer-dir" in fn and "--run-nonce" in fn)
+
+    check("monitored branch derives interactive selection from the sealed profile",
+          "MONITORED_PROFILE_INTERACTIVE" in text)
+    check("monitored stage budget is explicitly unbounded",
+          "MONITORED_STAGE_BUDGET=0" in text)
+
+    launcher = open(os.path.join(SHERLOCK, "eval", "bench",
+                                 "run-harness-qualification.sh"),
+                    encoding="utf-8").read()
+    check("selected subscription removes ambient interactive overrides",
+          "SHERLOCK_INTERACTIVE=*" in launcher
+          and '"SHERLOCK_INTERACTIVE=1"' not in launcher)
 
     check("the interactive branch skips the resume loop",
           re.search(r'if \[ "\$INTERACTIVE" = "1" \]; then\s*\n\s*if run_qwen_interactive',

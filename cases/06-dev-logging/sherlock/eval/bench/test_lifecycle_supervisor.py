@@ -444,6 +444,37 @@ class LifecycleSupervisorTest(unittest.TestCase):
             [self.successful_call("call-parent-sibling")])["continue"])
         self.assertTrue(self.lifecycle_hook("UserPromptSubmit", prompt="continue")["continue"])
 
+    def test_session_start_clear_is_retained_with_exact_raw_input(self):
+        row = {
+            "cwd": str(self.workspace),
+            "hook_event_name": "SessionStart",
+            "permission_mode": "default",
+            "session_id": "session-after-clear",
+            "source": "clear",
+            "timestamp": "2026-09-06T00:00:00.000Z",
+            "transcript_path": str(self.workspace / "transcript.jsonl"),
+        }
+        raw = json.dumps(row, ensure_ascii=False, sort_keys=True).encode()
+        result = LIFECYCLE.handle_hook(
+            self.observer, self.workspace, self.nonce, self.boot, raw)
+        self.assertTrue(result["continue"])
+        retained = json.loads(
+            (self.observer / "session-start-events.jsonl").read_text())
+        self.assertEqual(retained["source"], "clear")
+        self.assertEqual(retained["session_id"], "session-after-clear")
+        self.assertEqual(base64.b64decode(retained["input_base64"]), raw)
+        self.assertEqual(retained["input_sha256"], LIFECYCLE.sha256(raw))
+
+    def test_session_start_rejects_missing_source_without_losing_raw_fault(self):
+        result = self.lifecycle_hook("SessionStart", session_id="new-session")
+        self.assertFalse(result["continue"])
+        fault = json.loads((self.observer / "fault.json").read_text())
+        self.assertEqual(fault["reason"], "INVALID_HOOK_INPUT")
+        journal = json.loads(
+            (self.observer / "hook-fault-events.jsonl").read_text())
+        raw = base64.b64decode(journal["input_base64"])
+        self.assertEqual(json.loads(raw)["hook_event_name"], "SessionStart")
+
     def test_capped_child_stop_revokes_only_batch_renewed_permit(self):
         self.observe()
         LIFECYCLE.register_expected_tools(

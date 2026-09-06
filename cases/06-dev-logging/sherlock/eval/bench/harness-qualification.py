@@ -1029,6 +1029,7 @@ def prepare_selected(source: Path, output: Path, qwen: Path):
     package = parse_json(_plain_file(output / 'input-package.json', 'INPUT_PACKAGE'), 'INPUT_PACKAGE')
     package.update(prompt_sha256=digest((output / 'prompt.txt').read_bytes()),
                    lifecycle_helper_sha256=source_package['lifecycle_helper_sha256'],
+                   interactive_driver_sha256=source_package['interactive_driver_sha256'],
                    arm=registered.version, package_version=registered.version, package_sha256=registered.digest,
                    settings_sha256=digest(settings), tool_schema_sha256=digest(tools_rows),
                    target_profile_sha256=record['target_profile_sha256'],
