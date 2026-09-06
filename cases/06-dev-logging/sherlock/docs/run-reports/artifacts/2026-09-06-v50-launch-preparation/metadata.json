@@ -1,0 +1,20 @@
+{
+  "schema": 1,
+  "arm": "v50",
+  "source_templates": [
+    "/tmp/sherlock-v49-prepare-r1.sh",
+    "/tmp/sherlock-v49-launch-harness-r1.sh",
+    "/tmp/sherlock-v49-launch-target-r1.sh",
+    "/tmp/sherlock-v49-launch-full-wine-r1.sh",
+    "/tmp/sherlock-v49-prepare-independent-r1.sh",
+    "/tmp/sherlock-v49-launch-target-independent-r1.sh",
+    "/tmp/sherlock-v49-launch-full-independent-r1.sh"
+  ],
+  "scripts": 7,
+  "bash_n": "passed",
+  "executed": false,
+  "provider_contact": false,
+  "helper_pin_preserved": "0d6aacbb7ed0d5e2f665113154a79122b5e9f9072cc0ec721bc436c1da44c0ee",
+  "interactive_driver_pin_preserved": "6095a501e5b7f338f82276eb309624c165ad108027c332a022592f89bcd83717",
+  "hash_inventory": "scripts.sha256"
+}
