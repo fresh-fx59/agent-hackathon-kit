@@ -1,0 +1,75 @@
+{
+  "schema": 1,
+  "report": "2026-09-06-v45-harness-r8.md",
+  "status": "rejected",
+  "run_tag": "run-20260906T121612Z-9c097e6c7389",
+  "launch_at": "2026-09-06T12:16:55.075839Z",
+  "runtime": {
+    "package_version": "v45",
+    "package_sha256": "36a0dfe2c674ac11a13d1dc1b6a0b8c3e720fdb08577c8c9ec5d386cd317e40e",
+    "implementation_commit": "a104458035fc19cf886dc8c60a6e68c759c0e99e",
+    "interactive_driver_sha256": "4ca7eb56657a3de81b900cddce89b813d3ab81e1c693bc1a5574595b3aebbec8",
+    "lifecycle_helper_sha256": "b67790b700d0406aa0909e799b0672b4be8a0ab45088e0400b40b3d3032e4d2c",
+    "qwen_sha256": "68cb29eb7ccc936d78ece5564ef55cae41a55b630e6657dc417c1f2e561cf4c9",
+    "requested_model": "gpt-5.5",
+    "returned_model": "gpt-5.5",
+    "deepseek_used": false
+  },
+  "mirror": {
+    "path": "/Users/a/hack/sherlock-v45-qualification-development-20260906/sherlock-v45-harness-20260906-r8",
+    "regular_file_count": 426,
+    "external_inventory_sha256": "30d67931939a780be935423312a4f7223d0ed370268157dcae1846d14274321c"
+  },
+  "verdict": {
+    "lifecycle_status": "FAULT",
+    "fault_reason": "EXPECTED_TOOL_BATCH_MISSING",
+    "fault_detail": "call_3FQ3fKWoi861IlMnQVL2Y0jp",
+    "fault_at": "2026-09-06T12:22:07.513274Z",
+    "controller_verdict": "EXCEEDED",
+    "controller_observed_at": "2026-09-06T12:22:07.569Z",
+    "controller_wall_seconds": 290,
+    "attempts_charged": 28,
+    "status_exit_code": 2
+  },
+  "counts": {
+    "expected_tools": 28,
+    "batched_tools": 24,
+    "completed_tools": 23,
+    "rejected_tools": 1,
+    "nested_dispatches": 9,
+    "subagents": 1,
+    "root_boundaries": 16,
+    "session_starts": 2,
+    "upstream_calls": 28,
+    "upstream_status_200": 28
+  },
+  "observations": {
+    "last_accepted_sequence": 11,
+    "last_accepted_at": "2026-09-06T12:21:57.063166Z",
+    "stale_observation_fault": false
+  },
+  "clear_reseed": {
+    "clear_typed_while_busy_at": "2026-09-06T12:21:57Z",
+    "reseeded_at": "2026-09-06T12:21:59Z",
+    "driver_verdict": "CLEAR_NOT_EFFECTIVE",
+    "fresh_session_id": "25d3b715-c749-47ba-a567-998255b41c2b",
+    "fresh_session_slash_sherlock_at": "2026-09-06T12:21:30.843Z",
+    "later_empty_prompt_times": ["2026-09-06T12:21:41.113Z", "2026-09-06T12:21:49.513Z"],
+    "expected_reseed_prompt_present": false
+  },
+  "causal_distinction": {
+    "clear_failure_is_causal_evidence": true,
+    "final_missing_batch_cause_resolved": false,
+    "terminal_report_synthesis_completed": false,
+    "report_state": "ready_for_synthesis"
+  },
+  "evidence": {
+    "run_trace": "runs/run-20260906T121612Z-9c097e6c7389",
+    "review_index": "/Users/a/hack/sherlock-v45-qualification-development-20260906/r8-review-index.json",
+    "driver_events": "interactive-events.jsonl",
+    "root_boundaries": "observer-bf7d66ad10287ae258fade6149fb2b00/root-boundary-events.jsonl",
+    "observations": "observer-bf7d66ad10287ae258fade6149fb2b00/observations.jsonl",
+    "upstream_ledger": "upstream-completed.jsonl"
+  },
+  "next_repair": "Require exact fresh-session identity and exact reseed prompt before draft; stop on CLEAR_NOT_EFFECTIVE; separately investigate missing expected batch."
+}
