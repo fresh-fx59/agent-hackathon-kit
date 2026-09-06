@@ -719,7 +719,8 @@ def prepare(args, secret_reader=None):
                 '--boot-id "$SHERLOCK_BOOT_ID"' % lifecycle_helper)
             hooks = settings_row.setdefault("hooks", {})
             for event in ("PreToolUse", "PostToolUse", "PostToolUseFailure",
-                          "PostToolBatch"):
+                          "PostToolBatch", "SubagentStart", "SubagentStop",
+                          "UserPromptSubmit"):
                 if event in hooks:
                     raise ProbeFailure("TARGET_PROBE_PREPARE",
                                        "lifecycle hook collision")

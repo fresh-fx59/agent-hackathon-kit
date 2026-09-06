@@ -172,10 +172,16 @@ def monitored_lifecycle_failures(trace):
                 or type(receipt.get("batched_tool_count")) is not int
                 or type(receipt.get("completed_tool_count")) is not int
                 or type(receipt.get("rejected_tool_count")) is not int
+                or type(receipt.get("subagent_count")) is not int
+                or type(receipt.get("nested_dispatch_count")) is not int
+                or type(receipt.get("root_boundary_count")) is not int
                 or receipt["expected_tool_count"] < 0
                 or receipt["batched_tool_count"] < 0
                 or receipt["completed_tool_count"] < 0
-                or receipt["rejected_tool_count"] < 0):
+                or receipt["rejected_tool_count"] < 0
+                or receipt["subagent_count"] < 0
+                or receipt["nested_dispatch_count"] < 0
+                or receipt["root_boundary_count"] < 0):
             raise ValueError("receipt identity")
         # Receipt digests cover the observer state the controller had at its
         # terminal decision.  A mismatch is invalid evidence even if the HMAC
@@ -184,7 +190,8 @@ def monitored_lifecycle_failures(trace):
                             ("pairs_sha256", "pairs.json"),
                             ("expectations_sha256", "expectations.json"),
                             ("batch_tools_sha256", "batch-tools.json"),
-                            ("rejections_sha256", "rejections.json")):
+                            ("rejections_sha256", "rejections.json"),
+                            ("subagent_state_sha256", "subagent-state.json")):
             if receipt[field] != lifecycle.sha256(lifecycle._read_regular(observer / name, MAX_JSON)):
                 raise ValueError("observer digest")
         for field, name in (("last_accepted_observation_sha256", "last-accepted-observation.json"),
@@ -192,6 +199,9 @@ def monitored_lifecycle_failures(trace):
                             ("hook_events_sha256", "hook-events.jsonl"),
                             ("post_tool_batch_events_sha256",
                              "post-tool-batch-events.jsonl"),
+                            ("subagent_events_sha256", "subagent-events.jsonl"),
+                            ("nested_dispatches_sha256", "nested-dispatches.jsonl"),
+                            ("root_boundary_events_sha256", "root-boundary-events.jsonl"),
                             ("guardian_events_sha256", "guardian-events.jsonl"),
                             ("fault_sha256", "fault.json")):
             claimed = receipt.get(field)
@@ -365,8 +375,181 @@ def monitored_lifecycle_failures(trace):
             raise ValueError("derived batch tool state")
         if derived_rejections != rejections["rejected"]:
             raise ValueError("derived rejection state")
+        subagent_state = lifecycle._strict_json(lifecycle._read_regular(
+            observer / "subagent-state.json", MAX_JSON))
+        if (set(subagent_state) != {"schema", "active", "completed",
+                                    "next_permit_sequence"}
+                or subagent_state.get("schema") != lifecycle.SCHEMA
+                or not isinstance(subagent_state.get("completed"), list)
+                or type(subagent_state.get("next_permit_sequence")) is not int
+                or subagent_state["next_permit_sequence"] < 0
+                or (subagent_state.get("active") is not None
+                    and not isinstance(subagent_state["active"], dict))):
+            raise ValueError("subagent state schema")
+        completed_subagents = subagent_state["completed"]
+        completed_fields = {"agent_id", "agent_type", "parent_tool_call_id",
+                            "parent_request_reference"}
+        for row in completed_subagents:
+            if (not isinstance(row, dict) or set(row) != completed_fields
+                    or not all(isinstance(row.get(name), str) and row[name]
+                               for name in completed_fields)
+                    or row["parent_tool_call_id"] not in expected_owners
+                    or expected_owners[row["parent_tool_call_id"]]
+                    != row["parent_request_reference"]
+                    or row["agent_id"] != "%s-%s" % (
+                        row["agent_type"], row["parent_tool_call_id"])):
+                raise ValueError("completed subagent schema")
+        subagent_events = []
+        subagent_path = observer / "subagent-events.jsonl"
+        if subagent_path.exists():
+            fields = {"schema", "run_nonce", "sequence", "phase", "session_id",
+                      "agent_id", "agent_type", "input_sha256", "input_base64",
+                      "output", "observed_at", "monotonic_ns"}
+            active_event = None
+            for sequence, raw_line in enumerate(
+                    lifecycle._read_regular(subagent_path, MAX_LEDGER).splitlines()):
+                row = lifecycle._strict_json(raw_line)
+                if (set(row) != fields or row.get("schema") != lifecycle.SCHEMA
+                        or row.get("run_nonce") != launch["run_nonce"]
+                        or row.get("sequence") != sequence
+                        or row.get("phase") not in ("SubagentStart", "SubagentStop")
+                        or row.get("output", {}).get("continue") is not True):
+                    raise ValueError("subagent event schema")
+                raw = base64.b64decode(row["input_base64"], validate=True)
+                event = lifecycle._strict_json(raw)
+                if (lifecycle.sha256(raw) != row.get("input_sha256")
+                        or event.get("hook_event_name") != row["phase"]
+                        or any(event.get(name) != row[name]
+                               for name in ("session_id", "agent_id", "agent_type"))):
+                    raise ValueError("subagent event input")
+                if row["phase"] == "SubagentStart":
+                    if active_event is not None:
+                        raise ValueError("nested subagent event")
+                    active_event = row
+                else:
+                    if (active_event is None
+                            or any(row[name] != active_event[name]
+                                   for name in ("session_id", "agent_id", "agent_type"))):
+                        raise ValueError("subagent stop mismatch")
+                    subagent_events.append((active_event, row))
+                    active_event = None
+            if active_event is not None and subagent_state.get("active") is None:
+                raise ValueError("unclosed subagent event")
+        if len(subagent_events) != len(completed_subagents):
+            raise ValueError("subagent completion projection")
+        for (event, _stop_event), completed in zip(
+                subagent_events, completed_subagents):
+            if (event["agent_id"] != completed["agent_id"]
+                    or event["agent_type"] != completed["agent_type"]):
+                raise ValueError("subagent completion identity")
+            parent_pair = None
+            parent_key = None
+            for key, pair in pairs["pairs"].items():
+                if pair.get("tool_call_id") == completed["parent_tool_call_id"]:
+                    parent_pair, parent_key = pair, key
+                    break
+            pre = parent_pair.get("pre") if isinstance(parent_pair, dict) else None
+            pre_sequence = pre.get("sequence") if isinstance(pre, dict) else None
+            hook_path = observer / "hook-events.jsonl"
+            hook_rows = lifecycle._read_regular(hook_path, MAX_LEDGER).splitlines()
+            if (type(pre_sequence) is not int or pre_sequence < 0
+                    or pre_sequence >= len(hook_rows)):
+                raise ValueError("subagent parent pre")
+            pre_receipt = lifecycle._strict_json(hook_rows[pre_sequence])
+            pre_raw = base64.b64decode(pre_receipt.get("input_base64", ""), validate=True)
+            pre_event = lifecycle._strict_json(pre_raw)
+            tool_input = pre_event.get("tool_input")
+            if (pre_receipt.get("input_sha256") != lifecycle.sha256(pre_raw)
+                    or pre_event.get("hook_event_name") != "PreToolUse"
+                    or pre_event.get("tool_call_id") != completed["parent_tool_call_id"]
+                    or pre_event.get("tool_name") != "agent"
+                    or not isinstance(tool_input, dict)
+                    or tool_input.get("run_in_background") is not False
+                    or tool_input.get("subagent_type") != completed["agent_type"]
+                    or parent_key.split("\x1f", 1)[0] != event["session_id"]):
+                raise ValueError("subagent parent authorization")
+        dispatch_rows = []
+        dispatch_path = observer / "nested-dispatches.jsonl"
+        if dispatch_path.exists():
+            fields = {"schema", "run_nonce", "sequence", "action", "provenance",
+                      "parent_tool_call_id", "agent_id", "request_sha256",
+                      "observed_at", "monotonic_ns"}
+            for raw_line in lifecycle._read_regular(dispatch_path, MAX_LEDGER).splitlines():
+                row = lifecycle._strict_json(raw_line)
+                if (set(row) != fields or row.get("schema") != lifecycle.SCHEMA
+                        or row.get("run_nonce") != launch["run_nonce"]
+                        or row.get("action") not in ("consume", "revoke")
+                        or row.get("provenance") not in ("start", "batch")
+                        or type(row.get("sequence")) is not int or row["sequence"] < 0
+                        or not isinstance(row.get("parent_tool_call_id"), str)
+                        or not isinstance(row.get("agent_id"), str)
+                        or (row["action"] == "consume"
+                            and not lifecycle._hex_digest(row.get("request_sha256")))
+                        or (row["action"] == "revoke"
+                            and (row.get("request_sha256") is not None
+                                 or row["provenance"] != "batch"))):
+                    raise ValueError("nested dispatch schema")
+                dispatch_rows.append(row)
+        if (sorted(row["sequence"] for row in dispatch_rows)
+                != list(range(subagent_state["next_permit_sequence"]))):
+            raise ValueError("nested permit projection")
+        consumed_requests = [row["request_sha256"] for row in dispatch_rows
+                             if row["action"] == "consume"]
+        if len(consumed_requests) != len(set(consumed_requests)):
+            raise ValueError("nested request replay")
+        known_subagents = {(row["agent_id"], row["parent_tool_call_id"])
+                           for row in completed_subagents}
+        for row in dispatch_rows:
+            if (row["agent_id"], row["parent_tool_call_id"]) not in known_subagents:
+                raise ValueError("nested dispatch owner")
+        projected_order = []
+        for (start_event, stop_event), completed in zip(
+                subagent_events, completed_subagents):
+            owned = sorted((row for row in dispatch_rows
+                            if row["agent_id"] == completed["agent_id"]
+                            and row["parent_tool_call_id"]
+                            == completed["parent_tool_call_id"]),
+                           key=lambda row: row["sequence"])
+            if (not owned or owned[0]["action"] != "consume"
+                    or owned[0]["provenance"] != "start"
+                    or any(row["provenance"] != "batch" for row in owned[1:])
+                    or any(row["action"] == "revoke" for row in owned[:-1])
+                    or any(not (start_event["monotonic_ns"] < row["monotonic_ns"]
+                                < stop_event["monotonic_ns"])
+                           for row in owned)):
+                raise ValueError("nested dispatch lifecycle")
+            projected_order.extend(owned)
+        if [row["sequence"] for row in projected_order] != [
+                row["sequence"] for row in sorted(
+                    dispatch_rows, key=lambda row: row["sequence"])]:
+            raise ValueError("nested dispatch ordering")
+        root_rows = 0
+        root_path = observer / "root-boundary-events.jsonl"
+        if root_path.exists():
+            fields = {"schema", "run_nonce", "sequence", "phase", "session_id",
+                      "input_sha256", "input_base64", "output", "observed_at",
+                      "monotonic_ns"}
+            for sequence, raw_line in enumerate(
+                    lifecycle._read_regular(root_path, MAX_LEDGER).splitlines()):
+                row = lifecycle._strict_json(raw_line)
+                raw = base64.b64decode(row.get("input_base64", ""), validate=True)
+                event = lifecycle._strict_json(raw)
+                if (set(row) != fields or row.get("schema") != lifecycle.SCHEMA
+                        or row.get("run_nonce") != launch["run_nonce"]
+                        or row.get("sequence") != sequence
+                        or row.get("phase") != "UserPromptSubmit"
+                        or row.get("output", {}).get("continue") is not True
+                        or lifecycle.sha256(raw) != row.get("input_sha256")
+                        or event.get("hook_event_name") != "UserPromptSubmit"
+                        or event.get("session_id") != row.get("session_id")):
+                    raise ValueError("root boundary event")
+                root_rows += 1
+        if (receipt["subagent_count"] != len(completed_subagents)
+                or receipt["nested_dispatch_count"] != len(dispatch_rows)
+                or receipt["root_boundary_count"] != root_rows):
+            raise ValueError("nested lifecycle counts")
         if (completed_ids & rejected_ids or rejected_ids - expected_ids
-                or batch_ids != expected_ids):
+                or batch_ids - expected_ids):
             raise ValueError("ambiguous rejected tool")
         if (receipt["expected_tool_count"] != len(expected_ids)
                 or receipt["batched_tool_count"] != len(expected_ids & batch_ids)
@@ -375,6 +558,7 @@ def monitored_lifecycle_failures(trace):
             raise ValueError("derived tool reconciliation")
         if receipt.get("status") != "PASS" or receipt.get("fault_sha256") is not None \
                 or receipt.get("fault_reason") is not None \
+                or subagent_state.get("active") is not None \
                 or incomplete or receipt["expected_tool_count"] != receipt["batched_tool_count"] \
                 or receipt["expected_tool_count"] != (\
                     receipt["completed_tool_count"] + receipt["rejected_tool_count"]):

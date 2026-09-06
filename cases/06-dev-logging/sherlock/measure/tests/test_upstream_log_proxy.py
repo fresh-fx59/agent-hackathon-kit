@@ -404,6 +404,41 @@ class ItNamesWhatActuallyAnswered(ProxyCase):
         self.assertEqual(code, 200)
         self.assertEqual(len(self.srv.seen), 1)
 
+    def test_foreground_child_permit_consumes_exactly_one_proxy_request(self):
+        observer = self.start_lifecycle("healthy")
+        identity = json.loads((observer / "identity.json").read_text())
+        nonce, boot = identity["run_nonce"], identity["boot_id"]
+        LIFECYCLE.register_expected_tools(
+            observer, nonce, boot, "request-parent", ["call-parent-agent"])
+        pre = {
+            "hook_event_name": "PreToolUse", "session_id": "session-1",
+            "tool_use_id": "toolu-parent", "tool_call_id": "call-parent-agent",
+            "tool_name": "agent", "tool_input": {
+                "subagent_type": "sherlock-triage", "run_in_background": False,
+                "prompt": "inspect"},
+        }
+        start = {
+            "hook_event_name": "SubagentStart", "session_id": "session-1",
+            "agent_id": "sherlock-triage-call-parent-agent",
+            "agent_type": "sherlock-triage",
+        }
+        self.assertTrue(LIFECYCLE.handle_hook(
+            observer, pathlib.Path(self.tmp) / "workspace-healthy", nonce, boot,
+            json.dumps(pre, sort_keys=True).encode())["continue"])
+        self.assertTrue(LIFECYCLE.handle_hook(
+            observer, pathlib.Path(self.tmp) / "workspace-healthy", nonce, boot,
+            json.dumps(start, sort_keys=True).encode())["continue"])
+
+        code, _ = self.post()
+        self.assertEqual(code, 200)
+        self.assertEqual(len(self.srv.seen), 1)
+        code, _ = self.post()
+        self.assertEqual(code, 403)
+        self.assertEqual(len(self.srv.seen), 1)
+        dispatch = json.loads(
+            (observer / "nested-dispatches.jsonl").read_text().splitlines()[0])
+        self.assertRegex(dispatch["request_sha256"], r"^[0-9a-f]{64}$")
+
     def test_provider_tool_without_hook_pair_blocks_the_next_dispatch(self):
         observer = self.start_lifecycle("healthy")
         code, _ = self.post()

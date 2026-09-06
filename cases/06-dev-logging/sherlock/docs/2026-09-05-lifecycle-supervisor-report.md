@@ -19,6 +19,80 @@ root tests, and the first installed-client rejection smoke passed; the final
 installed-client rerun against the review-fixed exact-once snapshot is pending.
 No metered target provider contact occurred while developing this repair.
 
+## Nested foreground admission specification
+
+Selected-subscription r5 and three installed-Qwen 0.22.0 captures establish a
+serial boundary that the original supervisor did not model. A foreground
+`agent` call emits parent PreToolUse, exact SubagentStart, all child provider
+requests and child tool batches, exact SubagentStop, parent PostToolUse and its
+batch; only then does Qwen schedule a sibling tool from the same parent response
+and reach the next root UserPromptSubmit. Child HTTP requests and child tool
+hooks carry no agent or parent identifier. The installed scheduler awaits the
+foreground subagent; v45 mandates `sherlock-triage` with
+`run_in_background:false`, permits a foreground `general-purpose` retry only
+after named-agent failure, and forbids child delegation.
+
+The repair will support that one serial foreground boundary, rather than a
+general subagent scheduler:
+
+1. Monitored settings add UserPromptSubmit, SubagentStart and SubagentStop to
+   the existing helper. The helper retains each accepted event's exact bytes,
+   digest, sequence and explicit allow/deny output outside the workspace.
+2. SubagentStart is accepted only when there is no active child and exactly one
+   pending parent pair matches a provider-expected `agent` call. Its preserved
+   Pre input must have `run_in_background:false` and a `subagent_type` equal to
+   the event's `agent_type`; `agent_id` must equal
+   `<agent_type>-<parent tool_call_id>`. Anything ambiguous, nested, background,
+   unanticipated or duplicated faults permanently.
+3. An accepted start creates one one-use child-dispatch permit bound to the
+   exact parent pair, its originating provider-response reference, and child
+   identity. A proxy dispatch may consume that permit only after authenticating
+   a fresh root observation and hashing the exact request bytes. While doing so,
+   it may defer only the unresolved IDs from that same parent response: the
+   active parent agent and serial siblings Qwen has not started yet. Every
+   older or child-origin expectation and every unrelated pending pair remains a
+   dispatch blocker. There is no time/grace waiver and no reusable active-child
+   bypass.
+4. While the child is active, an accepted PostToolBatch may renew exactly one
+   permit only after the prior permit was consumed and all child-origin
+   expectations so far have exact batch evidence plus disjoint completed-pair
+   or prevalidation-rejection outcomes. This permits the source-proven child
+   tool-result continuation. An incomplete child batch, missing hooks, duplicate
+   ID, second unused permit or root-origin batch cannot authorize contact.
+5. SubagentStop must match the active start, have no child tool pending, and
+   have complete exact-once accounting for every child-origin response. It may
+   explicitly revoke an unused permit created by a fully reconciled child batch:
+   installed Qwen can stop a child at its turn limit immediately after that
+   batch, and v45 requires the parent to inspect work even when the child returns
+   empty or failed. An unused initial Start permit has no evidence of a child
+   request and remains a fault. Every consumed or revoked permit is journaled
+   once and can never be reused.
+6. Stop does not discharge the parent. Parent PostToolUse or a root-origin batch
+   while its matching child is still active faults independently, so a missing
+   or fail-open Stop cannot silently convert parent execution into child scope.
+   After exact Stop, parent PostToolUse and batch remain mandatory, and
+   same-response siblings must subsequently run and batch. At root
+   UserPromptSubmit, no child may remain active and every expectation must be
+   fully reconciled; the proxy independently enforces the same strict state
+   before ordinary root dispatch.
+7. A durable child-state file plus raw subagent, nested-dispatch and root-boundary
+   journals are hashed into the signed terminal receipt. The terminal auditor
+   independently reconstructs start/stop pairing, one-use permits, request-byte
+   hashes and scope reconciliation. FAULT receipts preserve counts from each
+   structurally valid expectation/pair/batch/rejection state; an incomplete
+   pending pair or missing batch may fault the segment but must not zero all
+   already derived counts. PASS still requires no fault, no active child, no
+   unused permit and full exact-once root and child accounting.
+
+Acceptance requires red then green provider-free tests for the observed parent
+agent/child-tool/sibling order, a child continuation after inner batch, missing
+or duplicate Start/Stop, background and nested refusal, permit replay, unrelated
+pending/old expectation refusal, missing child hooks/batch, root-boundary
+refusal, partial FAULT counts, settings identity and independent terminal audit.
+The frozen installed-Qwen smoke must then prove a normal child continuation and
+the negative missing-Stop, missing-parent-Post and missing-inner-batch paths.
+No v45 bytes or paid-provider path changes are permitted.
+
 ## Timeline
 
 - 2026-09-05 — Read the reviewed lifecycle spec and mapped the existing active
@@ -391,6 +465,142 @@ No metered target provider contact occurred while developing this repair.
   hashes, and inspected the exact-once dispatch and raw-auditor reconstruction;
   both retained Codex review findings are addressed with no further review
   requested.
+
+- 2026-09-06 — Selected-subscription qualification r5 exposed a distinct
+  nested-agent ordering boundary after eight completed requests. Qwen emitted
+  PreToolUse for foreground `agent` call
+  `call_rrrtdTojr6yxfYSpURa797XP` (internal ID
+  `toolu_1788651758364_p3ezqf7se`), then legitimately attempted the child
+  agent's provider request before the parent tool could emit PostToolUse. The
+  proxy treated that in-progress parent pair as `HOOK_PAIR_MISSING` and stopped
+  the cold segment; guardian exit 2, launcher exit 1, and Qwen cancellation 130
+  confirm fail-closed termination. No code change is justified until installed
+  Qwen source plus exact child-request/hook evidence identifies an authoritative
+  nested correlation that does not waive ordinary pending hooks.
+
+- 2026-09-06 — The signed r5 FAULT receipt reports zero expected, batched,
+  completed, and rejected tools because finalization resets every derived set
+  when pair derivation encounters the pending parent. The raw signed journals
+  still retain the prior tool and rejection evidence. This does not weaken the
+  terminal fault, but loses useful independently derivable failure accounting;
+  the nested-boundary repair should preserve truthful partial counts without
+  allowing them to satisfy PASS.
+
+- 2026-09-06 — Three provider-free installed-Qwen 0.22.0 captures established
+  the narrow nested contract. SubagentStart carries exact
+  `<agent_type>-<provider call ID>` identity, while child HTTP requests,
+  UserPromptSubmit and child tool hooks carry no parent correlation. The
+  child-tool capture showed parent Pre → Start → child Pre/Post/batch → Stop →
+  parent Post/batch. The sibling capture showed strict foreground serialization:
+  the same-response sibling remained expected but unstarted until the child,
+  parent Post and parent batch finished, then ran and batched before the root
+  boundary. The r3 evidence inventory contains 45 files with SHA-256
+  `2181e7067184889259659a11c43377dab1eb9fe4658cb9848ddb816429d7cea3`.
+  Its one-turn child cap did not exercise a child continuation, so that remains
+  an explicit acceptance case rather than an observed result.
+
+- 2026-09-06 — Wrote the concrete serial-foreground specification above. It
+  uses exact Start identity plus a consumed one-use permit, defers only the
+  active parent's same-origin response IDs, renews only after fully reconciled
+  child batch evidence, and restores strict accounting at Stop and root
+  UserPromptSubmit. Background, nested, ambiguous and unrelated pending states
+  remain terminal. The ready specification now goes through the required single
+  Codex gpt-5.6-sol critique before implementation.
+
+- 2026-09-06 — The max-turns-three installed capture exercised the remaining
+  continuation edge with exactly four requests: root agent, child tool call,
+  child continuation after inner batch, and root continuation. The inner batch
+  therefore is an observed one-use permit renewal boundary. The matching local
+  and remote 44-file evidence inventory SHA-256 is
+  `ce23706308c52d70efd8051321531b0cfa0a1d8b6caff6ae7844b1f8d4b2b75c`.
+  Root also caught a legitimate capped-child edge in the earlier capture: Stop
+  can follow a fully reconciled batch without consuming its renewed permit.
+  The specification now requires explicit one-time revocation for that case,
+  while an unused initial permit still faults, and independently rejects parent
+  Post or root-origin batch before matching Stop.
+
+- 2026-09-06 — The required single Codex gpt-5.6-sol medium critique returned
+  `FAIL` with the same concrete capped-child issue root found while it ran:
+  automatic batch renewal plus a no-unused-permit Stop rule would reject the
+  installed r2/r3 path where the child stops immediately after its tool batch.
+  The specification above now implements the review's exact repair: a
+  batch-created continuation authorization is consumed by the next child
+  dispatch or atomically revoked by matching Stop, with either outcome retained
+  for independent audit. The input SHA-256 is
+  `c854df8f3d60372276164b9f78cab5d92038208277f83a3278f224e08620ba8e`;
+  raw verdict SHA-256 is
+  `f9c8b359e89d40d6a6279751358e5d593acf681508fef4c577a732378184a674`.
+  Root's second clarification is also incorporated: parent Post/batch is
+  refused while the child remains active, independently of the root-boundary
+  hook. No second model review is needed; red/green implementation can proceed.
+
+- 2026-09-06 — Added five focused nested-foreground regressions before the
+  production change. `python3 -m unittest
+  eval/bench/test_lifecycle_supervisor.py` ran 35 tests in 0.508s and failed
+  exactly at the new boundary: two errors because `check_dispatch` does not yet
+  accept an exact request digest, and three failures because Start, Stop and
+  UserPromptSubmit are still rejected as unknown hook phases. Existing tests
+  remained green. This is the expected red state and proves the regressions
+  exercise the missing integration rather than an already-supported path.
+
+- 2026-09-06 — Implemented the first helper slice: exact foreground Start
+  identity, one-use request-digest consumption, child-only accounting, batch
+  renewal, capped-child revocation, Stop identity, root-boundary strictness and
+  explicit refusal of parent Post/batch before Stop. The focused helper suite
+  then passed all 35 tests in 0.551s. This proves the core continuation and
+  capped-stop state machine; proxy propagation, signed terminal binding and the
+  independent auditor remain separate red/green steps.
+
+- 2026-09-06 — Completed the remaining nested integration: the proxy supplies
+  the SHA-256 of the exact inbound request to one-use permit consumption;
+  monitored settings install SubagentStart, SubagentStop and UserPromptSubmit;
+  terminal receipts bind subagent state and raw event, dispatch and root-boundary
+  journals; the auditor reconstructs their identities; and structurally valid
+  FAULT receipts retain partial tool counts. Added strict initial-permit,
+  continuation-batch, replay, nested-start, exact-identity, proxy one-use,
+  auditor-tamper and partial-count regressions. Observed results on the frozen
+  production snapshot: helper 39 tests passed in 0.628s; combined helper and
+  terminal audit 52 passed in 5.064s; focused exact proxy dispatch passed in
+  0.616s; focused monitored settings passed in 0.205s; Python compilation and
+  `git diff --check` passed. Frozen hashes are helper
+  `f2b6d04eceec5bdf52ab65cae3d334893a76fa5520c35af8fd7276e701d966c1`,
+  auditor `6caa18f83944e1c8ead98b656692bd2b742ea04f0f650820c72bd51dfe04cea8`,
+  proxy `8308cf12043412dc300616754cd0b98e1b389dcbbffed9f6030aef0983c315ba`
+  and settings producer
+  `74829960dd6241ca02f5cfb8ee8fab04c654244246659014c64fd35b5d2c66a7`.
+  Terra can now exercise this exact helper with installed Qwen while broad
+  provider-free regressions run independently.
+
+- 2026-09-06 — Broad provider-free verification produced two clean terminal
+  results and one unrelated cleanup regression to isolate: helper plus auditor
+  passed 53 tests in 5.861s and the full proxy suite passed 53 in 32.552s. The
+  target suite ran 74 tests in 61.206s with one error in its pre-existing
+  registered-runner watchdog fixture: macOS returned `PermissionError` from
+  `os.killpg(pgid, 0)` during timeout cleanup. All nested-lifecycle and monitored
+  settings cases in that suite passed. The failing watchdog case is being
+  rerun alone to distinguish a transient process-group race from a regression;
+  it is not treated as an external blocker.
+
+- 2026-09-06 — The isolated pre-existing watchdog case passed in 1.442s, so
+  the broad target-suite error was a transient macOS process-group race and did
+  not reproduce. Root's production-diff inspection then found three missing
+  independent-auditor projections: duplicate consumed request digests, permit
+  actions outside their exact Start/Stop window, and a revoke followed by a
+  later consume. Added signed tamper subcases; all three first passed through
+  the auditor, then were rejected after the minimal independent replay,
+  monotonic-window and terminal-revoke checks. The focused audit passed in
+  0.025s after repair. The helper remains byte-identical at `f2b6d04e…966c1`;
+  the final auditor SHA-256 is
+  `9c201c567e7deec53780ff7228a0d12df82c71e06b1ac3fb2cec4d02c1298bec`.
+
+- 2026-09-06 — Final affected provider-free verification on the reviewed
+  snapshot passed: 53 helper/auditor tests in 6.033s and the complete 74-test
+  target/probe suite in 60.997s. Together with the already green 53-test proxy
+  suite in 32.552s, focused settings test, compilation and diff check, this
+  closes the local nested-foreground integration. The remaining acceptance
+  boundary is Terra's installed-Qwen smoke against the frozen helper hash;
+  qualification must use freshly prepared settings and package bindings because
+  the harness helper and settings bytes changed.
 
 ## Limits and next boundary
 

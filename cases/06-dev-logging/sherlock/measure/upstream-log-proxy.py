@@ -2410,7 +2410,8 @@ class Proxy(BaseHTTPRequestHandler):
                 try:
                     _LIFECYCLE.check_dispatch(
                         SHERLOCK_OBSERVER_DIR, SHERLOCK_RUN_NONCE,
-                        SHERLOCK_BOOT_ID)
+                        SHERLOCK_BOOT_ID,
+                        request_sha256=hashlib.sha256(body).hexdigest())
                 except BaseException as exc:
                     detail = "%s: %s" % (type(exc).__name__, exc)
                     try:

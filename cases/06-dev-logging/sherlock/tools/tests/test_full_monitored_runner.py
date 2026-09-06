@@ -60,9 +60,117 @@ class MonitoredTerminalAuditTest(unittest.TestCase):
             lifecycle_helper_sha256=self.digest, guardian_pid=123,
             guardian_start_ticks="fixture", guardian_exit_code=-15)
 
+    def hook(self, phase, tool_use_id, tool_call_id, *, tool_name="run_shell_command",
+             tool_input=None, **extra):
+        event = {"hook_event_name": phase, "session_id": "session-1",
+                 "tool_use_id": tool_use_id, "tool_call_id": tool_call_id,
+                 "tool_name": tool_name, "tool_input": tool_input or {"command": "true"}}
+        event.update(extra)
+        return LIFECYCLE.handle_hook(
+            self.observer, self.workspace, self.nonce, self.boot,
+            json.dumps(event, sort_keys=True).encode())
+
+    def lifecycle_hook(self, phase, **extra):
+        event = {"hook_event_name": phase, "session_id": "session-1"}
+        event.update(extra)
+        return LIFECYCLE.handle_hook(
+            self.observer, self.workspace, self.nonce, self.boot,
+            json.dumps(event, sort_keys=True).encode())
+
+    def batch(self, tool_id):
+        event = {"hook_event_name": "PostToolBatch", "session_id": "session-1",
+                 "tool_calls": [{"tool_name": "run_shell_command",
+                                  "tool_input": {"command": "true"},
+                                  "tool_use_id": tool_id, "tool_call_id": tool_id,
+                                  "status": "success",
+                                  "tool_response": {"execution_status": "completed"}}]}
+        return LIFECYCLE.handle_hook(
+            self.observer, self.workspace, self.nonce, self.boot,
+            json.dumps(event, sort_keys=True).encode())
+
     def test_valid_signed_terminal_receipt_passes(self):
         self.finish()
         self.assertEqual(VERDICT.monitored_lifecycle_failures(self.trace), [])
+
+    def test_nested_foreground_journals_are_independently_audited(self):
+        LIFECYCLE.register_expected_tools(
+            self.observer, self.nonce, self.boot, "request-parent", ["call-parent"])
+        self.hook("PreToolUse", "toolu-parent", "call-parent", tool_name="agent",
+                  tool_input={"subagent_type": "sherlock-triage",
+                              "run_in_background": False, "prompt": "inspect"})
+        self.lifecycle_hook("SubagentStart",
+                            agent_id="sherlock-triage-call-parent",
+                            agent_type="sherlock-triage")
+        LIFECYCLE.check_dispatch(
+            self.observer, self.nonce, self.boot,
+            request_sha256=LIFECYCLE.sha256(b"child request"))
+        self.lifecycle_hook("SubagentStop",
+                            agent_id="sherlock-triage-call-parent",
+                            agent_type="sherlock-triage")
+        self.hook("PostToolUse", "toolu-parent", "call-parent",
+                  tool_response={"ok": True})
+        self.batch("call-parent")
+        self.lifecycle_hook("UserPromptSubmit", prompt="continue")
+        receipt = self.finish()
+        self.assertEqual(receipt["subagent_count"], 1)
+        self.assertEqual(receipt["nested_dispatch_count"], 1)
+        self.assertEqual(receipt["root_boundary_count"], 1)
+        self.assertEqual(VERDICT.monitored_lifecycle_failures(self.trace), [])
+        dispatch_path = self.observer / "nested-dispatches.jsonl"
+        state_path = self.observer / "subagent-state.json"
+        original_dispatch = json.loads(dispatch_path.read_text())
+        original_state = json.loads(state_path.read_text())
+
+        def install(rows, state):
+            dispatch_path.write_bytes(b"".join(
+                LIFECYCLE._canonical(row) + b"\n" for row in rows))
+            state_path.write_bytes(LIFECYCLE._canonical(state) + b"\n")
+            changed = dict(receipt)
+            changed["nested_dispatches_sha256"] = LIFECYCLE.sha256(
+                dispatch_path.read_bytes())
+            changed["subagent_state_sha256"] = LIFECYCLE.sha256(
+                state_path.read_bytes())
+            changed["nested_dispatch_count"] = len(rows)
+            changed = LIFECYCLE._sign_record(self.observer, changed)
+            (self.trace / "lifecycle-receipt.json").write_bytes(
+                LIFECYCLE._canonical(changed) + b"\n")
+
+        outside = dict(original_dispatch, monotonic_ns=0)
+        replay = dict(original_dispatch, sequence=1, provenance="batch")
+        replay_state = dict(original_state, next_permit_sequence=2)
+        revoked = dict(original_dispatch, sequence=1, action="revoke",
+                       provenance="batch", request_sha256=None,
+                       monotonic_ns=original_dispatch["monotonic_ns"] + 1)
+        after_revoke = dict(original_dispatch, sequence=2, provenance="batch",
+                            request_sha256="e" * 64,
+                            monotonic_ns=original_dispatch["monotonic_ns"] + 2)
+        revoked_state = dict(original_state, next_permit_sequence=3)
+        for rows, state in (([outside], original_state),
+                            ([original_dispatch, replay], replay_state),
+                            ([original_dispatch, revoked, after_revoke], revoked_state)):
+            with self.subTest(rows=len(rows), action=rows[-1]["action"]):
+                install(rows, state)
+                self.assertEqual(VERDICT.monitored_lifecycle_failures(self.trace),
+                                 ["LIFECYCLE_AUDIT_INVALID"])
+
+    def test_fault_receipt_preserves_structurally_valid_partial_counts(self):
+        LIFECYCLE.register_expected_tools(
+            self.observer, self.nonce, self.boot, "request-1", ["call-complete"])
+        self.hook("PreToolUse", "toolu-complete", "call-complete")
+        self.hook("PostToolUse", "toolu-complete", "call-complete",
+                  tool_response={"ok": True})
+        self.batch("call-complete")
+        LIFECYCLE.register_expected_tools(
+            self.observer, self.nonce, self.boot, "request-2", ["call-pending"])
+        self.hook("PreToolUse", "toolu-pending", "call-pending")
+        receipt = self.finish()
+        self.assertEqual(receipt["status"], "FAULT")
+        self.assertEqual(receipt["expected_tool_count"], 2)
+        self.assertEqual(receipt["batched_tool_count"], 1)
+        self.assertEqual(receipt["completed_tool_count"], 1)
+        self.assertEqual(receipt["rejected_tool_count"], 0)
+        self.assertEqual(VERDICT.monitored_lifecycle_failures(self.trace),
+                         ["LIFECYCLE_AUDIT_FAULT"])
 
     def test_provider_call_id_bridges_qwen_tool_use_id_in_terminal_audit(self):
         LIFECYCLE.register_expected_tools(

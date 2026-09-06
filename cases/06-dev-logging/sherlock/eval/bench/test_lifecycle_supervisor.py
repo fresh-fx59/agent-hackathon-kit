@@ -72,6 +72,20 @@ class LifecycleSupervisorTest(unittest.TestCase):
         return LIFECYCLE.handle_hook(
             self.observer, self.workspace, self.nonce, self.boot, raw)
 
+    def lifecycle_hook(self, phase, **extra):
+        row = {
+            "cwd": str(self.workspace),
+            "hook_event_name": phase,
+            "permission_mode": "default",
+            "session_id": "session-1",
+            "timestamp": "2026-09-06T00:00:00.000Z",
+            "transcript_path": str(self.workspace / "transcript.jsonl"),
+        }
+        row.update(extra)
+        raw = json.dumps(row, sort_keys=True).encode()
+        return LIFECYCLE.handle_hook(
+            self.observer, self.workspace, self.nonce, self.boot, raw)
+
     @staticmethod
     def invalid_directory_call(tool_id="tool-1", **changes):
         row = {
@@ -383,6 +397,252 @@ class LifecycleSupervisorTest(unittest.TestCase):
         pairs = json.loads((self.observer / "pairs.json").read_text())
         pair = pairs["pairs"]["session-1\x1ftoolu-qwen-1"]
         self.assertEqual(pair["tool_call_id"], "call-provider-1")
+
+    def test_foreground_child_dispatch_and_continuation_are_exactly_scoped(self):
+        self.observe()
+        LIFECYCLE.register_expected_tools(
+            self.observer, self.nonce, self.boot, "request-parent",
+            ["call-parent-agent", "call-parent-sibling"])
+        self.hook(
+            "PreToolUse", tool_id="toolu-parent", tool_call_id="call-parent-agent",
+            tool_name="agent", tool_input={
+                "subagent_type": "sherlock-triage", "run_in_background": False,
+                "prompt": "inspect the evidence"})
+        self.assertTrue(self.lifecycle_hook(
+            "SubagentStart", agent_id="sherlock-triage-call-parent-agent",
+            agent_type="sherlock-triage")["continue"])
+
+        row = LIFECYCLE.check_dispatch(
+            self.observer, self.nonce, self.boot,
+            now_monotonic_ns=10_000_000_001,
+            request_sha256=LIFECYCLE.sha256(b"child request 1"))
+        self.assertEqual(row["sequence"], 0)
+        LIFECYCLE.register_expected_tools(
+            self.observer, self.nonce, self.boot, "request-child-1", ["call-child"])
+        self.hook("PreToolUse", tool_id="toolu-child", tool_call_id="call-child")
+        self.hook("PostToolUse", tool_id="toolu-child", tool_call_id="call-child",
+                  tool_response={"ok": True})
+        self.assertTrue(self.post_tool_batch(
+            [self.successful_call("call-child")])["continue"])
+
+        LIFECYCLE.check_dispatch(
+            self.observer, self.nonce, self.boot,
+            now_monotonic_ns=10_000_000_002,
+            request_sha256=LIFECYCLE.sha256(b"child request 2"))
+        self.assertTrue(self.lifecycle_hook(
+            "SubagentStop", agent_id="sherlock-triage-call-parent-agent",
+            agent_type="sherlock-triage")["continue"])
+        self.hook("PostToolUse", tool_id="toolu-parent",
+                  tool_call_id="call-parent-agent", tool_response={"ok": True})
+        self.assertTrue(self.post_tool_batch(
+            [self.successful_call("call-parent-agent")])["continue"])
+        self.hook("PreToolUse", tool_id="toolu-sibling",
+                  tool_call_id="call-parent-sibling")
+        self.hook("PostToolUse", tool_id="toolu-sibling",
+                  tool_call_id="call-parent-sibling", tool_response={"ok": True})
+        self.assertTrue(self.post_tool_batch(
+            [self.successful_call("call-parent-sibling")])["continue"])
+        self.assertTrue(self.lifecycle_hook("UserPromptSubmit", prompt="continue")["continue"])
+
+    def test_capped_child_stop_revokes_only_batch_renewed_permit(self):
+        self.observe()
+        LIFECYCLE.register_expected_tools(
+            self.observer, self.nonce, self.boot, "request-parent", ["call-parent-agent"])
+        self.hook(
+            "PreToolUse", tool_id="toolu-parent", tool_call_id="call-parent-agent",
+            tool_name="agent", tool_input={
+                "subagent_type": "sherlock-triage", "run_in_background": False,
+                "prompt": "inspect"})
+        self.lifecycle_hook(
+            "SubagentStart", agent_id="sherlock-triage-call-parent-agent",
+            agent_type="sherlock-triage")
+        LIFECYCLE.check_dispatch(
+            self.observer, self.nonce, self.boot,
+            now_monotonic_ns=10_000_000_001,
+            request_sha256=LIFECYCLE.sha256(b"child request"))
+        LIFECYCLE.register_expected_tools(
+            self.observer, self.nonce, self.boot, "request-child", ["call-child"])
+        self.hook("PreToolUse", tool_id="toolu-child", tool_call_id="call-child")
+        self.hook("PostToolUse", tool_id="toolu-child", tool_call_id="call-child",
+                  tool_response={"ok": True})
+        self.post_tool_batch([self.successful_call("call-child")])
+        self.assertTrue(self.lifecycle_hook(
+            "SubagentStop", agent_id="sherlock-triage-call-parent-agent",
+            agent_type="sherlock-triage")["continue"])
+        dispatches = [json.loads(line) for line in
+                      (self.observer / "nested-dispatches.jsonl").read_text().splitlines()]
+        self.assertEqual([row["action"] for row in dispatches], ["consume", "revoke"])
+
+    def test_parent_post_before_matching_child_stop_faults(self):
+        self.observe()
+        LIFECYCLE.register_expected_tools(
+            self.observer, self.nonce, self.boot, "request-parent", ["call-parent-agent"])
+        self.hook(
+            "PreToolUse", tool_id="toolu-parent", tool_call_id="call-parent-agent",
+            tool_name="agent", tool_input={
+                "subagent_type": "sherlock-triage", "run_in_background": False,
+                "prompt": "inspect"})
+        self.lifecycle_hook(
+            "SubagentStart", agent_id="sherlock-triage-call-parent-agent",
+            agent_type="sherlock-triage")
+        result = self.hook("PostToolUse", tool_id="toolu-parent",
+                           tool_call_id="call-parent-agent", tool_response={"ok": True})
+        self.assertFalse(result["continue"])
+        fault = json.loads((self.observer / "fault.json").read_text())
+        self.assertEqual(fault["reason"], "SUBAGENT_STOP_MISSING")
+
+    def test_child_dispatch_does_not_waive_unrelated_pending_tool(self):
+        self.observe()
+        LIFECYCLE.register_expected_tools(
+            self.observer, self.nonce, self.boot, "request-old", ["call-old"])
+        self.hook("PreToolUse", tool_id="toolu-old", tool_call_id="call-old")
+        LIFECYCLE.register_expected_tools(
+            self.observer, self.nonce, self.boot, "request-parent", ["call-parent-agent"])
+        self.hook(
+            "PreToolUse", tool_id="toolu-parent", tool_call_id="call-parent-agent",
+            tool_name="agent", tool_input={
+                "subagent_type": "sherlock-triage", "run_in_background": False,
+                "prompt": "inspect"})
+        result = self.lifecycle_hook(
+            "SubagentStart", agent_id="sherlock-triage-call-parent-agent",
+            agent_type="sherlock-triage")
+        self.assertFalse(result["continue"])
+        self.assertEqual(json.loads((self.observer / "fault.json").read_text())["reason"],
+                         "SUBAGENT_START_UNAUTHORIZED")
+        with self.assertRaisesRegex(LIFECYCLE.LifecycleFault, "terminal"):
+            LIFECYCLE.check_dispatch(
+                self.observer, self.nonce, self.boot,
+                now_monotonic_ns=10_000_000_001,
+                request_sha256=LIFECYCLE.sha256(b"child request"))
+
+    def test_root_boundary_refuses_active_child_and_missing_inner_batch(self):
+        self.observe()
+        LIFECYCLE.register_expected_tools(
+            self.observer, self.nonce, self.boot, "request-parent", ["call-parent-agent"])
+        self.hook(
+            "PreToolUse", tool_id="toolu-parent", tool_call_id="call-parent-agent",
+            tool_name="agent", tool_input={
+                "subagent_type": "sherlock-triage", "run_in_background": False,
+                "prompt": "inspect"})
+        self.lifecycle_hook(
+            "SubagentStart", agent_id="sherlock-triage-call-parent-agent",
+            agent_type="sherlock-triage")
+        result = self.lifecycle_hook("UserPromptSubmit", prompt="root continuation")
+        self.assertFalse(result["continue"])
+        fault = json.loads((self.observer / "fault.json").read_text())
+        self.assertEqual(fault["reason"], "SUBAGENT_STOP_MISSING")
+
+    def test_stop_refuses_unused_initial_permit_and_nested_start(self):
+        for case in ("unused", "nested"):
+            with self.subTest(case=case):
+                shutil.rmtree(self.observer)
+                self.observer = LIFECYCLE.init_segment(
+                    self.trace, self.nonce, self.boot, capability=self.capability)
+                self.observe()
+                LIFECYCLE.register_expected_tools(
+                    self.observer, self.nonce, self.boot, "request-parent",
+                    ["call-parent-agent"])
+                self.hook(
+                    "PreToolUse", tool_id="toolu-parent",
+                    tool_call_id="call-parent-agent", tool_name="agent",
+                    tool_input={"subagent_type": "sherlock-triage",
+                                "run_in_background": False, "prompt": "inspect"})
+                self.lifecycle_hook(
+                    "SubagentStart", agent_id="sherlock-triage-call-parent-agent",
+                    agent_type="sherlock-triage")
+                if case == "unused":
+                    result = self.lifecycle_hook(
+                        "SubagentStop", agent_id="sherlock-triage-call-parent-agent",
+                        agent_type="sherlock-triage")
+                    expected = "SUBAGENT_DISPATCH_MISSING"
+                else:
+                    result = self.lifecycle_hook(
+                        "SubagentStart", agent_id="sherlock-triage-call-parent-agent",
+                        agent_type="sherlock-triage")
+                    expected = "NESTED_SUBAGENT_UNSUPPORTED"
+                self.assertFalse(result["continue"])
+                self.assertEqual(json.loads(
+                    (self.observer / "fault.json").read_text())["reason"], expected)
+
+    def test_child_continuation_requires_inner_batch_and_fresh_permit(self):
+        self.observe()
+        LIFECYCLE.register_expected_tools(
+            self.observer, self.nonce, self.boot, "request-parent", ["call-parent-agent"])
+        self.hook(
+            "PreToolUse", tool_id="toolu-parent", tool_call_id="call-parent-agent",
+            tool_name="agent", tool_input={
+                "subagent_type": "sherlock-triage", "run_in_background": False,
+                "prompt": "inspect"})
+        self.lifecycle_hook(
+            "SubagentStart", agent_id="sherlock-triage-call-parent-agent",
+            agent_type="sherlock-triage")
+        LIFECYCLE.check_dispatch(
+            self.observer, self.nonce, self.boot,
+            now_monotonic_ns=10_000_000_001,
+            request_sha256=LIFECYCLE.sha256(b"child request"))
+        LIFECYCLE.register_expected_tools(
+            self.observer, self.nonce, self.boot, "request-child", ["call-child"])
+        self.hook("PreToolUse", tool_id="toolu-child", tool_call_id="call-child")
+        self.hook("PostToolUse", tool_id="toolu-child", tool_call_id="call-child",
+                  tool_response={"ok": True})
+        with self.assertRaisesRegex(LIFECYCLE.LifecycleFault,
+                                    "EXPECTED_TOOL_BATCH_MISSING"):
+            LIFECYCLE.check_dispatch(
+                self.observer, self.nonce, self.boot,
+                now_monotonic_ns=10_000_000_002,
+                request_sha256=LIFECYCLE.sha256(b"child continuation"))
+
+    def test_batch_renewal_cannot_replay_a_consumed_child_request(self):
+        self.observe()
+        LIFECYCLE.register_expected_tools(
+            self.observer, self.nonce, self.boot, "request-parent", ["call-parent-agent"])
+        self.hook(
+            "PreToolUse", tool_id="toolu-parent", tool_call_id="call-parent-agent",
+            tool_name="agent", tool_input={
+                "subagent_type": "sherlock-triage", "run_in_background": False,
+                "prompt": "inspect"})
+        self.lifecycle_hook(
+            "SubagentStart", agent_id="sherlock-triage-call-parent-agent",
+            agent_type="sherlock-triage")
+        digest = LIFECYCLE.sha256(b"child request")
+        LIFECYCLE.check_dispatch(
+            self.observer, self.nonce, self.boot,
+            now_monotonic_ns=10_000_000_001, request_sha256=digest)
+        LIFECYCLE.register_expected_tools(
+            self.observer, self.nonce, self.boot, "request-child", ["call-child"])
+        self.hook("PreToolUse", tool_id="toolu-child", tool_call_id="call-child")
+        self.hook("PostToolUse", tool_id="toolu-child", tool_call_id="call-child",
+                  tool_response={"ok": True})
+        self.post_tool_batch([self.successful_call("call-child")])
+        with self.assertRaisesRegex(LIFECYCLE.LifecycleFault,
+                                    "NESTED_DISPATCH_REPLAY"):
+            LIFECYCLE.check_dispatch(
+                self.observer, self.nonce, self.boot,
+                now_monotonic_ns=10_000_000_002, request_sha256=digest)
+
+    def test_subagent_start_requires_exact_foreground_parent_identity(self):
+        for changes in ({"agent_id": "wrong"}, {"agent_type": "other"}):
+            with self.subTest(changes=changes):
+                shutil.rmtree(self.observer)
+                self.observer = LIFECYCLE.init_segment(
+                    self.trace, self.nonce, self.boot, capability=self.capability)
+                self.observe()
+                LIFECYCLE.register_expected_tools(
+                    self.observer, self.nonce, self.boot, "request-parent",
+                    ["call-parent-agent"])
+                self.hook(
+                    "PreToolUse", tool_id="toolu-parent",
+                    tool_call_id="call-parent-agent", tool_name="agent",
+                    tool_input={"subagent_type": "sherlock-triage",
+                                "run_in_background": False, "prompt": "inspect"})
+                event = {"agent_id": "sherlock-triage-call-parent-agent",
+                         "agent_type": "sherlock-triage"}
+                event.update(changes)
+                result = self.lifecycle_hook("SubagentStart", **event)
+                self.assertFalse(result["continue"])
+                self.assertEqual(json.loads(
+                    (self.observer / "fault.json").read_text())["reason"],
+                    "SUBAGENT_START_UNAUTHORIZED")
 
     def test_pre_and_post_reject_different_provider_tool_call_ids(self):
         self.hook("PreToolUse", tool_id="toolu-qwen-1",

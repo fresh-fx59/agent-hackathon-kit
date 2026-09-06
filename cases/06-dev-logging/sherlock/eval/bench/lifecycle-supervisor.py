@@ -45,6 +45,9 @@ RECEIPT_FIELDS = {
     "last_accepted_observation_sha256", "registry_sha256", "pairs_sha256",
     "expectations_sha256", "batch_tools_sha256", "rejections_sha256", "hook_starts_sha256",
     "hook_events_sha256", "post_tool_batch_events_sha256",
+    "subagent_state_sha256", "subagent_events_sha256",
+    "nested_dispatches_sha256", "root_boundary_events_sha256",
+    "subagent_count", "nested_dispatch_count", "root_boundary_count",
     "expected_tool_count", "batched_tool_count", "completed_tool_count",
     "rejected_tool_count", "fault_sha256",
     "fault_reason", "guardian_events_sha256", "status", "key_id",
@@ -352,6 +355,10 @@ def init_segment(trace, run_nonce, boot_id, *, capability=None,
                    _canonical({"schema": SCHEMA, "tools": {}}) + b"\n", 0o600)
     _atomic_create(observer / "rejections.json",
                    _canonical({"schema": SCHEMA, "rejected": {}}) + b"\n", 0o600)
+    _atomic_create(observer / "subagent-state.json",
+                   _canonical({"schema": SCHEMA, "active": None,
+                               "completed": [], "next_permit_sequence": 0}) + b"\n",
+                   0o600)
     _fsync_dir(observer)
     return observer
 
@@ -582,6 +589,116 @@ def _batched_tool_ids(state):
     return batched
 
 
+def _subagent_state(observer):
+    state = _load_json(Path(observer) / "subagent-state.json")
+    if (state.get("schema") != SCHEMA or set(state) != {
+            "schema", "active", "completed", "next_permit_sequence"}
+            or not isinstance(state["completed"], list)
+            or type(state["next_permit_sequence"]) is not int
+            or state["next_permit_sequence"] < 0
+            or (state["active"] is not None and not isinstance(state["active"], dict))):
+        raise LifecycleFault("SUBAGENT_STATE_MALFORMED", "shape")
+    return state
+
+
+def _pair_pre_event(observer, pair):
+    pre = pair.get("pre") if isinstance(pair, dict) else None
+    sequence = pre.get("sequence") if isinstance(pre, dict) else None
+    if type(sequence) is not int or sequence < 0:
+        raise LifecycleFault("HOOK_STATE_MALFORMED", "parent pre sequence")
+    rows = _read_regular(Path(observer) / "hook-events.jsonl").splitlines()
+    if sequence >= len(rows):
+        raise LifecycleFault("HOOK_STATE_MALFORMED", "parent pre receipt missing")
+    receipt = _strict_json(rows[sequence])
+    try:
+        raw = base64.b64decode(receipt["input_base64"], validate=True)
+        event = _strict_json(raw)
+    except (KeyError, ValueError, TypeError) as exc:
+        raise LifecycleFault("HOOK_STATE_MALFORMED", "parent pre receipt") from exc
+    if (receipt.get("sequence") != sequence or receipt.get("phase") != "PreToolUse"
+            or receipt.get("input_sha256") != sha256(raw)):
+        raise LifecycleFault("HOOK_STATE_MALFORMED", "parent pre receipt identity")
+    return event
+
+
+def _append_subagent_event(observer, run_nonce, phase, event, raw_input, output):
+    path = Path(observer) / "subagent-events.jsonl"
+    sequence = sum(1 for line in path.read_bytes().splitlines() if line) if path.exists() else 0
+    _append(path, {
+        "schema": SCHEMA, "run_nonce": run_nonce, "sequence": sequence,
+        "phase": phase, "session_id": event["session_id"],
+        "agent_id": event["agent_id"], "agent_type": event["agent_type"],
+        "input_sha256": sha256(raw_input),
+        "input_base64": base64.b64encode(raw_input).decode("ascii"),
+        "output": output, "observed_at": _wall_now(),
+        "monotonic_ns": time.monotonic_ns(),
+    })
+    return sequence
+
+
+def _append_nested_dispatch(observer, run_nonce, active, *, action,
+                            request_sha256=None):
+    path = Path(observer) / "nested-dispatches.jsonl"
+    used_sequences = set()
+    used_requests = set()
+    if path.exists():
+        for raw_line in _read_regular(path).splitlines():
+            prior = _strict_json(raw_line)
+            sequence = prior.get("sequence")
+            if type(sequence) is not int or sequence in used_sequences:
+                raise LifecycleFault("NESTED_DISPATCH_REPLAY", "permit sequence")
+            used_sequences.add(sequence)
+            if prior.get("action") == "consume":
+                used_requests.add(prior.get("request_sha256"))
+    if active["permit"]["sequence"] in used_sequences:
+        raise LifecycleFault("NESTED_DISPATCH_REPLAY", "permit sequence")
+    if action == "consume" and request_sha256 in used_requests:
+        raise LifecycleFault("NESTED_DISPATCH_REPLAY", "request digest")
+    _append(path, {
+        "schema": SCHEMA, "run_nonce": run_nonce,
+        "sequence": active["permit"]["sequence"],
+        "action": action, "provenance": active["permit"]["provenance"],
+        "parent_tool_call_id": active["parent_tool_call_id"],
+        "agent_id": active["agent_id"],
+        "request_sha256": request_sha256,
+        "observed_at": _wall_now(), "monotonic_ns": time.monotonic_ns(),
+    })
+
+
+def _active_allowed_parent_ids(active, owners):
+    return {tool_id for tool_id, owner in owners.items()
+            if owner == active["parent_request_reference"]}
+
+
+def _validate_active_child_accounting(observer, active, *, allow_parent_pending=True):
+    pairs = _load_json(Path(observer) / "pairs.json")
+    expected = _load_json(Path(observer) / "expectations.json")
+    completed, pending = _completed_tool_ids(pairs)
+    owners = _expected_tool_owners(expected)
+    batched = _batched_tool_ids(_load_json(Path(observer) / "batch-tools.json"))
+    rejected = _rejected_tool_ids(_load_json(Path(observer) / "rejections.json"))
+    parent_ids = _active_allowed_parent_ids(active, owners)
+    allowed_pending = {active["parent_pair_key"]} if allow_parent_pending else set()
+    extra_pending = set(pending) - allowed_pending
+    if extra_pending:
+        raise LifecycleFault("HOOK_PAIR_MISSING",
+                             "incomplete hook pair: %s" % sorted(extra_pending)[0])
+    child_ids = set(owners) - parent_ids
+    overlap = completed & rejected
+    if overlap:
+        raise LifecycleFault("TOOL_OUTCOME_AMBIGUOUS", sorted(overlap)[0])
+    missing_batch = child_ids - batched
+    if missing_batch:
+        raise LifecycleFault("EXPECTED_TOOL_BATCH_MISSING", sorted(missing_batch)[0])
+    missing = child_ids - completed - rejected
+    if missing:
+        raise LifecycleFault("EXPECTED_TOOL_HOOK_MISSING", sorted(missing)[0])
+    if (rejected - set(owners) or batched - set(owners)
+            or (rejected | batched) & parent_ids):
+        raise LifecycleFault("SUBAGENT_SCOPE_MISMATCH", "root-origin tool in child scope")
+    return completed, pending, owners, batched, rejected
+
+
 def _raise_fault(observer, run_nonce, reason, detail):
     row = _fault_unlocked(observer, run_nonce, reason, detail)
     raise LifecycleFault(row["reason"], row["detail"])
@@ -651,7 +768,8 @@ def check_supervision(observer, run_nonce, boot_id, *, now_monotonic_ns=None):
         return row
 
 
-def check_dispatch(observer, run_nonce, boot_id, *, now_monotonic_ns=None):
+def check_dispatch(observer, run_nonce, boot_id, *, now_monotonic_ns=None,
+                   request_sha256=None):
     observer = Path(observer)
     with _locked(observer):
         now = time.monotonic_ns() if now_monotonic_ns is None else now_monotonic_ns
@@ -669,6 +787,30 @@ def check_dispatch(observer, run_nonce, boot_id, *, now_monotonic_ns=None):
             completed, pending = _completed_tool_ids(pairs)
         except LifecycleFault as exc:
             _raise_fault(observer, run_nonce, exc.reason, exc.detail)
+        try:
+            subagents = _subagent_state(observer)
+            active = subagents["active"]
+        except LifecycleFault as exc:
+            _raise_fault(observer, run_nonce, exc.reason, exc.detail)
+        if active is not None:
+            if not _hex_digest(request_sha256):
+                _raise_fault(observer, run_nonce, "NESTED_DISPATCH_UNAUTHORIZED",
+                             "exact request digest required")
+            try:
+                _validate_active_child_accounting(observer, active)
+            except LifecycleFault as exc:
+                _raise_fault(observer, run_nonce, exc.reason, exc.detail)
+            permit = active.get("permit")
+            if not isinstance(permit, dict) or permit.get("available") is not True:
+                _raise_fault(observer, run_nonce, "NESTED_DISPATCH_UNAUTHORIZED",
+                             "no one-use child dispatch permit")
+            _append_nested_dispatch(observer, run_nonce, active, action="consume",
+                                    request_sha256=request_sha256)
+            permit["available"] = False
+            permit["consumed_request_sha256"] = request_sha256
+            _atomic_replace(observer / "subagent-state.json", _canonical(subagents) + b"\n")
+            _accept_observation_unlocked(observer, row, now)
+            return row
         if pending:
             _raise_fault(observer, run_nonce, "HOOK_PAIR_MISSING",
                          "incomplete hook pair: %s" % pending[0])
@@ -853,6 +995,127 @@ def _hook_key(event):
     return "%s\x1f%s" % (session, tool)
 
 
+def _handle_subagent_event(observer, run_nonce, boot_id, event, raw_input):
+    phase = event.get("hook_event_name")
+    session = event.get("session_id")
+    agent_id = event.get("agent_id")
+    agent_type = event.get("agent_type")
+    if (phase not in ("SubagentStart", "SubagentStop")
+            or not isinstance(session, str) or not session or len(session) > 4096
+            or not isinstance(agent_id, str) or not agent_id or len(agent_id) > 4096
+            or not isinstance(agent_type, str) or not agent_type or len(agent_type) > 4096):
+        raise LifecycleFault("INVALID_HOOK_INPUT", "%s shape" % phase)
+    output = _hook_output(phase, True)
+    with _locked(observer):
+        terminal = _load_json(observer / "fault.json", absent=None)
+        if terminal is not None:
+            return _hook_output(phase, False,
+                                "terminal lifecycle fault: %s" % terminal.get("reason"))
+        identity = _identity(observer)
+        if identity.get("run_nonce") != run_nonce or identity.get("boot_id") != boot_id:
+            raise LifecycleFault("SEGMENT_IDENTITY_MISMATCH", "hook")
+        state = _subagent_state(observer)
+        if phase == "SubagentStart":
+            if state["active"] is not None:
+                raise LifecycleFault("NESTED_SUBAGENT_UNSUPPORTED", agent_id)
+            pairs = _load_json(observer / "pairs.json")
+            _, pending = _completed_tool_ids(pairs)
+            expected = _expected_tool_owners(_load_json(observer / "expectations.json"))
+            candidates = []
+            for key in pending:
+                pair = pairs["pairs"][key]
+                pre_event = _pair_pre_event(observer, pair)
+                call_id = pair["tool_call_id"]
+                tool_input = pre_event.get("tool_input")
+                if (pre_event.get("tool_name") == "agent"
+                        and isinstance(tool_input, dict)
+                        and tool_input.get("run_in_background") is False
+                        and tool_input.get("subagent_type") == agent_type
+                        and agent_id == "%s-%s" % (agent_type, call_id)
+                        and call_id in expected):
+                    candidates.append((key, call_id, expected[call_id]))
+            if len(candidates) != 1 or len(pending) != 1:
+                raise LifecycleFault("SUBAGENT_START_UNAUTHORIZED",
+                                     "requires one exact pending foreground agent")
+            key, call_id, request_reference = candidates[0]
+            sequence = state["next_permit_sequence"]
+            state["next_permit_sequence"] += 1
+            state["active"] = {
+                "agent_id": agent_id, "agent_type": agent_type,
+                "session_id": session, "parent_pair_key": key,
+                "parent_tool_call_id": call_id,
+                "parent_request_reference": request_reference,
+                "permit": {"available": True, "provenance": "start",
+                           "sequence": sequence, "consumed_request_sha256": None},
+            }
+        else:
+            active = state["active"]
+            if (active is None or active.get("agent_id") != agent_id
+                    or active.get("agent_type") != agent_type
+                    or active.get("session_id") != session):
+                raise LifecycleFault("SUBAGENT_STOP_MISMATCH", agent_id)
+            _validate_active_child_accounting(observer, active)
+            permit = active.get("permit")
+            if not isinstance(permit, dict):
+                raise LifecycleFault("SUBAGENT_STATE_MALFORMED", "permit")
+            if permit.get("available") is True:
+                if permit.get("provenance") != "batch":
+                    raise LifecycleFault("SUBAGENT_DISPATCH_MISSING",
+                                         "unused initial child permit")
+                _append_nested_dispatch(observer, run_nonce, active, action="revoke")
+                permit["available"] = False
+            state["completed"].append({
+                "agent_id": agent_id, "agent_type": agent_type,
+                "parent_tool_call_id": active["parent_tool_call_id"],
+                "parent_request_reference": active["parent_request_reference"],
+            })
+            state["active"] = None
+        _append_subagent_event(observer, run_nonce, phase, event, raw_input, output)
+        _atomic_replace(observer / "subagent-state.json", _canonical(state) + b"\n")
+        return output
+
+
+def _handle_root_boundary(observer, run_nonce, boot_id, event, raw_input):
+    session = event.get("session_id")
+    if not isinstance(session, str) or not session or len(session) > 4096:
+        raise LifecycleFault("INVALID_HOOK_INPUT", "UserPromptSubmit shape")
+    output = _hook_output("UserPromptSubmit", True)
+    with _locked(observer):
+        terminal = _load_json(observer / "fault.json", absent=None)
+        if terminal is not None:
+            return _hook_output("UserPromptSubmit", False,
+                                "terminal lifecycle fault: %s" % terminal.get("reason"))
+        identity = _identity(observer)
+        if identity.get("run_nonce") != run_nonce or identity.get("boot_id") != boot_id:
+            raise LifecycleFault("SEGMENT_IDENTITY_MISMATCH", "hook")
+        if _subagent_state(observer)["active"] is not None:
+            raise LifecycleFault("SUBAGENT_STOP_MISSING", "root boundary while child active")
+        pairs = _load_json(observer / "pairs.json")
+        completed, pending = _completed_tool_ids(pairs)
+        owners = _expected_tool_owners(_load_json(observer / "expectations.json"))
+        batched = _batched_tool_ids(_load_json(observer / "batch-tools.json"))
+        rejected = _rejected_tool_ids(_load_json(observer / "rejections.json"))
+        if pending:
+            raise LifecycleFault("HOOK_PAIR_MISSING", pending[0])
+        if set(owners) != batched:
+            raise LifecycleFault("EXPECTED_TOOL_BATCH_MISSING",
+                                 sorted(set(owners) - batched)[0])
+        missing = set(owners) - completed - rejected
+        if missing:
+            raise LifecycleFault("EXPECTED_TOOL_HOOK_MISSING", sorted(missing)[0])
+        path = observer / "root-boundary-events.jsonl"
+        sequence = sum(1 for line in path.read_bytes().splitlines() if line) if path.exists() else 0
+        _append(path, {
+            "schema": SCHEMA, "run_nonce": run_nonce, "sequence": sequence,
+            "phase": "UserPromptSubmit", "session_id": session,
+            "input_sha256": sha256(raw_input),
+            "input_base64": base64.b64encode(raw_input).decode("ascii"),
+            "output": output, "observed_at": _wall_now(),
+            "monotonic_ns": time.monotonic_ns(),
+        })
+        return output
+
+
 def _handle_post_tool_batch(observer, run_nonce, boot_id, event, raw_input):
     session = event.get("session_id")
     calls = event.get("tool_calls")
@@ -877,13 +1140,18 @@ def _handle_post_tool_batch(observer, run_nonce, boot_id, event, raw_input):
         completed, pending = _completed_tool_ids(pairs)
         batched = _batched_tool_ids(batches)
         rejected = _rejected_tool_ids(rejections)
+        subagents = _subagent_state(observer)
+        active = subagents["active"]
         if completed & rejected:
             raise LifecycleFault("TOOL_OUTCOME_AMBIGUOUS", sorted(completed & rejected)[0])
         if rejected - set(owners):
             raise LifecycleFault("CLIENT_REJECTION_UNEXPECTED",
                                  sorted(rejected - set(owners))[0])
-        if pending:
-            raise LifecycleFault("HOOK_PAIR_MISSING", "incomplete hook pair: %s" % pending[0])
+        allowed_pending = {active["parent_pair_key"]} if active is not None else set()
+        extra_pending = set(pending) - allowed_pending
+        if extra_pending:
+            raise LifecycleFault("HOOK_PAIR_MISSING",
+                                 "incomplete hook pair: %s" % sorted(extra_pending)[0])
         call_ids = []
         accepted = []
         batch_rows = []
@@ -908,6 +1176,9 @@ def _handle_post_tool_batch(observer, run_nonce, boot_id, event, raw_input):
             owner = owners.get(call_id)
             if owner is None:
                 raise LifecycleFault("CLIENT_BATCH_UNEXPECTED_TOOL", call_id)
+            if active is not None and owner == active["parent_request_reference"]:
+                raise LifecycleFault("SUBAGENT_STOP_MISSING",
+                                     "root-origin batch while child active: %s" % call_id)
             is_rejected = (call.get("status") == "error"
                            and response.get("error_type") == "invalid_tool_params"
                            and response.get("execution_status") == "not_started")
@@ -962,6 +1233,20 @@ def _handle_post_tool_batch(observer, run_nonce, boot_id, event, raw_input):
         for call_id, row in batch_rows:
             batches["tools"][call_id] = row
         _atomic_replace(observer / "batch-tools.json", _canonical(batches) + b"\n")
+        if active is not None:
+            _validate_active_child_accounting(observer, active)
+            permit = active.get("permit")
+            if not isinstance(permit, dict) or permit.get("available") is not False:
+                raise LifecycleFault("NESTED_DISPATCH_AMBIGUOUS",
+                                     "child batch without consumed permit")
+            sequence = subagents["next_permit_sequence"]
+            subagents["next_permit_sequence"] += 1
+            active["permit"] = {
+                "available": True, "provenance": "batch", "sequence": sequence,
+                "consumed_request_sha256": None,
+            }
+            _atomic_replace(observer / "subagent-state.json",
+                            _canonical(subagents) + b"\n")
         return output
 
 
@@ -974,8 +1259,15 @@ def handle_hook(observer, workspace, run_nonce, boot_id, raw_input):
         event = _strict_json(raw_input)
         phase = event.get("hook_event_name")
         if phase not in ("PreToolUse", "PostToolUse", "PostToolUseFailure",
-                         "PostToolBatch"):
+                         "PostToolBatch", "SubagentStart", "SubagentStop",
+                         "UserPromptSubmit"):
             raise LifecycleFault("INVALID_HOOK_INPUT", "event phase")
+        if phase in ("SubagentStart", "SubagentStop"):
+            return _handle_subagent_event(
+                observer, run_nonce, boot_id, event, raw_input)
+        if phase == "UserPromptSubmit":
+            return _handle_root_boundary(
+                observer, run_nonce, boot_id, event, raw_input)
         if phase == "PostToolBatch":
             return _handle_post_tool_batch(
                 observer, run_nonce, boot_id, event, raw_input)
@@ -993,6 +1285,11 @@ def handle_hook(observer, workspace, run_nonce, boot_id, raw_input):
             pairs = _load_json(observer / "pairs.json")
             pair = pairs["pairs"].get(key)
             slot = "pre" if phase == "PreToolUse" else "post"
+            active = _subagent_state(observer)["active"]
+            if (active is not None and slot == "post"
+                    and call_id == active.get("parent_tool_call_id")):
+                raise LifecycleFault("SUBAGENT_STOP_MISSING",
+                                     "parent post while child active: %s" % call_id)
             if pair is not None and pair.get("tool_call_id") != call_id:
                 raise LifecycleFault(
                     "HOOK_CALL_ID_MISMATCH",
@@ -1116,6 +1413,7 @@ def finalize_segment(observer, trace, run_nonce, boot_id, *, run_tag,
         expected_raw = _read_regular(observer / "expectations.json")
         batch_tools_raw = _read_regular(observer / "batch-tools.json")
         rejections_raw = _read_regular(observer / "rejections.json")
+        subagent_state_raw = _read_regular(observer / "subagent-state.json")
         registry_raw = _read_regular(observer / "registry.json")
         pairs, expected = _strict_json(pairs_raw), _strict_json(expected_raw)
         try:
@@ -1123,17 +1421,26 @@ def finalize_segment(observer, trace, run_nonce, boot_id, *, run_tag,
             completed_ids, pending = _completed_tool_ids(pairs)
             batched_ids = _batched_tool_ids(_strict_json(batch_tools_raw))
             rejected_ids = _rejected_tool_ids(_strict_json(rejections_raw))
-            if (completed_ids & rejected_ids or rejected_ids - expected_ids
-                    or batched_ids != expected_ids):
-                raise LifecycleFault("TOOL_OUTCOME_AMBIGUOUS",
-                                     "terminal completed/rejected reconciliation")
+            subagent_state = _subagent_state(observer)
         except LifecycleFault as exc:
             _fault_unlocked(observer, run_nonce, exc.reason, exc.detail)
             expected_ids, batched_ids, completed_ids, rejected_ids, pending = (
                 set(), set(), set(), set(), ["malformed"])
+            subagent_state = {"completed": [], "active": {"malformed": True}}
+        overlap = completed_ids & rejected_ids
+        if overlap or rejected_ids - expected_ids or batched_ids - expected_ids:
+            _fault_unlocked(observer, run_nonce, "TOOL_OUTCOME_AMBIGUOUS",
+                            "terminal completed/rejected reconciliation")
+        missing_batch = expected_ids - batched_ids
+        if missing_batch:
+            _fault_unlocked(observer, run_nonce, "EXPECTED_TOOL_BATCH_MISSING",
+                            sorted(missing_batch)[0])
         if pending or not expected_ids.issubset(completed_ids | rejected_ids):
             _fault_unlocked(observer, run_nonce, "HOOK_PAIR_MISSING",
                             "terminal hook reconciliation")
+        if subagent_state.get("active") is not None:
+            _fault_unlocked(observer, run_nonce, "SUBAGENT_STOP_MISSING",
+                            "terminal child state active")
         fault_path = observer / "fault.json"
         fault_sha = _optional_digest(fault_path)
         fault = _load_json(fault_path, absent=None)
@@ -1157,6 +1464,19 @@ def finalize_segment(observer, trace, run_nonce, boot_id, *, run_tag,
             "hook_events_sha256": _optional_digest(observer / "hook-events.jsonl"),
             "post_tool_batch_events_sha256": _optional_digest(
                 observer / "post-tool-batch-events.jsonl"),
+            "subagent_state_sha256": sha256(subagent_state_raw),
+            "subagent_events_sha256": _optional_digest(observer / "subagent-events.jsonl"),
+            "nested_dispatches_sha256": _optional_digest(
+                observer / "nested-dispatches.jsonl"),
+            "root_boundary_events_sha256": _optional_digest(
+                observer / "root-boundary-events.jsonl"),
+            "subagent_count": len(subagent_state.get("completed", [])),
+            "nested_dispatch_count": sum(
+                1 for line in (observer / "nested-dispatches.jsonl").read_bytes().splitlines()
+                if line) if (observer / "nested-dispatches.jsonl").exists() else 0,
+            "root_boundary_count": sum(
+                1 for line in (observer / "root-boundary-events.jsonl").read_bytes().splitlines()
+                if line) if (observer / "root-boundary-events.jsonl").exists() else 0,
             "expected_tool_count": len(expected_ids),
             "batched_tool_count": len(expected_ids & batched_ids),
             "completed_tool_count": len(expected_ids & completed_ids),
