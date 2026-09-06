@@ -1,0 +1,165 @@
+Review only the following focused patch and real-client regression fixture. Goal: strict fresh SessionStart(clear) -> actual /sherlock -> exact actual reseed proof, while tolerating only observed Qwen internal continuation hooks (prompt empty and submitted_prompt absent) in same new session. Olddriver reproduced failure with realQwen0.22 localhost toolcall afterskill. Reject wrong actual text, empty/null submitted projections, wrongsession and any inferred reseed. Installed source+official client.ts proves projection emitted only for nonempty UserQuery. Return PASS or actionable concrete defects only; no scope expansion.
+diff --git a/cases/06-dev-logging/sherlock/measure/interactive-drive.py b/cases/06-dev-logging/sherlock/measure/interactive-drive.py
+index 29c1b11..8cd25cf 100755
+--- a/cases/06-dev-logging/sherlock/measure/interactive-drive.py
++++ b/cases/06-dev-logging/sherlock/measure/interactive-drive.py
+@@ -199,7 +199,23 @@ def monitored_clear_evidence(observer_dir, run_nonce, anchor, skill_command,
+     if len(later_roots) == 1:
+         return {"state": "await_reseed", "new_session_id": clear_row["session_id"]}
+ 
+-    reseed_row, reseed_event = later_roots[1]
++    # Qwen's interactive client can emit autonomous continuation hooks while
++    # the slash-command turn is still active. Its raw hook input has exactly
++    # an empty prompt and no submitted_prompt: the client omits that field
++    # unless a non-empty user submission caused the event. This is not a
++    # reseed and must not consume the next actual user submission. Keep the
++    # exception this narrow: an empty submitted_prompt, a non-empty prompt,
++    # or a different session remains contradictory evidence and fails closed.
++    reseed_row = reseed_event = None
++    for candidate_row, candidate_event in later_roots[1:]:
++        if (candidate_row["session_id"] == clear_row["session_id"]
++                and candidate_event.get("prompt") == ""
++                and "submitted_prompt" not in candidate_event):
++            continue
++        reseed_row, reseed_event = candidate_row, candidate_event
++        break
++    if reseed_row is None:
++        return {"state": "await_reseed", "new_session_id": clear_row["session_id"]}
+     if (reseed_row["session_id"] != clear_row["session_id"]
+             or reseed_event.get("prompt") != reseed_line
+             or reseed_event.get("submitted_prompt") != reseed_line):
+diff --git a/cases/06-dev-logging/sherlock/measure/tests/test_monitored_clear_proof.py b/cases/06-dev-logging/sherlock/measure/tests/test_monitored_clear_proof.py
+index 746250e..ca641ec 100644
+--- a/cases/06-dev-logging/sherlock/measure/tests/test_monitored_clear_proof.py
++++ b/cases/06-dev-logging/sherlock/measure/tests/test_monitored_clear_proof.py
+@@ -65,6 +65,56 @@ class MonitoredClearProofTest(unittest.TestCase):
+         self.assertEqual(proof["old_session_id"], "old")
+         self.assertEqual(proof["new_session_id"], "new")
+ 
++    def test_empty_continuations_without_submitted_prompt_wait_for_reseed(self):
++        self.append("root-boundary-events.jsonl", phase="UserPromptSubmit",
++                    session="old", monotonic=10, prompt="initial")
++        anchor = DRIVE.capture_clear_anchor(self.observer, self.nonce)
++        self.append("session-start-events.jsonl", phase="SessionStart",
++                    session="new", monotonic=20, source="clear", cwd="/workspace")
++        self.append("root-boundary-events.jsonl", phase="UserPromptSubmit",
++                    session="new", monotonic=30, prompt="expanded skill",
++                    submitted_prompt="/sherlock")
++        # These are retained raw Qwen continuation hook inputs: prompt is empty
++        # and submitted_prompt is absent because no human prompt was submitted.
++        self.append("root-boundary-events.jsonl", phase="UserPromptSubmit",
++                    session="new", monotonic=40, prompt="")
++        self.append("root-boundary-events.jsonl", phase="UserPromptSubmit",
++                    session="new", monotonic=50, prompt="")
++        self.append("root-boundary-events.jsonl", phase="UserPromptSubmit",
++                    session="new", monotonic=60, prompt="resume exact",
++                    submitted_prompt="resume exact")
++
++        rows = (self.observer / "root-boundary-events.jsonl").read_text().splitlines()
++        continuation_raw = base64.b64decode(json.loads(rows[2])["input_base64"])
++        self.assertEqual(json.loads(continuation_raw), {
++            "hook_event_name": "UserPromptSubmit", "prompt": "", "session_id": "new"})
++        self.assertEqual(DRIVE.monitored_clear_evidence(
++            self.observer, self.nonce, anchor, "/sherlock", "resume exact")["state"],
++            "complete")
++
++    def test_nonempty_submitted_prompt_and_wrong_session_empty_row_refuse(self):
++        cases = [
++            ("new", {"prompt": "wrong actual", "submitted_prompt": "wrong actual"}),
++            ("other", {"prompt": ""}),
++            ("new", {"prompt": "", "submitted_prompt": ""}),
++        ]
++        for session, payload in cases:
++            with self.subTest(session=session, payload=payload):
++                self.tearDown(); self.setUp()
++                self.append("root-boundary-events.jsonl", phase="UserPromptSubmit",
++                            session="old", monotonic=10, prompt="initial")
++                anchor = DRIVE.capture_clear_anchor(self.observer, self.nonce)
++                self.append("session-start-events.jsonl", phase="SessionStart",
++                            session="new", monotonic=20, source="clear", cwd="/workspace")
++                self.append("root-boundary-events.jsonl", phase="UserPromptSubmit",
++                            session="new", monotonic=30, prompt="expanded skill",
++                            submitted_prompt="/sherlock")
++                self.append("root-boundary-events.jsonl", phase="UserPromptSubmit",
++                            session=session, monotonic=40, **payload)
++                with self.assertRaises(DRIVE.ClearProofError):
++                    DRIVE.monitored_clear_evidence(
++                        self.observer, self.nonce, anchor, "/sherlock", "resume exact")
++
+     def test_provider_message_counts_cannot_substitute_for_root_hooks(self):
+         self.append("root-boundary-events.jsonl", phase="UserPromptSubmit",
+                     session="old", monotonic=10, prompt="initial")
+diff --git a/cases/06-dev-logging/sherlock/tools/tests/qwen_monitored_clear_reseed_smoke.py b/cases/06-dev-logging/sherlock/tools/tests/qwen_monitored_clear_reseed_smoke.py
+index 238ca1e..e932f3e 100644
+--- a/cases/06-dev-logging/sherlock/tools/tests/qwen_monitored_clear_reseed_smoke.py
++++ b/cases/06-dev-logging/sherlock/tools/tests/qwen_monitored_clear_reseed_smoke.py
+@@ -151,6 +151,8 @@ def main():
+     parser.add_argument("--reseed", default="RESEED: use the toy Sherlock skill")
+     parser.add_argument("--helper", type=pathlib.Path, required=True)
+     parser.add_argument("--driver", type=pathlib.Path, required=True)
++    parser.add_argument("--tool-continuation", action="store_true",
++                        help="require a real Qwen tool continuation after skill reload")
+     args = parser.parse_args()
+     root = args.output.resolve(); root.mkdir(mode=0o700, parents=True)
+     work = root / "workspace"; work.mkdir(mode=0o700)
+@@ -174,6 +176,9 @@ def main():
+     (qwen_dir / "settings.json").write_text(json.dumps(settings, sort_keys=True) + "\n")
+     requests = []
+     actions = []
++    tool_sent = []
++    marker = work / "continuation-evidence.txt"
++    marker.write_text("Toy evidence for the clear/reseed source proof.\n")
+ 
+     def send_stage(fd, label, text):
+         actions.append({"label": label, "text": text, "sent_at_ns": time.time_ns()})
+@@ -195,6 +200,15 @@ def main():
+             finish = {"id": "clear-%d" % index, "object": "chat.completion.chunk",
+                       "created": int(time.time()), "model": "mock",
+                       "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]}
++            if (args.tool_continuation and not tool_sent
++                    and any(action["label"] == "skill" for action in actions)):
++                tool_sent.append(index)
++                row["choices"][0]["delta"] = {
++                    "role": "assistant", "tool_calls": [{
++                        "index": 0, "id": "call_clear_continuation", "type": "function",
++                        "function": {"name": "read_file", "arguments": json.dumps({
++                            "file_path": str(marker), "offset": 0, "limit": 5})}}]}
++                finish["choices"][0]["finish_reason"] = "tool_calls"
+             sse = b"data: " + json.dumps(row).encode() + b"\n\ndata: " + json.dumps(finish).encode() + b"\n\ndata: [DONE]\n\n"
+             atomic(root / ("response-%02d.sse" % index), sse)
+             self.send_response(200); self.send_header("Content-Type", "text/event-stream")
+@@ -236,6 +250,17 @@ def main():
+             fd, transcript,
+             lambda: any(event_name(x) == "UserPromptSubmit" and x.get("submitted_prompt") == "/sherlock"
+                         for x in load_rows(hooks)), 12)
++        continuation_observed = not args.tool_continuation
++        if args.tool_continuation:
++            def saw_continuation():
++                rows = load_rows(hooks)
++                skill_at = next((i for i, row in enumerate(rows)
++                                 if row.get("submitted_prompt") == "/sherlock"), None)
++                return skill_at is not None and any(
++                    event_name(row) == "UserPromptSubmit" and row.get("prompt") == ""
++                    and "submitted_prompt" not in row for row in rows[skill_at + 1:])
++            continuation_observed = read_until(fd, transcript, saw_continuation, 25)
++            wait_for_request_quiet(fd, transcript, requests, len(requests), 15)
+         time.sleep(0.5)
+         send_stage(fd, "reseed", args.reseed)
+         reseed_hook_ok = read_until(fd, transcript,
+@@ -248,11 +273,15 @@ def main():
+         result.update(start_hook_observed=start_ok, initial_request_observed=initial_ok,
+                       initial_completion_observed=initial_done, clear_hook_observed=clear_ok,
+                       skill_hook_observed=skill_hook_observed,
++                      tool_continuation_required=args.tool_continuation,
++                      tool_continuation_observed=continuation_observed,
++                      tool_response_request_indices=tool_sent,
+                       reseed_hook_observed=reseed_hook_ok, reseed_request_observed=reseed_ok,
+                       request_count_at_reseed_proof=len(requests), hook_rows=rows, stage_actions=actions,
+                       boundary_proof=proof, driver_proof=driver_proof, observer_dir=str(observer), lifecycle_helper_sha256=helper_digest, driver_sha256=driver_digest)
+         result["passed"] = all((start_ok, initial_ok, initial_done, clear_ok, skill_hook_observed,
+-                                reseed_hook_ok, reseed_ok, proof["passed"], driver_proof.get("state") == "complete"))
++                                continuation_observed, reseed_hook_ok, reseed_ok,
++                                proof["passed"], driver_proof.get("state") == "complete"))
+         if requests:
+             parsed = [json.loads(raw) for raw in requests]
+             result["request_message_counts"] = [len(x.get("messages", [])) for x in parsed]

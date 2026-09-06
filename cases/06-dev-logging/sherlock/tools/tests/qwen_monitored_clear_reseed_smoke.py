@@ -151,6 +151,8 @@ def main():
     parser.add_argument("--reseed", default="RESEED: use the toy Sherlock skill")
     parser.add_argument("--helper", type=pathlib.Path, required=True)
     parser.add_argument("--driver", type=pathlib.Path, required=True)
+    parser.add_argument("--tool-continuation", action="store_true",
+                        help="require a real Qwen tool continuation after skill reload")
     args = parser.parse_args()
     root = args.output.resolve(); root.mkdir(mode=0o700, parents=True)
     work = root / "workspace"; work.mkdir(mode=0o700)
@@ -174,6 +176,9 @@ def main():
     (qwen_dir / "settings.json").write_text(json.dumps(settings, sort_keys=True) + "\n")
     requests = []
     actions = []
+    tool_sent = []
+    marker = work / "continuation-evidence.txt"
+    marker.write_text("Toy evidence for the clear/reseed source proof.\n")
 
     def send_stage(fd, label, text):
         actions.append({"label": label, "text": text, "sent_at_ns": time.time_ns()})
@@ -195,6 +200,15 @@ def main():
             finish = {"id": "clear-%d" % index, "object": "chat.completion.chunk",
                       "created": int(time.time()), "model": "mock",
                       "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]}
+            if (args.tool_continuation and not tool_sent
+                    and any(action["label"] == "skill" for action in actions)):
+                tool_sent.append(index)
+                row["choices"][0]["delta"] = {
+                    "role": "assistant", "tool_calls": [{
+                        "index": 0, "id": "call_clear_continuation", "type": "function",
+                        "function": {"name": "read_file", "arguments": json.dumps({
+                            "file_path": str(marker), "offset": 0, "limit": 5})}}]}
+                finish["choices"][0]["finish_reason"] = "tool_calls"
             sse = b"data: " + json.dumps(row).encode() + b"\n\ndata: " + json.dumps(finish).encode() + b"\n\ndata: [DONE]\n\n"
             atomic(root / ("response-%02d.sse" % index), sse)
             self.send_response(200); self.send_header("Content-Type", "text/event-stream")
@@ -236,6 +250,17 @@ def main():
             fd, transcript,
             lambda: any(event_name(x) == "UserPromptSubmit" and x.get("submitted_prompt") == "/sherlock"
                         for x in load_rows(hooks)), 12)
+        continuation_observed = not args.tool_continuation
+        if args.tool_continuation:
+            def saw_continuation():
+                rows = load_rows(hooks)
+                skill_at = next((i for i, row in enumerate(rows)
+                                 if row.get("submitted_prompt") == "/sherlock"), None)
+                return skill_at is not None and any(
+                    event_name(row) == "UserPromptSubmit" and row.get("prompt") == ""
+                    and "submitted_prompt" not in row for row in rows[skill_at + 1:])
+            continuation_observed = read_until(fd, transcript, saw_continuation, 25)
+            wait_for_request_quiet(fd, transcript, requests, len(requests), 15)
         time.sleep(0.5)
         send_stage(fd, "reseed", args.reseed)
         reseed_hook_ok = read_until(fd, transcript,
@@ -248,11 +273,15 @@ def main():
         result.update(start_hook_observed=start_ok, initial_request_observed=initial_ok,
                       initial_completion_observed=initial_done, clear_hook_observed=clear_ok,
                       skill_hook_observed=skill_hook_observed,
+                      tool_continuation_required=args.tool_continuation,
+                      tool_continuation_observed=continuation_observed,
+                      tool_response_request_indices=tool_sent,
                       reseed_hook_observed=reseed_hook_ok, reseed_request_observed=reseed_ok,
                       request_count_at_reseed_proof=len(requests), hook_rows=rows, stage_actions=actions,
                       boundary_proof=proof, driver_proof=driver_proof, observer_dir=str(observer), lifecycle_helper_sha256=helper_digest, driver_sha256=driver_digest)
         result["passed"] = all((start_ok, initial_ok, initial_done, clear_ok, skill_hook_observed,
-                                reseed_hook_ok, reseed_ok, proof["passed"], driver_proof.get("state") == "complete"))
+                                continuation_observed, reseed_hook_ok, reseed_ok,
+                                proof["passed"], driver_proof.get("state") == "complete"))
         if requests:
             parsed = [json.loads(raw) for raw in requests]
             result["request_message_counts"] = [len(x.get("messages", [])) for x in parsed]

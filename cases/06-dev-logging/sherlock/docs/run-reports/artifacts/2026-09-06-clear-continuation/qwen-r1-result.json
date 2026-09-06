@@ -1,0 +1,159 @@
+{
+  "argv": [
+    "node",
+    "/home/claude-developer/.local/lib/node_modules/@qwen-code/qwen-code/cli-entry.js",
+    "--auth-type",
+    "openai",
+    "--model",
+    "mock",
+    "--approval-mode",
+    "yolo"
+  ],
+  "child_wait_status": 15,
+  "exception": "fresh-session reseed prompt does not match",
+  "exception_type": "ClearProofError",
+  "finished_at_ns": 1788697677157483440,
+  "hook_rows": [
+    {
+      "capture_file": "01788697667690525629-SessionStart.input.json",
+      "captured_at_ns": 1788697667690525629,
+      "cwd": "/tmp/qwen-monitored-continuation-20260906-r1/workspace",
+      "hook_event_name": "SessionStart",
+      "input_sha256": "513fffb9305aa85b0a8daba5a565cdf207646998c10b2163807638dc7c1bed8a",
+      "model": "mock",
+      "permission_mode": "yolo",
+      "session_id": "9ed9b18f-e891-45d9-a052-782e353d4e89",
+      "source": "startup",
+      "timestamp": "2026-09-06T12:27:47.532Z",
+      "transcript_path": "/tmp/qwen-monitored-continuation-20260906-r1/home/projects/-tmp-qwen-monitored-continuation-20260906-r1-workspace/chats/9ed9b18f-e891-45d9-a052-782e353d4e89.jsonl"
+    },
+    {
+      "capture_file": "01788697667690525629-SessionStart.stdout.json",
+      "captured_at_ns": 1788697667690525629,
+      "continue": true,
+      "hookSpecificOutput": {
+        "hookEventName": "SessionStart"
+      },
+      "input_sha256": "0af78f23d7dfeb80a4871fb34621d110038881271c83958ca4a7c3e6101e853d"
+    },
+    {
+      "capture_file": "01788697668573797963-UserPromptSubmit.input.json",
+      "captured_at_ns": 1788697668573797963,
+      "cwd": "/tmp/qwen-monitored-continuation-20260906-r1/workspace",
+      "hook_event_name": "UserPromptSubmit",
+      "input_sha256": "7aca5e00b2b38c1e11d6dfcd4cb320ff6ec6c6a52c8bbdd993be2ef461b5150d",
+      "prompt": "INITIAL: establish parent session",
+      "session_id": "9ed9b18f-e891-45d9-a052-782e353d4e89",
+      "submitted_prompt": "INITIAL: establish parent session",
+      "timestamp": "2026-09-06T12:27:48.456Z",
+      "transcript_path": "/tmp/qwen-monitored-continuation-20260906-r1/home/projects/-tmp-qwen-monitored-continuation-20260906-r1-workspace/chats/9ed9b18f-e891-45d9-a052-782e353d4e89.jsonl"
+    },
+    {
+      "capture_file": "01788697668573797963-UserPromptSubmit.stdout.json",
+      "captured_at_ns": 1788697668573797963,
+      "continue": true,
+      "hookSpecificOutput": {
+        "hookEventName": "UserPromptSubmit"
+      },
+      "input_sha256": "c7b912ca1f6c2b67faa973ed142e089b4efe02185e079309ba0eadfc1a398ee1"
+    },
+    {
+      "capture_file": "01788697671489204879-SessionStart.input.json",
+      "captured_at_ns": 1788697671489204879,
+      "cwd": "/tmp/qwen-monitored-continuation-20260906-r1/workspace",
+      "hook_event_name": "SessionStart",
+      "input_sha256": "1c2d3226766998b322f5ca6ef31f823b80dad99b49b867392092ac7f59e8c580",
+      "model": "mock",
+      "permission_mode": "yolo",
+      "session_id": "9d3a7577-7a92-4f89-9f12-ee54e82042ab",
+      "source": "clear",
+      "timestamp": "2026-09-06T12:27:51.305Z",
+      "transcript_path": "/tmp/qwen-monitored-continuation-20260906-r1/home/projects/-tmp-qwen-monitored-continuation-20260906-r1-workspace/chats/9d3a7577-7a92-4f89-9f12-ee54e82042ab.jsonl"
+    },
+    {
+      "capture_file": "01788697671489204879-SessionStart.stdout.json",
+      "captured_at_ns": 1788697671489204879,
+      "continue": true,
+      "hookSpecificOutput": {
+        "hookEventName": "SessionStart"
+      },
+      "input_sha256": "0af78f23d7dfeb80a4871fb34621d110038881271c83958ca4a7c3e6101e853d"
+    },
+    {
+      "capture_file": "01788697672219858150-UserPromptSubmit.input.json",
+      "captured_at_ns": 1788697672219858150,
+      "cwd": "/tmp/qwen-monitored-continuation-20260906-r1/workspace",
+      "hook_event_name": "UserPromptSubmit",
+      "input_sha256": "c92ddbc51429d31417397dd48d0934d15c67a0fda5a27e9bc9eefecdc9b4d0dd",
+      "prompt": "Base directory for this skill: /tmp/qwen-monitored-continuation-20260906-r1/skill-catalogue/sherlock\nImportant: ALWAYS resolve absolute paths from this base directory when working with skills.\n\nUse toy evidence only.\n",
+      "session_id": "9d3a7577-7a92-4f89-9f12-ee54e82042ab",
+      "submitted_prompt": "/sherlock",
+      "timestamp": "2026-09-06T12:27:52.108Z",
+      "transcript_path": "/tmp/qwen-monitored-continuation-20260906-r1/home/projects/-tmp-qwen-monitored-continuation-20260906-r1-workspace/chats/9d3a7577-7a92-4f89-9f12-ee54e82042ab.jsonl"
+    },
+    {
+      "capture_file": "01788697672219858150-UserPromptSubmit.stdout.json",
+      "captured_at_ns": 1788697672219858150,
+      "continue": true,
+      "hookSpecificOutput": {
+        "hookEventName": "UserPromptSubmit"
+      },
+      "input_sha256": "c7b912ca1f6c2b67faa973ed142e089b4efe02185e079309ba0eadfc1a398ee1"
+    },
+    {
+      "capture_file": "01788697672878736541-UserPromptSubmit.input.json",
+      "captured_at_ns": 1788697672878736541,
+      "cwd": "/tmp/qwen-monitored-continuation-20260906-r1/workspace",
+      "hook_event_name": "UserPromptSubmit",
+      "input_sha256": "55e2885c20e355bd5eadf6621fe67ecc248995d621ab93b56774adf3e07fc13d",
+      "prompt": "",
+      "session_id": "9d3a7577-7a92-4f89-9f12-ee54e82042ab",
+      "timestamp": "2026-09-06T12:27:52.755Z",
+      "transcript_path": "/tmp/qwen-monitored-continuation-20260906-r1/home/projects/-tmp-qwen-monitored-continuation-20260906-r1-workspace/chats/9d3a7577-7a92-4f89-9f12-ee54e82042ab.jsonl"
+    },
+    {
+      "capture_file": "01788697672878736541-UserPromptSubmit.stdout.json",
+      "captured_at_ns": 1788697672878736541,
+      "continue": true,
+      "hookSpecificOutput": {
+        "hookEventName": "UserPromptSubmit"
+      },
+      "input_sha256": "c7b912ca1f6c2b67faa973ed142e089b4efe02185e079309ba0eadfc1a398ee1"
+    },
+    {
+      "capture_file": "01788697675694952649-UserPromptSubmit.input.json",
+      "captured_at_ns": 1788697675694952649,
+      "cwd": "/tmp/qwen-monitored-continuation-20260906-r1/workspace",
+      "hook_event_name": "UserPromptSubmit",
+      "input_sha256": "be3ad6099c8249f01d35abab40805cdcf8f4ee09ab3b032592e38f94edac2f3a",
+      "prompt": "RESEED: use the toy Sherlock skill",
+      "session_id": "9d3a7577-7a92-4f89-9f12-ee54e82042ab",
+      "submitted_prompt": "RESEED: use the toy Sherlock skill",
+      "timestamp": "2026-09-06T12:27:55.592Z",
+      "transcript_path": "/tmp/qwen-monitored-continuation-20260906-r1/home/projects/-tmp-qwen-monitored-continuation-20260906-r1-workspace/chats/9d3a7577-7a92-4f89-9f12-ee54e82042ab.jsonl"
+    },
+    {
+      "capture_file": "01788697675694952649-UserPromptSubmit.stdout.json",
+      "captured_at_ns": 1788697675694952649,
+      "continue": true,
+      "hookSpecificOutput": {
+        "hookEventName": "UserPromptSubmit"
+      },
+      "input_sha256": "c7b912ca1f6c2b67faa973ed142e089b4efe02185e079309ba0eadfc1a398ee1"
+    }
+  ],
+  "passed": false,
+  "provider": "loopback-only",
+  "qwen_path": "/home/claude-developer/.local/lib/node_modules/@qwen-code/qwen-code/cli-entry.js",
+  "qwen_sha256": "68cb29eb7ccc936d78ece5564ef55cae41a55b630e6657dc417c1f2e561cf4c9",
+  "request_count": 6,
+  "request_message_counts": [
+    2,
+    4,
+    2,
+    4,
+    6,
+    6
+  ],
+  "started_at_ns": 1788697658429649599
+}

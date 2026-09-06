@@ -1,0 +1,212 @@
+{
+  "argv": [
+    "node",
+    "/home/claude-developer/.local/lib/node_modules/@qwen-code/qwen-code/cli-entry.js",
+    "--auth-type",
+    "openai",
+    "--model",
+    "mock",
+    "--approval-mode",
+    "yolo"
+  ],
+  "boundary_proof": {
+    "clear_event_index": 4,
+    "passed": true,
+    "post_clear_session_id": "3a474d08-2e11-4a03-90b3-415205dcde5f",
+    "pre_clear_session_id": "ae9579ec-e523-4c49-8409-51979f900fe2",
+    "reason": null,
+    "reseed_event_index": 10
+  },
+  "child_wait_status": 15,
+  "clear_hook_observed": true,
+  "driver_proof": {
+    "anchor_input_sha256": "6f38492cd52a9bbd7956ea1b3573788157529faeb3a40f86469477fb3818af85",
+    "clear_input_sha256": "d1a36c2ae8818bc0f61f5c88efc92065a49967d74f5f295f44a813cd30ab1fae",
+    "new_session_id": "3a474d08-2e11-4a03-90b3-415205dcde5f",
+    "old_session_id": "ae9579ec-e523-4c49-8409-51979f900fe2",
+    "reseed_input_sha256": "44c62c939ebb16b96034497f9bab6523877d617c9288f13637b20880d60445dc",
+    "skill_input_sha256": "8c1e07c4f375ad3815f79e0bfcbfe495d76fde8c097c06766bb997cdfc796a81",
+    "state": "complete"
+  },
+  "driver_sha256": "b5f89ccd917248ba4ac1a0dd527d3062a92a3004c4bab15784f0acddc90da106",
+  "finished_at_ns": 1788697803552117904,
+  "hook_rows": [
+    {
+      "capture_file": "01788697793279321185-SessionStart.input.json",
+      "captured_at_ns": 1788697793279321185,
+      "cwd": "/tmp/qwen-monitored-continuation-20260906-r2/workspace",
+      "hook_event_name": "SessionStart",
+      "input_sha256": "c718fea95398e27203ebcf2556d4eff6561a5fb5ae4c548a19d9cf3a5bd85c05",
+      "model": "mock",
+      "permission_mode": "yolo",
+      "session_id": "ae9579ec-e523-4c49-8409-51979f900fe2",
+      "source": "startup",
+      "timestamp": "2026-09-06T12:29:53.167Z",
+      "transcript_path": "/tmp/qwen-monitored-continuation-20260906-r2/home/projects/-tmp-qwen-monitored-continuation-20260906-r2-workspace/chats/ae9579ec-e523-4c49-8409-51979f900fe2.jsonl"
+    },
+    {
+      "capture_file": "01788697793279321185-SessionStart.stdout.json",
+      "captured_at_ns": 1788697793279321185,
+      "continue": true,
+      "hookSpecificOutput": {
+        "hookEventName": "SessionStart"
+      },
+      "input_sha256": "0af78f23d7dfeb80a4871fb34621d110038881271c83958ca4a7c3e6101e853d"
+    },
+    {
+      "capture_file": "01788697794049368198-UserPromptSubmit.input.json",
+      "captured_at_ns": 1788697794049368198,
+      "cwd": "/tmp/qwen-monitored-continuation-20260906-r2/workspace",
+      "hook_event_name": "UserPromptSubmit",
+      "input_sha256": "6f38492cd52a9bbd7956ea1b3573788157529faeb3a40f86469477fb3818af85",
+      "prompt": "INITIAL: establish parent session",
+      "session_id": "ae9579ec-e523-4c49-8409-51979f900fe2",
+      "submitted_prompt": "INITIAL: establish parent session",
+      "timestamp": "2026-09-06T12:29:53.898Z",
+      "transcript_path": "/tmp/qwen-monitored-continuation-20260906-r2/home/projects/-tmp-qwen-monitored-continuation-20260906-r2-workspace/chats/ae9579ec-e523-4c49-8409-51979f900fe2.jsonl"
+    },
+    {
+      "capture_file": "01788697794049368198-UserPromptSubmit.stdout.json",
+      "captured_at_ns": 1788697794049368198,
+      "continue": true,
+      "hookSpecificOutput": {
+        "hookEventName": "UserPromptSubmit"
+      },
+      "input_sha256": "c7b912ca1f6c2b67faa973ed142e089b4efe02185e079309ba0eadfc1a398ee1"
+    },
+    {
+      "capture_file": "01788697796891184432-SessionStart.input.json",
+      "captured_at_ns": 1788697796891184432,
+      "cwd": "/tmp/qwen-monitored-continuation-20260906-r2/workspace",
+      "hook_event_name": "SessionStart",
+      "input_sha256": "d1a36c2ae8818bc0f61f5c88efc92065a49967d74f5f295f44a813cd30ab1fae",
+      "model": "mock",
+      "permission_mode": "yolo",
+      "session_id": "3a474d08-2e11-4a03-90b3-415205dcde5f",
+      "source": "clear",
+      "timestamp": "2026-09-06T12:29:56.770Z",
+      "transcript_path": "/tmp/qwen-monitored-continuation-20260906-r2/home/projects/-tmp-qwen-monitored-continuation-20260906-r2-workspace/chats/3a474d08-2e11-4a03-90b3-415205dcde5f.jsonl"
+    },
+    {
+      "capture_file": "01788697796891184432-SessionStart.stdout.json",
+      "captured_at_ns": 1788697796891184432,
+      "continue": true,
+      "hookSpecificOutput": {
+        "hookEventName": "SessionStart"
+      },
+      "input_sha256": "0af78f23d7dfeb80a4871fb34621d110038881271c83958ca4a7c3e6101e853d"
+    },
+    {
+      "capture_file": "01788697797450732644-UserPromptSubmit.input.json",
+      "captured_at_ns": 1788697797450732644,
+      "cwd": "/tmp/qwen-monitored-continuation-20260906-r2/workspace",
+      "hook_event_name": "UserPromptSubmit",
+      "input_sha256": "8c1e07c4f375ad3815f79e0bfcbfe495d76fde8c097c06766bb997cdfc796a81",
+      "prompt": "Base directory for this skill: /tmp/qwen-monitored-continuation-20260906-r2/skill-catalogue/sherlock\nImportant: ALWAYS resolve absolute paths from this base directory when working with skills.\n\nUse toy evidence only.\n",
+      "session_id": "3a474d08-2e11-4a03-90b3-415205dcde5f",
+      "submitted_prompt": "/sherlock",
+      "timestamp": "2026-09-06T12:29:57.344Z",
+      "transcript_path": "/tmp/qwen-monitored-continuation-20260906-r2/home/projects/-tmp-qwen-monitored-continuation-20260906-r2-workspace/chats/3a474d08-2e11-4a03-90b3-415205dcde5f.jsonl"
+    },
+    {
+      "capture_file": "01788697797450732644-UserPromptSubmit.stdout.json",
+      "captured_at_ns": 1788697797450732644,
+      "continue": true,
+      "hookSpecificOutput": {
+        "hookEventName": "UserPromptSubmit"
+      },
+      "input_sha256": "c7b912ca1f6c2b67faa973ed142e089b4efe02185e079309ba0eadfc1a398ee1"
+    },
+    {
+      "capture_file": "01788697798081900018-UserPromptSubmit.input.json",
+      "captured_at_ns": 1788697798081900018,
+      "cwd": "/tmp/qwen-monitored-continuation-20260906-r2/workspace",
+      "hook_event_name": "UserPromptSubmit",
+      "input_sha256": "405bb519725f6f55bce187e5ac95eefb09f7ad88c6c294fdb9870b528f15e4be",
+      "prompt": "",
+      "session_id": "3a474d08-2e11-4a03-90b3-415205dcde5f",
+      "timestamp": "2026-09-06T12:29:57.984Z",
+      "transcript_path": "/tmp/qwen-monitored-continuation-20260906-r2/home/projects/-tmp-qwen-monitored-continuation-20260906-r2-workspace/chats/3a474d08-2e11-4a03-90b3-415205dcde5f.jsonl"
+    },
+    {
+      "capture_file": "01788697798081900018-UserPromptSubmit.stdout.json",
+      "captured_at_ns": 1788697798081900018,
+      "continue": true,
+      "hookSpecificOutput": {
+        "hookEventName": "UserPromptSubmit"
+      },
+      "input_sha256": "c7b912ca1f6c2b67faa973ed142e089b4efe02185e079309ba0eadfc1a398ee1"
+    },
+    {
+      "capture_file": "01788697801060637645-UserPromptSubmit.input.json",
+      "captured_at_ns": 1788697801060637645,
+      "cwd": "/tmp/qwen-monitored-continuation-20260906-r2/workspace",
+      "hook_event_name": "UserPromptSubmit",
+      "input_sha256": "44c62c939ebb16b96034497f9bab6523877d617c9288f13637b20880d60445dc",
+      "prompt": "RESEED: use the toy Sherlock skill",
+      "session_id": "3a474d08-2e11-4a03-90b3-415205dcde5f",
+      "submitted_prompt": "RESEED: use the toy Sherlock skill",
+      "timestamp": "2026-09-06T12:30:00.818Z",
+      "transcript_path": "/tmp/qwen-monitored-continuation-20260906-r2/home/projects/-tmp-qwen-monitored-continuation-20260906-r2-workspace/chats/3a474d08-2e11-4a03-90b3-415205dcde5f.jsonl"
+    },
+    {
+      "capture_file": "01788697801060637645-UserPromptSubmit.stdout.json",
+      "captured_at_ns": 1788697801060637645,
+      "continue": true,
+      "hookSpecificOutput": {
+        "hookEventName": "UserPromptSubmit"
+      },
+      "input_sha256": "c7b912ca1f6c2b67faa973ed142e089b4efe02185e079309ba0eadfc1a398ee1"
+    }
+  ],
+  "initial_completion_observed": true,
+  "initial_request_observed": true,
+  "lifecycle_helper_sha256": "b67790b700d0406aa0909e799b0672b4be8a0ab45088e0400b40b3d3032e4d2c",
+  "observer_dir": "/tmp/qwen-monitored-continuation-20260906-r2/observer-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "passed": true,
+  "provider": "loopback-only",
+  "qwen_path": "/home/claude-developer/.local/lib/node_modules/@qwen-code/qwen-code/cli-entry.js",
+  "qwen_sha256": "68cb29eb7ccc936d78ece5564ef55cae41a55b630e6657dc417c1f2e561cf4c9",
+  "request_count": 6,
+  "request_count_at_reseed_proof": 6,
+  "request_message_counts": [
+    2,
+    4,
+    2,
+    4,
+    6,
+    6
+  ],
+  "reseed_hook_observed": true,
+  "reseed_request_observed": true,
+  "skill_hook_observed": true,
+  "stage_actions": [
+    {
+      "label": "initial",
+      "sent_at_ns": 1788697793344505495,
+      "text": "INITIAL: establish parent session"
+    },
+    {
+      "label": "clear",
+      "sent_at_ns": 1788697796666327208,
+      "text": "/clear"
+    },
+    {
+      "label": "skill",
+      "sent_at_ns": 1788697797251095803,
+      "text": "/sherlock"
+    },
+    {
+      "label": "reseed",
+      "sent_at_ns": 1788697800503091413,
+      "text": "RESEED: use the toy Sherlock skill"
+    }
+  ],
+  "start_hook_observed": true,
+  "started_at_ns": 1788697786780938599,
+  "tool_continuation_observed": true,
+  "tool_continuation_required": true,
+  "tool_response_request_indices": [
+    2
+  ]
+}

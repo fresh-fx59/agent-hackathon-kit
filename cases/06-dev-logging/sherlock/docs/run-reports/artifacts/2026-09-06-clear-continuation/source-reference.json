@@ -1,0 +1,8 @@
+{
+  "url": "https://raw.githubusercontent.com/QwenLM/qwen-code/main/packages/core/src/core/client.ts",
+  "retrieved": "2026-09-06",
+  "full_source_sha256": "4dd918068759c3af9c609bf7cda9d2c65d7d47485c2f5f5a86ea5476118b35ec",
+  "lines_3224_3243": "        const promptText = preHookUserPromptText ?? partToString(request);\n        const submittedPrompt =\n          messageType === SendMessageType.UserQuery &&\n          typeof options?.submittedPrompt === 'string' &&\n          options.submittedPrompt.trim().length > 0\n            ? options.submittedPrompt\n            : undefined;\n        const response = await messageBus.request<\n          HookExecutionRequest,\n          HookExecutionResponse\n        >(\n          {\n            type: MessageBusType.HOOK_EXECUTION_REQUEST,\n            eventName: 'UserPromptSubmit',\n            input: {\n              prompt: promptText,\n              ...(submittedPrompt !== undefined\n                ? { submitted_prompt: submittedPrompt }\n                : {}),\n            },",
+  "applicability": "Matches installed Qwen0.22 chunk-T6XLJRQY.js submitted_prompt branch; current main is corroboration, installed source and real client are decisive.",
+  "web_search": "tool transport connection failed; direct primary fetch succeeded"
+}
