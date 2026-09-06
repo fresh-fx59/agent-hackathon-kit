@@ -31,3 +31,11 @@ All three scripts passed `bash -n`. They were not executed; no remote state or p
 ## Launch order
 
 Run prepare, inspect the produced manifest/profile, run the target probe, verify the resulting receipt and shared digest comparison, then run the full script. If any shared digest, source-package shape, or package identity check fails, stop before provider contact and prepare a fresh harness qualification.
+
+## Execution correction
+
+- 2026-09-06T14:48:50.953231+00:00 — Root review removed inherited `test ! -e "$HARNESS"` from prepare: reuse requires an existing harness. Updated harness reference to r4. Actual remote prepare on independent corpus exited1 before contact: PROBE_SOURCE_CHANGED because contract-probe-fixture.py fixed recipe requests `Security.jsonl`, absent from independent corpus. No runtime verdict. Failed root `/home/claude-developer/hack/sherlock-v48-independent-qualification-20260906-r1` is preserved. Next source review distinguishes model-contract calibration fixture from the cold full corpus; do not rename input or inject Winevtx evidence into independent workspace.
+
+## Probe versus full-corpus binding
+
+The target probe must use a WineVTX calibration source containing the recipe-required `Security.jsonl`; the independent corpus may lack that representative file. The probe receipt/profile do not bind a corpus identity. `paid-admission.py` separately binds the fresh full-input package and only rejects invalid schema or declared incomparable differences. The full run can therefore use the independent corpus with its own inventory, prompt, provenance, and cold-start hashes after a fresh WineVTX calibration probe.
