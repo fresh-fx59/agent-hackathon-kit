@@ -1,0 +1,55 @@
+{
+  "context": {
+    "autoCompactThreshold": 0.7
+  },
+  "general": {
+    "enableAutoUpdate": false
+  },
+  "mcp": {
+    "excluded": []
+  },
+  "memory": {
+    "enableDreams": false,
+    "enableManagedAutoMemory": false
+  },
+  "model": {
+    "chatCompression": {
+      "maxRecentFilesToRetain": 0
+    },
+    "generationConfig": {
+      "contextWindowSize": 262000,
+      "maxRetries": 0,
+      "samplingParams": {
+        "max_tokens": 10000
+      },
+      "timeout": 600000
+    },
+    "model_fallback": {
+      "enabled": false
+    },
+    "sessionTokenLimit": 230000,
+    "skipStartupContext": true
+  },
+  "skills": {
+    "disabledLevels": [
+      "bundled",
+      "extension",
+      "project"
+    ]
+  },
+  "tools": {
+    "core": [
+      "read_file",
+      "write_file",
+      "edit",
+      "grep_search",
+      "glob",
+      "run_shell_command",
+      "todo_write",
+      "list_directory",
+      "skill",
+      "agent"
+    ]
+  },
+  "$version": 4
+}
