@@ -9,3 +9,9 @@ The helper journal accepted startup and clear `SessionStart`, initial, `/sherloc
 Remote evidence: `/tmp/qwen-monitored-clear-reseed-20260906-r2`. Local selected-artifact mirror: `/Users/a/hack/qwen-monitored-clear-reseed-20260906-r2`; it excludes only Qwen's unexecuted `home/updates` auto-update cache. Raw helper bridge input, stdout, stderr, exit, observer journals, request/SSE bodies, PTY transcript, settings, argv, hashes, and result are retained.
 
 r1 is retained as a fixture bridge-argv failure: no hooks reached the helper and `capture_clear_anchor` correctly raised `ClearProofError`. r2 fixes only the bridge argument ordering and passed.
+
+## Final driver identity rerun — r3
+
+After the driver shutdown-ownership-only change, r3 reran the same bounded fixture using final driver SHA-256 `4ca7eb56657a3de81b900cddce89b813d3ab81e1c693bc1a5574595b3aebbec8`; helper remained `b67790b700d0406aa0909e799b0672b4be8a0ab45088e0400b40b3d3032e4d2c`.
+
+r3 passed. The final driver proof is `complete`, binding old session `b435488d-a8b1-46f3-8a9d-9892167a697f` to new clear session `be849b96-7d39-4c90-b182-a47e4277d71b`. The helper accepted the raw clear SessionStart and the exact slash and reseed UserPromptSubmit events. Remote evidence is `/tmp/qwen-monitored-clear-reseed-20260906-r3`; selected local mirror is `/Users/a/hack/qwen-monitored-clear-reseed-20260906-r3`.
