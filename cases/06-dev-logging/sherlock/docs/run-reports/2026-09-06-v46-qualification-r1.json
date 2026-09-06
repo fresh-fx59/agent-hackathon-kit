@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "report": "2026-09-06-v46-qualification-r1.md",
-  "status": "launched",
+  "status": "blocked",
   "acceptance": false,
   "model_under_test": "DeepSeek v4 Flash in Qwen Code",
   "runtime": {
@@ -15,8 +15,28 @@
   "harness_output": "/home/claude-developer/hack/sherlock-v46-harness-20260906-r1",
   "timeline": [
     {
-      "at": "2026-09-06",
-      "event": "fresh v46 qualification launched; root monitoring signed lifecycle and raw outputs"
+      "at": "2026-09-06T13:22:01Z",
+      "event": "fresh v46 qualification launched; provider-free suites passed 43, 17, and 69 tests with one skip"
+    },
+    {
+      "at": "2026-09-06T13:23:31Z",
+      "event": "driver typed bare /sherlock"
+    },
+    {
+      "at": "2026-09-06T13:23:40Z",
+      "event": "first prompt containing /sherlock queued duplicate startup input"
+    },
+    {
+      "at": "2026-09-06T13:28:19Z",
+      "event": "actual submitted prompt appeared in old session after triage boundary 1 while receipt remained pending"
+    },
+    {
+      "at": "2026-09-06T13:30:06.626Z",
+      "event": "root accepted observation sequence 11"
+    },
+    {
+      "at": "2026-09-06T13:31:06.700Z",
+      "event": "controller recorded OBSERVATION_STALE; owned driver received SIGTERM around this time"
     }
   ],
   "pending_gates": [
@@ -24,5 +44,38 @@
     "complete raw request/response/tool/report review",
     "report and corpus acceptance gates",
     "final verdict after all gates"
-  ]
+  ],
+  "terminal_verdict": "OBSERVATION_STALE",
+  "completed_requests": 34,
+  "request_count_audit": {
+    "source": "runs/run-20260906T132201Z-b3f54f8a4477/upstream-completed.jsonl",
+    "lines": 34,
+    "all_requests": "gpt-5.5 subscription calls; no model-under-test acceptance"
+  },
+  "observation": {
+    "last_accepted_sequence": 11,
+    "last_accepted_at": "2026-09-06T13:30:06.626Z",
+    "terminal_at": "2026-09-06T13:31:06.700Z",
+    "gap_seconds": 60.065,
+    "driver_sigterm": "sent around terminal observation-stale time"
+  },
+  "root_input_defect": {
+    "bare_skill_at": "2026-09-06T13:23:31Z",
+    "first_prompt_with_skill_at": "2026-09-06T13:23:40Z",
+    "actual_submitted_prompt_at": "2026-09-06T13:28:19Z",
+    "effect": "duplicate queued startup prompt; submitted receipt remained pending while draft continued"
+  },
+  "report_artifact": {
+    "path": "runs/run-20260906T132201Z-b3f54f8a4477/work/report.md",
+    "accepted": false
+  },
+  "evidence_artifacts": {
+    "directory": "artifacts/2026-09-06-v46-qualification-r1/",
+    "harness_inventory": "artifacts/2026-09-06-v46-qualification-r1/harness.sha256-inventory.json",
+    "target_inventory": "artifacts/2026-09-06-v46-qualification-r1/target.sha256-inventory.json",
+    "launch_stdout": "artifacts/2026-09-06-v46-qualification-r1/launch.stdout",
+    "launch_stderr": "artifacts/2026-09-06-v46-qualification-r1/launch.stderr",
+    "local_harness_mirror": "/Users/a/hack/sherlock-v46-harness-20260906-r1",
+    "local_target_mirror": "/Users/a/hack/sherlock-v46-qualification-20260906-r1"
+  }
 }

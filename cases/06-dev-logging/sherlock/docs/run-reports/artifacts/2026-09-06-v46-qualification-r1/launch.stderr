@@ -1,0 +1,3 @@
+  ↻ upstream route (hot-swappable, read per call): /home/claude-developer/hack/sherlock-v46-harness-20260906-r1/runs/run-20260906T132201Z-b3f54f8a4477.upstream.route.json
+      hack/swap-upstream-route.sh /home/claude-developer/hack/sherlock-v46-harness-20260906-r1/runs/run-20260906T132201Z-b3f54f8a4477.upstream.route.json <base> <model> [identity]
+Terminated                 sleep 0.1
