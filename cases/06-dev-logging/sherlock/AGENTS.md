@@ -27,6 +27,11 @@ from scratch. Benchmark engineering alone is not completion.
    Record actual model identity and usage. Normally one implementation lane and
    one scoped review; independent work only in parallel. Development workers
    must never substitute for the exact target-model acceptance run.
+   Batch independent shell work into one tool call. Budget about 40 tool calls
+   per task; if more appear necessary, first ask `claude -p` for an economy
+   review, then continue if the work still needs them. Delegate file reading and
+   test runs to bounded subagents; do not grind them in the main loop. Use
+   `claude -p` with a fitting model and effort when an independent opinion helps.
 5. **Investigate before fixing.** Inspect actual logs and request/tool traces;
    test competing explanations. Research relevant current primary documentation
    when behavior is uncertain. Cite source URLs, dates and applicability. Never
