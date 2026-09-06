@@ -1,0 +1,7 @@
+FAIL
+
+- Partial-handoff transitions are underspecified. “Partial non-done stages” does not define whether the destination must equal the source, advance exactly one stage, or may move backward/skip stages. This can admit invalid transitions or produce incompatible implementations.
+- Receipt consumption is not crash-safe as specified. If Stop atomically consumes the receipt and then crashes before persisting/returning the stage-pause result, the handoff becomes unrecoverable and cannot be replayed. Consumption and durable pause outcome need one transactional/idempotent contract.
+- “Natural idle” is undefined, especially for tools lacking completion hooks—the exact failure cited in the evidence. The driver needs an authoritative idle predicate covering provider completion, outstanding tool calls, and pending hooks; otherwise it may clear prematurely again.
+- Boundary identity is insufficiently scoped. A boundary sequence plus kind/stages/text hash can collide across sessions or runtime instances. The receipt must also bind to a durable session/run identity and specify monotonic sequence persistence.
+- The contract between the distinct stage-pause result, preserved active marker, and subsequent clear is missing. It does not state what authorizes clear while the marker remains active, how clear verifies the consumed receipt, or how stale pause results are rejected.

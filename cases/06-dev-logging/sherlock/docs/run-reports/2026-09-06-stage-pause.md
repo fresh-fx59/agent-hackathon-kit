@@ -45,7 +45,8 @@ r1 is the preserved v45 regression. r2 demonstrates the candidate composition bu
 
 - Local mirrors: `/Users/a/hack/qwen-stage-pause-20260906-r1`, `-r2`, `-r3`, `-r4`
 - Remote originals: `/tmp/qwen-stage-pause-20260906-r1`, `-r2`, `-r3`, `-r4`
-- Committed fixture sources and inventories: `artifacts/2026-09-06-stage-pause/`
+- Committed fixture sources and inventories: `artifacts/2026-09-06-stage-pause/` (inventory files `inventory-r1.sha256.json` through `inventory-r4.sha256.json`; each inventory was compared against its remote original, with r4 matching 1465/1465 entries)
+- Review and critique preservation: `artifacts/2026-09-06-stage-pause/review/`, `spec-critique.txt`, and `spec-critique.stderr` retain exact outputs. The complete remote mirrors remain outside Git at `/Users/a/hack/qwen-stage-pause-20260906-r{1,2,3,4}`; the committed evidence preserves source fixtures, inventories, and review outputs rather than duplicating large mirrors.
 - Results: each mirror's `result.json`
 - Raw requests and responses: each mirror's `request-*.json` and `response-*.sse`
 - Raw hooks: each mirror's `raw-hooks/`

@@ -1,0 +1,46 @@
+Reading additional input from stdin...
+OpenAI Codex v0.153.4
+--------
+workdir: /private/tmp
+model: gpt-5.6-sol
+provider: openai
+approval: never
+sandbox: read-only
+reasoning effort: medium
+reasoning summaries: none
+session id: 01a076c4-be68-7c71-a5d2-fd380aa67d9e
+--------
+user
+Criticise this ready scoped specification only. Do not execute tools or edit files. Return PASS or concrete correctness defects. No need for further research.
+
+<stdin>
+# Verified stage pauses for Sherlock v46
+
+Goal: let the generic staged investigation transfer context and reach validated reports on Winevtx and a fresh independent corpus. No final report acceptance rules change.
+
+Evidence: r9 closed triage at 12:39:23; Stop reinjected a final-report substance error at 12:39:33 despite the required handoff. Driver sent Escape at 12:39:54; clear ran before the old provider response completed at 12:39:59. Four requested tools lacked completion hooks; guardian faulted at 12:40:03. Runtime has no stage-pause allowance and the driver cancels after 20 seconds.
+
+Runtime v46: copy immutable v45. checkpoint handoff writes a durable one-use pending-handoff receipt bound to boundary sequence, partial/full kind, source/destination stage, and canonical handoff text hash. Stop validates safe receipt/checkpoint/handoff paths and matching durable boundary before final-report validation. Permit only partial non-done stages or full triage→draft / draft→repair. Verify current worklist seals/counts and no active child before pause. Consume receipt atomically, preserve active marker, and return a distinct stage-pause reason. Invalid or consumed receipts do not grant allowance. repair→done never grants a pause; all existing final report gates and exact final delivery remain required. Document that a stage pause is not final success. Do not modify v45.
+
+Driver: monitored operation must wait for natural idle, never send Escape and never type while busy. Existing external controller/guardian and 600-second request watchdog remain responsible for cancellation on actual faults. No aggregate time/call/cost cap. Check child process liveness while waiting and stop cleanly on exit. Keep legacy behavior isolated. Preserve clear/session/skill/reseed evidence checks.
+
+Acceptance: regressions reproduce missing allowance and premature cancellation; valid full/partial handoffs preserve marker and cannot replay; malformed/stale/state/hash mismatches refuse; active children refuse; final placeholder still refuses and valid final delivery retains all four gate checks. Driver delayed-idle regression proves zero Escape/typing until idle, process exit stops without typing, and supervisor stop still terminates owned processes. Actual installed Qwen fixture must exercise stage handoff Stop plus delayed provider/tool completion before clear. Existing focused clear-proof tests pass. Subscription qualification then target-model partial, full Winevtx, and cold independent corpus on one frozen final package hash.
+
+Non-goals: new orchestration framework, relaxing missing-tool checks, seeded findings, broad cleanup, production changes.
+</stdin>
+hook: SessionStart
+hook: SessionStart Completed
+hook: UserPromptSubmit
+hook: UserPromptSubmit Completed
+codex
+FAIL
+
+- Partial-handoff transitions are underspecified. “Partial non-done stages” does not define whether the destination must equal the source, advance exactly one stage, or may move backward/skip stages. This can admit invalid transitions or produce incompatible implementations.
+- Receipt consumption is not crash-safe as specified. If Stop atomically consumes the receipt and then crashes before persisting/returning the stage-pause result, the handoff becomes unrecoverable and cannot be replayed. Consumption and durable pause outcome need one transactional/idempotent contract.
+- “Natural idle” is undefined, especially for tools lacking completion hooks—the exact failure cited in the evidence. The driver needs an authoritative idle predicate covering provider completion, outstanding tool calls, and pending hooks; otherwise it may clear prematurely again.
+- Boundary identity is insufficiently scoped. A boundary sequence plus kind/stages/text hash can collide across sessions or runtime instances. The receipt must also bind to a durable session/run identity and specify monotonic sequence persistence.
+- The contract between the distinct stage-pause result, preserved active marker, and subsequent clear is missing. It does not state what authorizes clear while the marker remains active, how clear verifies the consumed receipt, or how stale pause results are rejected.
+hook: Stop
+hook: Stop Completed
+tokens used
+6 871
