@@ -1,0 +1,60 @@
+{
+  "schema": 1,
+  "report": "2026-09-06-v50-harness-r8.md",
+  "status": "rejected_controller_permission_error_after_reviewer",
+  "acceptance": false,
+  "runtime": {
+    "version": "v50",
+    "package_sha256": "0f95b5a59dcc41500168d3f2dc6df3e237b8c68e9d3666bf181716983d902ee7",
+    "arm_commit": "3c8a73ff3787b244931e965655d11135489633ae",
+    "monitor_sha256": "dcf42026de753649a169d6499077e2f1f2570b7c9af5ed104fd7d97ccc3a388e"
+  },
+  "health": {
+    "checked_at": "2026-09-06T19:03:58.850662Z",
+    "verdict": "HEALTHY",
+    "checks": [
+      {"size_kb": 100, "status": 200, "response_bytes": 681, "returned_model": "gpt-5.5", "error_code": null},
+      {"size_kb": 250, "status": 200, "response_bytes": 683, "returned_model": "gpt-5.5", "error_code": null},
+      {"size_kb": 400, "status": 200, "response_bytes": 684, "returned_model": "gpt-5.5", "error_code": null}
+    ]
+  },
+  "review": {
+    "published_at": "2026-09-06T19:04:07.200568Z",
+    "duration_seconds": 7.192493337,
+    "model": "claude-sonnet-5",
+    "decision": "continue",
+    "snapshot_sha256": "52dfc9f50d3d05f5428c49807c293a0416a75c6227d2d84a8b5f05d1f1b2780f",
+    "sonnet_list_price_usd": 0.0439398,
+    "auxiliary_haiku_list_price_usd": 0.004765,
+    "total_list_price_estimate_usd": 0.0487048,
+    "invoice": false
+  },
+  "terminal": {
+    "controller_status_at": "2026-09-06T19:04:07.223Z",
+    "controller_phase": "BLOCKED_UNKNOWN",
+    "controller_reason": "LIFECYCLE_LAUNCH_INVALID",
+    "cause": "PermissionError reading root-owned mode-0600 current-observation.json",
+    "reviewer_response": true,
+    "qwen_launched": false,
+    "deepseek_requests": 0
+  },
+  "evidence": {
+    "run_tag": "run-20260906T190325Z-504ab93556ad",
+    "run_nonce": "4099a23ba4b210ada8d5d89c1fd7c26d",
+    "artifact_directory": "artifacts/2026-09-06-v50-harness-subscription-r8-failed/",
+    "provider_free_health_gate": true,
+    "remote_inventory_files": 151,
+    "r9_preparation": {
+      "helper_pid": 1163985,
+      "process_uid": 1000,
+      "process_gid": 100,
+      "monitor_mode": "0700",
+      "lock_mode": "0600",
+      "controller_rc": 7,
+      "root_absent": true,
+      "lock_removed": true,
+      "child_stopped": true,
+      "same_uid_observation_read": true
+    }
+  }
+}

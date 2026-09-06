@@ -1,0 +1,2 @@
+{"claude": "/run/current-system/sw/bin/claude", "gid": 100, "home": "/home/claude-developer", "path": "/home/claude-developer/.local/bin:/run/current-system/sw/bin:/usr/bin:/bin", "realpath": "/nix/store/iqmk4mxhgzkcpayin8b2l3pj7f1j5r42-claude-code-2.1.263/bin/claude", "uid": 1000}
+2.1.263 (Claude Code)
