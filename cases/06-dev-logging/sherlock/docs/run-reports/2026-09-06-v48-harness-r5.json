@@ -1,0 +1,37 @@
+{
+  "schema": 1,
+  "report": "2026-09-06-v48-harness-r5.md",
+  "status": "rejected_stage_boundary_violation",
+  "acceptance": false,
+  "terminal": {
+    "verdict": "STAGE_BOUNDARY_VIOLATION",
+    "fault_at": "2026-09-06T15:01:14.639310Z",
+    "controller_status": "BLOCKED",
+    "completed_gpt55_responses": 35,
+    "deepseek_requests": 0,
+    "observer_sequence_18_at": "2026-09-06T15:01:14.895585Z",
+    "observer_sequence_18_post_fault_seconds": 0.256275,
+    "observer_sequence_18_valid_for_acceptance": false
+  },
+  "causal_chain": {
+    "handoff_actor": "root_session",
+    "triage_child_completed": true,
+    "handoff_call_id": "call_nYZ8WwCcXQh3oZ20CisgcbDS",
+    "handoff_tool_id": "toolu_1788706710979_wox5mcpx1",
+    "handoff_exit": 0,
+    "handoff_instruction": "НЕ ПРОДОЛЖАЙ В ЭТОЙ СЕССИИ",
+    "post_hook_sha256": "8646936a6cfe93c55c4e27a73a6d1adebfa1ec5969329074d10bf530d41ddc35",
+    "continued_same_session_draft_work": true,
+    "earlier_child_attribution": "corrected_inference"
+  },
+  "evidence": {
+    "harness_mirror": "/Users/a/hack/sherlock-v48-harness-20260906-r5",
+    "target_mirror": "/Users/a/hack/sherlock-v48-qualification-20260906-r5",
+    "harness_file_count": 456,
+    "target_file_count": 68,
+    "inventory_equality": true,
+    "inventory_policy": "exclude home/ and updates/ only",
+    "artifact_directory": "artifacts/2026-09-06-v48-harness-r5/",
+    "handoff_trace": "artifacts/2026-09-06-v48-harness-r5/handoff-trace.json"
+  }
+}
