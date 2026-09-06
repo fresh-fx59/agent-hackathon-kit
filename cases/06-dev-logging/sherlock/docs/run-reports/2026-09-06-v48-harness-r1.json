@@ -1,0 +1,31 @@
+{
+  "schema": 1,
+  "report": "2026-09-06-v48-harness-r1.md",
+  "status": "blocked_before_model_under_test",
+  "acceptance": false,
+  "runtime": {
+    "version": "v48 candidate",
+    "package_sha256": "be96db39cc0f4b8d36324dea9b66fdf2880d9dbefb1bea78fc927269f769c9ba",
+    "code": "e595c80",
+    "driver_sha256": "75d0c3dd65f69dddd551b0c15cbc7f4343231c8fde5930b01f267a6114640b9f",
+    "preparation_manifest_sha256": "bc7515a76205c655488b9b479b41bddde76051c5bd69696ce8549ba6e31d26c4"
+  },
+  "terminal": {
+    "run_tag": "run-20260906T141548Z-1229faa8503f",
+    "completed_subscription_requests": 1,
+    "deepseek_requests": 0,
+    "controller_fault": "EXPECTED_TOOL_BATCH_MISSING",
+    "observation_stale": false,
+    "cause": "driver rejected Qwen-trimmed terminal LF and tore down PTY before tool execution"
+  },
+  "evidence": {
+    "harness_mirror": "/Users/a/hack/sherlock-v48-harness-20260906-r1",
+    "target_mirror": "/Users/a/hack/sherlock-v48-qualification-20260906-r1",
+    "harness_inventory_artifact": "artifacts/2026-09-06-v48-harness-r1/harness.sha256-inventory.json",
+    "target_inventory_artifact": "artifacts/2026-09-06-v48-harness-r1/target.sha256-inventory.json",
+    "launch_stdout": "artifacts/2026-09-06-v48-harness-r1/launch.stdout",
+    "launch_stderr": "artifacts/2026-09-06-v48-harness-r1/launch.stderr",
+    "mirror_policy": "exclude home/updates only"
+  },
+  "next_step": "Repair exact Qwen submission normalization while retaining original prompt bytes and both hashes; rerun fresh before DeepSeek or corpus acceptance."
+}
