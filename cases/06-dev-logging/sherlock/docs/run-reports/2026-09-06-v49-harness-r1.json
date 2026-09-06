@@ -1,0 +1,48 @@
+{
+  "schema": 1,
+  "report": "2026-09-06-v49-harness-r1",
+  "status": "rejected_observation_stale",
+  "acceptance": false,
+  "run_tag": "run-20260906T153519Z-385cb7d2b90b",
+  "runtime": {
+    "arm": "v49",
+    "skill_sha256": "d9eb69b2f45a549778ef60cc2ee5c83817394468f52d076504b6ee95285d0c9e",
+    "lifecycle_helper_sha256": "0d6aacbb7ed0d5e2f665113154a79122b5e9f9072cc0ec721bc436c1da44c0ee",
+    "code_commit": "07b0382d0669e15cdde3bd92af6ff5d8c894ce0e"
+  },
+  "terminal": {
+    "reason": "OBSERVATION_STALE",
+    "fault_observed_at": "2026-09-06T15:41:42.359793Z",
+    "stale_detail_ns": 60070538735,
+    "last_accepted_sequence": 9,
+    "last_accepted_monotonic_ns": 799126173118765,
+    "last_checked_monotonic_ns": 799185993180609,
+    "completed_gpt55_responses": 24,
+    "expected_tool_count": 31,
+    "completed_tool_count": 31,
+    "deepseek_requests": 0
+  },
+  "separate_runtime_issue": {
+    "type": "pending_handoff_worklist_seal_mismatch",
+    "exact_denial": "Sherlock: stage handoff worklist seals changed.",
+    "evidence": "The checkpoint included worklist-index.tsv; this is recorded separately from the terminal OBSERVATION_STALE verdict.",
+    "post_denial_effects": "none verified"
+  },
+  "receipts": {
+    "controller_verdict": "EXCEEDED",
+    "controller_reason": "OBSERVATION_STALE",
+    "lifecycle_status": "FAULT",
+    "harness_acceptance_receipt": "not_generated",
+    "target_probe_receipt": "not_generated"
+  },
+  "inventory": {
+    "harness_local_entries": 409,
+    "harness_remote_entries": 409,
+    "harness_equal": true,
+    "target_local_entries": 70,
+    "target_remote_entries": 70,
+    "target_equal": true,
+    "policy": "Inventory generation pruned directories named exactly home or updates at any depth; raw remote trees were retained separately."
+  },
+  "artifacts": "docs/run-reports/artifacts/2026-09-06-v49-harness-r1"
+}
