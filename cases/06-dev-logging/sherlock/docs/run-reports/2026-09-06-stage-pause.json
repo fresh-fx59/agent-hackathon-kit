@@ -1,0 +1,87 @@
+{
+  "schema": 1,
+  "report": "2026-09-06-stage-pause.md",
+  "status": "development_evidence_only",
+  "provider_calls": 0,
+  "corpus_acceptance": false,
+  "mirror_policy": "exclude home/updates only",
+  "experiments": [
+    {
+      "id": "r1",
+      "runtime": "v45",
+      "passed": false,
+      "provider": "loopback-only",
+      "request_count": 10,
+      "error": "AssertionError('stage pause was blocked')",
+      "observed": [
+        "repeated HOOK_PAIR_MISSING",
+        "EXPECTED_TOOL_BATCH_MISSING: call_pause",
+        "client/provider remained busy",
+        "Stop did not allow stage pause"
+      ],
+      "inventory_entries": 565,
+      "inventory_sha256": "47392ce4e2fc3d3aee5c1778fcd7553371f074aa9ee49d904ee9b54a16033acd",
+      "fixture_sha256": "2e74b3bf0c38f930ff8c1857a86343eacd45b671e227898e87cad972f7f75663"
+    },
+    {
+      "id": "r2",
+      "runtime": "v46 candidate",
+      "passed": false,
+      "provider": "loopback-only",
+      "request_count": 3,
+      "error": "AssertionError('unexpected continuation count: 3')",
+      "marker_preserved": true,
+      "stop_decision": "allow",
+      "stop_reason": "Sherlock stage handoff accepted",
+      "old_session_id": "ac43ed6c-aeee-420f-8059-93728efd824f",
+      "clear_session_id": "e28d35fe-dafe-493c-9fee-a950651a818c",
+      "interpretation": "composition evidence passed; fixture expected two responses and rejected the third Qwen auxiliary suggestion request",
+      "inventory_entries": 496,
+      "inventory_sha256": "b5850ef9076efb9f766f78d4fe49f5f8b53481a704312aa783e4cefec9bd4b2a",
+      "fixture_sha256": "52c58f1d57a720bc628966f0849fc2e016c735c55cbe78b07262fc7a3855671a"
+    },
+    {
+      "id": "r3",
+      "runtime": "v46 candidate",
+      "passed": false,
+      "provider": "loopback-only",
+      "request_count": 2,
+      "error": "ClearProofError('cannot verify stage Stop outcome: FILE_CHANGED_WHILE_READ: /tmp/qwen-stage-pause-20260906-r3/workspace/work/checkpoint.json')",
+      "auxiliary_suggestion_classification": true,
+      "interpretation": "strict snapshot guard failed closed on a concurrent atomic checkpoint replacement; Stop outcome remains unaccepted",
+      "inventory_entries": 490,
+      "inventory_sha256": "6d67c9566d5ec0ef95e9330148bc2ce86ef9561776262561272c3d310e9e677f",
+      "fixture_sha256": "a903321cd1a9845257e5a9b8413e3e1c74b4513e771f605bdfe6a4cb2cc849ba"
+    },
+    {
+      "id": "r4",
+      "runtime": "v46 frozen",
+      "passed": true,
+      "provider": "loopback-only",
+      "request_count": 3,
+      "provider_errors": [],
+      "marker_preserved": true,
+      "stop_decision": "allow",
+      "stop_reason": "Sherlock stage handoff accepted",
+      "old_session_id": "5602d387-df6c-408c-b080-25055401462b",
+      "clear_session_id": "d3ccd5bc-f12f-42e9-ba3f-e9cf2772b8d9",
+      "auxiliary_requests": [
+        {
+          "index": 2,
+          "kind": "Qwen suggestion"
+        }
+      ],
+      "interpretation": "stage-pause fixture passed after exact FILE_CHANGED_WHILE_READ retry and explicit Qwen auxiliary classification; no corpus acceptance",
+      "inventory_entries": 1465,
+      "inventory_sha256": "c5828486eb207e07f78211f396eeda3f41f4a7c48c2cea53dcbca27fea3764f4",
+      "fixture_sha256": "a903321cd1a9845257e5a9b8413e3e1c74b4513e771f605bdfe6a4cb2cc849ba",
+      "source_sha256": {
+        "driver": "2882f88ef73282256c409c5997c5fda8e413dbd096d8ef32e7c0597dfecb61c8",
+        "fixture": "a903321cd1a9845257e5a9b8413e3e1c74b4513e771f605bdfe6a4cb2cc849ba",
+        "helper": "b67790b700d0406aa0909e799b0672b4be8a0ab45088e0400b40b3d3032e4d2c",
+        "qwen": "68cb29eb7ccc936d78ece5564ef55cae41a55b630e6657dc417c1f2e561cf4c9"
+      }
+    }
+  ],
+  "next_step": "Run the fresh v46 qualification corpus from scratch; fixture evidence alone cannot establish corpus report acceptance."
+}
