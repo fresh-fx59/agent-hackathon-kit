@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Installed Qwen: full driver, discovered skill, combined arguments, real Stop.
 
-Only a scripted localhost provider and synthetic one-line evidence are used.
+Only a scripted localhost provider and synthetic evidence are used.
+The indexed mode mirrors the subscription qualification map input.
 This tests composition, not investigation quality or final report acceptance.
 """
 import argparse
@@ -42,10 +43,25 @@ def main():
     for arg in ('output', 'qwen', 'helper', 'driver', 'skill'):
         ap.add_argument('--'+arg, type=Path, required=True)
     ap.add_argument('--exercise-boundary', action='store_true')
+    ap.add_argument('--indexed-worklist', action='store_true')
     a = ap.parse_args()
     root=a.output.resolve(); root.mkdir(mode=0o700,parents=True)
     workspace=root/'workspace'; workspace.mkdir(); work=workspace/'work'
-    corpus=workspace/'corpus'; corpus.mkdir(); (corpus/'toy.log').write_text('2026-09-06 INFO toy operation complete\n')
+    corpus=workspace/'corpus'; corpus.mkdir()
+    if a.indexed_worklist:
+        events=[]
+        for index in range(12):
+            events.append({'Event':{'System':{
+                'Provider':{'#attributes':{'Name':'Service Control Manager'}},
+                'EventID':{'#attributes':{'Qualifiers':16384},'#text':7045},
+                'Level':4 if index < 6 else 6,
+                'TimeCreated':{'#attributes':{'SystemTime':'2026-09-04T00:00:%02dZ'%index}},
+                'Security':{'#attributes':{'UserID':'S-1-5-18'}}},
+                'EventData':{'ServiceName':'SherlockQualificationHealthy',
+                             'ImagePath':'C:\\Windows\\System32\\svchost.exe -k qualification'}}})
+        (corpus/'System.jsonl').write_text(''.join(json.dumps(e,sort_keys=True,separators=(',',':'))+'\n' for e in events))
+    else:
+        (corpus/'toy.log').write_text('2026-09-06 INFO toy operation complete\n')
     home=root/'home'; home.mkdir(); rawhooks=root/'raw-hooks'; rawhooks.mkdir()
     catalog=root/"skill-catalogue"; catalog.mkdir(); skill=catalog/"log-rca"
     shutil.copytree(a.skill.resolve(),skill,ignore=shutil.ignore_patterns("__pycache__","*.pyc"))
@@ -59,14 +75,25 @@ def main():
     cp=subprocess.run([sys.executable,str(skill/'tools/logmap.py'),str(corpus),'--out',str(work),'--single-host'],cwd=workspace,env=env,capture_output=True)
     (root/'logmap.stdout').write_bytes(cp.stdout); (root/'logmap.stderr').write_bytes(cp.stderr)
     if cp.returncode: raise RuntimeError('toy logmap failed')
+    if a.indexed_worklist and not (work/'worklist-index.tsv').is_file():
+        raise AssertionError('representative logmap fixture did not generate index')
     wl=work/'worklist.tsv'; lines=wl.read_text().splitlines()
     for i,line in enumerate(lines):
         if line and not line.startswith('#'):
-            cols=line.split('\t'); cols[1]='N toy.log:1 «toy operation complete» n=1 fixture'; lines[i]='\t'.join(cols)
+            cols=line.split('\t')
+            cols[1]=('N System.jsonl:1 «SherlockQualificationHealthy» n=1 fixture' if a.indexed_worklist
+                     else 'N toy.log:1 «toy operation complete» n=1 fixture')
+            lines[i]='\t'.join(cols)
     wl.write_text('\n'.join(lines)+'\n')
     cp=subprocess.run([sys.executable,str(skill/'tools/checkpoint.py'),'init','--work',str(work)],cwd=workspace,env=env,capture_output=True)
     (root/'checkpoint-init.stdout').write_bytes(cp.stdout); (root/'checkpoint-init.stderr').write_bytes(cp.stderr)
     if cp.returncode: raise RuntimeError('toy checkpoint init failed')
+    if a.indexed_worklist:
+        initial_checkpoint=json.loads((work/'checkpoint.json').read_text())
+        expected_rows=sum(bool(line and not line.startswith('#')) for line in wl.read_text().splitlines())
+        if (set(initial_checkpoint.get('worklists',{}))!={'worklist.tsv'}
+                or initial_checkpoint.get('total')!=expected_rows):
+            raise AssertionError('checkpoint counted derived index as evidence')
     bridge=root/'bridge.py'; bridge.write_text(BRIDGE)
     settings_path=a.driver.resolve().parent/'corporate-settings.py'
     settings_module=load('pause_settings',settings_path)
@@ -158,7 +185,7 @@ def main():
     env['OPENAI_BASE_URL']='http://127.0.0.1:%d/v1'%server.server_port
     argv=['node',str(a.qwen.resolve()),'--auth-type','openai','--model','mock','--approval-mode','yolo']
     (root/'argv.json').write_text(json.dumps(argv)+'\n')
-    result={'passed':False,'provider':'loopback-only','scope':'full driver startup and first clear; intentional fixture stop after second pause',
+    result={'passed':False,'indexed_worklist':a.indexed_worklist,'provider':'loopback-only','scope':'full driver startup and first clear; intentional fixture stop after second pause',
         'source_sha256':{name:hashlib.sha256(path.read_bytes()).hexdigest() for name,path in
                          [('qwen',a.qwen),('helper',a.helper),('driver',a.driver),('settings',settings_path),('fixture',Path(__file__))]},
         'skill_files':{str(p.relative_to(skill)):hashlib.sha256(p.read_bytes()).hexdigest()

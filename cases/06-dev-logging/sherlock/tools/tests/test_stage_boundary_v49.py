@@ -10,7 +10,7 @@ from pathlib import Path
 
 
 SHERLOCK = Path(__file__).resolve().parents[2]
-PACKAGE = SHERLOCK / "skills" / "v49"
+PACKAGE = SHERLOCK / "skills" / os.environ.get("SHERLOCK_TEST_PACKAGE", "v49")
 
 
 class StageBoundaryV49Test(unittest.TestCase):
@@ -22,8 +22,6 @@ class StageBoundaryV49Test(unittest.TestCase):
         self.corpus.mkdir()
         self.work.mkdir()
         (self.work / "worklist.tsv").write_text("# id\tverdict\n", encoding="utf-8")
-        self.run_checkpoint("init")
-        self.run_checkpoint("handoff", "--done", "triage")
         marker = self.root / ".sherlock" / "active.json"
         marker.parent.mkdir()
         marker.write_text(json.dumps({
@@ -31,6 +29,8 @@ class StageBoundaryV49Test(unittest.TestCase):
             "skill_root": str(PACKAGE.resolve()), "corpus": str(self.corpus),
             "out": str(self.work), "mode": "single", "worklists": ["worklist.tsv"],
         }) + "\n", encoding="utf-8")
+        self.run_checkpoint("init")
+        self.run_checkpoint("handoff", "--done", "triage")
 
     def tearDown(self):
         self.temp.cleanup()

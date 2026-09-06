@@ -28,6 +28,13 @@ class StagePauseV46Test(unittest.TestCase):
     def prepare(self, worklist, done, partial=False):
         self.work.mkdir(exist_ok=True)
         (self.work / "worklist.tsv").write_text(worklist, encoding="utf-8")
+        marker = self.root / ".sherlock" / "active.json"
+        marker.parent.mkdir(exist_ok=True)
+        marker.write_text(json.dumps({
+            "version": 36, "active": True, "workspace": str(self.root),
+            "skill_root": str(PACKAGE.resolve()), "corpus": str(self.corpus),
+            "out": str(self.work), "mode": "single", "worklists": ["worklist.tsv"],
+        }) + "\n", encoding="utf-8")
         subprocess.run([sys.executable, str(PACKAGE / "tools" / "checkpoint.py"),
                         "init", "--work", str(self.work)], check=True,
                        capture_output=True, text=True)
@@ -37,13 +44,6 @@ class StagePauseV46Test(unittest.TestCase):
             command.append("--partial")
         subprocess.run(command,
                        check=True, capture_output=True, text=True)
-        marker = self.root / ".sherlock" / "active.json"
-        marker.parent.mkdir(exist_ok=True)
-        marker.write_text(json.dumps({
-            "version": 36, "active": True, "workspace": str(self.root),
-            "skill_root": str(PACKAGE.resolve()), "corpus": str(self.corpus),
-            "out": str(self.work), "mode": "single", "worklists": ["worklist.tsv"],
-        }) + "\n", encoding="utf-8")
 
     def tearDown(self):
         self.temp.cleanup()

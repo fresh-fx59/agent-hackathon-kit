@@ -1,0 +1,1497 @@
+Review one bounded change for concrete correctness blockers. Subscription code review only, no tools. Goal: checkpoint must count and seal exact logmap-advertised ledgers, excluding derived index/view files; retain consumed fresh-session progression. V49 mismatch is proven on actual generated worklist-index.tsv. V50 is unregistered, never executed with Qwen. Controlled missing-marker Stop already fails closed; no new locator is in scope. Inspect canonical selection, receipt state/history consistency, force-create triage refresh, relative keys/multi-host, portability and actual indexed fixture. Return PASS or BLOCKERS, precise file/function/reason. Do not request unrelated features or more review panels. Below spec, exact runtime changes and test sources.
+
+# Canonical worklist selection for stage checkpoints
+
+Status: approved for implementation after scoped Codex critique and recorded dispositions.
+
+## Goal contribution
+
+Sherlock must hand off actual mapped EVTX corpora into fresh stages and deliver
+both requested reports. V49 subscription r1 exposed a checkpoint/Stop file-set
+mismatch: checkpoint.glob(worklist*.tsv) counted worklist-index.tsv as evidence,
+while the active marker/Stop correctly named only the real ledger. The handoff
+was born invalid, independent of the separate monitor expiration.
+
+## Scope and non-goals
+
+New immutable v50; reuse authoritative ledger enumeration rather than excluding
+one particular index filename. Checkpoint counts and seals must refer to the same
+canonical files as Stop/finalizer. Preserve safe standalone checkpoint operation
+and multi-host mappings. No gate weakening, old receipt repair, corpus-specific
+exception or new service. Do not mutate v49 or resume rejected attempts.
+
+## Acceptance
+
+- Real logmap-generated worklist plus derived index reproduces v49 mismatch.
+- V50 checkpoint and Stop agree on exact ledger names/hashes and counts.
+- Unresolved actual rows still block; derived index/views/backups cannot count
+  as evidence or substitute for a missing ledger.
+- Single/multi-host, nested work directory, missing/malformed/unsafe advertised
+  paths have explicit tested behavior; no symlink/path traversal bypass.
+- Existing standalone fixtures and final gates retain supported behavior.
+- Actual Qwen fixture generates the representative indexed map, proves denied
+  continuation, natural Stop, fresh clear and legitimate next-stage progress.
+- One Claude review, immutable register, then fresh subscription qualification
+  under direct root observations and approved paid corpus acceptance.
+
+## Timeline
+
+- 2026-09-06 — Root source confirms broad glob only in checkpoint.inspect_worklists.
+  Stop/finalizer already share active-marker manifest validation. worklist.manifest
+  is a row-ID manifest, not the file-selection authority. Terra investigates the
+  portable selection/fallback contract; root extends real-Qwen fixture inputs.
+
+## Selected contract
+
+Use one strict authoritative_worklists(work) helper shared by checkpoint
+inspection (including triagecheck's imported checkpoint path) and Stop/boundary
+seal selection. Reuse existing stopcheck manifest/path/hosts validation; do not
+invent a parallel permissive parser. Place the helper in the existing shipped
+module if dependency direction permits, otherwise one small stdlib module.
+
+Discover workspace marker from current workspace and the work directory's
+ancestors, binding marker.out exactly to the canonical work directory. A present
+malformed, mismatched or unsafe advertised marker is an error, not permission to
+fall back. A valid matching marker names the explicit ledgers and existing
+multi-host hosts.tsv cross-check remains mandatory. No marker: exact worklist.tsv
+for single-host, or validated hosts.tsv explicit worklist column for multi-host.
+When hosts.tsv exists it is authoritative; invalid hosts never falls back to a
+single ledger. Duplicate/traversal/symlink/nonregular/missing advertised entries
+fail closed. Standalone fixtures without a marker retain exact-ledger operation.
+No directory glob defines evidence membership, and no index-name blacklist.
+
+Derived view/index/backup files cannot add counts or seals. Real ledger mutation
+still invalidates pending handoff; index mutation does not. Preserve consumed
+fresh-session progression and Stop checks. V49 remains immutable.
+
+Root owns --indexed-worklist real-Qwen fixture. Terra owns v50 implementation and
+focused tests. One Claude review then registration before actual Qwen. Direct root
+live observation on next qualification; no automated timer standing in for review.
+
+## Verified reproduction
+
+- Actual r1 marker snapshot declares single worklists=[worklist.tsv]. Both actual
+  files retained their checkpoint-recorded hashes; this was a membership mismatch,
+  not on-disk ledger mutation. Generated index has two view rows, genuine ledger
+  two evidence rows. Checkpoint total4/resolved4 is wrong; triagecheck total2 is right.
+- Terra reproduced from preserved logmap-produced files at
+  /Users/a/hack/sherlock-v49-logmap-index-repro.YOBlKp with only marker paths rebound:
+  checkpoint init/handoff again seal both files; Pre denies seals changed.
+- Source: checkpoint.py43 glob; logmap.py4838–43 explicit marker emission;
+  stopcheck.manifest_worklists and _current_worklist_seals use marker membership.
+  triagecheck imports checkpoint, so shared inspection must remain portable.
+
+## Critique dispositions and precise boundaries
+
+Codex gpt-5.6-sol low returned four blockers (17,134 input, 10,624 cached,
+564 output tokens). Raw prompt/output are retained under run-report artifacts.
+
+1. Accepted: enumerate marker candidates deterministically: current workspace
+   marker first, then work-directory ancestors nearest first, deduplicated by
+   canonical marker path. Validate every present candidate; conflicting authority
+   is an error, never first-match success. All accepted markers must bind the same
+   canonical work directory and same explicit membership/mode.
+2. Accepted: advertised ledger/map paths are relative to canonical work only;
+   absolute, empty, dot, parent, duplicate paths are rejected. No path component
+   may be a symlink; advertised files must be regular and remain inside work.
+   Reuse and strengthen the existing manifest validator where required, including
+   multi-host cross-checks. Marker out can be absolute only under existing workspace
+   containment rules. Reject symlink marker/work authority paths.
+3. Rejected: run before registration contradicts Sherlock AGENTS.md rule 1,
+   requiring an immutable registered version before execution. Focused development
+   tests and Claude review precede registration; actual Qwen runs follow it.
+   Any discovered runtime defect requires v51, never editing an executed v50.
+4. Accepted: pending receipt binds selected authority as well as ledger seals.
+   Removing/replacing the marker or hosts authority after checkpoint must reject
+   handoff consumption even if selected ledger filenames happen to match. Capture
+   stable authority identity/membership, not irrelevant mutable marker timestamps.
+   A no-marker standalone checkpoint remains supported; changing its authority
+   before consumption fails closed. Test marker removal explicitly.
+
+- 2026-09-06 — Root inspected Codex critique against actual manifest validator and
+  Sherlock execution-version rule. Three safety ambiguities accepted and clarified;
+  unregistered actual execution rejected. Scoped implementation authorized.
+- 2026-09-06 — Prepared fresh v50 harness/target/Winevtx/independent launch templates from the reviewed v49 scripts. All seven passed `bash -n`; no script was launched and no provider was contacted. Runtime package SHA, fresh target receipts, and paid admission remain unresolved inputs before execution.
+
+## Scope clarification during implementation
+
+- 2026-09-06 16:08 UTC — Terra identified that portable Pre cannot discover a
+  nested work path after its marker is deleted. Root inspected evaluate_stop:
+  controlled runs already reject missing markers under
+  SHERLOCK_STRICT_MARKER_LIFECYCLE=1. Do not introduce a second marker/locator or
+  new state lifecycle. Test removal through actual controlled Stop, and test the
+  receipt authority comparison with its known work directory. The acceptance
+  requirement is rejection of handoff consumption after authority change;
+  unrelated inactive portable workspaces retain existing behavior. This keeps
+  the change focused on the observed ledger authority mismatch.
+
+- 2026-09-06 16:03 UTC — Timestamp correction: preceding scope clarification
+  was recorded at16:03UTC, not16:08UTC. Clock tool verified actual time.
+
+- 2026-09-06 — Root reordered old boundary/Stop fixtures to create the real
+  marker before checkpoint and exposed boundary package selection by environment.
+  Existing v49 boundary10tests PASS (1.319s); this aligns fixture ordering with
+  actual logmap behavior before testing v50 authority preservation.
+
+- 2026-09-06 16:11 UTC — Root legacy Stop11tests PASS (1.456s); harness
+  fixture compilation and git diff check pass. Remote checkout remains clean at
+  07b0382, fresh v50 roots absent, disk59GiB available. No provider contact.
+
+- 2026-09-06 16:15 UTC — Root v50 regressions: boundary10 PASS1.472s,
+  stage-pause11 PASS1.615s, finalization15 PASS2.099s. Logs retained under
+  artifacts/2026-09-06-v50-selection-verification. These are offline checks;
+  package remains unregistered and no actual Qwen/provider run has started.
+
+
+--- v49/README.md
++++ v50/README.md
+@@ -1,16 +1,16 @@
+ 
+ # Sherlock (log-rca) — running it in the corporate environment
+ 
+-This is the operator runbook for **this skill directory** (candidate v49). `SKILL.md` is
++This is the operator runbook for **this skill directory** (candidate v50). `SKILL.md` is
+ what the model reads; this README is what a human reads before the first run.
+ 
+ > Source: arm **v41**, proven end to end on 2026-08-27 by paid run
+ > `20260827T173511Z-v41` — a clean 323-line report AND every request under the
+ > 262,000-token ceiling (peak 236,678), $0.178849, 107 minutes.
+ 
+ ## Summary
+ 
+ You run `qwen` **interactively**, so there is no launcher. Three things to set up
+ once, then a session loop that is two keystrokes long.
+ 
+ **It takes what you were actually given.** A `.zip` of `.evtx` files is the
+@@ -60,25 +60,25 @@
+ | `skipStartupContext: true` | stops the session paying for project context it never uses |
+ | `maxRecentFilesToRetain: 0` | compaction keeps the summary, not a pile of file bodies |
+ | `disabledLevels` | no other skill loads and competes for the window |
+ | `tools.core` | ten tools; every extra tool schema is re-sent on every turn |
+ 
+ On the proven run the largest prompt ever sent was **229,978 tokens — 22 under
+ `sessionTokenLimit`**. That is this table working.
+ 
+ ## 2. Install the skill (once) — and how to do the agent by hand
+ 
+ ```
+ mkdir -p <PROJECT>/.qwen/skills
+-cp -r <KIT>/cases/06-dev-logging/sherlock/skills/v48 <PROJECT>/.qwen/skills/log-rca
++cp -r <KIT>/cases/06-dev-logging/sherlock/skills/v50 <PROJECT>/.qwen/skills/log-rca
+ ```
+ 
+ The skill also needs one **subagent definition**. Without it the phases run
+ inline in the parent and the session runs out of context. Either run:
+ 
+ ```
+ python3 <PROJECT>/.qwen/skills/log-rca/tools/brief.py --install-agents <PROJECT>/.qwen/agents
+ ```
+ 
+ **or do it by hand, no python:** create the file
+ 
+ ```
+
+
+--- v49/SKILL.md
++++ v50/SKILL.md
+@@ -78,26 +78,27 @@
+ 
+ **`<SKILL_BASE_DIR>` is an absolute path you have already been given.**
+ The first line when the skill loads: "Base directory for this skill: …".
+ Substitute it into every command below and do NOT guess the path: the skill
+ directory is not your working directory, and a relative `tools/logmap.py` will
+ not resolve. If that line is missing, locate the tools once — `ls -d
+ */tools/logmap.py ../*/tools/logmap.py ~/.*/skills/*/tools/logmap.py
+ 2>/dev/null` — and use the directory you found from then on.
+ 
+ A long instruction is easy to forget. So keep state on disk and do not move on
+ until the current state's file and command are done. If `work/checkpoint.json`
+ already exists, read it first. In state `ready_for_synthesis` do not repeat MAP
+-and TRIAGE: use the saved `worklist*.tsv`, `rules.tsv`, `axis3.tsv` and
+-`map*.txt`.
++and TRIAGE: use the saved ledger named by the active marker (`worklist.tsv`, or
++the explicit `hosts.tsv` list), plus `rules.tsv`, `axis3.tsv` and `map*.txt`.
++`worklist-index.tsv` and `view-*.tsv` are derived reading aids, never ledgers.
+ 
+ ### ONE SESSION PER STAGE — THE BOUNDARY IS `/clear`, AND YOU ANNOUNCE IT
+ 
+ **This investigation runs as three bounded sessions, not one long one:
+ `triage` (steps 1-2) → `draft` (step 3) → `repair` (gate fixes).** The session
+ boundary is the user typing `/clear`; the only thing that crosses it is
+ `./work`. MEASURED on the last paid run: a single session that did all stages
+ reached a **327,639-token prompt against a 262,000 ceiling**, while every
+ bounded session in the same run stayed at 186,812 and 43,279. Splitting the run
+ is not tidiness, it is the difference between a report and a refused request.
+ 
+ **FIRST COMMAND OF EVERY SESSION, before any other action:**
+
+
+--- v49/tools/boundarycheck.py
++++ v50/tools/boundarycheck.py
+@@ -21,26 +21,27 @@
+     return result
+ 
+ 
+ def evaluate(event, workspace, deadline):
+     if event.get("hook_event_name") != "PreToolUse":
+         raise stopcheck.ActiveStateError("Sherlock: boundary hook received a non-PreToolUse event.")
+     marker, _marker_path, _why = stopcheck.load_marker(workspace, deadline)
+     if marker is None:
+         return output(True)
+     out_dir = stopcheck.safe_dir(marker.get("out") or "", workspace)
+     if not out_dir:
+         raise stopcheck.ActiveStateError("Sherlock: active marker points outside the workspace.")
+-    lists = stopcheck.manifest_worklists(marker, out_dir, deadline)
+-    receipt = stopcheck._stage_pause_decision(event, out_dir, lists, deadline, consume=False)
++    lists, authority = stopcheck.authoritative_worklists(out_dir, workspace, deadline)
++    receipt = stopcheck._stage_pause_decision(event, out_dir, lists, authority,
++                                               deadline, consume=False)
+     if receipt is None:
+         return output(True)
+     session = event.get("session_id")
+     if receipt["state"] == "pending":
+         return output(False, "Sherlock stage handoff pending: end this turn; wait for Stop and a fresh /clear session before tools.")
+     if receipt.get("stop_session_id") == session:
+         return output(False, "Sherlock stage handoff was consumed in this session: wait for a fresh /clear session before tools.")
+     return output(True)
+ 
+ 
+ def main():
+     deadline = time.monotonic() + stopcheck.TOTAL_TIMEOUT
+
+
+--- v49/tools/checkpoint.py
++++ v50/tools/checkpoint.py
+@@ -7,56 +7,75 @@
+ that boundary is this directory. So the stage lives HERE, on disk, beside the
+ counts — and `handoff` prints the literal block the human copies.
+ 
+ Read out of the installed qwen-code 0.22.0 bundle (clearCommand.ts), and both
+ facts are load-bearing below: `/clear` calls `skillTool.clearLoadedSkills()`, so
+ the skill body is dropped and `/sherlock` must be typed again; and it REFUSES
+ while blocking background work is alive, so a stage must not end with a
+ background task running.
+ """
+ import argparse
+ import datetime
+ import hashlib
++import importlib.util
+ import json
+ import os
+ import re
+ import secrets
+ import sys
+ import tempfile
+ from pathlib import Path
+ 
+ 
+ def atomic_text(path, text):
+     path.parent.mkdir(parents=True, exist_ok=True)
+     fd, temporary = tempfile.mkstemp(prefix=".%s." % path.name, dir=str(path.parent))
+     try:
+         with os.fdopen(fd, "w", encoding="utf-8") as handle:
+             handle.write(text)
+             handle.flush()
+             os.fsync(handle.fileno())
+         os.replace(temporary, path)
+     finally:
+         if os.path.exists(temporary):
+             os.unlink(temporary)
+ 
+ 
+-def inspect_worklists(work):
+-    paths = sorted(work.glob("worklist*.tsv"))
+-    if not paths:
+-        raise ValueError("no worklist*.tsv in checkpoint")
++def _stopcheck_module():
++    path = Path(__file__).with_name("stopcheck.py")
++    spec = importlib.util.spec_from_file_location("checkpoint_stopcheck", path)
++    module = importlib.util.module_from_spec(spec)
++    spec.loader.exec_module(module)
++    return module
++
++
++def selected_worklists(work):
++    """The same advertised ledger set Stop and the boundary gate validate."""
++    module = _stopcheck_module()
++    try:
++        return module.authoritative_worklists(str(work), workspace=os.getcwd())
++    except module.ActiveStateError as exc:
++        raise ValueError(str(exc))
++
++
++def inspect_worklists(work, selection=None):
++    items, _authority = selection or selected_worklists(work)
++    if not items:
++        raise ValueError("no authoritative worklist in checkpoint")
+     total = resolved = 0
+     seals = {}
+-    for path in paths:
++    for item in items:
++        path = Path(item["path"])
+         raw = path.read_bytes()
+-        seals[path.name] = hashlib.sha256(raw).hexdigest()
++        seals[item["rel"]] = hashlib.sha256(raw).hexdigest()
+         for line in raw.decode("utf-8", errors="replace").splitlines():
+             if not line.strip() or line.startswith("#"):
+                 continue
+             cols = line.split("\t")
+             if len(cols) < 2:
+                 raise ValueError("malformed worklist row in %s" % path.name)
+             total += 1
+             if cols[1].strip() and not cols[1].lstrip().startswith("?"):
+                 resolved += 1
+     return total, resolved, seals
+ 
+ 
+@@ -330,24 +349,25 @@
+     """
+     entry = {
+         "at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+         "boundary_seq": row.get(BOUNDARY_SEQ),
+         "stage": row.get("stage"),
+         "stage_partial": row.get("stage_partial"),
+         "resolved": row.get("resolved"),
+         "total": row.get("total"),
+         "report_bytes": row.get("report_bytes", 0),
+         "report_sections_written": row.get("report_sections_written", 0),
+         "report_sections_required": row.get("report_sections_required", 0),
+         "worklist_seals": dict(row.get("worklists") or {}),
++        "worklist_authority": row.get("worklist_authority"),
+         "gate_tools_run": list(gate_tools_run),
+     }
+     receipt = row.get(PENDING_HANDOFF)
+     if isinstance(receipt, dict):
+         entry["handoff_receipt_id"] = receipt.get("id")
+         entry["handoff_sha256"] = receipt.get("handoff_sha256")
+     path = os.path.join(str(work), HISTORY)
+     with open(path, "a", encoding="utf-8") as handle:
+         handle.write(json.dumps(entry, ensure_ascii=False) + "\n")
+         handle.flush()
+         os.fsync(handle.fileno())
+     return entry
+@@ -412,24 +432,25 @@
+     row[PENDING_HANDOFF] = {
+         "version": 1,
+         "id": secrets.token_hex(16),
+         "state": "pending",
+         "work": str(work),
+         "boundary_seq": row[BOUNDARY_SEQ],
+         "kind": "partial" if partial else "full",
+         "from_stage": done,
+         "to_stage": row["stage"],
+         "stage_partial": bool(row["stage_partial"]),
+         "checkpoint_state": row["state"],
+         "worklist_seals": dict(row["worklists"]),
++        "worklist_authority": row["worklist_authority"],
+         "handoff_sha256": hashlib.sha256(block.encode("utf-8")).hexdigest(),
+     }
+     atomic_text(work / "checkpoint.json",
+                 json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n")
+     append_boundary(work, row, gate_tools_run=gate_tools_run)
+     atomic_text(work / "handoff.txt", block)
+     return row, block
+ 
+ 
+ def reseed_line(work):
+     """ONE LINE that says where the work stands, not where it lives.
+ 
+@@ -496,41 +517,43 @@
+         raise ValueError("no readable checkpoint.json in %s — this is a new "
+                          "investigation: start at stage triage" % work)
+     stage = row.get("stage", "triage")
+     return row, ("СТУПЕНЬ СЕЙЧАС: %s\nСОСТОЯНИЕ: %s (разобрано %s из %s, "
+                  "границ пройдено %s)\n%s\n"
+                  % (stage, row.get("state", "?"), row.get("resolved", "?"),
+                     row.get("total", "?"), row.get(BOUNDARY_SEQ, 0),
+                     reseed_line(work)))
+ 
+ 
+ def init(work):
+     work = work.resolve(strict=True)
+-    total, resolved, seals = inspect_worklists(work)
++    selection = selected_worklists(work)
++    total, resolved, seals = inspect_worklists(work, selection)
+     unresolved = total - resolved
+     previous = read_row(work)
+     row = {
+         "schema": SCHEMA,
+         # The stage is SEPARATE from the state on purpose. `state` answers "is
+         # the worklist closed"; `stage` answers "which bounded session am I".
+         # init must never rewind a stage: it is re-run inside every stage.
+         "stage": previous.get("stage", "triage") if previous else "triage",
+         # NEVER LOWERED. `init` runs inside every stage, so resetting this would
+         # erase a boundary the driver has not seen yet.
+         BOUNDARY_SEQ: int(previous.get(BOUNDARY_SEQ, 0) or 0) if previous else 0,
+         "state": "ready_for_synthesis" if unresolved == 0 else "resume_triage",
+         "total": total,
+         "resolved": resolved,
+         "unresolved": unresolved,
+         "worklists": seals,
++        "worklist_authority": selection[1],
+         "updated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+     }
+     atomic_text(work / "checkpoint.json", json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n")
+     report = work / "report.md"
+     try:
+         existing = report.read_text(encoding="utf-8", errors="replace")
+     except OSError:
+         existing = None
+     if existing is None or not existing.strip():
+         action = "created"
+     elif is_placeholder(existing):
+         action = "regenerated"          # fix 5b: never freeze a stale count
+
+
+--- v49/tools/stopcheck.py
++++ v50/tools/stopcheck.py
+@@ -47,24 +47,26 @@
+ # 2.0s: a real hook's payload is already in the pipe when the process starts,
+ # so readiness is immediate; nothing legitimate needs two seconds. A shell
+ # invocation has nothing to offer and falls through to the empty event, which
+ # is the long-standing «no marker -> allow» path, not a new behaviour.
+ STDIN_WAIT_S = 2.0
+ MAX_REASON = 220
+ MAX_MANIFEST_WORKLISTS = 512
+ FINALIZE_STOP_ENV = "SHERLOCK_FINALIZE_STOP_RUNNING"
+ CHECKPOINT_FILE = "checkpoint.json"
+ CHECKPOINT_HISTORY = "checkpoint.jsonl"
+ HANDOFF_FILE = "handoff.txt"
+ PENDING_HANDOFF = "pending_handoff"
++WORKLIST_AUTHORITY = "worklist_authority"
++WORKLIST_AUTHORITY_SCHEMA = 1
+ 
+ 
+ class ActiveStateError(Exception):
+     pass
+ 
+ 
+ class UntrustedState(Exception):
+     pass
+ 
+ 
+ class DeadlineExceeded(Exception):
+     pass
+@@ -302,26 +304,26 @@
+     st = _lstat(path)
+     if st is None or stat.S_ISLNK(st.st_mode) or not stat.S_ISREG(st.st_mode):
+         return None
+     return ap
+ 
+ 
+ def clean_relpath(value):
+     if not isinstance(value, str):
+         return None
+     raw = value.strip().replace("\\", "/")
+     if not raw or raw.startswith("/") or re_drive(raw):
+         return None
+-    parts = [p for p in raw.split("/") if p and p != "."]
+-    if not parts or any(p == ".." for p in parts):
++    parts = raw.split("/")
++    if (not parts or any(not p or p in (".", "..") for p in parts)):
+         return None
+     return "/".join(parts)
+ 
+ 
+ def re_drive(path):
+     return len(path) >= 3 and path[1] == ":" and path[2] == "/" and path[0].isalpha()
+ 
+ 
+ def safe_rel_file(root, relpath):
+     rel = clean_relpath(relpath)
+     if rel is None:
+         return None
+@@ -667,24 +669,167 @@
+         hosts_by_worklist = dict((row["worklist"], row.get("host")) for row in hosts)
+     paths = []
+     for r in rels:
+         if deadline is not None:
+             check_deadline(deadline)
+         p = safe_rel_file(out_dir, r)
+         if not p:
+             raise ActiveStateError("Sherlock: worklist %s is missing or unsafe; rerun logmap MAP step." % r)
+         paths.append({"path": p, "rel": r, "host": hosts_by_worklist.get(r)})
+     return paths
+ 
+ 
++def _authority_marker_candidate(workspace, deadline=None):
++    """Return one active marker, rejecting a present broken active receipt."""
++    try:
++        marker, marker_file, _why = load_marker(workspace, deadline)
++    except UntrustedState:
++        raise ActiveStateError("Sherlock: active marker authority is unsafe.")
++    if marker is not None:
++        return marker, real(marker_file)
++    if not os.path.lexists(marker_file):
++        return None
++    # A completed/inactive marker is not an advertised ledger.  Any other
++    # present-but-unreadable or invalid active document must not turn into a
++    # permissive standalone fallback.
++    checked = safe_file(marker_file, workspace)
++    if not checked:
++        raise ActiveStateError("Sherlock: active marker authority is unsafe.")
++    try:
++        raw = json.loads(open(checked, encoding="utf-8").read())
++    except (OSError, ValueError, TypeError):
++        raise ActiveStateError("Sherlock: active marker authority is malformed.")
++    if isinstance(raw, dict) and raw.get("active") is False:
++        retired = dict(raw)
++        retired["active"] = True
++        if validate_active_marker(retired, workspace):
++            return None
++    raise ActiveStateError("Sherlock: active marker authority is invalid.")
++
++
++def _authority_candidates(work, workspace=None):
++    """Current workspace first, then work ancestors nearest first."""
++    candidates = []
++    if isinstance(workspace, str) and workspace:
++        candidates.append(real(workspace))
++    current = work
++    while True:
++        candidates.append(current)
++        parent = os.path.dirname(current)
++        if parent == current:
++            break
++        current = parent
++    seen, ordered = set(), []
++    for item in candidates:
++        if item not in seen:
++            seen.add(item)
++            ordered.append(item)
++    return ordered
++
++
++def _canonical_work_dir(work):
++    if not isinstance(work, str) or not work:
++        raise ActiveStateError("Sherlock: checkpoint work directory is invalid.")
++    raw = os.path.abspath(work)
++    canonical = real(raw)
++    if raw != canonical or not safe_dir(canonical):
++        raise ActiveStateError("Sherlock: checkpoint work directory is unsafe.")
++    return canonical
++
++
++def _standalone_worklists(work, deadline=None):
++    """Select exact standalone ledger names; derived files never participate."""
++    hosts_name = "hosts.tsv"
++    hosts_path = os.path.join(work, hosts_name)
++    if os.path.lexists(hosts_path):
++        checked_hosts = safe_file(hosts_path, work)
++        if not checked_hosts:
++            raise ActiveStateError("Sherlock: standalone hosts.tsv is missing or unsafe.")
++        rows = parse_hosts_manifest(checked_hosts, work, deadline)
++        rels = [row["worklist"] for row in rows]
++        if len(set(rels)) != len(rels):
++            raise ActiveStateError("Sherlock: standalone hosts.tsv repeats a worklist.")
++        items = []
++        for row in rows:
++            path = safe_rel_file(work, row["worklist"])
++            if not path:
++                raise ActiveStateError("Sherlock: standalone hosts.tsv names an unsafe worklist.")
++            items.append({"path": path, "rel": row["worklist"], "host": row.get("host")})
++        hosts = _semantic_hosts(rows)
++        return items, {"schema": WORKLIST_AUTHORITY_SCHEMA, "source": "hosts.tsv",
++                       "worklists": sorted(rels), "hosts": hosts}
++    path = safe_rel_file(work, "worklist.tsv")
++    if not path:
++        raise ActiveStateError("Sherlock: standalone worklist.tsv is missing or unsafe.")
++    return [{"path": path, "rel": "worklist.tsv", "host": None}], {
++        "schema": WORKLIST_AUTHORITY_SCHEMA, "source": "worklist.tsv",
++        "worklists": ["worklist.tsv"]}
++
++
++def _semantic_hosts(rows):
++    hosts = [{"name": row["name"], "worklist": row["worklist"],
++              "host": row.get("host"), "map": row.get("map", "")}
++             for row in rows]
++    return sorted(hosts, key=lambda row: (row["worklist"], row["name"],
++                                           row["host"] or "", row["map"]))
++
++
++def authoritative_worklists(work, workspace=None, deadline=None):
++    """Return the exact ledger set and durable authority binding for `work`.
++
++    The active marker is the source of truth whenever one advertises this work
++    directory.  Filename patterns are deliberately absent: logmap's index and
++    view artifacts may share a prefix with ledgers but are not evidence rows.
++    """
++    if deadline is not None:
++        check_deadline(deadline)
++    work = _canonical_work_dir(work)
++    accepted = []
++    for candidate in _authority_candidates(work, workspace):
++        if deadline is not None:
++            check_deadline(deadline)
++        item = _authority_marker_candidate(candidate, deadline)
++        if item is None:
++            continue
++        marker, marker_file = item
++        out_dir = safe_dir(marker.get("out") or "", candidate)
++        if not out_dir or out_dir != work:
++            raise ActiveStateError("Sherlock: active marker authority does not bind this work directory.")
++        lists = manifest_worklists(marker, work, deadline)
++        rels = [entry["rel"] for entry in lists]
++        authority = {"schema": WORKLIST_AUTHORITY_SCHEMA, "source": "active-marker",
++                     "marker": marker_file, "workspace": real(marker["workspace"]),
++                     "out": work, "corpus": real(marker["corpus"]),
++                     "skill_root": real(marker["skill_root"]),
++                     "mode": marker["mode"], "worklists": sorted(rels)}
++        if marker["mode"] == "multi":
++            hosts = safe_rel_file(work, "hosts.tsv")
++            if not hosts:
++                raise ActiveStateError("Sherlock: hosts.tsv is missing or unsafe.")
++            authority["hosts"] = _semantic_hosts(
++                parse_hosts_manifest(hosts, work, deadline))
++        accepted.append((lists, authority))
++    if not accepted:
++        return _standalone_worklists(work, deadline)
++    first_lists, first_authority = accepted[0]
++    core = dict(first_authority)
++    core.pop("marker", None)
++    for _lists, authority in accepted[1:]:
++        candidate_core = dict(authority)
++        candidate_core.pop("marker", None)
++        if candidate_core != core:
++            raise ActiveStateError("Sherlock: active marker authorities conflict for this work directory.")
++    return first_lists, first_authority
++
++
+ def worklist_path(item):
+     return item.get("path") if isinstance(item, dict) else item
+ 
+ 
+ def worklist_host(item):
+     if isinstance(item, dict):
+         return item.get("host")
+     return worklist_host_token(item)
+ 
+ 
+ def compose_worklists(items, out_dir, deadline=None):
+     if deadline is not None:
+@@ -950,25 +1095,25 @@
+         return None
+     return hashlib.sha256(raw).hexdigest()
+ 
+ 
+ def _current_worklist_seals(lists, out_dir, deadline):
+     seals = {}
+     for item in lists:
+         check_deadline(deadline)
+         path = safe_file(worklist_path(item), out_dir)
+         if not path:
+             raise ActiveStateError("Sherlock: stage handoff worklist is missing or unsafe.")
+         try:
+-            seals[os.path.basename(path)] = hashlib.sha256(
++            seals[item.get("rel") if isinstance(item, dict) else os.path.basename(path)] = hashlib.sha256(
+                 open(path, "rb").read()).hexdigest()
+         except OSError:
+             raise ActiveStateError("Sherlock: stage handoff worklist cannot be read.")
+     return seals
+ 
+ 
+ def _write_consumed_handoff(checkpoint_path, out_dir, row):
+     """Replace a verified checkpoint only after its parent and file were safe."""
+     if not safe_file(checkpoint_path, out_dir):
+         raise ActiveStateError("Sherlock: stage handoff checkpoint became unsafe.")
+     fd, temporary = tempfile.mkstemp(prefix=".stage-pause-", dir=out_dir, text=True)
+     try:
+@@ -981,66 +1126,70 @@
+             directory = os.open(out_dir, os.O_RDONLY)
+             try:
+                 os.fsync(directory)
+             finally:
+                 os.close(directory)
+         except OSError:
+             pass
+     finally:
+         if os.path.exists(temporary):
+             os.unlink(temporary)
+ 
+ 
+-def _stage_pause_decision(event, out_dir, lists, deadline, consume=True):
++def _stage_pause_decision(event, out_dir, lists, authority, deadline, consume=True):
+     """Consume one verified non-final handoff, preserving the active marker.
+ 
+     No receipt means the normal final-delivery gate below remains authoritative.
+     A receipt that exists but cannot be proved is a fail-closed condition.
+     """
+     checkpoint_path = os.path.join(out_dir, CHECKPOINT_FILE)
+     # Older or interrupted runs may not have a checkpoint at all. That is not a
+     # stage-pause claim: leave the established final-delivery checks to decide.
+     # `lexists` deliberately distinguishes an absent file from a dangling link.
+     if not os.path.lexists(checkpoint_path):
+         return None
+     row = _read_safe_json(checkpoint_path, out_dir)
+     receipt = row.get(PENDING_HANDOFF)
+     if receipt is None:
+         return None
+     if not isinstance(receipt, dict):
+         raise ActiveStateError("Sherlock: stage handoff receipt is malformed.")
+     required = ("version", "id", "state", "work", "boundary_seq", "kind",
+                 "from_stage", "to_stage", "stage_partial", "checkpoint_state",
+-                "worklist_seals", "handoff_sha256")
++                "worklist_seals", WORKLIST_AUTHORITY, "handoff_sha256")
+     if any(key not in receipt for key in required):
+         raise ActiveStateError("Sherlock: stage handoff receipt is incomplete.")
+     if (receipt.get("version") != 1
+             or not isinstance(receipt.get("id"), str)
+             or not re.fullmatch(r"[0-9a-f]{32}", receipt["id"])
+             or receipt.get("state") not in ("pending", "consumed")
+             or not isinstance(receipt.get("work"), str)
+             or not os.path.isabs(receipt["work"])
+             or real(receipt["work"]) != out_dir
+             or not isinstance(receipt.get("boundary_seq"), int)
+             or receipt.get("kind") not in ("partial", "full")
+             or not isinstance(receipt.get("worklist_seals"), dict)
++            or not isinstance(receipt.get(WORKLIST_AUTHORITY), dict)
+             or not isinstance(receipt.get("handoff_sha256"), str)
+             or not re.fullmatch(r"[0-9a-f]{64}", receipt["handoff_sha256"])):
+         raise ActiveStateError("Sherlock: stage handoff receipt is unsafe.")
+     if (row.get("boundary_seq") != receipt["boundary_seq"]
+             or row.get("stage") != receipt.get("to_stage")
+             or row.get("stage_partial") is not receipt.get("stage_partial")
+             or row.get("state") != receipt.get("checkpoint_state")
+-            or row.get("worklists") != receipt["worklist_seals"]):
++            or row.get("worklists") != receipt["worklist_seals"]
++            or row.get(WORKLIST_AUTHORITY) != receipt[WORKLIST_AUTHORITY]):
+         raise ActiveStateError("Sherlock: stage handoff receipt does not match checkpoint state.")
++    if authority != receipt[WORKLIST_AUTHORITY]:
++        raise ActiveStateError("Sherlock: stage handoff worklist authority changed.")
+ 
+     partial = receipt.get("kind") == "partial"
+     from_stage, to_stage = receipt.get("from_stage"), receipt.get("to_stage")
+     pause = ((partial and from_stage == to_stage
+               and from_stage in ("triage", "draft", "repair")
+               and receipt.get("stage_partial") is True)
+              or (not partial and (from_stage, to_stage) in
+                  (("triage", "draft"), ("draft", "repair"))
+                  and receipt.get("stage_partial") is False))
+     final_transition = (not partial and (from_stage, to_stage) == ("repair", "done")
+                         and receipt.get("stage_partial") is False)
+     if not pause and not final_transition:
+@@ -1059,24 +1208,25 @@
+     if not history:
+         raise ActiveStateError("Sherlock: stage handoff history is missing or unsafe.")
+     try:
+         lines = [line for line in open(history, encoding="utf-8") if line.strip()]
+         last = json.loads(lines[-1]) if lines else None
+     except (OSError, ValueError, IndexError):
+         raise ActiveStateError("Sherlock: stage handoff history is malformed.")
+     if not isinstance(last, dict) or any((
+             last.get("boundary_seq") != receipt["boundary_seq"],
+             last.get("stage") != receipt["to_stage"],
+             last.get("stage_partial") is not receipt["stage_partial"],
+             last.get("worklist_seals") != receipt["worklist_seals"],
++            last.get(WORKLIST_AUTHORITY) != receipt[WORKLIST_AUTHORITY],
+             last.get("handoff_receipt_id") != receipt["id"],
+             last.get("handoff_sha256") != receipt["handoff_sha256"],
+     )):
+         raise ActiveStateError("Sherlock: stage handoff receipt is not the current boundary.")
+     # A pending receipt freezes its boundary worklists.  After Stop has bound
+     # the receipt to a session, a distinct fresh session may begin the next
+     # stage and legitimately edit them; history/row/handoff proof remains
+     # immutable, but the prior seal is no longer an admission condition.
+     if (consume or receipt["state"] == "pending") and _current_worklist_seals(lists, out_dir, deadline) != receipt["worklist_seals"]:
+         raise ActiveStateError("Sherlock: stage handoff worklist seals changed.")
+     if final_transition:
+         return None
+@@ -1130,34 +1280,34 @@
+         check_deadline(deadline)
+         out_dir = safe_dir(marker.get("out") or "", workspace)
+         if not out_dir:
+             raise ActiveStateError("Sherlock: active marker points outside the workspace; rerun logmap MAP step.")
+         check_deadline(deadline)
+         corpus = safe_dir(marker.get("corpus") or "")
+         if not corpus:
+             raise ActiveStateError("Sherlock: corpus is unavailable or unsafe; rerun logmap or restore the log directory before stopping.")
+         check_deadline(deadline)
+         expected_root = skill_root()
+         if real(marker.get("skill_root") or "") != expected_root:
+             raise ActiveStateError("Sherlock: active marker belongs to another skill copy; rerun logmap with this v30 skill.")
+-        lists = manifest_worklists(marker, out_dir, deadline)
++        lists, authority = authoritative_worklists(out_dir, workspace, deadline)
+     except ActiveStateError as e:
+         return _block(str(e))
+ 
+     try:
+         # A verified receipt is the only non-final Stop path. It is consumed
+         # before unresolved/report gates because an intermediate handoff may
+         # deliberately have an incomplete report or worklist. The returned
+         # allowance carries no retire path, so the active marker survives.
+-        stage_pause = _stage_pause_decision(event, out_dir, lists, deadline)
++        stage_pause = _stage_pause_decision(event, out_dir, lists, authority, deadline)
+         if stage_pause is not None:
+             return stage_pause
+ 
+         left = []
+         for wl in lists:
+             check_deadline(deadline)
+             left.extend(unresolved_rows(worklist_path(wl), deadline))
+         # EVIDENCE §E32: only this Stop reason samples identifiers.
+         if left:
+             sample = ", ".join(left[:5])
+             return _block(
+                 "Sherlock: %d unresolved rows across all worklists; in ONE TRIAGE pass, "
+
+
+--- v49/tools/triagecheck.py
++++ v50/tools/triagecheck.py
+@@ -1234,25 +1234,26 @@
+ 
+     Only touches a checkpoint that already exists there, unless `force`
+     (--refresh-checkpoint) says to create one. Never lowers `resolved`.
+     Returns a short Russian status line, or None if nothing was done.
+     """
+     work_dir = os.path.dirname(os.path.abspath(worklist_path)) or "."
+     checkpoint_path = os.path.join(work_dir, "checkpoint.json")
+     exists = os.path.exists(checkpoint_path)
+     if not exists and not force:
+         return None
+     try:
+         ckmod = _load_checkpoint()
+-        total, resolved, seals = ckmod.inspect_worklists(Path(work_dir))
++        selection = ckmod.selected_worklists(Path(work_dir))
++        total, resolved, seals = ckmod.inspect_worklists(Path(work_dir), selection)
+     except Exception as exc:
+         return "checkpoint не обновлён: %s" % exc
+ 
+     prior = {}
+     if exists:
+         try:
+             prior = json.loads(open(checkpoint_path, encoding="utf-8").read())
+         except Exception:
+             prior = {}
+ 
+     # never lower resolved: a stale or short-scoped rescan must not regress
+     # a count another run already advanced.
+@@ -1265,24 +1266,25 @@
+         # checkpoint.py. This writer used to hard-code `1`, so whichever of the
+         # two tools ran last decided what the file claimed to be.
+         "schema": ckmod.SCHEMA,
+         "stage": prior.get("stage", "triage"),
+         # Carried forward, never reset: the driver watches this counter to know a
+         # boundary happened, and dropping it here would hide one.
+         ckmod.BOUNDARY_SEQ: int(prior.get(ckmod.BOUNDARY_SEQ, 0) or 0),
+         "state": "ready_for_synthesis" if unresolved == 0 else "resume_triage",
+         "total": total,
+         "resolved": resolved,
+         "unresolved": unresolved,
+         "worklists": seals,
++        "worklist_authority": selection[1],
+         "updated_at": ckmod.datetime.datetime.now(
+             ckmod.datetime.timezone.utc).isoformat(),
+     })
+     ckmod.atomic_text(Path(checkpoint_path),
+                        json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n")
+     return "checkpoint обновлён: state=%s, resolved=%d/%d" % (
+         row["state"], resolved, total)
+ 
+ 
+ def main(argv=None):
+     ap = argparse.ArgumentParser(
+         description="чем закрыты строки рабочего списка — поимённо, правилом "
+
+
+
+FILE tools/tests/test_worklist_selection_v50.py
+#!/usr/bin/env python3
+"""v50 chooses the ledgers advertised by logmap, never filename patterns."""
+import json
+import os
+import subprocess
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+
+
+SHERLOCK = Path(__file__).resolve().parents[2]
+PACKAGE = SHERLOCK / "skills" / "v50"
+
+
+def system_events():
+    rows = []
+    for index in range(12):
+        rows.append({"Event": {"System": {
+            "Provider": {"#attributes": {"Name": "Service Control Manager"}},
+            "EventID": {"#attributes": {"Qualifiers": 16384}, "#text": 7045},
+            "Level": 4 if index < 6 else 6,
+            "TimeCreated": {"#attributes": {"SystemTime": "2026-09-04T00:00:%02dZ" % index}},
+            "Security": {"#attributes": {"UserID": "S-1-5-18"}}},
+            "EventData": {"ServiceName": "SherlockQualificationHealthy",
+                          "ImagePath": "C:\\Windows\\System32\\svchost.exe -k qualification"}}})
+    return "".join(json.dumps(row, sort_keys=True, separators=(",", ":")) + "\n"
+                   for row in rows)
+
+
+class WorklistSelectionV50Test(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.workspace = Path(self.temp.name).resolve()
+        self.corpus = self.workspace / "corpus"
+        self.work = self.workspace / "nested" / "work"
+        self.corpus.mkdir()
+        self.work.parent.mkdir()
+        (self.corpus / "System.jsonl").write_text(system_events(), encoding="utf-8")
+        env = {**os.environ, "QWEN_SKILL_ROOT": str(PACKAGE)}
+        result = subprocess.run(
+            [sys.executable, str(PACKAGE / "tools" / "logmap.py"), str(self.corpus),
+             "--out", str(self.work), "--single-host"],
+            cwd=self.workspace, env=env, text=True, capture_output=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue((self.work / "worklist-index.tsv").is_file())
+        worklist = self.work / "worklist.tsv"
+        rewritten = []
+        for line in worklist.read_text(encoding="utf-8").splitlines():
+            if line and not line.startswith("#"):
+                columns = line.split("\t")
+                columns[1] = "N fixture verified"
+                line = "\t".join(columns)
+            rewritten.append(line)
+        worklist.write_text("\n".join(rewritten) + "\n", encoding="utf-8")
+
+    def tearDown(self):
+        self.temp.cleanup()
+
+    def checkpoint(self, *args):
+        return subprocess.run(
+            [sys.executable, str(PACKAGE / "tools" / "checkpoint.py"), *args,
+             "--work", str(self.work)], text=True, capture_output=True)
+
+    def gate(self):
+        event = {"cwd": str(self.workspace), "hook_event_name": "PreToolUse",
+                 "session_id": "before-clear", "tool_name": "write_file",
+                 "tool_input": {"path": "nested/work/sentinel.txt"}}
+        return subprocess.run(
+            [sys.executable, str(PACKAGE / "tools" / "boundarycheck.py")],
+            input=json.dumps(event), text=True, capture_output=True, cwd=self.workspace,
+            env={**os.environ, "QWEN_SKILL_ROOT": str(PACKAGE)})
+
+    def stop(self, strict=False):
+        event = {"cwd": str(self.workspace), "hook_event_name": "Stop",
+                 "session_id": "before-clear", "last_assistant_message": "handoff"}
+        env = {**os.environ, "QWEN_SKILL_ROOT": str(PACKAGE)}
+        if strict:
+            env["SHERLOCK_STRICT_MARKER_LIFECYCLE"] = "1"
+        return subprocess.run([sys.executable, str(PACKAGE / "tools" / "stopcheck.py")],
+                              input=json.dumps(event), text=True, capture_output=True,
+                              cwd=self.workspace, env=env)
+
+    def test_logmap_index_is_not_a_checkpoint_ledger(self):
+        self.assertEqual(self.checkpoint("init").returncode, 0)
+        self.assertEqual(self.checkpoint("handoff", "--done", "triage").returncode, 0)
+        row = json.loads((self.work / "checkpoint.json").read_text(encoding="utf-8"))
+        self.assertEqual(list(row["worklists"]), ["worklist.tsv"])
+        self.assertEqual(row["total"], 2)
+        self.assertEqual(row["pending_handoff"]["worklist_seals"], row["worklists"])
+        with (self.work / "worklist-index.tsv").open("a", encoding="utf-8") as handle:
+            handle.write("view-extra.tsv\tedge\t1\n")
+        result = self.gate()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        reason = json.loads(result.stdout)["hookSpecificOutput"]["permissionDecisionReason"]
+        self.assertIn("handoff pending", reason)
+
+    def test_ledger_change_after_handoff_still_fails_the_seal_check(self):
+        self.assertEqual(self.checkpoint("init").returncode, 0)
+        self.assertEqual(self.checkpoint("handoff", "--done", "triage").returncode, 0)
+        with (self.work / "worklist.tsv").open("a", encoding="utf-8") as handle:
+            handle.write("tampered\tN\n")
+        result = self.gate()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        reason = json.loads(result.stdout)["hookSpecificOutput"]["permissionDecisionReason"]
+        self.assertIn("worklist seals changed", reason)
+
+    def test_triage_refresh_force_create_records_selected_authority(self):
+        result = subprocess.run(
+            [sys.executable, str(PACKAGE / "tools" / "triagecheck.py"),
+             "--worklist", str(self.work / "worklist.tsv"), "--rules",
+             str(self.work / "rules.tsv"), "--corpus", str(self.corpus), "--json",
+             "--refresh-checkpoint"], text=True, capture_output=True)
+        self.assertTrue((self.work / "checkpoint.json").is_file(), result.stderr)
+        row = json.loads((self.work / "checkpoint.json").read_text(encoding="utf-8"))
+        self.assertEqual(row["worklist_authority"]["source"], "active-marker")
+        self.assertEqual(row["worklists"], {"worklist.tsv": row["worklists"]["worklist.tsv"]})
+
+    def test_marker_replacement_after_handoff_rejects_bound_authority(self):
+        self.assertEqual(self.checkpoint("init").returncode, 0)
+        self.assertEqual(self.checkpoint("handoff", "--done", "triage").returncode, 0)
+        replacement_corpus = self.workspace / "replacement-corpus"
+        replacement_corpus.mkdir()
+        marker_path = self.workspace / ".sherlock" / "active.json"
+        marker = json.loads(marker_path.read_text(encoding="utf-8"))
+        marker["corpus"] = str(replacement_corpus)
+        marker_path.write_text(json.dumps(marker) + "\n", encoding="utf-8")
+        result = self.stop()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout)["decision"], "block")
+
+    def test_marker_timestamp_change_preserves_handoff_authority(self):
+        self.assertEqual(self.checkpoint("init").returncode, 0)
+        self.assertEqual(self.checkpoint("handoff", "--done", "triage").returncode, 0)
+        marker_path = self.workspace / ".sherlock" / "active.json"
+        marker = json.loads(marker_path.read_text(encoding="utf-8"))
+        marker["updated_at"] = "2026-09-06T15:40:12+00:00"
+        marker_path.write_text(json.dumps(marker) + "\n", encoding="utf-8")
+        result = self.stop()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout)["decision"], "allow")
+
+    def test_controlled_stop_blocks_after_marker_removal(self):
+        self.assertEqual(self.checkpoint("init").returncode, 0)
+        self.assertEqual(self.checkpoint("handoff", "--done", "triage").returncode, 0)
+        (self.workspace / ".sherlock" / "active.json").unlink()
+        result = self.stop(strict=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout)["decision"], "block")
+
+    def test_standalone_hosts_manifest_excludes_derived_worklist_files(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            work = Path(temporary).resolve() / "nested" / "work"
+            work.mkdir(parents=True)
+            for name, row_id in (("worklist-alpha.tsv", "a1"),
+                                 ("worklist-beta.tsv", "b1")):
+                (work / name).write_text("# id\tverdict\n%s\tN closed\n" % row_id,
+                                         encoding="utf-8")
+            (work / "map-alpha.txt").write_text("map\n", encoding="utf-8")
+            (work / "map-beta.txt").write_text("map\n", encoding="utf-8")
+            (work / "worklist-index.tsv").write_text(
+                "# derived view index\nview-a.tsv\tedge\t99\n", encoding="utf-8")
+            (work / "hosts.tsv").write_text(
+                "# host\tfiles\trows\ttime\tskipped\tworklist\tmap\tfolded\n"
+                "alpha\t1\t1\t0\t0\tworklist-alpha.tsv\tmap-alpha.txt\t0\n"
+                "beta\t1\t1\t0\t0\tworklist-beta.tsv\tmap-beta.txt\t0\n",
+                encoding="utf-8")
+            result = subprocess.run(
+                [sys.executable, str(PACKAGE / "tools" / "checkpoint.py"), "init",
+                 "--work", str(work)], text=True, capture_output=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            row = json.loads((work / "checkpoint.json").read_text(encoding="utf-8"))
+            self.assertEqual(sorted(row["worklists"]),
+                             ["worklist-alpha.tsv", "worklist-beta.tsv"])
+            self.assertEqual((row["total"], row["resolved"]), (2, 2))
+
+    def test_malformed_advertised_marker_never_falls_back_to_worklist_name(self):
+        marker = self.workspace / ".sherlock" / "active.json"
+        marker.write_text("{}\n", encoding="utf-8")
+        result = self.checkpoint("init")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("marker authority", result.stdout)
+
+
+if __name__ == "__main__":
+    unittest.main()
+
+
+
+FILE tools/tests/test_stage_boundary_v49.py
+#!/usr/bin/env python3
+"""v49 admits tools only on the safe side of a durable handoff receipt."""
+import json
+import os
+import subprocess
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+
+
+SHERLOCK = Path(__file__).resolve().parents[2]
+PACKAGE = SHERLOCK / "skills" / os.environ.get("SHERLOCK_TEST_PACKAGE", "v49")
+
+
+class StageBoundaryV49Test(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.root = Path(self.temp.name).resolve()
+        self.work = self.root / "work"
+        self.corpus = self.root / "corpus"
+        self.corpus.mkdir()
+        self.work.mkdir()
+        (self.work / "worklist.tsv").write_text("# id\tverdict\n", encoding="utf-8")
+        marker = self.root / ".sherlock" / "active.json"
+        marker.parent.mkdir()
+        marker.write_text(json.dumps({
+            "version": 36, "active": True, "workspace": str(self.root),
+            "skill_root": str(PACKAGE.resolve()), "corpus": str(self.corpus),
+            "out": str(self.work), "mode": "single", "worklists": ["worklist.tsv"],
+        }) + "\n", encoding="utf-8")
+        self.run_checkpoint("init")
+        self.run_checkpoint("handoff", "--done", "triage")
+
+    def tearDown(self):
+        self.temp.cleanup()
+
+    def run_checkpoint(self, *args):
+        return subprocess.run([sys.executable, str(PACKAGE / "tools" / "checkpoint.py"),
+                               *args, "--work", str(self.work)],
+                              check=True, capture_output=True, text=True)
+
+    def gate(self, session_id="old-session"):
+        return subprocess.run(
+            [sys.executable, str(PACKAGE / "tools" / "boundarycheck.py")],
+            input=json.dumps({"cwd": str(self.root), "hook_event_name": "PreToolUse",
+                              "session_id": session_id, "tool_name": "write_file",
+                              "tool_input": {"path": "work/sentinel.txt", "content": "no"}}),
+            text=True, capture_output=True, cwd=self.root,
+            env={**os.environ, "QWEN_SKILL_ROOT": str(PACKAGE)}, check=False)
+
+    def stop(self, session_id="old-session"):
+        return subprocess.run(
+            [sys.executable, str(PACKAGE / "tools" / "stopcheck.py")],
+            input=json.dumps({"cwd": str(self.root), "hook_event_name": "Stop",
+                              "session_id": session_id, "last_assistant_message": "handoff"}),
+            text=True, capture_output=True, cwd=self.root,
+            env={**os.environ, "QWEN_SKILL_ROOT": str(PACKAGE)}, check=False)
+
+    def test_pending_handoff_denies_tool_with_qwen_pretool_shape(self):
+        done = self.gate()
+        self.assertEqual(done.returncode, 0, done.stderr)
+        result = json.loads(done.stdout)
+        self.assertFalse(result["continue"])
+        self.assertEqual(result["hookSpecificOutput"]["hookEventName"], "PreToolUse")
+        self.assertEqual(result["hookSpecificOutput"]["permissionDecision"], "deny")
+        self.assertFalse((self.work / "sentinel.txt").exists())
+
+    def test_pending_seal_mismatch_fails_closed(self):
+        with (self.work / "worklist.tsv").open("a", encoding="utf-8") as handle:
+            handle.write("tampered\n")
+        self.assertFalse(json.loads(self.gate().stdout)["continue"])
+
+    def test_malformed_checkpoint_fails_closed(self):
+        (self.work / "checkpoint.json").write_text("{", encoding="utf-8")
+        self.assertFalse(json.loads(self.gate().stdout)["continue"])
+
+    def test_no_active_marker_preserves_unrelated_workspace(self):
+        (self.root / ".sherlock" / "active.json").unlink()
+        self.assertTrue(json.loads(self.gate().stdout)["continue"])
+
+    def test_active_handoff_without_session_identity_fails_closed(self):
+        done = self.gate()
+        event = {"cwd": str(self.root), "hook_event_name": "PreToolUse",
+                 "tool_name": "write_file", "tool_input": {}}
+        result = subprocess.run([sys.executable, str(PACKAGE / "tools" / "boundarycheck.py")],
+                                input=json.dumps(event), text=True, capture_output=True,
+                                cwd=self.root, env={**os.environ, "QWEN_SKILL_ROOT": str(PACKAGE)})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(json.loads(result.stdout)["continue"])
+
+    def test_valid_final_handoff_does_not_claim_a_stage_pause(self):
+        self.run_checkpoint("init")  # consumes the old receipt as the next stage begins
+        (self.work / "report.md").write_text("### Н-1 finding\n", encoding="utf-8")
+        self.run_checkpoint("handoff", "--done", "draft")
+        self.run_checkpoint("init")
+        (self.work / "report.md").write_text("### Н-1 finding\n", encoding="utf-8")
+        self.run_checkpoint("handoff", "--done", "repair")
+        self.assertTrue(json.loads(self.gate().stdout)["continue"])
+
+    def test_consumed_handoff_blocks_old_session_and_allows_fresh_one(self):
+        self.assertEqual(json.loads(self.stop().stdout)["decision"], "allow")
+        self.assertFalse(json.loads(self.gate("old-session").stdout)["continue"])
+        self.assertTrue(json.loads(self.gate("fresh-session").stdout)["continue"])
+
+    def test_consumed_receipt_allows_fresh_stage_worklist_change(self):
+        self.assertEqual(json.loads(self.stop().stdout)["decision"], "allow")
+        with (self.work / "worklist.tsv").open("a", encoding="utf-8") as handle:
+            handle.write("next-stage-row\n")
+        self.assertTrue(json.loads(self.gate("fresh-session").stdout)["continue"])
+
+    def test_consumed_receipt_missing_stop_identity_fails_closed(self):
+        self.assertEqual(json.loads(self.stop().stdout)["decision"], "allow")
+        checkpoint = self.work / "checkpoint.json"
+        row = json.loads(checkpoint.read_text(encoding="utf-8"))
+        row["pending_handoff"].pop("stop_session_id")
+        checkpoint.write_text(json.dumps(row) + "\n", encoding="utf-8")
+        self.assertFalse(json.loads(self.gate("fresh-session").stdout)["continue"])
+
+    def test_malformed_receipt_fails_closed(self):
+        checkpoint = self.work / "checkpoint.json"
+        row = json.loads(checkpoint.read_text(encoding="utf-8"))
+        row["pending_handoff"]["kind"] = "forged"
+        checkpoint.write_text(json.dumps(row) + "\n", encoding="utf-8")
+        self.assertFalse(json.loads(self.gate().stdout)["continue"])
+
+
+if __name__ == "__main__":
+    unittest.main()
+
+
+
+FILE tools/tests/qwen_single_invocation_smoke.py
+#!/usr/bin/env python3
+"""Installed Qwen: full driver, discovered skill, combined arguments, real Stop.
+
+Only a scripted localhost provider and synthetic evidence are used.
+The indexed mode mirrors the subscription qualification map input.
+This tests composition, not investigation quality or final report acceptance.
+"""
+import argparse
+import importlib.util
+import hashlib
+import json
+import os
+from pathlib import Path
+import shlex
+import shutil
+import signal
+import subprocess
+import sys
+import threading
+import time
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+
+def load(name, path):
+    spec = importlib.util.spec_from_file_location(name, path)
+    module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
+    return module
+
+BRIDGE = '''import pathlib,subprocess,sys,time
+root=pathlib.Path(sys.argv[1]); event=sys.argv[2]; raw=sys.stdin.buffer.read()
+p=root/('%020d-'%time.time_ns()+event); p.with_suffix('.input.json').write_bytes(raw)
+r=subprocess.run(sys.argv[3:],input=raw,capture_output=True)
+p.with_suffix('.output.json').write_bytes(r.stdout); p.with_suffix('.stderr').write_bytes(r.stderr)
+p.with_suffix('.exit').write_text(str(r.returncode))
+sys.stdout.buffer.write(r.stdout);sys.stderr.buffer.write(r.stderr);raise SystemExit(r.returncode)
+'''
+
+class FixtureDeadline(BaseException):
+    """Escape driver's recoverable OSError handling; never used in real runs."""
+
+def main():
+    ap = argparse.ArgumentParser()
+    for arg in ('output', 'qwen', 'helper', 'driver', 'skill'):
+        ap.add_argument('--'+arg, type=Path, required=True)
+    ap.add_argument('--exercise-boundary', action='store_true')
+    ap.add_argument('--indexed-worklist', action='store_true')
+    a = ap.parse_args()
+    root=a.output.resolve(); root.mkdir(mode=0o700,parents=True)
+    workspace=root/'workspace'; workspace.mkdir(); work=workspace/'work'
+    corpus=workspace/'corpus'; corpus.mkdir()
+    if a.indexed_worklist:
+        events=[]
+        for index in range(12):
+            events.append({'Event':{'System':{
+                'Provider':{'#attributes':{'Name':'Service Control Manager'}},
+                'EventID':{'#attributes':{'Qualifiers':16384},'#text':7045},
+                'Level':4 if index < 6 else 6,
+                'TimeCreated':{'#attributes':{'SystemTime':'2026-09-04T00:00:%02dZ'%index}},
+                'Security':{'#attributes':{'UserID':'S-1-5-18'}}},
+                'EventData':{'ServiceName':'SherlockQualificationHealthy',
+                             'ImagePath':'C:\\Windows\\System32\\svchost.exe -k qualification'}}})
+        (corpus/'System.jsonl').write_text(''.join(json.dumps(e,sort_keys=True,separators=(',',':'))+'\n' for e in events))
+    else:
+        (corpus/'toy.log').write_text('2026-09-06 INFO toy operation complete\n')
+    home=root/'home'; home.mkdir(); rawhooks=root/'raw-hooks'; rawhooks.mkdir()
+    catalog=root/"skill-catalogue"; catalog.mkdir(); skill=catalog/"log-rca"
+    shutil.copytree(a.skill.resolve(),skill,ignore=shutil.ignore_patterns("__pycache__","*.pyc"))
+    helper=load('pause_life',a.helper); driver=load('pause_drive',a.driver)
+    nonce='stage-pause-fixture-20260906'; boot=helper.current_boot_id(); key=b'p'*32
+    observer=helper.init_segment(root,nonce,boot,capability=key)
+    helper.publish_observation(observer,nonce,boot,sequence=0,monotonic_ns=time.monotonic_ns(),capability=key)
+    env={k:v for k,v in os.environ.items() if k in ('PATH','LANG','LC_ALL')}
+    env.update(HOME=str(home),QWEN_HOME=str(home),QWEN_SKILL_ROOT=str(skill),
+               SHERLOCK_STRICT_MARKER_LIFECYCLE='1',TERM='xterm-256color',OPENAI_API_KEY='loopback-only',NO_PROXY='127.0.0.1,localhost')
+    cp=subprocess.run([sys.executable,str(skill/'tools/logmap.py'),str(corpus),'--out',str(work),'--single-host'],cwd=workspace,env=env,capture_output=True)
+    (root/'logmap.stdout').write_bytes(cp.stdout); (root/'logmap.stderr').write_bytes(cp.stderr)
+    if cp.returncode: raise RuntimeError('toy logmap failed')
+    if a.indexed_worklist and not (work/'worklist-index.tsv').is_file():
+        raise AssertionError('representative logmap fixture did not generate index')
+    wl=work/'worklist.tsv'; lines=wl.read_text().splitlines()
+    for i,line in enumerate(lines):
+        if line and not line.startswith('#'):
+            cols=line.split('\t')
+            cols[1]=('N System.jsonl:1 «SherlockQualificationHealthy» n=1 fixture' if a.indexed_worklist
+                     else 'N toy.log:1 «toy operation complete» n=1 fixture')
+            lines[i]='\t'.join(cols)
+    wl.write_text('\n'.join(lines)+'\n')
+    cp=subprocess.run([sys.executable,str(skill/'tools/checkpoint.py'),'init','--work',str(work)],cwd=workspace,env=env,capture_output=True)
+    (root/'checkpoint-init.stdout').write_bytes(cp.stdout); (root/'checkpoint-init.stderr').write_bytes(cp.stderr)
+    if cp.returncode: raise RuntimeError('toy checkpoint init failed')
+    if a.indexed_worklist:
+        initial_checkpoint=json.loads((work/'checkpoint.json').read_text())
+        expected_rows=sum(bool(line and not line.startswith('#')) for line in wl.read_text().splitlines())
+        if (set(initial_checkpoint.get('worklists',{}))!={'worklist.tsv'}
+                or initial_checkpoint.get('total')!=expected_rows):
+            raise AssertionError('checkpoint counted derived index as evidence')
+    bridge=root/'bridge.py'; bridge.write_text(BRIDGE)
+    settings_path=a.driver.resolve().parent/'corporate-settings.py'
+    settings_module=load('pause_settings',settings_path)
+    hooks=settings_module.run_settings(262000,20000,skill_directory=str(catalog)).get('hooks',{})
+    if 'Stop' not in hooks: raise AssertionError('production emitter did not install Stop hook')
+    stop_hook=hooks['Stop'][0]['hooks'][0]
+    original_stop_command=stop_hook['command']
+    (root/'emitted-stop-command.txt').write_text(original_stop_command+'\n')
+    stop_hook['command']=shlex.join([sys.executable,str(bridge),str(rawhooks),'Stop','bash','-c',original_stop_command])
+    for event in ('SessionStart','UserPromptSubmit','PreToolUse','PostToolUse','PostToolUseFailure','PostToolBatch'):
+        target=[sys.executable,str(a.helper.resolve()),'hook','--observer-dir',str(observer),'--workspace',str(workspace),'--nonce',nonce,'--boot-id',boot]
+        if event == 'PreToolUse' and a.exercise_boundary:
+            gate=skill/'tools/boundarycheck.py'
+            if not gate.is_file(): raise AssertionError('boundary fixture requires portable gate')
+            target += ['--boundary-gate',str(gate)]
+        command=shlex.join([sys.executable,str(bridge),str(rawhooks),event]+target)
+        hooks[event]=[{'hooks':[{'type':'command','command':command,'timeout':60000}]}]
+    qdir=workspace/'.qwen'; qdir.mkdir()
+    (qdir/'settings.json').write_text(json.dumps({'hooks':hooks,'skills':{'directories':[str(catalog)]}})+'\n')
+    task='SYNTHETIC-START-ONLY: run the toy triage handoff and end the turn.\n'
+    reseed='SYNTHETIC-RESEED-ONLY: run a partial draft handoff and end the turn.'
+    sentinel=workspace/'forbidden-after-handoff.txt'
+    second_handoff=4 if a.exercise_boundary else 2
+    first_turn_requests=3 if a.exercise_boundary else 2
+    normal_requests=[]
+    requests=[]; provider_events=[]; errors=[]; inflight={}; lock=threading.Lock()
+    def update_inflight(index, add):
+        with lock:
+            if add: inflight[str(index)]={'fixture':True}
+            else: inflight.pop(str(index),None)
+            p=root/'upstream-inflight.json'
+            if inflight:
+                tmp=root/'inflight.tmp'; tmp.write_text(json.dumps({'requests':inflight})); tmp.replace(p)
+            else: p.unlink(missing_ok=True)
+    class Provider(BaseHTTPRequestHandler):
+        def log_message(self,*args): pass
+        def do_POST(self):
+            raw=self.rfile.read(int(self.headers['Content-Length']))
+            with lock: index=len(requests); requests.append(raw)
+            (root/('request-%02d.json'%index)).write_bytes(raw); update_inflight(index,True)
+            try:
+                body=json.loads(raw); message=body['messages'][-1]
+                content=message.get('content','')
+                last_text=content if isinstance(content,str) else ''.join(p.get('text','') for p in content)
+                auxiliary=message.get('role')=='user' and last_text.startswith('[SUGGESTION MODE:')
+                if auxiliary:
+                    delta={'role':'assistant','content':''}; finish='stop'
+                else:
+                    with lock: ordinal=len(normal_requests);normal_requests.append(index)
+                    if ordinal in (0,second_handoff):
+                        expected=task.rstrip('\n') if ordinal==0 else reseed
+                        visible=json.dumps(body['messages'],ensure_ascii=False)
+                        if expected not in visible: raise AssertionError('contextless skill request before task/reseed')
+                        args=['--done','triage'] if ordinal==0 else ['--done','draft','--partial']
+                        command=shlex.join([sys.executable,str(skill/'tools/checkpoint.py'),'handoff','--work',str(work)]+args)+' && sleep 2'
+                        tool_id='call_pause_%d'%ordinal
+                        delta={'role':'assistant','tool_calls':[{'index':0,'id':tool_id,'type':'function','function':{'name':'run_shell_command','arguments':json.dumps({'command':command})}}]}; finish='tool_calls'
+                        helper.register_expected_tools(observer,nonce,boot,'fixture-response-%d'%index,[tool_id])
+                    elif a.exercise_boundary and ordinal == 1:
+                        command=shlex.join([sys.executable,'-c',
+                            'from pathlib import Path; Path('+repr(str(sentinel))+').write_text("forbidden")'])
+                        tool_id='call_forbidden_after_handoff'
+                        delta={'role':'assistant','tool_calls':[{'index':0,'id':tool_id,'type':'function','function':{'name':'run_shell_command','arguments':json.dumps({'command':command})}}]}; finish='tool_calls'
+                        helper.register_expected_tools(observer,nonce,boot,'fixture-response-%d'%index,[tool_id])
+                    elif a.exercise_boundary and ordinal == 3:
+                        visible=json.dumps(body['messages'],ensure_ascii=False)
+                        if reseed not in visible: raise AssertionError('fresh task missing before next-stage edit')
+                        command=shlex.join([sys.executable,'-c',
+                            'from pathlib import Path; p=Path('+repr(str(work/'worklist.tsv'))+'); p.write_text(p.read_text()+"# fresh-stage edit\\n")'])
+                        tool_id='call_fresh_stage_edit'
+                        delta={'role':'assistant','tool_calls':[{'index':0,'id':tool_id,'type':'function','function':{'name':'run_shell_command','arguments':json.dumps({'command':command})}}]}; finish='tool_calls'
+                        helper.register_expected_tools(observer,nonce,boot,'fixture-response-%d'%index,[tool_id])
+                    elif ordinal in (first_turn_requests-1,second_handoff+1):
+                        time.sleep(3)
+                        delta={'role':'assistant','content':(work/'handoff.txt').read_text()}; finish='stop'
+                    else: raise AssertionError('unexpected investigation request %d'%ordinal)
+                parts=[]
+                for d,f in ((delta,None),({},finish)):
+                    row={'id':'pause-%d'%index,'object':'chat.completion.chunk','created':int(time.time()),'model':'mock','choices':[{'index':0,'delta':d,'finish_reason':f}]}
+                    parts.append(b'data: '+json.dumps(row).encode()+b'\n\n')
+                sse=b''.join(parts)+b'data: [DONE]\n\n'
+                (root/('response-%02d.sse'%index)).write_bytes(sse)
+                self.send_response(200);self.send_header('Content-Type','text/event-stream');self.send_header('Content-Length',str(len(sse)));self.end_headers();self.wfile.write(sse);self.wfile.flush()
+                provider_events.append({'index':index,'completed_at_ns':time.time_ns()})
+            except BaseException as exc: errors.append(repr(exc))
+            finally: update_inflight(index,False)
+    server=ThreadingHTTPServer(('127.0.0.1',0),Provider)
+    thread=threading.Thread(target=server.serve_forever,daemon=True);thread.start()
+    env['OPENAI_BASE_URL']='http://127.0.0.1:%d/v1'%server.server_port
+    argv=['node',str(a.qwen.resolve()),'--auth-type','openai','--model','mock','--approval-mode','yolo']
+    (root/'argv.json').write_text(json.dumps(argv)+'\n')
+    result={'passed':False,'indexed_worklist':a.indexed_worklist,'provider':'loopback-only','scope':'full driver startup and first clear; intentional fixture stop after second pause',
+        'source_sha256':{name:hashlib.sha256(path.read_bytes()).hexdigest() for name,path in
+                         [('qwen',a.qwen),('helper',a.helper),('driver',a.driver),('settings',settings_path),('fixture',Path(__file__))]},
+        'skill_files':{str(p.relative_to(skill)):hashlib.sha256(p.read_bytes()).hexdigest()
+                       for p in sorted(skill.rglob('*')) if p.is_file() and '__pycache__' not in p.parts}}
+    events_path=root/'driver-events.jsonl'; finished=threading.Event(); stop_requested=[]
+    def rows(event):
+        return [(p,json.loads(p.read_bytes())) for p in sorted(rawhooks.glob('*-'+event+'.input.json'))]
+    def observe_fixture():
+        while not finished.wait(.02):
+            if errors:
+                os.kill(os.getpid(),signal.SIGTERM);return
+            try:
+                events=[json.loads(l) for l in events_path.read_text().splitlines()]
+                cp=json.loads((work/'checkpoint.json').read_text())
+                with lock: quiet=not inflight
+                completed_stops=[]
+                for p,event in rows('Stop'):
+                    output=p.with_name(p.name.replace('.input.json','.output.json'))
+                    status=p.with_name(p.name.replace('.input.json','.exit'))
+                    if output.exists() and status.exists() and status.read_text()=='0':
+                        if json.loads(output.read_bytes()).get('decision')=='allow':completed_stops.append(event)
+                if (quiet and cp.get('boundary_seq',0)>=2 and cp.get('pending_handoff',{}).get('state')=='consumed'
+                        and len(completed_stops)>=2 and any(e.get('event')=='clear_verified' for e in events)):
+                    stop_requested.append(time.time_ns());os.kill(os.getpid(),signal.SIGTERM);return
+            except (OSError,ValueError): pass
+    watcher=threading.Thread(target=observe_fixture,daemon=True);watcher.start()
+    def alarm(*args): raise FixtureDeadline('synthetic fixture watchdog')
+    prior=signal.signal(signal.SIGALRM,alarm);signal.alarm(140)
+    previous_env=dict(os.environ);os.environ.clear();os.environ.update(env)
+    try:
+        rc,events=driver.drive(argv,str(workspace),str(work),'/sherlock\n\n'+task,reseed,0,6.0,
+            str(root/'pty-transcript.raw'),'/sherlock',events_path=str(events_path),
+            observer_dir=str(observer),run_nonce=nonce,clear_idle_wait_s=.25,clear_idle_settle_s=1)
+        result.update(driver_exit=rc,driver_events=events)
+        if rc!=143 or not stop_requested:raise AssertionError('driver did not reach the intentional fixture stop')
+        prompts=[r for _,r in rows('UserPromptSubmit') if 'submitted_prompt' in r]
+        if len(prompts)!=2:raise AssertionError('expected exactly startup and combined reseed submissions')
+        if prompts[0]['submitted_prompt']!='/sherlock\n\n'+task.rstrip('\n'):raise AssertionError('startup arguments changed beyond Qwen terminal newline trimming')
+        if prompts[1]['submitted_prompt']!='/sherlock '+reseed:raise AssertionError('combined reseed not exact')
+        clear_rows=[(p,r) for p,r in rows('SessionStart') if r.get('source')=='clear']
+        clears=[r for _,r in clear_rows]
+        if not clears or prompts[0]['session_id']==prompts[1]['session_id'] or clears[0]['session_id']!=prompts[1]['session_id']:
+            raise AssertionError('fresh session correlation missing')
+        stops=[]
+        for p,e in rows('Stop'):
+            output_path=p.with_name(p.name.replace('.input.json','.output.json'))
+            o=json.loads(output_path.read_bytes());stops.append({'input':e,'output':o,'completed_at_ns':output_path.stat().st_mtime_ns})
+        if len(stops)<2 or any(x['output'].get('decision')!='allow' for x in stops):raise AssertionError('skill-scoped Stop did not accept both pauses')
+        clear_ns=int(clear_rows[0][0].name.split('-',1)[0])
+        first_stops=[s for s in stops if s['input'].get('session_id')==prompts[0]['session_id']]
+        if not first_stops or any(s['completed_at_ns']>=clear_ns for s in first_stops):
+            raise AssertionError('first Stop did not complete before clear')
+        initial_responses=[p for p in provider_events if p['index'] in normal_requests[:first_turn_requests]]
+        if len(initial_responses)!=first_turn_requests or any(p['completed_at_ns']>=clear_ns for p in initial_responses):
+            raise AssertionError('initial provider completion did not precede clear')
+        if not (workspace/'.sherlock/active.json').is_file():raise AssertionError('pause retired marker')
+        pairs=json.loads((observer/'pairs.json').read_text())['pairs']
+        completed,pending=helper._completed_tool_ids({'schema':helper.SCHEMA,'pairs':pairs})
+        if pending or len(completed)!=len(pairs):raise AssertionError('tool completion missing')
+        if a.exercise_boundary:
+            if sentinel.exists():raise AssertionError('denied tool changed the workspace')
+            denied=[row for row in pairs.values() if row.get('tool_call_id')=='call_forbidden_after_handoff']
+            if len(denied)!=1 or denied[0].get('post') is not None:
+                raise AssertionError('denial needs one real pre pair and no invented post')
+            denial=denied[0]['pre']['output']
+            if denial.get('continue') is not False or denial.get('hookSpecificOutput',{}).get('permissionDecision')!='deny':
+                raise AssertionError('runtime denial not captured exactly')
+            batches=rows('PostToolBatch')
+            calls=[call for _,batch in batches for call in batch.get('tool_calls',[])
+                   if call.get('tool_call_id')=='call_forbidden_after_handoff']
+            if (len(calls)!=1 or calls[0].get('status')!='error'
+                    or calls[0].get('tool_response',{}).get('error_type')!='execution_denied'
+                    or calls[0].get('tool_response',{}).get('execution_status')!='not_started'):
+                raise AssertionError('Qwen terminal denial absent from raw tool batch')
+            if '# fresh-stage edit' not in (work/'worklist.tsv').read_text():
+                raise AssertionError('fresh-stage edit did not execute')
+            result.update(fresh_stage_edit_allowed=True,boundary_denial=denial,sentinel_unchanged=True,denied_tool_has_no_post=True)
+        if len(provider_events)!=len(requests):raise AssertionError('provider completion missing')
+        if len(normal_requests)!=second_handoff+2:raise AssertionError('unexpected normal request count')
+        result.update(passed=True,submitted_prompts=prompts,stops=stops,marker_preserved=True,clear_sessions=clears)
+    except BaseException as exc:result.update(passed=False,error=repr(exc))
+    finally:
+        finished.set();watcher.join(2);signal.alarm(0);signal.signal(signal.SIGALRM,prior)
+        os.environ.clear();os.environ.update(previous_env);server.shutdown();server.server_close();thread.join(5)
+        result.update(request_count=len(requests),normal_request_indices=normal_requests,provider_events=provider_events,provider_errors=errors,fixture_stop_requested=stop_requested)
+        if errors:result['passed']=False
+        (root/'result.json').write_text(json.dumps(result,indent=2,sort_keys=True)+'\n')
+    print(json.dumps(result,indent=2,sort_keys=True));return 0 if result['passed'] else 1
+if __name__=='__main__':raise SystemExit(main())

@@ -109,3 +109,58 @@ Codex gpt-5.6-sol low returned four blockers (17,134 input, 10,624 cached,
 - 2026-09-06 — Root inspected Codex critique against actual manifest validator and
   Sherlock execution-version rule. Three safety ambiguities accepted and clarified;
   unregistered actual execution rejected. Scoped implementation authorized.
+- 2026-09-06 — Prepared fresh v50 harness/target/Winevtx/independent launch templates from the reviewed v49 scripts. All seven passed `bash -n`; no script was launched and no provider was contacted. Runtime package SHA, fresh target receipts, and paid admission remain unresolved inputs before execution.
+
+## Scope clarification during implementation
+
+- 2026-09-06 16:08 UTC — Terra identified that portable Pre cannot discover a
+  nested work path after its marker is deleted. Root inspected evaluate_stop:
+  controlled runs already reject missing markers under
+  SHERLOCK_STRICT_MARKER_LIFECYCLE=1. Do not introduce a second marker/locator or
+  new state lifecycle. Test removal through actual controlled Stop, and test the
+  receipt authority comparison with its known work directory. The acceptance
+  requirement is rejection of handoff consumption after authority change;
+  unrelated inactive portable workspaces retain existing behavior. This keeps
+  the change focused on the observed ledger authority mismatch.
+
+- 2026-09-06 16:03 UTC — Timestamp correction: preceding scope clarification
+  was recorded at16:03UTC, not16:08UTC. Clock tool verified actual time.
+
+- 2026-09-06 — Root reordered old boundary/Stop fixtures to create the real
+  marker before checkpoint and exposed boundary package selection by environment.
+  Existing v49 boundary10tests PASS (1.319s); this aligns fixture ordering with
+  actual logmap behavior before testing v50 authority preservation.
+
+- 2026-09-06 16:11 UTC — Root legacy Stop11tests PASS (1.456s); harness
+  fixture compilation and git diff check pass. Remote checkout remains clean at
+  07b0382, fresh v50 roots absent, disk59GiB available. No provider contact.
+
+- 2026-09-06 16:15 UTC — Root v50 regressions: boundary10 PASS1.472s,
+  stage-pause11 PASS1.615s, finalization15 PASS2.099s. Logs retained under
+  artifacts/2026-09-06-v50-selection-verification. These are offline checks;
+  package remains unregistered and no actual Qwen/provider run has started.
+
+- 2026-09-06 — Root selection8tests PASS1.223s on stable v50. New cases
+  include real generated index, actual-ledger mutation, force-created triage
+  checkpoint authority, marker replacement/removal, timestamp-only preservation,
+  standalone multi-host membership and malformed marker rejection. One subscription
+  Claude Sonnet low review launched from /tmp with tools disabled and exact diff.
+
+## Claude review disposition
+
+- 2026-09-06T16:24:01.169879+00:00 — One subscription Claude Sonnet5 low review returned a selection-boundary blocker. Actual usage: input2, cache-create36,843, cache-read3,289, output13,538 including12,386thinking; API150.343s. Ancillary Haiku4.5 input24,136/output20 reported separately. List-price metadata is not a subscription invoice. Raw review retained.
+
+Accepted: search must stop at the owning workspace. When supplied workspace
+contains work, validate candidates only from work up to that workspace inclusive,
+never above. When checkpoint is called from unrelated cwd, ignore that cwd as
+authority and infer the nearest valid matching workspace marker from work
+ancestors, then stop above it. Conflicting/malformed candidates inside the owning
+workspace still fail closed. Add an unrelated parent-marker regression and
+verify outside-workspace CLI discovers the same authority. This refines the
+earlier root-wide ancestor contract, which was too broad for independent runs.
+
+Rejected: claimed unhandled ancestor stat/open OSError. Source _lstat already
+catches OSError and load_marker catches open errors. No speculative exception
+wrapper is required. Core index fix, authority/history binding, relative seal
+keys and triage refresh were reviewed as sound. One focused correction/test pass
+remains before registration; no additional review panel.
