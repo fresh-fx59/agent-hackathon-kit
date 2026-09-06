@@ -1,0 +1,38 @@
+{
+  "schema": 1,
+  "status": "runner_failed_lifecycle_pass",
+  "run_tag": "run-20260906T001815Z-15f066d69e7d",
+  "lane": "selected_subscription_operator_monitored",
+  "remote_root": "/home/claude-developer/hack/sherlock-v45-harness-20260906-r6",
+  "local_root": "/Users/a/hack/sherlock-v45-qualification-development-20260906/sherlock-v45-harness-20260906-r6",
+  "inventory": {
+    "regular_file_count": 382,
+    "sha256": "81715eb46c242223057a8aa29afb450b20cb7416deac6985bfde34a7bf144a3d"
+  },
+  "controller": {
+    "verdict": "WITHIN",
+    "attempts_charged": 19,
+    "wall_seconds": 169,
+    "consecutive_provider_failures": 0,
+    "provider_responses": 19
+  },
+  "lifecycle": {
+    "status": "PASS",
+    "expected_tool_count": 21,
+    "completed_tool_count": 20,
+    "rejected_tool_count": 1,
+    "subagent_count": 1,
+    "nested_dispatch_count": 10,
+    "lifecycle_helper_sha256": "f2b6d04eceec5bdf52ab65cae3d334893a76fa5520c35af8fd7276e701d966c1",
+    "completed_foreground_subagents": 1
+  },
+  "failure": {
+    "stage": "runner_final_visible_triage_handoff",
+    "reason": "single headless session cannot perform required /clear then fresh /sherlock draft context",
+    "recovery_attempted": false
+  },
+  "launch_siblings": [
+    "sherlock-v45-harness-20260906-r6.launch.stdout",
+    "sherlock-v45-harness-20260906-r6.launch.stderr"
+  ]
+}
