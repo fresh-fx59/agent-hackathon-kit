@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "report": "2026-09-06-independent-corpus-cold-start.md",
-  "status": "prepared_syntax_validated",
+  "status": "prepared_r2_no_model_contact",
   "launched": false,
   "provider_contact": false,
   "decision": {
@@ -38,5 +38,32 @@
     "prior_worklists": false,
     "prior_checkpoints": false,
     "prior_pattern_cards": false
+  },
+  "preparation": {
+    "r1": {
+      "status": "failed_closed_missing_security_fixture",
+      "remote_file_count": 56,
+      "inventory_equal": true
+    },
+    "r2": {
+      "status": "prepared",
+      "manifest_sha256": "564a07fcba5e00b1a97191644ee9168d6aa8746bc333770d71cd46fa1a871dc7",
+      "remote_file_count": 68,
+      "inventory_equal": true
+    }
+  },
+  "current_scripts": {
+    "prepare": {
+      "path": "/tmp/sherlock-v48-prepare-independent-r2.sh",
+      "sha256": "4d58ef592ce114e7a1e03dbffc5b6b1378e2b7e8f84f92039438916d459269c5"
+    },
+    "target": {
+      "path": "/tmp/sherlock-v48-launch-target-independent-r2.sh",
+      "sha256": "d91f6239388dd9411d9cf46017048e491d3fb8178af47a8d37be098b1871f7c9"
+    },
+    "full": {
+      "path": "/tmp/sherlock-v48-launch-full-independent-r2.sh",
+      "sha256": "1008cc6650ac28e723651c1aa3ee261dac90db826004a4a95986cf58ccea1520"
+    }
   }
 }

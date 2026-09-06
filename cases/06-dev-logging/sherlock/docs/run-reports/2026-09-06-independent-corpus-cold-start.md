@@ -39,3 +39,9 @@ Run prepare, inspect the produced manifest/profile, run the target probe, verify
 ## Probe versus full-corpus binding
 
 The target probe must use a WineVTX calibration source containing the recipe-required `Security.jsonl`; the independent corpus may lack that representative file. The probe receipt/profile do not bind a corpus identity. `paid-admission.py` separately binds the fresh full-input package and only rejects invalid schema or declared incomparable differences. The full run can therefore use the independent corpus with its own inventory, prompt, provenance, and cold-start hashes after a fresh WineVTX calibration probe.
+
+## Preparation attempts
+
+- Independent r1 failed closed before model contact because the probe recipe requires `Security.jsonl`, while the independent source contains `BlueSkyRansomware.jsonl`. Its prepared tree has 56 files and matches the remote tree exactly.
+- Independent r2 was prepared successfully with the WineVTX calibration source and a fresh independent target root. Manifest SHA-256: `564a07fcba5e00b1a97191644ee9168d6aa8746bc333770d71cd46fa1a871dc7`. Its 68-file tree matches the remote tree exactly. No target probe or model request was launched.
+- The current r2 scripts are `/tmp/sherlock-v48-prepare-independent-r2.sh`, `/tmp/sherlock-v48-launch-target-independent-r2.sh`, and `/tmp/sherlock-v48-launch-full-independent-r2.sh`; their SHA-256 values are `4d58ef592ce114e7a1e03dbffc5b6b1378e2b7e8f84f92039438916d459269c5`, `d91f6239388dd9411d9cf46017048e491d3fb8178af47a8d37be098b1871f7c9`, and `1008cc6650ac28e723651c1aa3ee261dac90db826004a4a95986cf58ccea1520`.
