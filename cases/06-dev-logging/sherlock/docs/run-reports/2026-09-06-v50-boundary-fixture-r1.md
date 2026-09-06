@@ -1,6 +1,6 @@
 # V50 boundary fixture r1
 
-Status: rejected fixture run; no provider contact. This report records the terminal evidence and does not treat the owner SIGTERM as an intentional fixture stop.
+Status: rejected fixture run; no external provider contact. This report records the terminal evidence and does not treat the owner SIGTERM as an intentional fixture stop.
 
 ## Identity
 
@@ -12,6 +12,9 @@ Code `08ac52c`; runtime/skill SHA `0f95b5a59dcc41500168d3f2dc6df3e237b8c68e9d366
 - 2026-09-06 — The result recorded five requests: four normal requests at indices `0,1,2,4` and one auxiliary suggestion at index `3`. The runtime counted two ledger rows and sealed `worklist.tsv`; the pending PreToolUse was denied, and the actual Stop path was allowed and consumed.
 - 2026-09-06 — The driver received `Unknown command: /sherlock` twice, retried startup, and then the owner sent SIGTERM. The process exited `143`; `fixture_stop_requested` is empty and no clear occurred. The result is `passed:false` with `AssertionError('driver did not reach the intentional fixture stop')` and provider assertion `fresh task missing before next-stage edit`.
 - 2026-09-06 — Local and remote inventories were compared after mirroring. Both contain 130 comparable files with equal path, byte count, and SHA-256. Inventory generation excluded directory names exactly `home` and `updates`; the original remote tree was left untouched.
+
+- 2026-09-06T16:36:18.556115+00:00 — Root cause evidence:39copies of the rejection banner appear in584772PTYbytes. Exact expanded startup hook16:30:21.497666Z predates driver retry detection16:30:26. Duplicate original input16:30:36.513245Z retains the same session. Harness retry must consult exact hook acceptance before retyping. Provider contact above means external; all five requests used the scripted loopback provider.
+
 
 ## Proven facts and hypothesis
 

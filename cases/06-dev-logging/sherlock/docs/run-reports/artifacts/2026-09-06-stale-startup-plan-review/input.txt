@@ -1,0 +1,349 @@
+Critique this ready bounded repair plan. Return only concrete blockers or PASS, under500words. No tools needed. Do not invent infrastructure or relax exact evidence.
+# Accepted skill invocation versus stale terminal rejection
+
+Status: ready for scoped Codex critique.
+
+## Goal contribution and evidence
+V50 real indexed Qwen fixture r1 correctly counts2ledger rows and consumes Stop.
+Driver erroneously repeats startup instead of reaching clear: exact expanded
+UserPromptSubmit16:30:21.497666Z precedes second typed log16:30:26; transcript
+584772bytes contains39 repainted Unknown command banners. Duplicate original
+submission16:30:36.513245Z is in the same session. Original artifacts preserved.
+
+## Scope
+Harness-only measure/interactive-drive.py and focused regression test.
+Frozen v50 never changes. Add optional exact-acceptance predicate to type_skill;
+check before retries and while probing terminal rejection. Startup uses existing
+monitored_start_evidence state complete; clear uses monitored_clear_evidence
+state complete. Existing exact submitted input, skill expansion, nonce/session
+and boundary matching remain mandatory. Contradictory hooks retain rc8 failure.
+No proof preserves genuine Unknown-command retries and missing-skill rc11.
+No new services, sleep thresholds, runtime prose or provider calls.
+
+## Acceptance
+Repainted old rejection + exact hook acceptance: one accepted invocation, no
+additional retry. Genuine initial rejection without hook acceptance retries.
+A later accepted retry cannot be followed by duplicate submission. Wrong prompt
+or expansion cannot become positive acceptance. Existing startup/clear tests pass.
+Actual indexed Qwen fixture rerun in fresh directory after reviewed driver commit.
+
+## Timeline
+- 2026-09-06 — Terra inspected real hooks and39 terminal repeats; root agrees
+  positive exact acceptance outranks terminal repaint. Ready scoped critique.
+
+DRIVER lines330-445
+                raise ValueError("session projection")
+        except (KeyError, TypeError, ValueError, base64.binascii.Error) as exc:
+            raise ClearProofError("invalid %s row %d" % (phase, sequence)) from exc
+        previous_mono = mono
+        rows.append((row, event))
+    return rows
+
+
+def capture_clear_anchor(observer_dir, run_nonce):
+    """Capture the exact latest root prompt before the driver types /clear."""
+    rows = _lifecycle_rows(observer_dir, "root-boundary-events.jsonl",
+                           "UserPromptSubmit", run_nonce)
+    if not rows:
+        raise ClearProofError("no root prompt exists before /clear")
+    row, _ = rows[-1]
+    return {key: row[key] for key in (
+        "run_nonce", "sequence", "session_id", "input_sha256", "monotonic_ns")}
+
+
+def _only_qwen_continuations(rows, new_session_id):
+    """Reject any actual user input after a proven combined invocation."""
+    for row, event in rows:
+        if (row["session_id"] == new_session_id
+                and event.get("prompt") == ""
+                and "submitted_prompt" not in event):
+            continue
+        raise ClearProofError("unexpected root prompt after combined invocation")
+
+
+def monitored_start_evidence(observer_dir, run_nonce, expected_invocation,
+                             skill_root):
+    """Prove the very first root input is one expanded skill invocation."""
+    roots = _lifecycle_rows(observer_dir, "root-boundary-events.jsonl",
+                            "UserPromptSubmit", run_nonce)
+    if not roots:
+        return {"state": "await_invocation"}
+    row, event = roots[0]
+    expected_submitted = qwen_submitted_invocation(expected_invocation)
+    if event.get("submitted_prompt") != expected_submitted:
+        raise ClearProofError("first startup prompt is not the expected invocation")
+    skill_body_sha256 = expanded_skill_body(skill_root, event.get("prompt"))
+    _only_qwen_continuations(roots[1:], row["session_id"])
+    return {
+        "state": "complete", "session_id": row["session_id"],
+        "startup_input_sha256": row["input_sha256"],
+        "expected_invocation_sha256": hashlib.sha256(
+            expected_invocation.encode("utf-8")).hexdigest(),
+        "submitted_invocation_sha256": hashlib.sha256(
+            expected_submitted.encode("utf-8")).hexdigest(),
+        "skill_body_sha256": skill_body_sha256,
+    }
+
+
+def monitored_clear_evidence(observer_dir, run_nonce, anchor,
+                             expected_invocation, skill_root):
+    """Reconstruct clear → one combined fresh-session invocation.
+
+    The returned state is a polling state, never an inferred success. Any
+    observed event that conflicts with the expected next event raises.
+    """
+    roots = _lifecycle_rows(observer_dir, "root-boundary-events.jsonl",
+                            "UserPromptSubmit", run_nonce)
+    starts = _lifecycle_rows(observer_dir, "session-start-events.jsonl",
+                             "SessionStart", run_nonce)
+    try:
+        sequence = anchor["sequence"]
+        anchor_row, _ = roots[sequence]
+        exact = {key: anchor_row[key] for key in (
+            "run_nonce", "sequence", "session_id", "input_sha256", "monotonic_ns")}
+    except (KeyError, IndexError, TypeError) as exc:
+        raise ClearProofError("clear anchor is absent") from exc
+    if anchor != exact or anchor.get("run_nonce") != run_nonce:
+        raise ClearProofError("clear anchor changed")
+
+    later_starts = [(row, event) for row, event in starts
+                    if row["monotonic_ns"] > anchor["monotonic_ns"]]
+    later_roots = [(row, event) for row, event in roots
+                   if row["monotonic_ns"] > anchor["monotonic_ns"]]
+    if not later_starts:
+        if later_roots:
+            raise ClearProofError("root prompt arrived before clear SessionStart")
+        return {"state": "await_clear"}
+    clear_row, clear_event = later_starts[0]
+    if (clear_event.get("source") != "clear"
+            or clear_row["session_id"] == anchor["session_id"]):
+        raise ClearProofError("SessionStart is not a fresh /clear session")
+    if len(later_starts) > 1:
+        raise ClearProofError("another SessionStart interrupted reset proof")
+    if any(row["monotonic_ns"] <= clear_row["monotonic_ns"]
+           for row, _ in later_roots):
+        raise ClearProofError("root prompt arrived before clear completed")
+    if not later_roots:
+        return {"state": "await_invocation",
+                "new_session_id": clear_row["session_id"]}
+
+    invocation_row, invocation_event = later_roots[0]
+    expected_submitted = qwen_submitted_invocation(expected_invocation)
+    if (invocation_row["session_id"] != clear_row["session_id"]
+            or invocation_event.get("submitted_prompt") != expected_submitted):
+        raise ClearProofError("first fresh-session prompt is not the expected invocation")
+    skill_body_sha256 = expanded_skill_body(skill_root,
+                                            invocation_event.get("prompt"))
+    _only_qwen_continuations(later_roots[1:], clear_row["session_id"])
+    return {
+        "state": "complete", "old_session_id": anchor["session_id"],
+        "new_session_id": clear_row["session_id"],
+        "anchor_input_sha256": anchor["input_sha256"],
+        "clear_input_sha256": clear_row["input_sha256"],
+        "invocation_input_sha256": invocation_row["input_sha256"],
+        "expected_invocation_sha256": hashlib.sha256(
+            expected_invocation.encode("utf-8")).hexdigest(),
+        "submitted_invocation_sha256": hashlib.sha256(
+            expected_submitted.encode("utf-8")).hexdigest(),
+        "skill_body_sha256": skill_body_sha256,
+    }
+
+
+DRIVER lines1395-1460
+            if quiet and not self._mark_busy():
+                return True
+            if time.time() >= deadline:
+                return False
+
+    def type_skill(self, skill_command, arguments, settle, note,
+                   attempts=SKILL_TYPE_ATTEMPTS):
+        """Type one skill invocation and PROVE it was accepted, or say it wasn't.
+
+        The rejection is read from the transcript FILE, from the byte offset
+        that was current before the command was typed — so the needle is
+        scoped to this command's own output and cannot be tripped by a corpus
+        that happens to contain the phrase, nor missed because a ring buffer
+        had already dropped it.
+
+        Returns True once the target accepts the command. Returns False after
+        `attempts` rejections, each one preceded by a fresh readiness wait —
+        which is the honest answer when the skill genuinely is not installed
+        (the v43 `settings.skills.directories` failure), and is reported as a
+        terminal instead of being run around for six hours.
+        """
+        invocation = skill_invocation(skill_command, arguments)
+        needle = SKILL_REJECTED_FMT % skill_command
+        for attempt in range(1, attempts + 1):
+            try:
+                self.transcript.flush()
+                before = self.transcript.tell()
+            except (OSError, IOError, ValueError):
+                before = 0
+            self.type(invocation, settle=settle)
+            note("typed", invocation)
+            # POLL, DON'T SLEEP. A fixed extra settle here is pure latency on
+            # the happy path — and this driver's startup latency is inside
+            # every test's own timeout arithmetic, so a blind second is not
+            # free. The rejection lands in the same instant the command is
+            # rejected (the real target printed it immediately, thirteen
+            # times), so read the disk on a short tick and stop as soon as
+            # there is an answer; a clean screen costs one tick, not one
+            # second.
+            fresh = ""
+            rejected = False
+            probe_deadline = time.time() + SKILL_REJECT_PROBE_S
+            while True:
+                try:
+                    with open(self.transcript_path, "rb") as fh:
+                        fh.seek(before)
+                        fresh = strip(fh.read().decode("utf-8", "replace"))
+                except (OSError, IOError):
+                    fresh = ""
+                if needle in fresh:
+                    rejected = True
+                    break
+                if time.time() >= probe_deadline:
+                    break
+                self.pump(0.2)
+            if not rejected:
+                return True
+            note("skill_command_rejected",
+                 "attempt %d/%d — the target answered «%s»; it was still "
+                 "starting up, so waiting for readiness and retyping"
+                 % (attempt, attempts, needle))
+            self.wait_ready()
+        return False
+
+    def escape(self, settle=0.5):
+        """Send a bare ESC — cancel the in-flight turn, the way the TUI's own
+
+DRIVER lines1620-1666
+                clear_idle_wait_s, clear_idle_settle_s,
+                boundary_work=work if step_label == "/clear" else None)
+        idle = ses.wait_idle(clear_idle_wait_s, settle_s=clear_idle_settle_s)
+        if idle:
+            return
+        if allow_cancel:
+            for attempt in range(1, ESCAPE_ATTEMPTS + 1):
+                ses.escape()
+                idle = ses.wait_idle(ESCAPE_VERIFY_WAIT_S,
+                                      settle_s=clear_idle_settle_s)
+                note("esc_sent",
+                     "attempt %d/%d before %s — idle after ESC: %s"
+                     % (attempt, ESCAPE_ATTEMPTS, step_label, idle))
+                if idle:
+                    break
+            if idle:
+                return
+        note("clear_typed_while_busy",
+             "%s — target never looked idle within %.0fs before %s; "
+             "typing anyway (today's behaviour, never worse)"
+             % (seen, clear_idle_wait_s, step_label))
+
+    def wait_for_start_state(expected_invocation):
+        """Poll the first root hook; a second user turn is contradictory."""
+        end = time.time() + max(settle_s * 4, 60.0)
+        while time.time() < end:
+            try:
+                proof = monitored_start_evidence(
+                    observer_dir, run_nonce, expected_invocation, skill_root)
+            except ClearProofError as exc:
+                note("CLEAR_NOT_EFFECTIVE", str(exc))
+                return None
+            if proof["state"] == "complete":
+                return proof
+            if not ses.pump(1.0) and not ses.alive():
+                break
+        note("CLEAR_NOT_EFFECTIVE",
+             "no exact startup invocation proof within the verification window")
+        return None
+
+    def wait_for_reset_state(anchor, wanted, expected_invocation):
+        """Poll exact external hook evidence while keeping the PTY alive."""
+        ranks = {"await_clear": 0, "await_invocation": 1, "complete": 2}
+        end = time.time() + max(settle_s * 4, 60.0)
+        while time.time() < end:
+            try:
+                proof = monitored_clear_evidence(
+
+DRIVER lines1710-1748
+        seen = stage_of(work)
+        seen_boundary = boundary_of(work)
+        # THE LATCH IS RESET BEFORE TYPING, NEVER AT THE TOP OF THE
+        # WAIT LOOP. A fast target answers during the settle that follows the
+        # reseed line, so a reset at the top of the next iteration WIPES the
+        # block it is about to look for — measured on the stand-in, where the
+        # happy path recorded `not_shown` at every boundary while printing the
+        # block at every boundary. Reset, type, wait, judge.
+        ses.stage_reset()
+        # WAIT FOR REAL READINESS, never a blind settle. See INIT_MARKER: the
+        # paid run typed into «Initializing...» and ran a whole session with
+        # no skill loaded and no request sent.
+        if not ses.wait_ready():
+            note("init_wait_timeout",
+                 "target never looked ready within %.0fs; typing anyway "
+                 "rather than hanging" % INIT_WAIT_S)
+        if not ses.type_skill(skill_command, first_prompt, settle_s, note):
+            note("SKILL_NOT_LOADED",
+                 "the target rejected %s on every one of %d attempts — the "
+                 "skill is not registered, so the session would run with no "
+                 "skill at all (paid run 20260902T171049Z-v44 did exactly "
+                 "that for 28 minutes and never sent a request)"
+                 % (skill_command, SKILL_TYPE_ATTEMPTS))
+            return 11, events
+        if observer_dir and wait_for_start_state(
+                skill_invocation(skill_command, first_prompt)) is None:
+            return 8, events
+        # WHEN THE RUN ACTUALLY BEGAN, for the nudge. Until the first upstream
+        # call there is no ledger to read, and `ledger_quiet_s` used to answer
+        # None there and call it "not a stall" — so the paid run's 28 silent
+        # minutes could not have been nudged, and would have burned the whole
+        # 21,600s timeout. Quiet is measured from this moment instead.
+        started_at = time.time()
+        while True:
+            deadline = stage_deadline(stage_budget_s)
+            nudges = 0
+            # One note per blocked window, not one per poll: a mutable cell
+            # because the branch that sets it sits inside the loop.
+            tool_block_noted = [False]
+
+DRIVER lines2042-2080
+            line = reseed % {"work": os.path.abspath(work), "stage": seen}
+            if reseed_command:
+                # BUILT AT RESEED TIME, so it carries THIS boundary's numbers.
+                # A static template cannot: v43's was byte-identical at all
+                # ten reseeds and told the model nothing it did not already
+                # assume. Single line ONLY — the driver types this straight
+                # into a TUI, and a newline in it would submit early and
+                # split the message, so only the first line is ever used.
+                try:
+                    out = subprocess.run(reseed_command, shell=True,
+                                         capture_output=True, text=True,
+                                         timeout=30)
+                    if out.returncode == 0 and out.stdout.strip():
+                        line = out.stdout.strip().splitlines()[0]
+                    else:
+                        note("reseed_command_failed",
+                             "rc %s — falling back to the static template"
+                             % out.returncode)
+                except (OSError, subprocess.SubprocessError) as exc:
+                    note("reseed_command_failed",
+                         "%s — falling back to the static template" % exc)
+            invocation = skill_invocation(skill_command, line)
+            if observer_dir and wait_for_reset_state(
+                    clear_anchor, "await_invocation", invocation) is None:
+                return 8, events
+            wait_before("the combined skill invocation")
+            if not ses.type_skill(skill_command, line, settle_s, note):
+                note("SKILL_NOT_LOADED",
+                     "the target rejected %s during reseed" % skill_command)
+                return 11, events
+            note("reseeded", seen)
+            if observer_dir:
+                proof = wait_for_reset_state(clear_anchor, "complete", invocation)
+                if proof is None:
+                    return 8, events
+                note("clear_verified",
+                     "%s — exact SessionStart(clear) %s -> %s and exact "
+                     "combined root invocation (%s)"
+                     % (seen, proof["old_session_id"], proof["new_session_id"],
