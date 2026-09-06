@@ -65,6 +65,59 @@ class MonitoredClearProofTest(unittest.TestCase):
         self.assertEqual(proof["old_session_id"], "old")
         self.assertEqual(proof["new_session_id"], "new")
 
+    def test_empty_continuations_without_submitted_prompt_wait_for_reseed(self):
+        self.append("root-boundary-events.jsonl", phase="UserPromptSubmit",
+                    session="old", monotonic=10, prompt="initial")
+        anchor = DRIVE.capture_clear_anchor(self.observer, self.nonce)
+        self.append("session-start-events.jsonl", phase="SessionStart",
+                    session="new", monotonic=20, source="clear", cwd="/workspace")
+        self.append("root-boundary-events.jsonl", phase="UserPromptSubmit",
+                    session="new", monotonic=30, prompt="expanded skill",
+                    submitted_prompt="/sherlock")
+        # These are retained raw Qwen continuation hook inputs: prompt is empty
+        # and submitted_prompt is absent because no human prompt was submitted.
+        self.append("root-boundary-events.jsonl", phase="UserPromptSubmit",
+                    session="new", monotonic=40, prompt="")
+        self.append("root-boundary-events.jsonl", phase="UserPromptSubmit",
+                    session="new", monotonic=50, prompt="")
+
+        rows = (self.observer / "root-boundary-events.jsonl").read_text().splitlines()
+        continuation_raw = base64.b64decode(json.loads(rows[2])["input_base64"])
+        self.assertEqual(json.loads(continuation_raw), {
+            "hook_event_name": "UserPromptSubmit", "prompt": "", "session_id": "new"})
+        self.assertEqual(DRIVE.monitored_clear_evidence(
+            self.observer, self.nonce, anchor, "/sherlock", "resume exact")["state"],
+            "await_reseed")
+        self.append("root-boundary-events.jsonl", phase="UserPromptSubmit",
+                    session="new", monotonic=60, prompt="resume exact",
+                    submitted_prompt="resume exact")
+        self.assertEqual(DRIVE.monitored_clear_evidence(
+            self.observer, self.nonce, anchor, "/sherlock", "resume exact")["state"],
+            "complete")
+
+    def test_nonempty_submitted_prompt_and_wrong_session_empty_row_refuse(self):
+        cases = [
+            ("new", {"prompt": "wrong actual", "submitted_prompt": "wrong actual"}),
+            ("other", {"prompt": ""}),
+            ("new", {"prompt": "", "submitted_prompt": ""}),
+        ]
+        for session, payload in cases:
+            with self.subTest(session=session, payload=payload):
+                self.tearDown(); self.setUp()
+                self.append("root-boundary-events.jsonl", phase="UserPromptSubmit",
+                            session="old", monotonic=10, prompt="initial")
+                anchor = DRIVE.capture_clear_anchor(self.observer, self.nonce)
+                self.append("session-start-events.jsonl", phase="SessionStart",
+                            session="new", monotonic=20, source="clear", cwd="/workspace")
+                self.append("root-boundary-events.jsonl", phase="UserPromptSubmit",
+                            session="new", monotonic=30, prompt="expanded skill",
+                            submitted_prompt="/sherlock")
+                self.append("root-boundary-events.jsonl", phase="UserPromptSubmit",
+                            session=session, monotonic=40, **payload)
+                with self.assertRaises(DRIVE.ClearProofError):
+                    DRIVE.monitored_clear_evidence(
+                        self.observer, self.nonce, anchor, "/sherlock", "resume exact")
+
     def test_provider_message_counts_cannot_substitute_for_root_hooks(self):
         self.append("root-boundary-events.jsonl", phase="UserPromptSubmit",
                     session="old", monotonic=10, prompt="initial")

@@ -199,7 +199,23 @@ def monitored_clear_evidence(observer_dir, run_nonce, anchor, skill_command,
     if len(later_roots) == 1:
         return {"state": "await_reseed", "new_session_id": clear_row["session_id"]}
 
-    reseed_row, reseed_event = later_roots[1]
+    # Qwen's interactive client can emit autonomous continuation hooks while
+    # the slash-command turn is still active. Its raw hook input has exactly
+    # an empty prompt and no submitted_prompt: the client omits that field
+    # unless a non-empty user submission caused the event. This is not a
+    # reseed and must not consume the next actual user submission. Keep the
+    # exception this narrow: an empty submitted_prompt, a non-empty prompt,
+    # or a different session remains contradictory evidence and fails closed.
+    reseed_row = reseed_event = None
+    for candidate_row, candidate_event in later_roots[1:]:
+        if (candidate_row["session_id"] == clear_row["session_id"]
+                and candidate_event.get("prompt") == ""
+                and "submitted_prompt" not in candidate_event):
+            continue
+        reseed_row, reseed_event = candidate_row, candidate_event
+        break
+    if reseed_row is None:
+        return {"state": "await_reseed", "new_session_id": clear_row["session_id"]}
     if (reseed_row["session_id"] != clear_row["session_id"]
             or reseed_event.get("prompt") != reseed_line
             or reseed_event.get("submitted_prompt") != reseed_line):

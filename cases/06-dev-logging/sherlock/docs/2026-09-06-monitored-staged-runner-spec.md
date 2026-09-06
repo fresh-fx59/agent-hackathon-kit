@@ -104,6 +104,19 @@ binds that projection to the signed receipt. Initial startup events may be
 recorded but cannot satisfy a clear transition. A clear event is single-use: a
 later stage cannot reuse its session ID, sequence, or raw input hash.
 
+### Qwen autonomous continuation between skill reload and reseed
+
+Qwen 0.22 may emit one or more `UserPromptSubmit` hooks while its `/sherlock`
+turn continues, before the driver has a real reseed submission to observe. The
+installed client derives `submitted_prompt` only from a non-empty user query;
+the retained continuation inputs observed in the failed 2026-09-06 driver run
+therefore have the fresh session ID, `prompt: ""`, and no `submitted_prompt`
+field. The proof may wait past only that exact raw shape. It must not infer a
+reseed from it, and any other post-skill event — including a different session,
+an empty present `submitted_prompt`, or a nonmatching submitted prompt — stays
+`CLEAR_NOT_EFFECTIVE`. Completion still requires the first non-continuation
+event to contain both exact reseed values in the fresh session.
+
 The proof source is the controller-created observer directory already passed to
 the child as `SHERLOCK_OBSERVER_DIR`. The driver treats it only as live
 evidence; the independently authenticated lifecycle terminal audit remains the
