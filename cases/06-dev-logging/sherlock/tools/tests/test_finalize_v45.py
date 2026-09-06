@@ -13,7 +13,8 @@ import subprocess
 
 
 ROOT = Path(__file__).resolve().parents[2]
-FINALIZE = ROOT / "skills" / "v45" / "tools" / "finalize.py"
+PACKAGE = ROOT / "skills" / os.environ.get("SHERLOCK_TEST_PACKAGE", "v45")
+FINALIZE = PACKAGE / "tools" / "finalize.py"
 
 
 def sha256(path):
@@ -60,7 +61,7 @@ class FinalizeV45(unittest.TestCase):
             "A3\tN фон: Security.jsonl:3 «external authentication from 198.51.100.9»\trare\tSecurity.jsonl:3\tn=1\texternal authentication from 198.51.100.9\n",
             encoding="utf-8")
         (work / "rules.tsv").write_text("# id\tусловие\tвердикт\tутверждение\tоснование\n", encoding="utf-8")
-        return ROOT / "skills/v45", corpus, work
+        return PACKAGE, corpus, work
 
     def test_clean_run_records_all_gate_outputs_and_preserves_inputs(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -121,7 +122,7 @@ class FinalizeV45(unittest.TestCase):
             self.assertEqual(self.load_helper().run(package, work, corpus), 0)
 
     def test_stop_finalizer_blocks_recursion_and_reports_saved_attempt_on_failure(self):
-        stop_path = ROOT / "skills" / "v45" / "tools" / "stopcheck.py"
+        stop_path = PACKAGE / "tools" / "stopcheck.py"
         spec = importlib.util.spec_from_file_location("stopcheck_v45", stop_path)
         stop = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(stop)

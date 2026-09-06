@@ -30,6 +30,7 @@ import argparse
 import base64
 import errno
 import hashlib
+import importlib.util
 import json
 import os
 import pty
@@ -93,6 +94,122 @@ def _strict_object(raw):
     if not isinstance(value, dict):
         raise ClearProofError("retained hook input is not an object")
     return value
+
+
+_LIFECYCLE = None
+
+
+def monitored_idle_reason(observer_dir, run_nonce):
+    """Reuse the supervisor's authoritative root accounting before PTY input.
+
+    The proxy publishes inflight before contact and removes it only after its
+    response and expected tools are durable. An absent map means no live call.
+    The existing SessionStart(clear) hook independently rechecks tool accounting.
+    """
+    global _LIFECYCLE
+    if _LIFECYCLE is None:
+        path = Path(__file__).resolve().parents[1] / "eval/bench/lifecycle-supervisor.py"
+        spec = importlib.util.spec_from_file_location("driver_lifecycle", path)
+        _LIFECYCLE = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(_LIFECYCLE)
+    observer = Path(observer_dir)
+    try:
+        with _LIFECYCLE._locked(observer):
+            identity = _LIFECYCLE._identity(observer)
+            if identity.get("run_nonce") != run_nonce:
+                raise ClearProofError("monitored idle segment identity mismatch")
+            fault = _LIFECYCLE._load_json(observer / "fault.json")
+            if fault is not None:
+                raise ClearProofError("terminal lifecycle fault: %s" % fault.get("reason"))
+            inflight = _LIFECYCLE._load_json(observer.parent / "upstream-inflight.json")
+            if inflight is not None:
+                if not isinstance(inflight.get("requests"), dict):
+                    raise ClearProofError("invalid proxy inflight map")
+                if inflight["requests"]:
+                    return "provider request pending"
+            try:
+                _LIFECYCLE._require_root_reconciled(observer)
+            except _LIFECYCLE.LifecycleFault as exc:
+                # A normal response-to-hook interval is pending, not a new
+                # fault. The existing guardian decides missing-hook deadlines.
+                return str(exc)
+        return None
+    except _LIFECYCLE.LifecycleFault as exc:
+        if exc.reason == "FILE_CHANGED_WHILE_READ":
+            return "live state is changing; waiting for a stable snapshot"
+        raise ClearProofError("cannot verify monitored idle: %s" % exc) from exc
+    except (OSError, ValueError) as exc:
+        raise ClearProofError("cannot verify monitored idle: %s" % exc) from exc
+
+
+def monitored_stage_reason(work, observer_dir, run_nonce, final_delivery=False):
+    """Require Stop's durable outcome, not a transient idle between turns."""
+    work = Path(work).resolve()
+    try:
+        if final_delivery:
+            marker_dir = work.parent / ".sherlock"
+            if os.path.lexists(marker_dir / "active.json"):
+                return "final Stop has not retired the active marker"
+            completed = _LIFECYCLE._load_json(marker_dir / "completed.json")
+            if completed is None:
+                return "final Stop completion receipt pending"
+            if (completed.get("workspace") != str(work.parent)
+                    or completed.get("out") != str(work)):
+                raise ClearProofError("final Stop receipt belongs to another workspace")
+            return None
+        row = _LIFECYCLE._load_json(work / "checkpoint.json")
+        if row is None or not isinstance(row.get("pending_handoff"), dict):
+            return "verified stage-pause receipt pending"
+        receipt = row["pending_handoff"]
+        if (receipt.get("work") != str(work)
+                or receipt.get("boundary_seq") != row.get("boundary_seq")
+                or receipt.get("to_stage") != row.get("stage")
+                or receipt.get("stage_partial") is not row.get("stage_partial")):
+            raise ClearProofError("stage-pause receipt does not match current boundary")
+        if receipt.get("state") == "pending":
+            return "Stop has not accepted the stage pause"
+        if receipt.get("state") != "consumed":
+            raise ClearProofError("invalid stage-pause receipt state")
+        anchor = capture_clear_anchor(observer_dir, run_nonce)
+        if receipt.get("stop_session_id") != anchor["session_id"]:
+            raise ClearProofError("stage pause was accepted in another session")
+        return None
+    except _LIFECYCLE.LifecycleFault as exc:
+        # Stop atomically replaces checkpoint.json while consuming its receipt.
+        # Never act on a torn view, and never call a legitimate replacement a
+        # terminal fault. The next pump must obtain one complete stable view.
+        if exc.reason == "FILE_CHANGED_WHILE_READ":
+            return "stage state is changing; waiting for a stable snapshot"
+        raise ClearProofError("cannot verify stage Stop outcome: %s" % exc) from exc
+    except (OSError, ValueError) as exc:
+        raise ClearProofError("cannot verify stage Stop outcome: %s" % exc) from exc
+
+
+def wait_monitored_idle(ses, observer_dir, run_nonce, step_label, note,
+                        report_interval_s=20.0, settle_s=1.0,
+                        boundary_work=None, final_delivery=False):
+    """Wait without cancelling work or typing into a busy client.
+
+    No aggregate deadline: the external guardian and per-request watchdog own
+    fault termination. Short pump intervals preserve signals and observability.
+    """
+    last_note = time.monotonic()
+    while True:
+        if not ses.alive():
+            raise ClearProofError("client exited while waiting before %s" % step_label)
+        idle = ses.wait_idle(min(max(report_interval_s, 0.01), 1.0), settle_s=settle_s)
+        pending = monitored_idle_reason(observer_dir, run_nonce)
+        if pending is None and boundary_work is not None:
+            pending = monitored_stage_reason(
+                boundary_work, observer_dir, run_nonce, final_delivery)
+        if idle and pending is None:
+            return
+        now = time.monotonic()
+        if now - last_note >= max(report_interval_s, 0.01):
+            note("waiting_for_monitored_idle", "%s: %s" % (
+                step_label, pending or "client still busy"))
+            last_note = now
+        ses.pump(0.2)
 
 
 def _lifecycle_rows(observer_dir, name, phase, run_nonce):
@@ -1398,6 +1515,11 @@ def drive(argv, cwd, work, first_prompt, reseed, stage_budget_s, settle_s,
         `handoff --partial` call site: cancelling BEFORE the boundary is
         durable is not safe, see the comment above ESCAPE_ATTEMPTS.
         """
+        if observer_dir:
+            return wait_monitored_idle(
+                ses, observer_dir, run_nonce, step_label, note,
+                clear_idle_wait_s, clear_idle_settle_s,
+                boundary_work=work if step_label == "/clear" else None)
         idle = ses.wait_idle(clear_idle_wait_s, settle_s=clear_idle_settle_s)
         if idle:
             return
@@ -1762,6 +1884,11 @@ def drive(argv, cwd, work, first_prompt, reseed, stage_budget_s, settle_s,
                 note("handoff_block_not_shown", volume)
 
             if seen == "done" and not partial:
+                if observer_dir:
+                    wait_monitored_idle(
+                        ses, observer_dir, run_nonce, "final delivery", note,
+                        clear_idle_wait_s, clear_idle_settle_s,
+                        boundary_work=work, final_delivery=True)
                 note("finished", "stage=done")
                 return 0, events
 
@@ -1902,6 +2029,9 @@ def drive(argv, cwd, work, first_prompt, reseed, stage_budget_s, settle_s,
                              "meaningless"
                              % [r.get("messages_count") for r in rows])
                         return 8, events
+    except ClearProofError as exc:
+        note("CLEAR_NOT_EFFECTIVE", str(exc))
+        return 8, events
     except DriverStopped:
         note("STOPPED", "owner sent SIGTERM; terminating the PTY process group")
         return 143, events

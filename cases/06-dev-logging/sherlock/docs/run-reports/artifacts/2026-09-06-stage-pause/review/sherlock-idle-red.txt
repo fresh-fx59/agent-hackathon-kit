@@ -1,0 +1,54 @@
+EEEEE
+======================================================================
+ERROR: test_active_provider_and_expected_tools_each_prevent_clear (test_monitored_idle.MonitoredIdleTest.test_active_provider_and_expected_tools_each_prevent_clear)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/a/hack/wt-v42/cases/06-dev-logging/sherlock/measure/tests/test_monitored_idle.py", line 55, in test_active_provider_and_expected_tools_each_prevent_clear
+    self.assertIn('provider', DRIVE.monitored_idle_reason(self.observer, self.nonce))
+                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: module 'drive_idle_test' has no attribute 'monitored_idle_reason'
+
+======================================================================
+ERROR: test_dead_client_stops_without_input (test_monitored_idle.MonitoredIdleTest.test_dead_client_stops_without_input)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/a/hack/wt-v42/cases/06-dev-logging/sherlock/measure/tests/test_monitored_idle.py", line 51, in test_dead_client_stops_without_input
+    DRIVE.wait_monitored_idle(ses, self.observer, self.nonce, '/clear', lambda *a: None, .01, .001)
+    ^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: module 'drive_idle_test' has no attribute 'wait_monitored_idle'
+
+======================================================================
+ERROR: test_delayed_natural_idle_does_not_cancel (test_monitored_idle.MonitoredIdleTest.test_delayed_natural_idle_does_not_cancel)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/a/hack/wt-v42/cases/06-dev-logging/sherlock/measure/tests/test_monitored_idle.py", line 41, in test_delayed_natural_idle_does_not_cancel
+    DRIVE.wait_monitored_idle(ses, self.observer, self.nonce, '/clear', lambda *a: None, .01, .001)
+    ^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: module 'drive_idle_test' has no attribute 'wait_monitored_idle'
+
+======================================================================
+ERROR: test_fault_and_wrong_identity_fail_closed (test_monitored_idle.MonitoredIdleTest.test_fault_and_wrong_identity_fail_closed)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/a/hack/wt-v42/cases/06-dev-logging/sherlock/measure/tests/test_monitored_idle.py", line 62, in test_fault_and_wrong_identity_fail_closed
+    DRIVE.monitored_idle_reason(self.observer, 'b' * 32)
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: module 'drive_idle_test' has no attribute 'monitored_idle_reason'
+
+======================================================================
+ERROR: test_screen_idle_is_insufficient_until_lifecycle_reconciles (test_monitored_idle.MonitoredIdleTest.test_screen_idle_is_insufficient_until_lifecycle_reconciles)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/a/hack/wt-v42/cases/06-dev-logging/sherlock/measure/tests/test_monitored_idle.py", line 45, in test_screen_idle_is_insufficient_until_lifecycle_reconciles
+    with patch.object(DRIVE, 'monitored_idle_reason', side_effect=['provider pending', 'tool pending', None]):
+  File "/Library/Frameworks/Python.framework/Versions/3.12/lib/python3.12/unittest/mock.py", line 1455, in __enter__
+    original, local = self.get_original()
+                      ^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.12/lib/python3.12/unittest/mock.py", line 1428, in get_original
+    raise AttributeError(
+AttributeError: <module 'drive_idle_test' from '/Users/a/hack/wt-v42/cases/06-dev-logging/sherlock/measure/interactive-drive.py'> does not have the attribute 'monitored_idle_reason'
+
+----------------------------------------------------------------------
+Ran 5 tests in 0.029s
+
+FAILED (errors=5)

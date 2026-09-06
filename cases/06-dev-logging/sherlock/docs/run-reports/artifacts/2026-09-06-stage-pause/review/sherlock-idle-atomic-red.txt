@@ -1,0 +1,32 @@
+.E.......
+======================================================================
+ERROR: test_atomic_checkpoint_replacement_waits_for_stable_snapshot (test_monitored_idle.MonitoredIdleTest.test_atomic_checkpoint_replacement_waits_for_stable_snapshot)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/a/hack/wt-v42/cases/06-dev-logging/sherlock/measure/interactive-drive.py", line 156, in monitored_stage_reason
+    row = _LIFECYCLE._load_json(work / "checkpoint.json")
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.12/lib/python3.12/unittest/mock.py", line 1134, in __call__
+    return self._mock_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.12/lib/python3.12/unittest/mock.py", line 1138, in _mock_call
+    return self._execute_mock_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.12/lib/python3.12/unittest/mock.py", line 1193, in _execute_mock_call
+    raise effect
+driver_lifecycle.LifecycleFault: FILE_CHANGED_WHILE_READ: checkpoint.json
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/Users/a/hack/wt-v42/cases/06-dev-logging/sherlock/measure/tests/test_monitored_idle.py", line 99, in test_atomic_checkpoint_replacement_waits_for_stable_snapshot
+    self.assertIn('changing', DRIVE.monitored_stage_reason(
+                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/a/hack/wt-v42/cases/06-dev-logging/sherlock/measure/interactive-drive.py", line 174, in monitored_stage_reason
+    raise ClearProofError("cannot verify stage Stop outcome: %s" % exc) from exc
+drive_idle_test.ClearProofError: cannot verify stage Stop outcome: FILE_CHANGED_WHILE_READ: checkpoint.json
+
+----------------------------------------------------------------------
+Ran 9 tests in 0.046s
+
+FAILED (errors=1)

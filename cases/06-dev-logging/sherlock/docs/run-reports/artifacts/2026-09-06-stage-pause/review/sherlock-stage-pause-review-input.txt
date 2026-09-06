@@ -1,0 +1,963 @@
+Review only the following final scoped diff. No execution/tools. Return PASS or concrete correctness defects. Focus on stage pause versus final delivery, replay safety, delayed tool/provider completion and driver teardown. Runtime v45 is immutable; v46 is candidate; do not suggest broad cleanup. Actual Qwen0.22 localhost capture already proves accepted Stop + preserved marker + new clear session; third call is built-in suggestion. Root independently runs tests.
+
+# Verified stage pauses for Sherlock v46
+
+Goal: let the generic staged investigation transfer context and reach validated reports on Winevtx and a fresh independent corpus. No final report acceptance rules change.
+
+Evidence: r9 closed triage at 12:39:23; Stop reinjected a final-report substance error at 12:39:33 despite the required handoff. Driver sent Escape at 12:39:54; clear ran before the old provider response completed at 12:39:59. Four requested tools lacked completion hooks; guardian faulted at 12:40:03. Runtime has no stage-pause allowance and the driver cancels after 20 seconds.
+
+Runtime v46: copy immutable v45. checkpoint handoff writes a durable one-use pending-handoff receipt bound to boundary sequence, partial/full kind, source/destination stage, and canonical handoff text hash. Stop validates safe receipt/checkpoint/handoff paths and matching durable boundary before final-report validation. Permit only partial non-done stages or full triage→draft / draft→repair. Verify current worklist seals/counts and no active child before pause. Consume receipt atomically, preserve active marker, and return a distinct stage-pause reason. Invalid or consumed receipts do not grant allowance. repair→done never grants a pause; all existing final report gates and exact final delivery remain required. Document that a stage pause is not final success. Do not modify v45.
+
+Driver: monitored operation must wait for natural idle, never send Escape and never type while busy. Existing external controller/guardian and 600-second request watchdog remain responsible for cancellation on actual faults. No aggregate time/call/cost cap. Check child process liveness while waiting and stop cleanly on exit. Keep legacy behavior isolated. Preserve clear/session/skill/reseed evidence checks.
+
+Acceptance: regressions reproduce missing allowance and premature cancellation; valid full/partial handoffs preserve marker and cannot replay; malformed/stale/state/hash mismatches refuse; active children refuse; final placeholder still refuses and valid final delivery retains all four gate checks. Driver delayed-idle regression proves zero Escape/typing until idle, process exit stops without typing, and supervisor stop still terminates owned processes. Actual installed Qwen fixture must exercise stage handoff Stop plus delayed provider/tool completion before clear. Existing focused clear-proof tests pass. Subscription qualification then target-model partial, full Winevtx, and cold independent corpus on one frozen final package hash.
+
+Non-goals: new orchestration framework, relaxing missing-tool checks, seeded findings, broad cleanup, production changes.
+
+## Ready-spec critique and disposition
+
+Codex gpt-5.6-sol, medium, returned six concrete specification objections (raw output retained separately). Accepted clarifications: partial requires identical source/destination non-done stage; receipt binds random boundary identity, absolute work location and checkpoint state. Stop persists consumption with exact Stop event/session identity, allowing idempotent replay of that same hook result only, not a later/different Stop. Runtime marker remains active for continuation. Driver clearing additionally requires existing lifecycle supervisor root reconciliation (all expected batches and tool completion/rejection hooks, no active child) plus no proxy inflight requests and settled natural TUI idle. The next clear is authorized by the durable checkpoint stage transition and verified quiescence, not by an unvalidated arbitrary Stop output. Existing SessionStart(clear) reconciliation and exact new-session skill/reseed chain remain required. This uses existing records and helpers; no new orchestration protocol.
+
+--- v45/tools/checkpoint.py
++++ v46/tools/checkpoint.py
+@@ -19,6 +19,7 @@
+ import json
+ import os
+ import re
++import secrets
+ import sys
+ import tempfile
+ from pathlib import Path
+@@ -139,7 +140,13 @@
+ #: wrote 1 as well. The moment this file moved to 2, the two writers would have
+ #: disagreed depending on which ran last, and a reader cannot tell a v1 row from
+ #: a v2 row that lost its stage. One constant, imported by the other writer.
+-SCHEMA = 2
++SCHEMA = 3
++
++# A handoff is a pause between bounded stages, not evidence that the final
++# report may be delivered.  It needs an unguessable identity because the Stop
++# hook is allowed to consume it exactly once (apart from a retry of that same
++# hook event).
++PENDING_HANDOFF = "pending_handoff"
+ 
+ 
+ def next_stage(stage):
+@@ -338,6 +345,10 @@
+         "worklist_seals": dict(row.get("worklists") or {}),
+         "gate_tools_run": list(gate_tools_run),
+     }
++    receipt = row.get(PENDING_HANDOFF)
++    if isinstance(receipt, dict):
++        entry["handoff_receipt_id"] = receipt.get("id")
++        entry["handoff_sha256"] = receipt.get("handoff_sha256")
+     path = os.path.join(str(work), HISTORY)
+     with open(path, "a", encoding="utf-8") as handle:
+         handle.write(json.dumps(entry, ensure_ascii=False) + "\n")
+@@ -374,40 +385,51 @@
+                 row["report_bytes"] = 0
+         row["updated_at"] = datetime.datetime.now(
+             datetime.timezone.utc).isoformat()
+-        atomic_text(work / "checkpoint.json",
+-                    json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n")
+-        append_boundary(work, row, gate_tools_run=gate_tools_run)
+         block = render_handoff(str(work), done, row, partial=True)
+-        atomic_text(work / "handoff.txt", block)
+-        return row, block
+-    if done == "triage" and row["unresolved"]:
+-        raise ValueError("triage is not finished: %d of %d worklist rows still "
+-                         "open — close them, then run handoff again"
+-                         % (row["unresolved"], row["total"]))
+-    if done in ("draft", "repair"):
+-        report = work / "report.md"
+-        try:
+-            text = report.read_text(encoding="utf-8", errors="replace")
+-        except OSError:
+-            text = ""
+-        if not text.strip() or is_placeholder(text):
+-            raise ValueError("work/report.md is still the placeholder — the "
+-                             "draft stage is not finished")
+-        if PLACEHOLDER_MARKER in text:
+-            raise ValueError("work/report.md still carries the "
+-                             "«СИНТЕЗ НЕ ЗАВЕРШЁН» line — synthesis is not done")
+-    row["stage"] = next_stage(done)
+-    row["stage_closed"] = done
+-    row[BOUNDARY_SEQ] = int(row.get(BOUNDARY_SEQ, 0) or 0) + 1
+-    # The stage really ended, so the batch marker is spent. Left explicitly False
+-    # rather than deleted: a reader must be able to tell "no partial boundary was
+-    # ever taken" from "this key predates the feature".
+-    row["stage_partial"] = False
+-    row["updated_at"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
++    else:
++        if done == "triage" and row["unresolved"]:
++            raise ValueError("triage is not finished: %d of %d worklist rows still "
++                             "open — close them, then run handoff again"
++                             % (row["unresolved"], row["total"]))
++        if done in ("draft", "repair"):
++            report = work / "report.md"
++            try:
++                text = report.read_text(encoding="utf-8", errors="replace")
++            except OSError:
++                text = ""
++            if not text.strip() or is_placeholder(text):
++                raise ValueError("work/report.md is still the placeholder — the "
++                                 "draft stage is not finished")
++            if PLACEHOLDER_MARKER in text:
++                raise ValueError("work/report.md still carries the "
++                                 "«СИНТЕЗ НЕ ЗАВЕРШЁН» line — synthesis is not done")
++        row["stage"] = next_stage(done)
++        row["stage_closed"] = done
++        row[BOUNDARY_SEQ] = int(row.get(BOUNDARY_SEQ, 0) or 0) + 1
++        # The stage really ended, so the batch marker is spent. Left explicitly False
++        # rather than deleted: a reader must be able to tell "no partial boundary was
++        # ever taken" from "this key predates the feature".
++        row["stage_partial"] = False
++        row["updated_at"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
++        block = render_handoff(str(work), done, row)
++
++    row[PENDING_HANDOFF] = {
++        "version": 1,
++        "id": secrets.token_hex(16),
++        "state": "pending",
++        "work": str(work),
++        "boundary_seq": row[BOUNDARY_SEQ],
++        "kind": "partial" if partial else "full",
++        "from_stage": done,
++        "to_stage": row["stage"],
++        "stage_partial": bool(row["stage_partial"]),
++        "checkpoint_state": row["state"],
++        "worklist_seals": dict(row["worklists"]),
++        "handoff_sha256": hashlib.sha256(block.encode("utf-8")).hexdigest(),
++    }
+     atomic_text(work / "checkpoint.json",
+                 json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n")
+     append_boundary(work, row, gate_tools_run=gate_tools_run)
+-    block = render_handoff(str(work), done, row)
+     atomic_text(work / "handoff.txt", block)
+     return row, block
+ 
+
+--- v45/tools/stopcheck.py
++++ v46/tools/stopcheck.py
+@@ -1,11 +1,12 @@
+ #!/usr/bin/env python3
+-"""Qwen Stop gate for Sherlock v36.
++"""Qwen Stop gate for Sherlock v46.
+ 
+ It is normally an optional seatbelt. Controlled benchmark runs enable the strict
+ marker lifecycle, where a missing marker blocks and a successful Stop preserves
+ the exact validated marker before retiring the live copy.
+ """
+ import io
++import hashlib
+ import json
+ import os
+ import re
+@@ -51,6 +52,10 @@
+ MAX_REASON = 220
+ MAX_MANIFEST_WORKLISTS = 512
+ FINALIZE_STOP_ENV = "SHERLOCK_FINALIZE_STOP_RUNNING"
++CHECKPOINT_FILE = "checkpoint.json"
++CHECKPOINT_HISTORY = "checkpoint.jsonl"
++HANDOFF_FILE = "handoff.txt"
++PENDING_HANDOFF = "pending_handoff"
+ 
+ 
+ class ActiveStateError(Exception):
+@@ -917,6 +922,177 @@
+     return None
+ 
+ 
++def _read_safe_json(path, root):
++    """Read one small JSON object only after the no-symlink path check."""
++    checked = safe_file(path, root)
++    if not checked:
++        raise ActiveStateError("Sherlock: stage handoff state is missing or unsafe.")
++    try:
++        raw = open(checked, "rb").read(MAX_MARKER_BYTES + 1)
++    except OSError:
++        raise ActiveStateError("Sherlock: stage handoff state cannot be read.")
++    if len(raw) > MAX_MARKER_BYTES:
++        raise ActiveStateError("Sherlock: stage handoff state is too large.")
++    try:
++        value = json.loads(raw.decode("utf-8"))
++    except (UnicodeDecodeError, ValueError):
++        raise ActiveStateError("Sherlock: stage handoff state is malformed.")
++    if not isinstance(value, dict):
++        raise ActiveStateError("Sherlock: stage handoff state is malformed.")
++    return value
++
++
++def _event_hash(event):
++    try:
++        raw = json.dumps(event, ensure_ascii=False, sort_keys=True,
++                         separators=(",", ":")).encode("utf-8")
++    except (TypeError, ValueError):
++        return None
++    return hashlib.sha256(raw).hexdigest()
++
++
++def _current_worklist_seals(lists, out_dir, deadline):
++    seals = {}
++    for item in lists:
++        check_deadline(deadline)
++        path = safe_file(worklist_path(item), out_dir)
++        if not path:
++            raise ActiveStateError("Sherlock: stage handoff worklist is missing or unsafe.")
++        try:
++            seals[os.path.basename(path)] = hashlib.sha256(
++                open(path, "rb").read()).hexdigest()
++        except OSError:
++            raise ActiveStateError("Sherlock: stage handoff worklist cannot be read.")
++    return seals
++
++
++def _write_consumed_handoff(checkpoint_path, out_dir, row):
++    """Replace a verified checkpoint only after its parent and file were safe."""
++    if not safe_file(checkpoint_path, out_dir):
++        raise ActiveStateError("Sherlock: stage handoff checkpoint became unsafe.")
++    fd, temporary = tempfile.mkstemp(prefix=".stage-pause-", dir=out_dir, text=True)
++    try:
++        with os.fdopen(fd, "w", encoding="utf-8") as handle:
++            handle.write(json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n")
++            handle.flush()
++            os.fsync(handle.fileno())
++        os.replace(temporary, checkpoint_path)
++        try:
++            directory = os.open(out_dir, os.O_RDONLY)
++            try:
++                os.fsync(directory)
++            finally:
++                os.close(directory)
++        except OSError:
++            pass
++    finally:
++        if os.path.exists(temporary):
++            os.unlink(temporary)
++
++
++def _stage_pause_decision(event, out_dir, lists, deadline):
++    """Consume one verified non-final handoff, preserving the active marker.
++
++    No receipt means the normal final-delivery gate below remains authoritative.
++    A receipt that exists but cannot be proved is a fail-closed condition.
++    """
++    checkpoint_path = os.path.join(out_dir, CHECKPOINT_FILE)
++    # Older or interrupted runs may not have a checkpoint at all. That is not a
++    # stage-pause claim: leave the established final-delivery checks to decide.
++    # `lexists` deliberately distinguishes an absent file from a dangling link.
++    if not os.path.lexists(checkpoint_path):
++        return None
++    row = _read_safe_json(checkpoint_path, out_dir)
++    receipt = row.get(PENDING_HANDOFF)
++    if receipt is None:
++        return None
++    if not isinstance(receipt, dict):
++        raise ActiveStateError("Sherlock: stage handoff receipt is malformed.")
++    required = ("version", "id", "state", "work", "boundary_seq", "kind",
++                "from_stage", "to_stage", "stage_partial", "checkpoint_state",
++                "worklist_seals", "handoff_sha256")
++    if any(key not in receipt for key in required):
++        raise ActiveStateError("Sherlock: stage handoff receipt is incomplete.")
++    if (receipt.get("version") != 1
++            or not isinstance(receipt.get("id"), str)
++            or not re.fullmatch(r"[0-9a-f]{32}", receipt["id"])
++            or receipt.get("state") not in ("pending", "consumed")
++            or not isinstance(receipt.get("work"), str)
++            or not os.path.isabs(receipt["work"])
++            or real(receipt["work"]) != out_dir
++            or not isinstance(receipt.get("boundary_seq"), int)
++            or receipt.get("kind") not in ("partial", "full")
++            or not isinstance(receipt.get("worklist_seals"), dict)
++            or not isinstance(receipt.get("handoff_sha256"), str)
++            or not re.fullmatch(r"[0-9a-f]{64}", receipt["handoff_sha256"])):
++        raise ActiveStateError("Sherlock: stage handoff receipt is unsafe.")
++    if (row.get("boundary_seq") != receipt["boundary_seq"]
++            or row.get("stage") != receipt.get("to_stage")
++            or row.get("stage_partial") is not receipt.get("stage_partial")
++            or row.get("state") != receipt.get("checkpoint_state")
++            or row.get("worklists") != receipt["worklist_seals"]):
++        raise ActiveStateError("Sherlock: stage handoff receipt does not match checkpoint state.")
++
++    partial = receipt.get("kind") == "partial"
++    from_stage, to_stage = receipt.get("from_stage"), receipt.get("to_stage")
++    pause = ((partial and from_stage == to_stage
++              and from_stage in ("triage", "draft", "repair")
++              and receipt.get("stage_partial") is True)
++             or (not partial and (from_stage, to_stage) in
++                 (("triage", "draft"), ("draft", "repair"))
++                 and receipt.get("stage_partial") is False))
++    final_transition = (not partial and (from_stage, to_stage) == ("repair", "done")
++                        and receipt.get("stage_partial") is False)
++    if not pause and not final_transition:
++        raise ActiveStateError("Sherlock: stage handoff receipt has an invalid transition.")
++
++    handoff = safe_file(os.path.join(out_dir, HANDOFF_FILE), out_dir)
++    if not handoff:
++        raise ActiveStateError("Sherlock: stage handoff block is missing or unsafe.")
++    try:
++        handoff_hash = hashlib.sha256(open(handoff, "rb").read()).hexdigest()
++    except OSError:
++        raise ActiveStateError("Sherlock: stage handoff block cannot be read.")
++    if handoff_hash != receipt["handoff_sha256"]:
++        raise ActiveStateError("Sherlock: stage handoff block does not match its receipt.")
++    history = safe_file(os.path.join(out_dir, CHECKPOINT_HISTORY), out_dir)
++    if not history:
++        raise ActiveStateError("Sherlock: stage handoff history is missing or unsafe.")
++    try:
++        lines = [line for line in open(history, encoding="utf-8") if line.strip()]
++        last = json.loads(lines[-1]) if lines else None
++    except (OSError, ValueError, IndexError):
++        raise ActiveStateError("Sherlock: stage handoff history is malformed.")
++    if not isinstance(last, dict) or any((
++            last.get("boundary_seq") != receipt["boundary_seq"],
++            last.get("stage") != receipt["to_stage"],
++            last.get("stage_partial") is not receipt["stage_partial"],
++            last.get("worklist_seals") != receipt["worklist_seals"],
++            last.get("handoff_receipt_id") != receipt["id"],
++            last.get("handoff_sha256") != receipt["handoff_sha256"],
++    )):
++        raise ActiveStateError("Sherlock: stage handoff receipt is not the current boundary.")
++    if _current_worklist_seals(lists, out_dir, deadline) != receipt["worklist_seals"]:
++        raise ActiveStateError("Sherlock: stage handoff worklist seals changed.")
++    if final_transition:
++        return None
++
++    session = event.get("session_id")
++    event_hash = _event_hash(event)
++    if not isinstance(session, str) or not session or not event_hash:
++        raise ActiveStateError("Sherlock: stage handoff Stop event lacks a session identity.")
++    if receipt["state"] == "consumed":
++        if (receipt.get("stop_session_id") == session
++                and receipt.get("stop_event_sha256") == event_hash):
++            return _allow("Sherlock stage handoff already accepted")
++        raise ActiveStateError("Sherlock: stage handoff receipt was already consumed.")
++    receipt["state"] = "consumed"
++    receipt["stop_session_id"] = session
++    receipt["stop_event_sha256"] = event_hash
++    _write_consumed_handoff(checkpoint_path, out_dir, row)
++    return _allow("Sherlock stage handoff accepted")
++
++
+ def _allow(reason="Sherlock inactive", retire_path=None):
+     return "allow", reason, retire_path
+ 
+@@ -956,6 +1132,14 @@
+         return _block(str(e))
+ 
+     try:
++        # A verified receipt is the only non-final Stop path. It is consumed
++        # before unresolved/report gates because an intermediate handoff may
++        # deliberately have an incomplete report or worklist. The returned
++        # allowance carries no retire path, so the active marker survives.
++        stage_pause = _stage_pause_decision(event, out_dir, lists, deadline)
++        if stage_pause is not None:
++            return stage_pause
++
+         left = []
+         for wl in lists:
+             check_deadline(deadline)
+
+--- v45/SKILL.md
++++ v46/SKILL.md
+@@ -124,6 +124,14 @@
+ so without `/sherlock` the next session has no instructions at all — and a model
+ that keeps working past the boundary rebuilds the exact 327,639-token prompt
+ this protocol exists to prevent.
++
++`handoff` records a sealed one-use stage-pause receipt beside the checkpoint.
++For `triage → draft`, `draft → repair`, and a permitted batch boundary, the Stop
++hook may accept that receipt so the current turn can end; this is **not delivery**,
++does not retire the active marker, and does not waive any final gate. A retry of
++the same Stop event is safe; another event or session cannot reuse the receipt.
++`repair → done` is different: it remains a final delivery and must pass every
++finalizer gate before the marker can retire.
+ 
+ **RUN EVERY COMMAND IN THE FOREGROUND. Never leave a background task alive at
+ the end of a stage.** `/clear` REFUSES while background work is running
+
+diff --git a/cases/06-dev-logging/sherlock/measure/interactive-drive.py b/cases/06-dev-logging/sherlock/measure/interactive-drive.py
+index 8cd25cf..43e74ed 100755
+--- a/cases/06-dev-logging/sherlock/measure/interactive-drive.py
++++ b/cases/06-dev-logging/sherlock/measure/interactive-drive.py
+@@ -30,6 +30,7 @@ import argparse
+ import base64
+ import errno
+ import hashlib
++import importlib.util
+ import json
+ import os
+ import pty
+@@ -95,6 +96,111 @@ def _strict_object(raw):
+     return value
+ 
+ 
++_LIFECYCLE = None
++
++
++def monitored_idle_reason(observer_dir, run_nonce):
++    """Reuse the supervisor's authoritative root accounting before PTY input.
++
++    The proxy publishes inflight before contact and removes it only after its
++    response and expected tools are durable. An absent map means no live call.
++    The existing SessionStart(clear) hook independently rechecks tool accounting.
++    """
++    global _LIFECYCLE
++    if _LIFECYCLE is None:
++        path = Path(__file__).resolve().parents[1] / "eval/bench/lifecycle-supervisor.py"
++        spec = importlib.util.spec_from_file_location("driver_lifecycle", path)
++        _LIFECYCLE = importlib.util.module_from_spec(spec)
++        spec.loader.exec_module(_LIFECYCLE)
++    observer = Path(observer_dir)
++    try:
++        with _LIFECYCLE._locked(observer):
++            identity = _LIFECYCLE._identity(observer)
++            if identity.get("run_nonce") != run_nonce:
++                raise ClearProofError("monitored idle segment identity mismatch")
++            fault = _LIFECYCLE._load_json(observer / "fault.json")
++            if fault is not None:
++                raise ClearProofError("terminal lifecycle fault: %s" % fault.get("reason"))
++            inflight = _LIFECYCLE._load_json(observer.parent / "upstream-inflight.json")
++            if inflight is not None:
++                if not isinstance(inflight.get("requests"), dict):
++                    raise ClearProofError("invalid proxy inflight map")
++                if inflight["requests"]:
++                    return "provider request pending"
++            try:
++                _LIFECYCLE._require_root_reconciled(observer)
++            except _LIFECYCLE.LifecycleFault as exc:
++                # A normal response-to-hook interval is pending, not a new
++                # fault. The existing guardian decides missing-hook deadlines.
++                return str(exc)
++        return None
++    except (OSError, ValueError, _LIFECYCLE.LifecycleFault) as exc:
++        raise ClearProofError("cannot verify monitored idle: %s" % exc) from exc
++
++
++def monitored_stage_reason(work, observer_dir, run_nonce, final_delivery=False):
++    """Require Stop's durable outcome, not a transient idle between turns."""
++    work = Path(work).resolve()
++    try:
++        if final_delivery:
++            marker_dir = work.parent / ".sherlock"
++            if os.path.lexists(marker_dir / "active.json"):
++                return "final Stop has not retired the active marker"
++            completed = _LIFECYCLE._load_json(marker_dir / "completed.json")
++            if completed is None:
++                return "final Stop completion receipt pending"
++            if (completed.get("workspace") != str(work.parent)
++                    or completed.get("out") != str(work)):
++                raise ClearProofError("final Stop receipt belongs to another workspace")
++            return None
++        row = _LIFECYCLE._load_json(work / "checkpoint.json")
++        if row is None or not isinstance(row.get("pending_handoff"), dict):
++            return "verified stage-pause receipt pending"
++        receipt = row["pending_handoff"]
++        if (receipt.get("work") != str(work)
++                or receipt.get("boundary_seq") != row.get("boundary_seq")
++                or receipt.get("to_stage") != row.get("stage")
++                or receipt.get("stage_partial") is not row.get("stage_partial")):
++            raise ClearProofError("stage-pause receipt does not match current boundary")
++        if receipt.get("state") == "pending":
++            return "Stop has not accepted the stage pause"
++        if receipt.get("state") != "consumed":
++            raise ClearProofError("invalid stage-pause receipt state")
++        anchor = capture_clear_anchor(observer_dir, run_nonce)
++        if receipt.get("stop_session_id") != anchor["session_id"]:
++            raise ClearProofError("stage pause was accepted in another session")
++        return None
++    except (OSError, ValueError, _LIFECYCLE.LifecycleFault) as exc:
++        raise ClearProofError("cannot verify stage Stop outcome: %s" % exc) from exc
++
++
++def wait_monitored_idle(ses, observer_dir, run_nonce, step_label, note,
++                        report_interval_s=20.0, settle_s=1.0,
++                        boundary_work=None, final_delivery=False):
++    """Wait without cancelling work or typing into a busy client.
++
++    No aggregate deadline: the external guardian and per-request watchdog own
++    fault termination. Short pump intervals preserve signals and observability.
++    """
++    last_note = time.monotonic()
++    while True:
++        if not ses.alive():
++            raise ClearProofError("client exited while waiting before %s" % step_label)
++        idle = ses.wait_idle(min(max(report_interval_s, 0.01), 1.0), settle_s=settle_s)
++        pending = monitored_idle_reason(observer_dir, run_nonce)
++        if pending is None and boundary_work is not None:
++            pending = monitored_stage_reason(
++                boundary_work, observer_dir, run_nonce, final_delivery)
++        if idle and pending is None:
++            return
++        now = time.monotonic()
++        if now - last_note >= max(report_interval_s, 0.01):
++            note("waiting_for_monitored_idle", "%s: %s" % (
++                step_label, pending or "client still busy"))
++            last_note = now
++        ses.pump(0.2)
++
++
+ def _lifecycle_rows(observer_dir, name, phase, run_nonce):
+     path = Path(observer_dir) / name
+     if not path.exists():
+@@ -1398,6 +1504,11 @@ def drive(argv, cwd, work, first_prompt, reseed, stage_budget_s, settle_s,
+         `handoff --partial` call site: cancelling BEFORE the boundary is
+         durable is not safe, see the comment above ESCAPE_ATTEMPTS.
+         """
++        if observer_dir:
++            return wait_monitored_idle(
++                ses, observer_dir, run_nonce, step_label, note,
++                clear_idle_wait_s, clear_idle_settle_s,
++                boundary_work=work if step_label == "/clear" else None)
+         idle = ses.wait_idle(clear_idle_wait_s, settle_s=clear_idle_settle_s)
+         if idle:
+             return
+@@ -1762,6 +1873,11 @@ def drive(argv, cwd, work, first_prompt, reseed, stage_budget_s, settle_s,
+                 note("handoff_block_not_shown", volume)
+ 
+             if seen == "done" and not partial:
++                if observer_dir:
++                    wait_monitored_idle(
++                        ses, observer_dir, run_nonce, "final delivery", note,
++                        clear_idle_wait_s, clear_idle_settle_s,
++                        boundary_work=work, final_delivery=True)
+                 note("finished", "stage=done")
+                 return 0, events
+ 
+@@ -1902,6 +2018,9 @@ def drive(argv, cwd, work, first_prompt, reseed, stage_budget_s, settle_s,
+                              "meaningless"
+                              % [r.get("messages_count") for r in rows])
+                         return 8, events
++    except ClearProofError as exc:
++        note("CLEAR_NOT_EFFECTIVE", str(exc))
++        return 8, events
+     except DriverStopped:
+         note("STOPPED", "owner sent SIGTERM; terminating the PTY process group")
+         return 143, events
+
+
+FILE tools/tests/test_stage_pause_v46.py
+
+#!/usr/bin/env python3
+"""A durable non-final stage handoff must let Qwen end its current turn."""
+import json
+import os
+import shutil
+import subprocess
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+
+
+SHERLOCK = Path(__file__).resolve().parents[2]
+PACKAGE = SHERLOCK / "skills" / "v46"
+
+
+class StagePauseV46Test(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        # macOS exposes the same temp directory through /var and /private/var;
+        # marker safety deliberately requires the canonical workspace path.
+        self.root = Path(self.temp.name).resolve()
+        self.work = self.root / "work"
+        self.corpus = self.root / "corpus"
+        self.corpus.mkdir()
+        self.prepare("# id\tverdict\n", "triage")
+
+    def prepare(self, worklist, done, partial=False):
+        self.work.mkdir(exist_ok=True)
+        (self.work / "worklist.tsv").write_text(worklist, encoding="utf-8")
+        subprocess.run([sys.executable, str(PACKAGE / "tools" / "checkpoint.py"),
+                        "init", "--work", str(self.work)], check=True,
+                       capture_output=True, text=True)
+        command = [sys.executable, str(PACKAGE / "tools" / "checkpoint.py"),
+                   "handoff", "--work", str(self.work), "--done", done]
+        if partial:
+            command.append("--partial")
+        subprocess.run(command,
+                       check=True, capture_output=True, text=True)
+        marker = self.root / ".sherlock" / "active.json"
+        marker.parent.mkdir(exist_ok=True)
+        marker.write_text(json.dumps({
+            "version": 36, "active": True, "workspace": str(self.root),
+            "skill_root": str(PACKAGE.resolve()), "corpus": str(self.corpus),
+            "out": str(self.work), "mode": "single", "worklists": ["worklist.tsv"],
+        }) + "\n", encoding="utf-8")
+
+    def tearDown(self):
+        self.temp.cleanup()
+
+    def stop(self, session_id="stage-session", message="stage complete"):
+        return subprocess.run(
+            [sys.executable, str(PACKAGE / "tools" / "stopcheck.py")],
+            input=json.dumps({"cwd": str(self.root), "hook_event_name": "Stop",
+                              "session_id": session_id,
+                              "last_assistant_message": message}),
+            text=True, capture_output=True, cwd=self.root,
+            env={**os.environ, "QWEN_SKILL_ROOT": str(PACKAGE)}, check=False)
+
+    def mutate_receipt(self, mutate):
+        checkpoint = self.work / "checkpoint.json"
+        row = json.loads(checkpoint.read_text(encoding="utf-8"))
+        mutate(row["pending_handoff"])
+        checkpoint.write_text(json.dumps(row) + "\n", encoding="utf-8")
+
+    def test_triage_handoff_pauses_without_retiring_active_marker(self):
+        result = self.stop()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        decision = json.loads(result.stdout)
+        self.assertEqual(decision["decision"], "allow")
+        self.assertIn("handoff", decision["reason"])
+        self.assertTrue((self.root / ".sherlock" / "active.json").is_file())
+        self.assertFalse((self.root / ".sherlock" / "completed.json").exists())
+
+    def test_same_stop_event_is_idempotent_but_another_session_cannot_replay(self):
+        self.assertEqual(json.loads(self.stop().stdout)["decision"], "allow")
+        retry = json.loads(self.stop().stdout)
+        self.assertEqual(retry["decision"], "allow")
+        self.assertIn("already accepted", retry["reason"])
+        other_session = json.loads(self.stop("another-session").stdout)
+        self.assertEqual(other_session["decision"], "block")
+        self.assertIn("already consumed", other_session["reason"])
+        changed_event = json.loads(self.stop(message="a different Stop event").stdout)
+        self.assertEqual(changed_event["decision"], "block")
+        self.assertIn("already consumed", changed_event["reason"])
+
+    def test_changed_handoff_block_fails_closed(self):
+        (self.work / "handoff.txt").write_text("forged\n", encoding="utf-8")
+        decision = json.loads(self.stop().stdout)
+        self.assertEqual(decision["decision"], "block")
+        self.assertIn("does not match", decision["reason"])
+
+    def test_invalid_receipt_kind_fails_closed(self):
+        self.mutate_receipt(lambda receipt: receipt.__setitem__("kind", "forged"))
+        self.assertEqual(json.loads(self.stop().stdout)["decision"], "block")
+
+    def test_invalid_receipt_state_fails_closed(self):
+        self.mutate_receipt(lambda receipt: receipt.__setitem__("state", "forged"))
+        self.assertEqual(json.loads(self.stop().stdout)["decision"], "block")
+
+    def test_receipt_boundary_sequence_must_be_current(self):
+        self.mutate_receipt(
+            lambda receipt: receipt.__setitem__("boundary_seq", receipt["boundary_seq"] + 1))
+        self.assertEqual(json.loads(self.stop().stdout)["decision"], "block")
+
+    def test_changed_worklist_seal_fails_closed(self):
+        (self.work / "worklist.tsv").write_text("# altered\n", encoding="utf-8")
+        self.assertEqual(json.loads(self.stop().stdout)["decision"], "block")
+
+    def test_partial_stage_receipt_may_pause_with_unresolved_work(self):
+        shutil.rmtree(self.work)
+        self.prepare("# id\tverdict\nrow-1\t?\n", "triage", partial=True)
+        decision = json.loads(self.stop().stdout)
+        self.assertEqual(decision["decision"], "allow")
+        self.assertTrue((self.root / ".sherlock" / "active.json").is_file())
+
+    def test_draft_to_repair_receipt_may_pause(self):
+        (self.work / "report.md").write_text("# Отчёт\n\n### Н-1\nФакт\n",
+                                               encoding="utf-8")
+        subprocess.run([sys.executable, str(PACKAGE / "tools" / "checkpoint.py"),
+                        "handoff", "--work", str(self.work), "--done", "draft"],
+                       check=True, capture_output=True, text=True)
+        self.assertEqual(json.loads(self.stop().stdout)["decision"], "allow")
+
+    def test_no_checkpoint_uses_existing_final_delivery_gate(self):
+        (self.work / "checkpoint.json").unlink()
+        decision = json.loads(self.stop().stdout)
+        self.assertEqual(decision["decision"], "block")
+        self.assertNotIn("stage handoff", decision["reason"])
+
+    def test_repair_to_done_remains_on_final_delivery_path(self):
+        # Build the two earlier full transitions, then the final repair handoff.
+        (self.work / "report.md").write_text("# Отчёт\n\n### Н-1\nФакт\n",
+                                               encoding="utf-8")
+        subprocess.run([sys.executable, str(PACKAGE / "tools" / "checkpoint.py"),
+                        "handoff", "--work", str(self.work), "--done", "draft"],
+                       check=True, capture_output=True, text=True)
+        subprocess.run([sys.executable, str(PACKAGE / "tools" / "checkpoint.py"),
+                        "handoff", "--work", str(self.work), "--done", "repair"],
+                       check=True, capture_output=True, text=True)
+        decision = json.loads(self.stop().stdout)
+        self.assertEqual(decision["decision"], "block")
+        self.assertTrue((self.root / ".sherlock" / "active.json").is_file())
+
+
+if __name__ == "__main__":
+    unittest.main()
+
+
+FILE measure/tests/test_monitored_idle.py
+
+#!/usr/bin/env python3
+"""A stage boundary cannot cancel or overtake pending provider/tool work."""
+import importlib.util
+import json
+import tempfile
+import unittest
+from pathlib import Path
+from unittest.mock import patch
+
+ROOT = Path(__file__).resolve().parents[2]
+def module(name, path):
+    spec = importlib.util.spec_from_file_location(name, path)
+    result = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(result)
+    return result
+DRIVE = module('drive_idle_test', ROOT / 'measure/interactive-drive.py')
+LIFE = module('life_idle_test', ROOT / 'eval/bench/lifecycle-supervisor.py')
+
+class FakeSession:
+    def __init__(self, idle):
+        self.idle = iter(idle)
+        self.polls = 0
+        self.running = True
+    def alive(self): return self.running
+    def wait_idle(self, *args, **kwargs):
+        self.polls += 1
+        return next(self.idle)
+    def pump(self, *args): pass
+    def escape(self): raise AssertionError('must never cancel a monitored request')
+    def type(self, *args): raise AssertionError('wait must never type while busy')
+
+class MonitoredIdleTest(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.trace = Path(self.temp.name).resolve()
+        self.nonce = 'a' * 32
+        self.observer = LIFE.init_segment(self.trace, self.nonce, 'boot')
+    def tearDown(self): self.temp.cleanup()
+    def test_delayed_natural_idle_does_not_cancel(self):
+        ses = FakeSession([False, False, True])
+        DRIVE.wait_monitored_idle(ses, self.observer, self.nonce, '/clear', lambda *a: None, .01, .001)
+        self.assertEqual(ses.polls, 3)
+    def test_screen_idle_is_insufficient_until_lifecycle_reconciles(self):
+        ses = FakeSession([True, True, True])
+        with patch.object(DRIVE, 'monitored_idle_reason', side_effect=['provider pending', 'tool pending', None]):
+            DRIVE.wait_monitored_idle(ses, self.observer, self.nonce, '/clear', lambda *a: None, .01, .001)
+        self.assertEqual(ses.polls, 3)
+    def test_dead_client_stops_without_input(self):
+        ses = FakeSession([]); ses.running = False
+        with self.assertRaises(DRIVE.ClearProofError):
+            DRIVE.wait_monitored_idle(ses, self.observer, self.nonce, '/clear', lambda *a: None, .01, .001)
+    def test_active_provider_and_expected_tools_each_prevent_clear(self):
+        path = self.trace / 'upstream-inflight.json'
+        path.write_text(json.dumps({'requests': {'live-request': {'started_at': 'now'}}}))
+        self.assertIn('provider', DRIVE.monitored_idle_reason(self.observer, self.nonce))
+        path.unlink()
+        self.assertIsNone(DRIVE.monitored_idle_reason(self.observer, self.nonce))
+        LIFE.register_expected_tools(self.observer, self.nonce, 'boot', 'old-response', ['call-late'])
+        self.assertIn('EXPECTED_TOOL_BATCH_MISSING', DRIVE.monitored_idle_reason(self.observer, self.nonce))
+    def test_transient_idle_cannot_overtake_unaccepted_stop(self):
+        ses = FakeSession([True, True])
+        with patch.object(DRIVE, 'monitored_stage_reason', side_effect=['Stop pending', None]):
+            DRIVE.wait_monitored_idle(ses, self.observer, self.nonce, '/clear', lambda *a: None,
+                                      .01, .001, boundary_work=self.trace / 'work')
+        self.assertEqual(ses.polls, 2)
+    def test_stage_receipt_must_be_consumed_in_current_session(self):
+        DRIVE.monitored_idle_reason(self.observer, self.nonce)
+        work = self.trace / 'work'; work.mkdir()
+        row = {'boundary_seq': 1, 'stage': 'draft', 'stage_partial': False,
+               'pending_handoff': {'work': str(work), 'boundary_seq': 1, 'to_stage': 'draft',
+                                   'stage_partial': False, 'state': 'pending'}}
+        path = work / 'checkpoint.json'; path.write_text(json.dumps(row))
+        self.assertIn('not accepted', DRIVE.monitored_stage_reason(work, self.observer, self.nonce))
+        row['pending_handoff'].update(state='consumed', stop_session_id='old')
+        path.write_text(json.dumps(row))
+        with patch.object(DRIVE, 'capture_clear_anchor', return_value={'session_id': 'new'}):
+            with self.assertRaises(DRIVE.ClearProofError):
+                DRIVE.monitored_stage_reason(work, self.observer, self.nonce)
+        with patch.object(DRIVE, 'capture_clear_anchor', return_value={'session_id': 'old'}):
+            self.assertIsNone(DRIVE.monitored_stage_reason(work, self.observer, self.nonce))
+        row['boundary_seq'] = 2; path.write_text(json.dumps(row))
+        with self.assertRaises(DRIVE.ClearProofError):
+            DRIVE.monitored_stage_reason(work, self.observer, self.nonce)
+    def test_done_boundary_waits_for_final_stop_marker_retirement(self):
+        DRIVE.monitored_idle_reason(self.observer, self.nonce)
+        work = self.trace / 'work'; work.mkdir()
+        marker = self.trace / '.sherlock'; marker.mkdir()
+        value = {'workspace': str(self.trace), 'out': str(work), 'active': True}
+        (marker / 'active.json').write_text(json.dumps(value))
+        (marker / 'completed.json').write_text(json.dumps(value))
+        self.assertIn('not retired', DRIVE.monitored_stage_reason(work, self.observer, self.nonce, True))
+        (marker / 'active.json').unlink()
+        self.assertIsNone(DRIVE.monitored_stage_reason(work, self.observer, self.nonce, True))
+
+    def test_fault_and_wrong_identity_fail_closed(self):
+        with self.assertRaises(DRIVE.ClearProofError):
+            DRIVE.monitored_idle_reason(self.observer, 'b' * 32)
+        LIFE.record_fault(self.observer, self.nonce, 'EXPECTED_TOOL_BATCH_MISSING', 'call-late')
+        with self.assertRaises(DRIVE.ClearProofError):
+            DRIVE.monitored_idle_reason(self.observer, self.nonce)
+
+if __name__ == '__main__': unittest.main()
+
+
+FILE tools/tests/qwen_stage_pause_smoke.py
+
+#!/usr/bin/env python3
+"""Installed Qwen: real handoff tool, delayed response, real Stop, safe clear.
+
+Only a scripted localhost provider and synthetic one-line evidence are used.
+This tests composition, not investigation quality or final report acceptance.
+"""
+import argparse
+import importlib.util
+import hashlib
+import json
+import os
+from pathlib import Path
+import shlex
+import signal
+import subprocess
+import sys
+import threading
+import time
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+
+def load(name, path):
+    spec = importlib.util.spec_from_file_location(name, path)
+    module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
+    return module
+
+BRIDGE = '''import pathlib,subprocess,sys,time
+root=pathlib.Path(sys.argv[1]); event=sys.argv[2]; raw=sys.stdin.buffer.read()
+p=root/('%020d-'%time.time_ns()+event); p.with_suffix('.input.json').write_bytes(raw)
+r=subprocess.run(sys.argv[3:],input=raw,capture_output=True)
+p.with_suffix('.output.json').write_bytes(r.stdout); p.with_suffix('.stderr').write_bytes(r.stderr)
+p.with_suffix('.exit').write_text(str(r.returncode))
+sys.stdout.buffer.write(r.stdout);sys.stderr.buffer.write(r.stderr);raise SystemExit(r.returncode)
+'''
+
+def main():
+    ap = argparse.ArgumentParser()
+    for arg in ('output', 'qwen', 'helper', 'driver', 'skill'):
+        ap.add_argument('--'+arg, type=Path, required=True)
+    a = ap.parse_args()
+    root=a.output.resolve(); root.mkdir(mode=0o700,parents=True)
+    workspace=root/'workspace'; workspace.mkdir(); work=workspace/'work'
+    corpus=workspace/'corpus'; corpus.mkdir(); (corpus/'toy.log').write_text('2026-09-06 INFO toy operation complete\n')
+    home=root/'home'; home.mkdir(); rawhooks=root/'raw-hooks'; rawhooks.mkdir()
+    skill=a.skill.resolve(); helper=load('pause_life',a.helper); driver=load('pause_drive',a.driver)
+    nonce='stage-pause-fixture-20260906'; boot=helper.current_boot_id(); key=b'p'*32
+    observer=helper.init_segment(root,nonce,boot,capability=key)
+    helper.publish_observation(observer,nonce,boot,sequence=0,monotonic_ns=time.monotonic_ns(),capability=key)
+    env={k:v for k,v in os.environ.items() if k in ('PATH','LANG','LC_ALL')}
+    env.update(HOME=str(home),QWEN_HOME=str(home),QWEN_SKILL_ROOT=str(skill),
+               SHERLOCK_STRICT_MARKER_LIFECYCLE='1',TERM='xterm-256color',OPENAI_API_KEY='loopback-only',NO_PROXY='127.0.0.1,localhost')
+    cp=subprocess.run([sys.executable,str(skill/'tools/logmap.py'),str(corpus),'--out',str(work),'--single-host'],cwd=workspace,env=env,capture_output=True)
+    (root/'logmap.stdout').write_bytes(cp.stdout); (root/'logmap.stderr').write_bytes(cp.stderr)
+    if cp.returncode: raise RuntimeError('toy logmap failed')
+    wl=work/'worklist.tsv'; lines=wl.read_text().splitlines()
+    for i,line in enumerate(lines):
+        if line and not line.startswith('#'):
+            cols=line.split('\t'); cols[1]='N toy.log:1 «toy operation complete» n=1 fixture'; lines[i]='\t'.join(cols)
+    wl.write_text('\n'.join(lines)+'\n')
+    cp=subprocess.run([sys.executable,str(skill/'tools/checkpoint.py'),'init','--work',str(work)],cwd=workspace,env=env,capture_output=True)
+    (root/'checkpoint-init.stdout').write_bytes(cp.stdout); (root/'checkpoint-init.stderr').write_bytes(cp.stderr)
+    if cp.returncode: raise RuntimeError('toy checkpoint init failed')
+    bridge=root/'bridge.py'; bridge.write_text(BRIDGE)
+    hooks={}
+    for event in ('SessionStart','UserPromptSubmit','PreToolUse','PostToolUse','PostToolUseFailure','PostToolBatch','Stop'):
+        target=[sys.executable,str(skill/'tools/stopcheck.py')] if event=='Stop' else [sys.executable,str(a.helper.resolve()),'hook','--observer-dir',str(observer),'--workspace',str(workspace),'--nonce',nonce,'--boot-id',boot]
+        command=shlex.join([sys.executable,str(bridge),str(rawhooks),event]+target)
+        hooks[event]=[{'hooks':[{'type':'command','command':command,'timeout':60000}]}]
+    qdir=workspace/'.qwen'; qdir.mkdir(); (qdir/'settings.json').write_text(json.dumps({'hooks':hooks})+'\n')
+    requests=[]; provider_events=[]; errors=[]; inflight={}; lock=threading.Lock()
+    def update_inflight(index, add):
+        with lock:
+            if add: inflight[str(index)]={'fixture':True}
+            else: inflight.pop(str(index),None)
+            p=root/'upstream-inflight.json'
+            if inflight:
+                tmp=root/'inflight.tmp'; tmp.write_text(json.dumps({'requests':inflight})); tmp.replace(p)
+            else: p.unlink(missing_ok=True)
+    class Provider(BaseHTTPRequestHandler):
+        def log_message(self,*args): pass
+        def do_POST(self):
+            raw=self.rfile.read(int(self.headers['Content-Length']))
+            with lock: index=len(requests); requests.append(raw)
+            (root/('request-%02d.json'%index)).write_bytes(raw); update_inflight(index,True)
+            try:
+                if index==0:
+                    command=shlex.join([sys.executable,str(skill/'tools/checkpoint.py'),'handoff','--work',str(work),'--done','triage'])+' && sleep 2'
+                    delta={'role':'assistant','tool_calls':[{'index':0,'id':'call_pause','type':'function','function':{'name':'run_shell_command','arguments':json.dumps({'command':command})}}]}; finish='tool_calls'
+                    helper.register_expected_tools(observer,nonce,boot,'fixture-response-0',['call_pause'])
+                else:
+                    # A boundary already exists while this response remains live.
+                    time.sleep(3)
+                    delta={'role':'assistant','content':(work/'handoff.txt').read_text()}; finish='stop'
+                parts=[]
+                for d,f in ((delta,None),({},finish)):
+                    row={'id':'pause-%d'%index,'object':'chat.completion.chunk','created':int(time.time()),'model':'mock','choices':[{'index':0,'delta':d,'finish_reason':f}]}
+                    parts.append(b'data: '+json.dumps(row).encode()+b'\n\n')
+                sse=b''.join(parts)+b'data: [DONE]\n\n'
+                (root/('response-%02d.sse'%index)).write_bytes(sse)
+                self.send_response(200);self.send_header('Content-Type','text/event-stream');self.send_header('Content-Length',str(len(sse)));self.end_headers();self.wfile.write(sse);self.wfile.flush()
+                provider_events.append({'index':index,'completed_at_ns':time.time_ns()})
+            except BaseException as exc: errors.append(repr(exc))
+            finally: update_inflight(index,False)
+    server=ThreadingHTTPServer(('127.0.0.1',0),Provider)
+    thread=threading.Thread(target=server.serve_forever,daemon=True);thread.start()
+    env['OPENAI_BASE_URL']='http://127.0.0.1:%d/v1'%server.server_port
+    argv=['node',str(a.qwen.resolve()),'--auth-type','openai','--model','mock','--approval-mode','yolo']
+    (root/'argv.json').write_text(json.dumps(argv)+'\n')
+    session=driver.Session(argv,str(workspace),env,str(root/'pty-transcript.raw'))
+    events=[]; result={'passed':False,'provider':'loopback-only',
+        'source_sha256':{name:hashlib.sha256(path.read_bytes()).hexdigest() for name,path in
+                         [('qwen',a.qwen),('helper',a.helper),('driver',a.driver),('fixture',Path(__file__))]},
+        'skill_files':{str(p.relative_to(skill)):hashlib.sha256(p.read_bytes()).hexdigest()
+                       for p in sorted(skill.rglob('*')) if p.is_file() and '__pycache__' not in p.parts}}
+
+    def alarm(*args): raise TimeoutError('fixture watchdog')
+    prior=signal.signal(signal.SIGALRM,alarm); signal.alarm(100)
+    def rows(event):
+        return [(p,json.loads(p.read_bytes())) for p in sorted(rawhooks.glob('*-'+event+'.input.json'))]
+    def note(kind,detail):
+        events.append({'event':kind,'detail':detail,'at_ns':time.time_ns()})
+        for path in sorted(rawhooks.glob('*-Stop.output.json')):
+            try: output=json.loads(path.read_bytes())
+            except json.JSONDecodeError: continue
+            if output.get('decision')=='block':
+                raise AssertionError('real Stop rejected durable handoff: '+output.get('reason',''))
+    try:
+        while not rows('SessionStart'): session.pump(.2)
+        session.pump(.5); session.type('Run the toy triage handoff tool, then print its handoff block.',settle=.1)
+        while not (work/'handoff.txt').exists(): session.pump(.2)
+        started=time.time_ns()
+        driver.wait_monitored_idle(session,observer,nonce,'/clear',note,.25,.5,boundary_work=work)
+        ready=time.time_ns()
+        stop_rows=rows('Stop')
+        if not stop_rows: raise AssertionError('idle before Stop hook')
+        stop_path,stop=stop_rows[-1]; output=json.loads(stop_path.with_name(stop_path.name.replace('.input.json','.output.json')).read_bytes())
+        marker=workspace/'.sherlock/active.json'
+        if not marker.is_file(): raise AssertionError('stage pause retired active marker')
+        if output.get('decision')!='allow' or 'handoff' not in output.get('reason','').lower(): raise AssertionError('stage pause allowance missing')
+        anchor=driver.capture_clear_anchor(observer,nonce)
+        clear_at=time.time_ns();session.type('/clear',settle=.1)
+        while not any(r.get('source')=='clear' for _,r in rows('SessionStart')): session.pump(.2)
+        clear=[r for _,r in rows('SessionStart') if r.get('source')=='clear'][-1]
+        result.update(passed=True,wait_started_at_ns=started,idle_at_ns=ready,clear_sent_at_ns=clear_at,
+                      stop_input=stop,stop_output=output,marker_preserved=marker.is_file(),
+                      clear_session_id=clear['session_id'],old_session_id=anchor['session_id'])
+        if clear['session_id']==anchor['session_id']: raise AssertionError('clear did not change session')
+        auxiliary=[]
+        for index,raw in enumerate(requests[2:],start=2):
+            message=json.loads(raw)['messages'][-1]
+            content=message.get('content','')
+            text=content if isinstance(content,str) else ''.join(p.get('text','') for p in content)
+            if message.get('role')!='user' or not text.startswith('[SUGGESTION MODE:'):
+                raise AssertionError('unexpected post-Stop request %d'%index)
+            auxiliary.append({'index':index,'kind':'Qwen suggestion'})
+        result['auxiliary_requests']=auxiliary
+        if not events: raise AssertionError('delayed busy path was not exercised')
+        if any(e['completed_at_ns']>=clear_at for e in provider_events): raise AssertionError('clear overtook provider completion')
+    except BaseException as exc: result.update(passed=False,error=repr(exc))
+    finally:
+        signal.alarm(0);signal.signal(signal.SIGALRM,prior);session.close();server.shutdown();server.server_close();thread.join(5)
+        result.update(request_count=len(requests),provider_events=provider_events,provider_errors=errors,driver_events=events)
+        if errors: result['passed']=False
+        (root/'result.json').write_text(json.dumps(result,indent=2,sort_keys=True)+'\n')
+    print(json.dumps(result,indent=2,sort_keys=True));return 0 if result['passed'] else 1
+if __name__=='__main__':raise SystemExit(main())
