@@ -22,7 +22,19 @@
     "handoff_instruction": "НЕ ПРОДОЛЖАЙ В ЭТОЙ СЕССИИ",
     "post_hook_sha256": "8646936a6cfe93c55c4e27a73a6d1adebfa1ec5969329074d10bf530d41ddc35",
     "continued_same_session_draft_work": true,
-    "earlier_child_attribution": "corrected_inference"
+    "earlier_child_attribution": "corrected_inference",
+    "next_after_handoff": {
+      "timestamp": "2026-09-06T14:58:45.448Z",
+      "call": "skill sherlock",
+      "result": "already loaded; no Stop rejection"
+    },
+    "resume_call": {
+      "timestamp": "2026-09-06T14:58:53.805Z",
+      "call": "checkpoint.py resume",
+      "exit": 0,
+      "stage": "draft",
+      "state": "ready_for_synthesis"
+    }
   },
   "evidence": {
     "harness_mirror": "/Users/a/hack/sherlock-v48-harness-20260906-r5",
@@ -30,8 +42,13 @@
     "harness_file_count": 456,
     "target_file_count": 68,
     "inventory_equality": true,
-    "inventory_policy": "exclude home/ and updates/ only",
+    "inventory_policy": "exclude directories named exactly home or updates at any depth",
     "artifact_directory": "artifacts/2026-09-06-v48-harness-r5/",
     "handoff_trace": "artifacts/2026-09-06-v48-harness-r5/handoff-trace.json"
+  },
+  "interpretation": {
+    "fault_recorded_by": "manual lifecycle supervisor live audit",
+    "driver_mechanical_boundary_enforcement": false,
+    "late_observation_valid_for_acceptance": false
   }
 }
