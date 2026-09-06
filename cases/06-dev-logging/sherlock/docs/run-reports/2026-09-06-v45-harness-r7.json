@@ -67,7 +67,9 @@
     "cache_read_input_tokens": 3289,
     "cache_creation_input_tokens": 14186,
     "reported_cost_usd": 0.0757458,
-    "raw_result_path": "/tmp/r7-critique.json",
-    "raw_result_sha256": "bcc2bac3dfd9dd305b7021544639124afb72e5f57ac095d464f3bc8ae1b63046"
+    "raw_result_path": "artifacts/2026-09-06-v45-harness-r7/claude-critique.json",
+    "raw_result_sha256": "bcc2bac3dfd9dd305b7021544639124afb72e5f57ac095d464f3bc8ae1b63046",
+    "input_path": "artifacts/2026-09-06-v45-harness-r7/claude-critique-input.txt",
+    "input_sha256": "ff29be4ab8408d1275ffa834eecdbb409b19cf4e909c21a06f00dd01e2d3e935"
   }
 }
