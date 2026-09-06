@@ -26,3 +26,7 @@ Root regression run:7 tests pass, [output](artifacts/2026-09-06-clear-continuati
 ## Next goal-bound action
 
 Sync the reviewed driver, regenerate target preparation to bind its new hash, and launch a fresh subscription qualification. After acceptance, run the approved target partial and both full corpus investigations. No accepted output is claimed here.
+
+Mirror verification completed: r1 217files inventorySHA94e1e3f95b072ac81170acffd036cfd90f7798148e66b777264ed5a1f0bea97d; r2 218files inventorySHA24db858178ae74b475fbcb0cdece2bc3dce62d8419ff93c0bab301e8ed08aa03. Every selected path and byte hash matches remote; home/updates is the only excluded cache subtree.
+
+Additional broad fake-driver command launched by the worker later terminated without recoverable stdout/exit in its asynchronous tool session. Its outcome is UNKNOWN and is not counted as a passing check. It exercised legacy timing paths rather than the changed monitored proof; the exact proof regression suite, real-client red/green reproduction, and scoped review supply the acceptance evidence for this repair. No duplicate broad run was launched.
