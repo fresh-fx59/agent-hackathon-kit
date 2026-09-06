@@ -8,7 +8,7 @@ Code commit `07b0382`; runtime package v49 `d9eb69b2f45a549778ef60cc2ee5c8381739
 
 ## Result
 
-The fixture recorded `passed: true` across 7 loopback requests: 6 normal requests at indices 0, 1, 2, 4, 5, and 6, with the intentional fixture stop at driver exit 143. It verified two Stop/clear cycles, exact fresh-stage reseed and clear proof, unchanged sentinel, allowed fresh-stage worklist edit, and boundary denial with no fake post-tool event. The denial returned `permissionDecision: deny` and the reason to end the turn and wait for Stop plus a fresh `/clear` session.
+The fixture recorded `passed: true` across 7 loopback requests: 6 normal requests at indices 0, 1, 2, 4, 5, and 6, plus one auxiliary suggestion request at index 3. The driver exited 143 because the owner intentionally sent SIGTERM after the second handoff; that is process termination, not a model request. The fixture verified two Stop pauses and one fresh clear, exact reseed and clear proof, unchanged sentinel, allowed fresh-stage worklist edit, and boundary denial with no fake post-tool event. The denial returned `permissionDecision: deny` and the reason to end the turn and wait for Stop plus a fresh `/clear` session.
 
 ## Evidence
 

@@ -4,7 +4,43 @@
   "status": "pass_provider_free_fixture",
   "acceptance": true,
   "provider_contact": false,
-  "identity": {"code_commit":"07b0382","runtime_version":"v49","runtime_sha256":"d9eb69b2f45a549778ef60cc2ee5c83817394468f52d076504b6ee95285d0c9e","helper_sha256":"0d6aacbb7ed0d5e2f665113154a79122b5e9f9072cc0ec721bc436c1da44c0ee"},
-  "result": {"passed":true,"request_count":7,"normal_request_indices":[0,1,2,4,5,6],"driver_exit":143,"intentional_fixture_stop":true,"stop_clear_cycles":2,"sentinel_unchanged":true,"fresh_stage_worklist_edit_allowed":true,"denied_tool_has_no_post":true},
-  "evidence": {"remote_root":"/home/claude-developer/hack/sherlock-v49-boundary-fixture-20260906-r1","local_mirror":"/Users/a/hack/sherlock-v49-boundary-fixture-20260906-r1","retained_file_count":174,"inventory_equal":true,"inventory_policy":"exclude directories named exactly home or updates","artifact_directory":"artifacts/2026-09-06-v49-boundary-fixture-r1/","stdout_sha256":"91f2cf14f4ed888ae3b94f0ed9a18213828da5b3a3a53d45c6346a44aee3c5cd","stderr_sha256":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"}
+  "identity": {
+    "code_commit": "07b0382",
+    "runtime_version": "v49",
+    "runtime_sha256": "d9eb69b2f45a549778ef60cc2ee5c83817394468f52d076504b6ee95285d0c9e",
+    "helper_sha256": "0d6aacbb7ed0d5e2f665113154a79122b5e9f9072cc0ec721bc436c1da44c0ee"
+  },
+  "result": {
+    "passed": true,
+    "request_count": 7,
+    "normal_request_indices": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6
+    ],
+    "driver_exit": 143,
+    "intentional_fixture_stop": false,
+    "sentinel_unchanged": true,
+    "fresh_stage_worklist_edit_allowed": true,
+    "denied_tool_has_no_post": true,
+    "auxiliary_suggestion_indices": [
+      3
+    ],
+    "stop_pauses": 2,
+    "clear_sessions": 1,
+    "owner_sigterm": true
+  },
+  "evidence": {
+    "remote_root": "/home/claude-developer/hack/sherlock-v49-boundary-fixture-20260906-r1",
+    "local_mirror": "/Users/a/hack/sherlock-v49-boundary-fixture-20260906-r1",
+    "retained_file_count": 174,
+    "inventory_equal": true,
+    "inventory_policy": "exclude directories named exactly home or updates",
+    "artifact_directory": "artifacts/2026-09-06-v49-boundary-fixture-r1/",
+    "stdout_sha256": "91f2cf14f4ed888ae3b94f0ed9a18213828da5b3a3a53d45c6346a44aee3c5cd",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  }
 }
