@@ -738,6 +738,24 @@ class LifecycleSupervisorTest(unittest.TestCase):
         self.assertEqual(base64.b64decode(receipt["input_base64"]), raw)
         self.assertEqual(receipt["output"], output)
 
+    def test_pre_boundary_gate_output_is_the_recorded_pre_receipt(self):
+        gate = self.temp / "boundary-gate.py"
+        gate.write_text("import json,sys\njson.load(sys.stdin)\nprint(json.dumps({\"continue\":False,\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"boundary\"},\"stopReason\":\"boundary\"}))\n")
+        output = LIFECYCLE.handle_hook(
+            self.observer, self.workspace, self.nonce, self.boot,
+            json.dumps({"hook_event_name": "PreToolUse", "session_id": "s",
+                        "tool_use_id": "t", "tool_call_id": "t",
+                        "tool_name": "write_file", "tool_input": {}}).encode(),
+            boundary_gate=str(gate.resolve()))
+        self.assertFalse(output["continue"])
+        receipt = json.loads((self.observer / "hook-events.jsonl").read_text().splitlines()[-1])
+        self.assertEqual(receipt["output"], output)
+        pairs = json.loads((self.observer / "pairs.json").read_text())
+        self.assertEqual(pairs["pairs"]["s\x1ft"]["pre"]["output"], output)
+        complete, pending = LIFECYCLE._completed_tool_ids(pairs)
+        self.assertEqual(complete, {"t"})
+        self.assertEqual(pending, [])
+
     def test_changing_file_is_rejected_without_silent_retry(self):
         path = self.workspace / "race.tsv"
         path.write_bytes(b"before\n")

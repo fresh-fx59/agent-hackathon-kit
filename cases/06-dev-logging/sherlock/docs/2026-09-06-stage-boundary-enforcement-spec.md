@@ -141,3 +141,18 @@ snapshot before actual Qwen execution; any later runtime change needs v50.
 
 The four original review points remain preserved; these are explicit scope and
 acceptance corrections, not a claim that pre-hooks cancel admitted operations.
+
+- 2026-09-06T15:26Z — Root review of candidate wrapper found two required
+  continuation checks before freeze: consumed receipts must contain valid Stop
+  identity/hash; a fresh session's legitimate worklist edits must not be rejected
+  against the previous stage's live seals. Pending claims still require current
+  seals. Worker is adding explicit consumed-proof validation and progression tests.
+  Gate subprocess stdout/stderr/exit must remain available even on malformed output.
+- 2026-09-06T15:30Z — Installed-Qwen fixture now also edits the worklist in
+  the fresh session before requesting its next handoff, exercising legitimate
+  progression across mutable seals. Syntax compile passes; actual runtime run
+  awaits reviewed immutable registration. Five current boundary unit cases pass.
+- 2026-09-06T15:28:03.866231+00:00 — Timestamp correction: the preceding
+  fixture entry labelled15:30Z used an estimated clock time and was written before
+  this verified timestamp. Its compile/test results are real;15:30 is not an
+  execution timestamp and must not be used for duration calculations.

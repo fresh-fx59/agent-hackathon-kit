@@ -1701,6 +1701,9 @@ mkdir -p "$W/.qwen"
 EMIT_ARGS=""
 if [ "$PACKAGE_VERSION" != "none" ]; then
   EMIT_ARGS="$EMIT_ARGS --skill-directory $(dirname "$ARM_HOME")"
+  if [ -f "$PACKAGE_PATH/tools/boundarycheck.py" ]; then
+    EMIT_ARGS="$EMIT_ARGS --boundary-check"
+  fi
 fi
 if [ "${SHERLOCK_ALLOW_SUBAGENT:-0}" != "1" ]; then
   EMIT_ARGS="$EMIT_ARGS --exclude-tool agent"

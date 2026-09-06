@@ -207,7 +207,7 @@ def profile(window=GATE, max_tokens=MAX_TOKENS, skill_directory=None):  # noqa: 
 
 def run_settings(window, max_tokens, session_token_limit=None, timeout_ms=None,
                  max_retries=None, skill_directory=None, disabled_names=(),
-                 exclude_tools=(), auto_compact=True):
+                 exclude_tools=(), auto_compact=True, boundary_check=False):
     """The COMPLETE settings file a run writes — the profile plus lane details.
 
     `profile()` is what verify-bundle proves against the installed target. Until
@@ -252,6 +252,11 @@ def run_settings(window, max_tokens, session_token_limit=None, timeout_ms=None,
             "type": "command",
             "command": 'python3 "$QWEN_SKILL_ROOT/tools/stopcheck.py"',
         }]}]}
+        if boundary_check:
+            row["hooks"]["PreToolUse"] = [{"matcher": "*", "hooks": [{
+                "type": "command",
+                "command": 'python3 "$QWEN_SKILL_ROOT/tools/boundarycheck.py"',
+            }]}]
     # PIN THE BINARY FOR THE LIFE OF THE RUN. qwen-code 0.22.0 checks npm for
     # a newer version at TUI startup and STAGES it for the next launch: a
     # throwaway probe on 2026-09-02 printed «Update successful! The new
@@ -674,6 +679,8 @@ def main():
                     help="emit-run: model.generationConfig.maxRetries")
     ap.add_argument("--exclude-tool", action="append", default=[],
                     help="emit-run: also exclude this tool NAME (repeatable)")
+    ap.add_argument("--boundary-check", action="store_true",
+                    help="emit the v49 portable PreToolUse boundary wrapper")
     ap.add_argument("--no-auto-compact", action="store_true",
                     help="emit-run: push context.autoCompactThreshold to the "
                          "least-reachable legal value (0.99); the driver owns "
@@ -704,7 +711,7 @@ def main():
                 window, args.max_tokens, args.session_token_limit,
                 args.timeout, args.max_retries, args.skill_directory,
                 args.disable_skill, args.exclude_tool,
-                not args.no_auto_compact)
+                not args.no_auto_compact, args.boundary_check)
         except ValueError as exc:
             sys.stderr.write("✗ %s\n" % exc)
             return 1

@@ -983,6 +983,67 @@ def _hook_output(phase, allowed, reason=None):
     return row
 
 
+def _record_boundary_gate(observer, raw_input, path, completed=None, error=None, valid=False):
+    """Keep the gate exchange durable; command stdout never reaches the model twice."""
+    row = {"schema": SCHEMA, "input_sha256": sha256(raw_input),
+           "gate_path": str(path), "gate_sha256": None,
+           "exit_code": None, "stdout_base64": None, "stderr_base64": None,
+           "valid_output": valid, "error": error, "observed_at": _wall_now(),
+           "monotonic_ns": time.monotonic_ns()}
+    try:
+        row["gate_sha256"] = sha256(_read_regular(path, MAX_HOOK_INPUT_BYTES))
+    except (LifecycleFault, OSError, ValueError):
+        pass
+    if completed is not None:
+        row.update(exit_code=completed.returncode,
+                   stdout_base64=base64.b64encode(completed.stdout).decode("ascii"),
+                   stderr_base64=base64.b64encode(completed.stderr).decode("ascii"))
+    _append(Path(observer) / "boundary-gate-events.jsonl", row)
+
+
+def _boundary_gate_output(observer, boundary_gate, raw_input):
+    """Run one launcher-selected PreToolUse gate and retain its exact decision."""
+    path = Path(boundary_gate)
+    completed = None
+    try:
+        st = os.lstat(path)
+        if (not path.is_absolute() or stat.S_ISLNK(st.st_mode)
+                or not stat.S_ISREG(st.st_mode) or path.resolve(strict=True) != path):
+            raise ValueError("unsafe path")
+        completed = subprocess.run(
+            [sys.executable, str(path)], input=raw_input, stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE, timeout=10, check=False)
+    except (OSError, ValueError, subprocess.TimeoutExpired) as exc:
+        _record_boundary_gate(observer, raw_input, path, completed, type(exc).__name__)
+        raise LifecycleFault("BOUNDARY_GATE_FAILED", type(exc).__name__) from exc
+    if completed.returncode != 0:
+        _record_boundary_gate(observer, raw_input, path, completed, "exit %d" % completed.returncode)
+        raise LifecycleFault("BOUNDARY_GATE_FAILED", "exit %d" % completed.returncode)
+    try:
+        output = _strict_json(completed.stdout)
+        if not isinstance(output, dict):
+            raise ValueError("non-object output")
+        specific = output.get("hookSpecificOutput")
+        allowed = output.get("continue")
+        if (set(output) - {"continue", "hookSpecificOutput", "stopReason"}
+                or type(allowed) is not bool or not isinstance(specific, dict)
+                or specific.get("hookEventName") != "PreToolUse"):
+            raise ValueError("shape")
+        if allowed:
+            if set(specific) != {"hookEventName"} or "stopReason" in output:
+                raise ValueError("allow shape")
+        elif (set(specific) != {"hookEventName", "permissionDecision", "permissionDecisionReason"}
+              or specific.get("permissionDecision") != "deny"
+              or not isinstance(specific.get("permissionDecisionReason"), str)
+              or output.get("stopReason") != specific["permissionDecisionReason"]):
+            raise ValueError("deny shape")
+    except (LifecycleFault, ValueError, TypeError) as exc:
+        _record_boundary_gate(observer, raw_input, path, completed, "invalid output: %s" % type(exc).__name__)
+        raise LifecycleFault("BOUNDARY_GATE_FAILED", "invalid output") from exc
+    _record_boundary_gate(observer, raw_input, path, completed, valid=True)
+    return output
+
+
 def _hook_key(event):
     session = event.get("session_id")
     tool = event.get("tool_use_id")
@@ -1287,7 +1348,7 @@ def _handle_post_tool_batch(observer, run_nonce, boot_id, event, raw_input):
         return output
 
 
-def handle_hook(observer, workspace, run_nonce, boot_id, raw_input):
+def handle_hook(observer, workspace, run_nonce, boot_id, raw_input, *, boundary_gate=None):
     observer = Path(observer)
     phase = "Unknown"
     try:
@@ -1299,6 +1360,8 @@ def handle_hook(observer, workspace, run_nonce, boot_id, raw_input):
                          "PostToolBatch", "SubagentStart", "SubagentStop",
                          "SessionStart", "UserPromptSubmit"):
             raise LifecycleFault("INVALID_HOOK_INPUT", "event phase")
+        if boundary_gate is not None and phase != "PreToolUse":
+            raise LifecycleFault("BOUNDARY_GATE_FAILED", "non-PreToolUse event")
         if phase == "SessionStart":
             return _handle_session_start(
                 observer, workspace, run_nonce, boot_id, event, raw_input)
@@ -1350,7 +1413,8 @@ def handle_hook(observer, workspace, run_nonce, boot_id, raw_input):
                 "input_base64": base64.b64encode(raw_input).decode("ascii"),
                 "observed_at": _wall_now(), "monotonic_ns": time.monotonic_ns()})
             snapshots = _snapshot_required(observer, workspace, phase, key)
-            output = _hook_output(phase, True)
+            output = (_boundary_gate_output(observer, boundary_gate, raw_input)
+                      if boundary_gate is not None else _hook_output(phase, True))
             sequence_path = observer / "hook-events.jsonl"
             sequence = 0
             if sequence_path.exists():
@@ -1588,6 +1652,7 @@ def _parser():
     hook = sub.add_parser("hook")
     hook.add_argument("--observer-dir", required=True); hook.add_argument("--workspace", required=True)
     hook.add_argument("--nonce", required=True); hook.add_argument("--boot-id", default=None)
+    hook.add_argument("--boundary-gate", default=None)
     guardian = sub.add_parser("guardian")
     guardian.add_argument("--observer-dir", required=True); guardian.add_argument("--nonce", required=True)
     guardian.add_argument("--boot-id", default=None); guardian.add_argument("--controller-pid", required=True, type=int)
@@ -1618,7 +1683,8 @@ def main(argv=None):
             result = check_dispatch(args.observer_dir, args.nonce, boot)
         elif args.command == "hook":
             raw = sys.stdin.buffer.read(MAX_HOOK_INPUT_BYTES + 1)
-            result = handle_hook(args.observer_dir, args.workspace, args.nonce, boot, raw)
+            result = handle_hook(args.observer_dir, args.workspace, args.nonce, boot, raw,
+                                 boundary_gate=args.boundary_gate)
         else:
             return run_guardian(args.observer_dir, args.nonce, boot,
                                 args.controller_pid, args.controller_start_ticks,

@@ -705,6 +705,8 @@ def prepare(args, secret_reader=None):
                                        *(["--timeout", "600000"] if monitored else []),
                                        "--skill-directory", ("../skill-catalogue" if monitored else
                                                              str(root / "probe-work" / "skill-catalogue")),
+                                       *([] if monitored or not (runtime_package.path / "tools" / "boundarycheck.py").is_file()
+                                         else ["--boundary-check"]),
                                        *mute_args],
                                       text=True, capture_output=True, timeout=30)
         if settings_run.returncode:
@@ -714,6 +716,7 @@ def prepare(args, secret_reader=None):
             settings_row = _strict_json(settings_bytes)
             settings_row.setdefault("model", {})["maxSessionTurns"] = -1
             settings_row["model"]["maxWallTimeSeconds"] = -1
+            boundary_gate = runtime_package.path / "tools" / "boundarycheck.py"
             hook_command = (
                 'python3 "%s" hook --observer-dir "$SHERLOCK_OBSERVER_DIR" '
                 '--workspace "$PWD" --nonce "$SHERLOCK_RUN_NONCE" '
@@ -725,8 +728,11 @@ def prepare(args, secret_reader=None):
                 if event in hooks:
                     raise ProbeFailure("TARGET_PROBE_PREPARE",
                                        "lifecycle hook collision")
+                command = hook_command
+                if event == "PreToolUse" and boundary_gate.is_file():
+                    command += ' --boundary-gate "%s"' % boundary_gate.resolve()
                 hooks[event] = [{"matcher": "*", "hooks": [{
-                    "type": "command", "command": hook_command,
+                    "type": "command", "command": command,
                     "timeout": 10000}]}]
             settings_bytes = canonical(settings_row) + b"\n"
         profile = _profile(args, sha256(settings_bytes), runtime_package)

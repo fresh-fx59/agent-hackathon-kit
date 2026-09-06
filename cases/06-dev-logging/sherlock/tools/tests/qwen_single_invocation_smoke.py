@@ -41,6 +41,7 @@ def main():
     ap = argparse.ArgumentParser()
     for arg in ('output', 'qwen', 'helper', 'driver', 'skill'):
         ap.add_argument('--'+arg, type=Path, required=True)
+    ap.add_argument('--exercise-boundary', action='store_true')
     a = ap.parse_args()
     root=a.output.resolve(); root.mkdir(mode=0o700,parents=True)
     workspace=root/'workspace'; workspace.mkdir(); work=workspace/'work'
@@ -77,12 +78,19 @@ def main():
     stop_hook['command']=shlex.join([sys.executable,str(bridge),str(rawhooks),'Stop','bash','-c',original_stop_command])
     for event in ('SessionStart','UserPromptSubmit','PreToolUse','PostToolUse','PostToolUseFailure','PostToolBatch'):
         target=[sys.executable,str(a.helper.resolve()),'hook','--observer-dir',str(observer),'--workspace',str(workspace),'--nonce',nonce,'--boot-id',boot]
+        if event == 'PreToolUse' and a.exercise_boundary:
+            gate=skill/'tools/boundarycheck.py'
+            if not gate.is_file(): raise AssertionError('boundary fixture requires portable gate')
+            target += ['--boundary-gate',str(gate)]
         command=shlex.join([sys.executable,str(bridge),str(rawhooks),event]+target)
         hooks[event]=[{'hooks':[{'type':'command','command':command,'timeout':60000}]}]
     qdir=workspace/'.qwen'; qdir.mkdir()
     (qdir/'settings.json').write_text(json.dumps({'hooks':hooks,'skills':{'directories':[str(catalog)]}})+'\n')
     task='SYNTHETIC-START-ONLY: run the toy triage handoff and end the turn.\n'
     reseed='SYNTHETIC-RESEED-ONLY: run a partial draft handoff and end the turn.'
+    sentinel=workspace/'forbidden-after-handoff.txt'
+    second_handoff=4 if a.exercise_boundary else 2
+    first_turn_requests=3 if a.exercise_boundary else 2
     normal_requests=[]
     requests=[]; provider_events=[]; errors=[]; inflight={}; lock=threading.Lock()
     def update_inflight(index, add):
@@ -108,7 +116,7 @@ def main():
                     delta={'role':'assistant','content':''}; finish='stop'
                 else:
                     with lock: ordinal=len(normal_requests);normal_requests.append(index)
-                    if ordinal in (0,2):
+                    if ordinal in (0,second_handoff):
                         expected=task.rstrip('\n') if ordinal==0 else reseed
                         visible=json.dumps(body['messages'],ensure_ascii=False)
                         if expected not in visible: raise AssertionError('contextless skill request before task/reseed')
@@ -117,7 +125,21 @@ def main():
                         tool_id='call_pause_%d'%ordinal
                         delta={'role':'assistant','tool_calls':[{'index':0,'id':tool_id,'type':'function','function':{'name':'run_shell_command','arguments':json.dumps({'command':command})}}]}; finish='tool_calls'
                         helper.register_expected_tools(observer,nonce,boot,'fixture-response-%d'%index,[tool_id])
-                    elif ordinal in (1,3):
+                    elif a.exercise_boundary and ordinal == 1:
+                        command=shlex.join([sys.executable,'-c',
+                            'from pathlib import Path; Path('+repr(str(sentinel))+').write_text("forbidden")'])
+                        tool_id='call_forbidden_after_handoff'
+                        delta={'role':'assistant','tool_calls':[{'index':0,'id':tool_id,'type':'function','function':{'name':'run_shell_command','arguments':json.dumps({'command':command})}}]}; finish='tool_calls'
+                        helper.register_expected_tools(observer,nonce,boot,'fixture-response-%d'%index,[tool_id])
+                    elif a.exercise_boundary and ordinal == 3:
+                        visible=json.dumps(body['messages'],ensure_ascii=False)
+                        if reseed not in visible: raise AssertionError('fresh task missing before next-stage edit')
+                        command=shlex.join([sys.executable,'-c',
+                            'from pathlib import Path; p=Path('+repr(str(work/'worklist.tsv'))+'); p.write_text(p.read_text()+"# fresh-stage edit\\n")'])
+                        tool_id='call_fresh_stage_edit'
+                        delta={'role':'assistant','tool_calls':[{'index':0,'id':tool_id,'type':'function','function':{'name':'run_shell_command','arguments':json.dumps({'command':command})}}]}; finish='tool_calls'
+                        helper.register_expected_tools(observer,nonce,boot,'fixture-response-%d'%index,[tool_id])
+                    elif ordinal in (first_turn_requests-1,second_handoff+1):
                         time.sleep(3)
                         delta={'role':'assistant','content':(work/'handoff.txt').read_text()}; finish='stop'
                     else: raise AssertionError('unexpected investigation request %d'%ordinal)
@@ -189,14 +211,33 @@ def main():
         first_stops=[s for s in stops if s['input'].get('session_id')==prompts[0]['session_id']]
         if not first_stops or any(s['completed_at_ns']>=clear_ns for s in first_stops):
             raise AssertionError('first Stop did not complete before clear')
-        initial_responses=[p for p in provider_events if p['index'] in normal_requests[:2]]
-        if len(initial_responses)!=2 or any(p['completed_at_ns']>=clear_ns for p in initial_responses):
+        initial_responses=[p for p in provider_events if p['index'] in normal_requests[:first_turn_requests]]
+        if len(initial_responses)!=first_turn_requests or any(p['completed_at_ns']>=clear_ns for p in initial_responses):
             raise AssertionError('initial provider completion did not precede clear')
         if not (workspace/'.sherlock/active.json').is_file():raise AssertionError('pause retired marker')
         pairs=json.loads((observer/'pairs.json').read_text())['pairs']
-        if any(not row.get('post') for row in pairs.values()):raise AssertionError('tool completion missing')
+        completed,pending=helper._completed_tool_ids({'schema':helper.SCHEMA,'pairs':pairs})
+        if pending or len(completed)!=len(pairs):raise AssertionError('tool completion missing')
+        if a.exercise_boundary:
+            if sentinel.exists():raise AssertionError('denied tool changed the workspace')
+            denied=[row for row in pairs.values() if row.get('tool_call_id')=='call_forbidden_after_handoff']
+            if len(denied)!=1 or denied[0].get('post') is not None:
+                raise AssertionError('denial needs one real pre pair and no invented post')
+            denial=denied[0]['pre']['output']
+            if denial.get('continue') is not False or denial.get('hookSpecificOutput',{}).get('permissionDecision')!='deny':
+                raise AssertionError('runtime denial not captured exactly')
+            batches=rows('PostToolBatch')
+            calls=[call for _,batch in batches for call in batch.get('tool_calls',[])
+                   if call.get('tool_call_id')=='call_forbidden_after_handoff']
+            if (len(calls)!=1 or calls[0].get('status')!='error'
+                    or calls[0].get('tool_response',{}).get('error_type')!='execution_denied'
+                    or calls[0].get('tool_response',{}).get('execution_status')!='not_started'):
+                raise AssertionError('Qwen terminal denial absent from raw tool batch')
+            if '# fresh-stage edit' not in (work/'worklist.tsv').read_text():
+                raise AssertionError('fresh-stage edit did not execute')
+            result.update(fresh_stage_edit_allowed=True,boundary_denial=denial,sentinel_unchanged=True,denied_tool_has_no_post=True)
         if len(provider_events)!=len(requests):raise AssertionError('provider completion missing')
-        if len(normal_requests)!=4:raise AssertionError('unexpected normal request count')
+        if len(normal_requests)!=second_handoff+2:raise AssertionError('unexpected normal request count')
         result.update(passed=True,submitted_prompts=prompts,stops=stops,marker_preserved=True,clear_sessions=clears)
     except BaseException as exc:result.update(passed=False,error=repr(exc))
     finally:
