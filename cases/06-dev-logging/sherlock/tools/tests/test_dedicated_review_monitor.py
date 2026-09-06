@@ -113,6 +113,16 @@ class DedicatedReviewMonitorTest(unittest.TestCase):
             MONITOR.parse_decision(b"not-json", digest, self.nonce, None, None,
                                    "claude-sonnet-5")
 
+    def test_pinned_command_allows_empty_disable_values_but_not_empty_executable(self):
+        pinned = ROOT / "docs/run-reports/artifacts/2026-09-06-v50-launch-preparation-r2/review-command-sonnet-low.json"
+        argv, _, _ = MONITOR.load_command(pinned)
+        self.assertEqual(argv[argv.index("--tools") + 1], "")
+        self.assertEqual(argv[argv.index("--setting-sources") + 1], "")
+        for invalid in ([], ["", "--model", "sonnet"], ["claude", None]):
+            self.write_json(self.command, {"argv": invalid})
+            with self.assertRaisesRegex(MONITOR.MonitorError, "review command argv"):
+                MONITOR.load_command(self.command)
+
     def test_prepare_watch_does_not_create_fresh_run_root_and_locks_by_sibling(self):
         fresh = Path(self.temp.name) / "fresh-run"
         monitor = fresh.with_name(fresh.name + ".monitor")

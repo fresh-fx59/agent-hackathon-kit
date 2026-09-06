@@ -1,0 +1,34 @@
+{
+  "schema": 1,
+  "report": "2026-09-06-v50-harness-r4.md",
+  "status": "rejected_initial_observation_missing",
+  "acceptance": false,
+  "runtime": {
+    "version": "v50",
+    "package_sha256": "0f95b5a59dcc41500168d3f2dc6df3e237b8c68e9d3666bf181716983d902ee7",
+    "arm_commit": "257814918401c5f072d3e65a93294b3991f39dac",
+    "lifecycle_helper_sha256": "235d2e9a11a7a98b3390977f906d3c82315341ded3399b59fbfae66dff41b907"
+  },
+  "terminal": {
+    "fault": "INITIAL_OBSERVATION_MISSING",
+    "fault_at": "2026-09-06T18:27:21.412578Z",
+    "receipt_at": "2026-09-06T18:27:21.428338Z",
+    "expected_tools": 0,
+    "completed_tools": 0,
+    "root_boundary_count": 0,
+    "session_start_count": 0,
+    "subagent_count": 0,
+    "deepseek_requests": 0
+  },
+  "cause": {
+    "failure": "monitor command parser rejected empty --tools and --setting-sources values",
+    "runtime_or_model_fault": false,
+    "acceptance": "not_reached"
+  },
+  "evidence": {
+    "run_tag": "run-20260906T182532Z-32dcc71d33fc",
+    "run_nonce": "db81b491ddaba03228148f9ab92c0757",
+    "artifact_directory": "artifacts/2026-09-06-v50-harness-subscription-r4-failed/",
+    "provider_free": true
+  }
+}

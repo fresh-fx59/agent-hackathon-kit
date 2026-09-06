@@ -431,7 +431,8 @@ def load_command(path):
     raw, _ = read_regular(path)
     row = strict_object(raw)
     argv = row.get("argv")
-    if not isinstance(argv, list) or not argv or any(not isinstance(item, str) or not item for item in argv):
+    if (not isinstance(argv, list) or not argv or not isinstance(argv[0], str) or not argv[0]
+            or any(not isinstance(item, str) for item in argv[1:])):
         raise MonitorError("review command argv")
     return argv, sha256(raw), raw
 
