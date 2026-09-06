@@ -1,0 +1,17 @@
+{
+  "schema": 1,
+  "provider": "loopback-only",
+  "remote_root": "/tmp/qwen-nested-lifecycle-smoke-20260906-r3",
+  "local_mirror": "/Users/a/hack/qwen-nested-lifecycle-smoke-20260906-r3",
+  "qwen_sha256": "68cb29eb7ccc936d78ece5564ef55cae41a55b630e6657dc417c1f2e561cf4c9",
+  "lifecycle_helper_sha256": "f2b6d04eceec5bdf52ab65cae3d334893a76fa5520c35af8fd7276e701d966c1",
+  "auditor_sha256": "9c201c567e7deec53780ff7228a0d12df82c71e06b1ac3fb2cec4d02c1298bec",
+  "inventory": {"regular_file_count": 373, "sha256": "8ebdd33a11cf4ceb19619b5a3ff050fd0286a7f7b06af86831a0f9e2b70a5c29"},
+  "cases": {
+    "normal": {"exit_code": 0, "requests": 4, "successful_responses": 4, "fault": null, "guardian_alive_at_client_completion": true},
+    "capped": {"exit_code": 0, "requests": 3, "successful_responses": 3, "fault": null, "guardian_alive_at_client_completion": true},
+    "missing-stop": {"exit_code": -15, "requests": 3, "successful_responses": 3, "fault": "SUBAGENT_STOP_MISSING"},
+    "missing-parent-post": {"exit_code": -15, "requests": 3, "successful_responses": 3, "fault": "HOOK_PAIR_MISSING"},
+    "missing-inner-batch": {"exit_code": -15, "requests": 3, "successful_responses": 2, "fault": "EXPECTED_TOOL_BATCH_MISSING", "dispatch_index": 2}
+  }
+}
