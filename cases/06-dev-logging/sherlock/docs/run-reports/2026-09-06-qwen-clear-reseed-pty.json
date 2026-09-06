@@ -1,0 +1,18 @@
+{
+  "excluded_remote_cache_inventory_sha256": "591c3be194d8976da343b9acc87fd721175e68a78567f3269901d81a3c814986",
+  "final_attempt": "r6",
+  "kind": "installed-qwen-clear-reseed-source-proof",
+  "local_selected_artifact_root": "/Users/a/hack/qwen-clear-reseed-pty-20260906-source-evidence",
+  "passed": true,
+  "post_clear_session_id": "dc075482-7c88-459b-894a-3b87bea11055",
+  "pre_clear_session_id": "8b040acb-8366-4c5a-9e15-ec2f5d1cfe23",
+  "provider": "loopback-only",
+  "qwen_cli_sha256": "68cb29eb7ccc936d78ece5564ef55cae41a55b630e6657dc417c1f2e561cf4c9",
+  "remote_root": "/tmp/qwen-clear-reseed-pty-20260906-r6",
+  "request_count_after_cleanup": 6,
+  "request_count_at_reseed_proof": 5,
+  "reseed": "RESEED: use the toy Sherlock skill",
+  "schema": 1,
+  "selected_artifact_files": 1060,
+  "selected_artifact_inventory_sha256": "bdd7be7b00453f9b15cab521b20ada4f0c8bbf923fa50c20753af78686c609ce"
+}
