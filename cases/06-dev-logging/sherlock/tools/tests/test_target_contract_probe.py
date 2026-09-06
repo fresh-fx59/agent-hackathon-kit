@@ -225,7 +225,13 @@ class TargetContractProbeTest(unittest.TestCase):
             self._publish_initial_observation(root, outer)
             deadline = time.monotonic() + 15
             while time.monotonic() < deadline and not pid_path.exists(): time.sleep(0.05)
-            self.assertTrue(pid_path.exists(), "real runner never reached stubborn Qwen")
+            diagnostics = {}
+            if not pid_path.exists():
+                for path in root.rglob("*"):
+                    if path.is_file() and path.name in (
+                            "err.txt", "interactive-driver.log", "probe-result.json"):
+                        diagnostics[str(path.relative_to(root))] = path.read_text(errors="replace")[-6000:]
+            self.assertTrue(pid_path.exists(), ("real runner never reached stubborn Qwen", diagnostics))
             qwen_pid = int(pid_path.read_text())
             outer.send_signal(signal.SIGTERM)
             outer.communicate(timeout=25)
