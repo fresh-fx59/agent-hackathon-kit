@@ -1,0 +1,2 @@
+tools/tests/test_aggregate_citation_v39.py:661: SyntaxWarning: invalid escape sequence '\s'
+  """«producer and grader cannot drift» was false for any path with a space.

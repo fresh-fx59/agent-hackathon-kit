@@ -1,0 +1,34 @@
+{
+  "schema": 1,
+  "status": "review_only",
+  "publication": false,
+  "direct_probes": {
+    "haiku": {
+      "elapsed_s": 18.040168568957597,
+      "api_ms": 17233,
+      "decision": "continue",
+      "exit_code": 0,
+      "list_price_usd": 0.042446
+    },
+    "sonnet": {
+      "elapsed_s": 6.928299456019886,
+      "api_ms": 5842,
+      "decision": "stop",
+      "exit_code": 0,
+      "cli_aggregate_usd": 0.0717298,
+      "primary_model_list_price_usd": 0.0630478
+    }
+  },
+  "historical_replay": {
+    "snapshot_sha256": "b9ec136b26983f6113b0b8f0784fe4ffaa63ebe52288c4c1a475991d60f905b6",
+    "snapshot_bytes": 6154,
+    "decision": "continue",
+    "api_ms": 5595,
+    "exit_code": 0,
+    "contemporary_observation": false,
+    "primary_sonnet_list_price_usd": 0.0423938,
+    "auxiliary_haiku_list_price_usd": 0.003538,
+    "cli_aggregate_usd": 0.0459318
+  },
+  "invoice_claim": false
+}

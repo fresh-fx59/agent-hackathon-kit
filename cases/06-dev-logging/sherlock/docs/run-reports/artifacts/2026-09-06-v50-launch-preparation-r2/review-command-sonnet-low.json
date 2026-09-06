@@ -1,0 +1,1 @@
+{"argv":["/home/claude-developer/.local/bin/claude","-p","--model","sonnet","--effort","low","--tools","","--setting-sources","","--no-session-persistence","--output-format","json"]}

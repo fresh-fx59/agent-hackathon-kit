@@ -1,0 +1,44 @@
+{
+  "schema": 1,
+  "report": "2026-09-06-v50-harness-r3",
+  "status": "rejected_observation_stale",
+  "acceptance": false,
+  "deepseek_requests": 0,
+  "run_tag": "run-20260906T165936Z-fc4e0e5b1e36",
+  "observer_nonce": "20ae159e17e783c4c2f53cb8e1004230",
+  "runtime": {
+    "skill_sha256": "0f95b5a59dcc41500168d3f2dc6df3e237b8c68e9d3666bf181716983d902ee7",
+    "lifecycle_helper_sha256": "861593a235903f6de92c53a0b27d9bde5888aaead2d06acf97f3c3529c0fc2cb"
+  },
+  "terminal": {
+    "reason": "OBSERVATION_STALE",
+    "fault_observed_at": "2026-09-06T17:07:22.408911Z",
+    "stale_detail_ns": 60240426881,
+    "controller_status": "BLOCKED",
+    "controller_observed_at": "2026-09-06T17:07:24.888Z",
+    "last_accepted_sequence": 7,
+    "last_accepted_at": "2026-09-06T17:06:22.167304Z",
+    "late_sequence": 8,
+    "late_sequence_at": "2026-09-06T17:12:07.766241Z",
+    "late_sequence_accepted": false
+  },
+  "model_progress": {
+    "upstream_records": 6,
+    "returned_model": "gpt-5.5",
+    "latest_completed_request": "34b10648b21247818c0869b120d424fc",
+    "latest_completed_at": "2026-09-06T17:07:16Z",
+    "expected_tools": 5,
+    "completed_tools": 4,
+    "completed_pairs": 4,
+    "attempts_charged": 7,
+    "request_bytes": 1212355
+  },
+  "inventory": {
+    "local_entries": 311,
+    "remote_entries": 311,
+    "equal": true,
+    "excluded_directory_names": ["home", "updates"],
+    "original_remote_untouched": true
+  },
+  "artifacts": "docs/run-reports/artifacts/2026-09-06-v50-harness-r3"
+}

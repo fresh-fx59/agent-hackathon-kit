@@ -1,0 +1,20 @@
+{
+  "elapsed_s": 6.928299456019886,
+  "exit_code": 0,
+  "argv": [
+    "claude",
+    "-p",
+    "--model",
+    "sonnet",
+    "--effort",
+    "low",
+    "--tools",
+    "",
+    "--setting-sources",
+    "",
+    "--no-session-persistence",
+    "--output-format",
+    "json"
+  ],
+  "publication": false
+}

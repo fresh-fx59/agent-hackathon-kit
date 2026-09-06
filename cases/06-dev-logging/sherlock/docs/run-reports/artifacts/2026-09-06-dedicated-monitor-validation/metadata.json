@@ -1,0 +1,65 @@
+{
+  "schema": 1,
+  "status": "offline_focused_results",
+  "live_run": false,
+  "results": [
+    {
+      "name": "test_dedicated_review_monitor",
+      "stdout_bytes": 0,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_bytes": 106,
+      "stderr_sha256": "dbfa86934050a2fac605977e4ef647fad928301d9d7e2142ea66b54e1ed74e9c"
+    },
+    {
+      "name": "test_lifecycle_supervisor",
+      "stdout_bytes": 0,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_bytes": 143,
+      "stderr_sha256": "94e5093b8dbbb564f255cc9de69d00c90d4ac49cee05e88ef5423851bb25ca95"
+    },
+    {
+      "name": "test_full_monitored_runner",
+      "stdout_bytes": 0,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_bytes": 113,
+      "stderr_sha256": "832a2716f9fd5e527024f50d2ae341b41c76bdd630c4d92e8e97074205039d28"
+    },
+    {
+      "name": "compileall",
+      "stdout_bytes": 0,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_bytes": 171,
+      "stderr_sha256": "35a733c758dbc0b879a280605da073ebb936d2f321c2bb05788b5d300bfa21d5"
+    },
+    {
+      "name": "diffcheck",
+      "stdout_bytes": 0,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_bytes": 225,
+      "stderr_sha256": "2a5b5a398c5aa17438a07ff379f27c678eda97db7dc2fcea321610d43431c8c7"
+    },
+    {
+      "name": "test_version_gate",
+      "stdout_bytes": 0,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_bytes": 111,
+      "stderr_sha256": "7865228f4564e32209f708751d55556480775f73287454c2d3043726ae1bfaf7"
+    },
+    {
+      "name": "git-diff-check",
+      "stdout_bytes": 0,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_bytes": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "exit_code": 0
+    },
+    {
+      "name": "version-gate-actual",
+      "stdout_bytes": 11,
+      "stdout_sha256": "f5dcb254e666bcbb732acb01c7deb68644ff75d944bd529c7aa77abee8aaea79",
+      "stderr_bytes": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "exit_code": 0
+    }
+  ]
+}

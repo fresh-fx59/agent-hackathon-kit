@@ -1,0 +1,19 @@
+{"at": "2026-09-06T16:49:32Z", "event": "started", "detail": "node /home/claude-developer/.local/lib/node_modules/@qwen-code/qwen-code/cli-entry.js --auth-type openai --model mock --approval-mode yolo"}
+{"at": "2026-09-06T16:49:42Z", "event": "typed", "detail": "/sherlock\n\nSYNTHETIC-START-ONLY: run the toy triage handoff and end the turn.\n"}
+{"at": "2026-09-06T16:49:42Z", "event": "skill_command_accepted", "detail": "attempt 1/3 — exact monitored invocation proof arrived during rejection probe"}
+{"at": "2026-09-06T16:49:49Z", "event": "stage_advanced", "detail": "draft"}
+{"at": "2026-09-06T16:49:49Z", "event": "progress", "detail": "draft — first boundary in this stage"}
+{"at": "2026-09-06T16:49:49Z", "event": "handoff_block_on_screen", "detail": "draft — closed triage, 516561 B on screen, 1 mark(s), witness latch"}
+{"at": "2026-09-06T16:50:02Z", "event": "typed", "detail": "/sherlock SYNTHETIC-RESEED-ONLY: run a partial draft handoff and end the turn."}
+{"at": "2026-09-06T16:50:03Z", "event": "skill_command_accepted", "detail": "attempt 1/3 — exact monitored invocation proof arrived during rejection probe"}
+{"at": "2026-09-06T16:50:03Z", "event": "reseeded", "detail": "draft"}
+{"at": "2026-09-06T16:50:03Z", "event": "clear_verified", "detail": "draft — exact SessionStart(clear) c5a7c840-f0c7-4c89-b935-fcaa5d7561c0 -> 0d17c728-d4f0-4f5b-8357-f845bb60f960 and exact combined root invocation (e67127882d27d8258b0b35caaa5ddf2b752c9b09c5d36703ea0da73a1e44d6d5)"}
+{"at": "2026-09-06T16:50:06Z", "event": "batch_boundary", "detail": "draft"}
+{"at": "2026-09-06T16:50:06Z", "event": "progress", "detail": "draft — a worklist seal changed"}
+{"at": "2026-09-06T16:50:06Z", "event": "handoff_block_on_screen", "detail": "draft — closed draft, 352377 B on screen, 3 mark(s), witness transcript"}
+{"at": "2026-09-06T16:50:06Z", "event": "waiting_for_monitored_idle", "detail": "/clear: provider request pending"}
+{"at": "2026-09-06T16:50:07Z", "event": "waiting_for_monitored_idle", "detail": "/clear: provider request pending"}
+{"at": "2026-09-06T16:50:08Z", "event": "waiting_for_monitored_idle", "detail": "/clear: provider request pending"}
+{"at": "2026-09-06T16:50:09Z", "event": "waiting_for_monitored_idle", "detail": "/clear: provider request pending"}
+{"at": "2026-09-06T16:50:09Z", "event": "waiting_for_monitored_idle", "detail": "/clear: Stop has not accepted the stage pause"}
+{"at": "2026-09-06T16:50:09Z", "event": "STOPPED", "detail": "owner sent SIGTERM; terminating the PTY process group"}

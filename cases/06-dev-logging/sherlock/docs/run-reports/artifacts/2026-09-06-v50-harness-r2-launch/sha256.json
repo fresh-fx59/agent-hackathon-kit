@@ -1,0 +1,8 @@
+{
+  "v50-launch-full-independent-r1.sh": "981d43e90c060104419f61de0cef73186d2cc96c5f23d761ec7869f02a369ea0",
+  "v50-launch-full-wine-r1.sh": "e3dfec8ef77d1d7cb6992c7b6b8406e5a3fb4f8364a4d56f9d30cbebb3b1f031",
+  "v50-launch-harness-r2.sh": "a4d5c16442fb45e31a498bd9b35197de962696aff8464f7acb6bc972ae22b616",
+  "v50-launch-target-independent-r1.sh": "1fa0afaefe0dd9b0a0ddf240c06f3446abe5e1fec71dd60a954c13c25d525faa",
+  "v50-launch-target-r1.sh": "f2f3eacec85c72ea8ea3d75193fce20ff3abd21cec02e0b10bda2584cd7fe915",
+  "v50-prepare-independent-r1.sh": "e940d725ba45b8d80fde43b8c02b0aa44d5a4b9d515fa80be5e7e3ee9e31de07"
+}

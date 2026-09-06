@@ -1,0 +1,33 @@
+{
+  "schema": 1,
+  "report": "2026-09-06-v50-boundary-fixture-r2",
+  "status": "passed_fixture",
+  "passed": true,
+  "provider": "loopback-only",
+  "provider_contact": false,
+  "runtime": {
+    "execution_commit": "46549d8",
+    "skill_sha256": "0f95b5a59dcc41500168d3f2dc6df3e237b8c68e9d3666bf181716983d902ee7",
+    "driver_sha256": "c31be32f3d52a59423ad40b157eb550ba097e89833e47339eecbf15516b436b0",
+    "helper_sha256": "861593a235903f6de92c53a0b27d9bde5888aaead2d06acf97f3c3529c0fc2cb"
+  },
+  "result": {
+    "request_count": 8,
+    "normal_request_indices": [0,1,2,5,6,7],
+    "auxiliary_suggestion_indices": [3,4],
+    "denied_tool_has_no_post": true,
+    "sentinel_unchanged": true,
+    "fresh_stage_edit_allowed": true,
+    "fresh_clear_proven": true,
+    "intentional_fixture_stop": true,
+    "driver_exit": 143
+  },
+  "inventory": {
+    "local_entries": 179,
+    "remote_entries": 179,
+    "equal": true,
+    "excluded_directory_names": ["home", "updates"],
+    "original_remote_untouched": true
+  },
+  "artifacts": "docs/run-reports/artifacts/2026-09-06-v50-boundary-fixture-r2"
+}
