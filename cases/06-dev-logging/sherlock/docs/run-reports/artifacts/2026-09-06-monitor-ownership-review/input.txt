@@ -1,3 +1,5 @@
+Critique this ready workflow clarification only. No tools or edits. Return PASS or concrete blocker in <=200 words. Key question: dedicated agent reads actual evidence and is sole signed observation writer across root context compaction, unchanged 60s freshness and all gates. This is not an automatic timer.
+
 # Scoped task: controlled-run evidence lifecycle and supervision
 
 ## Goal and boundary
@@ -146,5 +148,3 @@ capabilities, captures, failure permanence and acceptance gates remain unchanged
   check_dispatch independently enforces hook/tool integrity. No runtime or harness
   code changes required. Assigned monitor for fresh v48 r3:
   `/root/clear_continuation_fix`; root owns launch/admission and report decisions.
-
-- 2026-09-06 — Ready workflow critique via codex exec gpt-5.6-sol low: PASS; input18029/cached10624/output266 tokens. Exact input/output retained under docs/run-reports/artifacts/2026-09-06-monitor-ownership-review. No runtime change.
