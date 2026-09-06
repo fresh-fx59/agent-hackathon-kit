@@ -20,4 +20,14 @@ null IDs, and name that pending operation. `controller_status_age_seconds` is
 diagnostic: HEALTH_CHECKING can predate the permit window. This classification
 is not a completed request, tool, heartbeat, or acceptance. A supplied fault,
 receipt, terminal state, corrupt evidence, unsafe transition, stale identity
-timestamp, or future identity timestamp still requires `stop`.
+ timestamp, or future identity timestamp still requires `stop`.
+
+`expected_control_flow` is also monitor-derived. When it is exactly `fresh
+checkpoint absent; start at stage triage`, the captured admitted completed tool
+is the checkpoint helper's documented new-investigation branch: it used Qwen's
+registered workspace and found no checkpoint at that capture. Its exit code 1
+is control flow, not a tool fault; return `continue` if the other supplied
+evidence is live and coherent. Every other failed or denied tool, including a
+workspace-boundary rejection, corrupt existing checkpoint, fault, receipt,
+terminal state, corrupt evidence, unsafe transition, or stale identity still
+requires `stop`.

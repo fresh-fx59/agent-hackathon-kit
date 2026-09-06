@@ -16,6 +16,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import shlex
 import subprocess
 import sys
 import time
@@ -58,7 +59,8 @@ def timestamp_age(value, collected_at):
         return None
 
 
-def review_lifecycle(controller, identity, last_request, last_tool, collected_at):
+def review_lifecycle(controller, identity, last_request, last_tool, collected_at,
+                     expected_control_flow=None):
     """Expose the bounded initial-permit state without inventing activity."""
     updated_at = controller.get("updated_at")
     created_at = identity.get("created_at")
@@ -69,6 +71,7 @@ def review_lifecycle(controller, identity, last_request, last_tool, collected_at
                        and identity_age is not None and identity_age < INITIAL_PENDING_MAX_AGE_S)
     return {"controller_phase": controller["phase"], "initial_pending": initial_pending,
             "pending_operation": "awaiting initial controller permit" if initial_pending else None,
+            "expected_control_flow": expected_control_flow,
             "controller_status_updated_at": updated_at,
             "controller_status_age_seconds": status_age,
             "observer_identity_created_at": created_at,
@@ -382,6 +385,70 @@ def verify_snapshot_object_bindings(monitor_dir, snapshot):
             raise MonitorError("snapshot raw object digest")
 
 
+def fresh_checkpoint_resume_control_flow(captured, state_entries, pairs, last_tool):
+    """Recognize checkpoint's documented fresh-run branch from captured hook bytes."""
+    if not isinstance(last_tool, str) or not isinstance(pairs, dict):
+        return None
+    launch = None
+    for entry in state_entries:
+        if entry.get("path", "").endswith("/lifecycle-launch.json"):
+            try:
+                launch = strict_object(base64.b64decode(entry["data_base64"], validate=True))
+            except (KeyError, ValueError, binascii.Error):
+                return None
+            break
+    workspace = launch.get("workspace_dir") if isinstance(launch, dict) else None
+    if not isinstance(workspace, str) or not os.path.isabs(workspace):
+        return None
+    work = (Path(workspace) / "work").resolve()
+    if not work.is_dir() or (work / "checkpoint.json").exists():
+        return None
+    if any(entry.get("path", "").endswith("/workspace/work/checkpoint.json")
+           for entry in state_entries):
+        return None
+    matched_pair = next((pair for pair in pairs.get("pairs", {}).values()
+                         if isinstance(pair, dict) and pair.get("tool_call_id") == last_tool), None)
+    post = matched_pair.get("post") if isinstance(matched_pair, dict) else None
+    if (not isinstance(post, dict) or post.get("phase") != "PostToolUseFailure"
+            or not isinstance(post.get("output"), dict) or post["output"].get("continue") is not True):
+        return None
+    expected_message = ("no readable checkpoint.json in %s — this is a new investigation: "
+                        "start at stage triage" % work)
+    for entry in captured:
+        for event in entry.get("decoded_events", []):
+            if (not isinstance(event, dict) or event.get("phase") != "PostToolUseFailure"
+                    or event.get("tool_call_id") != last_tool
+                    or not isinstance(event.get("output"), dict)
+                    or event["output"].get("continue") is not True):
+                continue
+            source = event.get("decoded_input_json")
+            tool_input = source.get("tool_input") if isinstance(source, dict) else None
+            if (not isinstance(source, dict) or source.get("hook_event_name") != "PostToolUseFailure"
+                    or source.get("tool_name") != "run_shell_command"
+                    or source.get("execution_status") != "error" or not isinstance(tool_input, dict)
+                    or tool_input.get("directory") not in (None, "")):
+                continue
+            command, error = tool_input.get("command"), source.get("error")
+            if not isinstance(command, str) or not isinstance(error, str):
+                continue
+            try:
+                argv = shlex.split(command)
+            except ValueError:
+                continue
+            try:
+                checkpoint = next(index for index, token in enumerate(argv)
+                                  if Path(token).name == "checkpoint.py")
+            except StopIteration:
+                continue
+            expected_error = ("Command: %s\nDirectory: (root)\nOutput: ✗ %s\n"
+                              "Error: (none)\nExit Code: 1" % (command, expected_message))
+            if (argv[checkpoint + 1:] != ["resume", "--work", "./work"]
+                    or error != expected_error):
+                continue
+            return "fresh checkpoint absent; start at stage triage"
+    return None
+
+
 def collect_snapshot(run_root, observer, monitor_dir, state, *, capacity):
     """Read complete new dynamic evidence and retain identities for revalidation."""
     append_only, statics, trees = source_paths(run_root, observer)
@@ -463,12 +530,15 @@ def collect_snapshot(run_root, observer, monitor_dir, state, *, capacity):
     last_request = latest_request(request_delta, state.get("last_completed_request"))
     last_tool = latest_tool(pairs, state.get("last_completed_tool"))
     collected_at = dt.datetime.now(dt.timezone.utc)
+    expected_control_flow = fresh_checkpoint_resume_control_flow(
+        captured, state_entries, pairs, last_tool)
     snapshot = {"schema": SCHEMA, "run_nonce": observer_identity["run_nonce"],
                 "collected_at": collected_at.isoformat().replace("+00:00", "Z"),
                 "dynamic": captured, "state": state_entries,
                 "last_completed_request": last_request, "last_completed_tool": last_tool,
                 "review_lifecycle": review_lifecycle(
-                    controller, observer_identity, last_request, last_tool, collected_at),
+                    controller, observer_identity, last_request, last_tool, collected_at,
+                    expected_control_flow),
                 "capacity_bytes": capacity, "captured_dynamic_bytes": total}
     raw = canonical(snapshot)
     return snapshot, raw, validation, {"schema": SCHEMA, "sources": next_sources,

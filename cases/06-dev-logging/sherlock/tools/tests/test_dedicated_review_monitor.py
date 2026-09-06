@@ -191,6 +191,102 @@ class DedicatedReviewMonitorTest(unittest.TestCase):
         self.assertFalse(json.loads(__import__("base64").b64decode(pair["data_base64"]))["pairs"]["denied-1"]["pre"]["output"]["continue"])
         self.assertFalse((self.workspace / "work" / "checkpoint.json").exists())
 
+    def test_authenticated_fresh_checkpoint_resume_is_explicit_control_flow(self):
+        """A missing initial checkpoint is a documented branch, not a tool fault."""
+        import base64
+        (self.workspace / "work").mkdir()
+        call_id = "checkpoint-resume-1"
+        command = "python3 /immutable/tools/checkpoint.py resume --work ./work"
+        message = ("✗ no readable checkpoint.json in %s/work — this is a new "
+                   "investigation: start at stage triage" % self.workspace.resolve())
+        source = {"session_id": "session-1", "tool_use_id": "tool-1",
+                  "tool_call_id": call_id, "hook_event_name": "PostToolUseFailure",
+                  "tool_name": "run_shell_command",
+                  "tool_input": {"command": command, "directory": ""},
+                  "error": "Command: %s\nDirectory: (root)\nOutput: %s\nError: (none)\nExit Code: 1" %
+                           (command, message), "execution_status": "error"}
+        raw = json.dumps(source, sort_keys=True, separators=(",", ":")).encode()
+        event = {"schema": 1, "run_nonce": self.nonce, "sequence": 1,
+                 "session_id": source["session_id"], "tool_use_id": source["tool_use_id"],
+                 "tool_call_id": call_id, "phase": "PostToolUseFailure",
+                 "input_base64": base64.b64encode(raw).decode(),
+                 "input_sha256": MONITOR.sha256(raw), "output": {"continue": True}}
+        (self.observer / "hook-events.jsonl").write_bytes(
+            json.dumps(event, sort_keys=True).encode() + b"\n")
+        self.write_json(self.observer / "pairs.json", {"schema": 1, "pairs": {
+            "session-1\x1ftool-1": {"tool_call_id": call_id,
+                "pre": {"sequence": 0, "output": {"continue": True}},
+                "post": {"sequence": 1, "phase": "PostToolUseFailure",
+                         "output": {"continue": True}}}}})
+        initial = {"schema": MONITOR.SCHEMA, "sources": {},
+                   "last_completed_request": None, "last_completed_tool": None}
+        captured, _, _, _ = MONITOR.collect_snapshot(
+            self.root, self.observer, self.monitor, initial, capacity=2 * 1024 * 1024)
+        self.assertEqual(captured["review_lifecycle"]["expected_control_flow"],
+                         "fresh checkpoint absent; start at stage triage")
+        # The control-flow exemption must bind the whole captured tool result,
+        # not merely a message that an unrelated failure can contain.
+        source["error"] += "\nunrelated failure after checkpoint handling"
+        raw = json.dumps(source, sort_keys=True, separators=(",", ":")).encode()
+        event["input_base64"] = base64.b64encode(raw).decode()
+        event["input_sha256"] = MONITOR.sha256(raw)
+        (self.observer / "hook-events.jsonl").write_bytes(
+            json.dumps(event, sort_keys=True).encode() + b"\n")
+        changed, _, _, _ = MONITOR.collect_snapshot(
+            self.root, self.observer, self.monitor, initial, capacity=2 * 1024 * 1024)
+        self.assertIsNone(changed["review_lifecycle"]["expected_control_flow"])
+        # Restore the authentic, immutable recorded shape for the integration
+        # half of this test.
+        source["error"] = "Command: %s\nDirectory: (root)\nOutput: %s\nError: (none)\nExit Code: 1" % (command, message)
+        raw = json.dumps(source, sort_keys=True, separators=(",", ":")).encode()
+        event["input_base64"] = base64.b64encode(raw).decode()
+        event["input_sha256"] = MONITOR.sha256(raw)
+        (self.observer / "hook-events.jsonl").write_bytes(
+            json.dumps(event, sort_keys=True).encode() + b"\n")
+        self.stub.write_text(
+            "import hashlib,json,sys\n"
+            "raw=sys.stdin.buffer.read(); s=json.loads(raw.split(b'\\nSNAPSHOT_SHA256=',1)[1].split(b'\\n',1)[1])\n"
+            "assert s['review_lifecycle']['expected_control_flow'] == 'fresh checkpoint absent; start at stage triage'\n"
+            "d={'schema':1,'snapshot_sha256':hashlib.sha256(json.dumps(s,sort_keys=True,ensure_ascii=False,separators=(',',':')).encode()).hexdigest(),'run_nonce':s['run_nonce'],'decision':'continue','last_completed_request':s['last_completed_request'],'last_completed_tool':s['last_completed_tool'],'pending_operation':'start at stage triage','reason':'documented fresh checkpoint resume branch'}\n"
+            "print(json.dumps({'is_error':False,'subtype':'success','terminal_reason':'completed','modelUsage':{'claude-sonnet-5':{'canonicalModel':'claude-sonnet-5'}},'usage':{},'result':json.dumps(d,separators=(',',':'))},separators=(',',':')))\n",
+            encoding="utf-8")
+
+        review = self.cycle()
+        snapshot = json.loads((self.monitor / "objects" / review["snapshot_sha256"]).read_text())
+        self.assertEqual(snapshot["review_lifecycle"]["expected_control_flow"],
+                         "fresh checkpoint absent; start at stage triage")
+        self.assertEqual(review["decision"]["decision"], "continue")
+
+    def test_checkpoint_resume_failures_without_the_fresh_branch_remain_unclassified(self):
+        import base64
+        (self.workspace / "work").mkdir()
+        call_id = "checkpoint-resume-1"
+        command = "python3 /immutable/tools/checkpoint.py resume --work ./work"
+        source = {"session_id": "session-1", "tool_use_id": "tool-1",
+                  "tool_call_id": call_id, "hook_event_name": "PostToolUseFailure",
+                  "tool_name": "run_shell_command",
+                  "tool_input": {"command": command, "directory": str(self.root)},
+                  "error": "Directory %s is not within any registered workspace directories" % self.root,
+                  "execution_status": "error"}
+        raw = json.dumps(source, sort_keys=True, separators=(",", ":")).encode()
+        event = {"schema": 1, "run_nonce": self.nonce, "sequence": 1,
+                 "session_id": source["session_id"], "tool_use_id": source["tool_use_id"],
+                 "tool_call_id": call_id, "phase": "PostToolUseFailure",
+                 "input_base64": base64.b64encode(raw).decode(),
+                 "input_sha256": MONITOR.sha256(raw), "output": {"continue": True}}
+        (self.observer / "hook-events.jsonl").write_bytes(
+            json.dumps(event, sort_keys=True).encode() + b"\n")
+        self.write_json(self.observer / "pairs.json", {"schema": 1, "pairs": {
+            "session-1\x1ftool-1": {"tool_call_id": call_id,
+                "pre": {"sequence": 0, "output": {"continue": True}},
+                "post": {"sequence": 1, "phase": "PostToolUseFailure",
+                         "output": {"continue": True}}}}})
+        initial = {"schema": MONITOR.SCHEMA, "sources": {},
+                   "last_completed_request": None, "last_completed_tool": None}
+        snapshot, _, _, _ = MONITOR.collect_snapshot(
+            self.root, self.observer, self.monitor, initial, capacity=2 * 1024 * 1024)
+        self.assertIsNone(snapshot["review_lifecycle"]["expected_control_flow"])
+
     def test_changed_prefix_and_terminal_state_do_not_publish(self):
         self.stub.write_text(
             "import hashlib,json,pathlib,sys\n"
