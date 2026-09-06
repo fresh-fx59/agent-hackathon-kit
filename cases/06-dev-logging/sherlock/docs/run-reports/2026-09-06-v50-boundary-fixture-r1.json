@@ -1,0 +1,41 @@
+{
+  "schema": 1,
+  "report": "2026-09-06-v50-boundary-fixture-r1",
+  "status": "rejected_fixture",
+  "passed": false,
+  "provider": "loopback-only",
+  "provider_contact": false,
+  "runtime": {
+    "code_commit": "08ac52c",
+    "skill_sha256": "0f95b5a59dcc41500168d3f2dc6df3e237b8c68e9d3666bf181716983d902ee7",
+    "driver_sha256": "6095a501e5b7f338f82276eb309624c165ad108027c332a022592f89bcd83717",
+    "helper_sha256": "0d6aacbb7ed0d5e2f665113154a79122b5e9f9072cc0ec721bc436c1da44c0ee"
+  },
+  "result": {
+    "request_count": 5,
+    "normal_request_indices": [0, 1, 2, 4],
+    "auxiliary_suggestion_indices": [3],
+    "ledger_rows": 2,
+    "sealed_worklists": ["worklist.tsv"],
+    "pending_pre_denied": true,
+    "actual_stop_allowed_and_consumed": true,
+    "clear_occurred": false,
+    "driver_exit": 143,
+    "fixture_stop_requested": [],
+    "error": "AssertionError('driver did not reach the intentional fixture stop')",
+    "provider_errors": ["AssertionError('fresh task missing before next-stage edit')"]
+  },
+  "startup": {
+    "unknown_command_retries": 2,
+    "command": "/sherlock",
+    "owner_termination": "SIGTERM"
+  },
+  "inventory": {
+    "local_entries": 130,
+    "remote_entries": 130,
+    "equal": true,
+    "excluded_directory_names": ["home", "updates"],
+    "original_remote_untouched": true
+  },
+  "artifacts": "docs/run-reports/artifacts/2026-09-06-v50-boundary-fixture-r1"
+}

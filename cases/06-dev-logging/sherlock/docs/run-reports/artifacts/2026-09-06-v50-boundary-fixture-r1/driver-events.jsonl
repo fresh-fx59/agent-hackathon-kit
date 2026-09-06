@@ -1,0 +1,6 @@
+{"at": "2026-09-06T16:30:12Z", "event": "started", "detail": "node /home/claude-developer/.local/lib/node_modules/@qwen-code/qwen-code/cli-entry.js --auth-type openai --model mock --approval-mode yolo"}
+{"at": "2026-09-06T16:30:19Z", "event": "typed", "detail": "/sherlock\n\nSYNTHETIC-START-ONLY: run the toy triage handoff and end the turn.\n"}
+{"at": "2026-09-06T16:30:19Z", "event": "skill_command_rejected", "detail": "attempt 1/3 — the target answered «Unknown command: /sherlock»; it was still starting up, so waiting for readiness and retyping"}
+{"at": "2026-09-06T16:30:26Z", "event": "typed", "detail": "/sherlock\n\nSYNTHETIC-START-ONLY: run the toy triage handoff and end the turn.\n"}
+{"at": "2026-09-06T16:30:26Z", "event": "skill_command_rejected", "detail": "attempt 2/3 — the target answered «Unknown command: /sherlock»; it was still starting up, so waiting for readiness and retyping"}
+{"at": "2026-09-06T16:30:36Z", "event": "STOPPED", "detail": "owner sent SIGTERM; terminating the PTY process group"}
