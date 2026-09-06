@@ -14,7 +14,13 @@
   "bash_n": "passed",
   "executed": false,
   "provider_contact": false,
-  "helper_pin_preserved": "0d6aacbb7ed0d5e2f665113154a79122b5e9f9072cc0ec721bc436c1da44c0ee",
-  "interactive_driver_pin_preserved": "6095a501e5b7f338f82276eb309624c165ad108027c332a022592f89bcd83717",
-  "hash_inventory": "scripts.sha256"
+  "helper_pin_preserved": "861593a235903f6de92c53a0b27d9bde5888aaead2d06acf97f3c3529c0fc2cb",
+  "interactive_driver_pin_preserved": "c31be32f3d52a59423ad40b157eb550ba097e89833e47339eecbf15516b436b0",
+  "hash_inventory": "scripts.sha256",
+  "driver_pin_previous": "6095a501e5b7f338f82276eb309624c165ad108027c332a022592f89bcd83717",
+  "driver_pin_updated_at": "2026-09-06T16:40:38.370577+00:00",
+  "driver_pin_reason": "Exact hook acceptance prevents stale Unknown-command repaint retries",
+  "helper_pin_previous": "0d6aacbb7ed0d5e2f665113154a79122b5e9f9072cc0ec721bc436c1da44c0ee",
+  "helper_pin_updated_at": "2026-09-06T16:47:49.906929+00:00",
+  "helper_pin_reason": "Guardian samples observation age after acquiring observer lock"
 }

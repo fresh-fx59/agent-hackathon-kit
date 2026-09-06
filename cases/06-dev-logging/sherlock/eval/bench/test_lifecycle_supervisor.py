@@ -824,6 +824,32 @@ class LifecycleSupervisorTest(unittest.TestCase):
         self.assertEqual(LIFECYCLE.verify_signed_record(
             self.observer, receipt), receipt)
 
+    def test_guardian_samples_after_publisher_wins_observer_lock(self):
+        """A valid publish between guardian prelude and lock acquisition passes."""
+        class StopAfterFirstCheck(Exception):
+            pass
+
+        original = LIFECYCLE.check_supervision
+        calls = [0]
+
+        def publish_then_check(*args, **kwargs):
+            calls[0] += 1
+            self.assertNotIn("now_monotonic_ns", kwargs)
+            LIFECYCLE.publish_observation(
+                self.observer, self.nonce, self.boot, sequence=0,
+                capability=self.capability)
+            original(*args, **kwargs)
+            raise StopAfterFirstCheck()
+
+        with mock.patch.object(LIFECYCLE, "check_supervision", publish_then_check):
+            with self.assertRaises(StopAfterFirstCheck):
+                LIFECYCLE.run_guardian(
+                    self.observer, self.nonce, self.boot, controller_pid=999999,
+                    controller_start_ticks="not-owned", controller_pgid=999999,
+                    interval_s=0.01)
+        self.assertEqual(calls[0], 1)
+        self.assertFalse((self.observer / "fault.json").exists())
+
     def test_guardian_expires_owned_controller_and_leaves_unrelated_process(self):
         shutil.rmtree(self.observer)
         boot = LIFECYCLE.current_boot_id()

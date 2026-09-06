@@ -1,0 +1,5 @@
+✓ the run ends with the SKILL_NOT_LOADED terminal, rc 11 — never a skill-less session left to burn the stage budget
+✓ it says so in the event log, in the target's own words
+✓ it retried before giving up — a late-registering skill must not be failed on the first rejection
+✓ it did NOT reach a terminal that means something else — rc 8/9/10 each name a different failure and must stay disjoint from this one
+OK

@@ -1398,7 +1398,7 @@ class Session(object):
                 return False
 
     def type_skill(self, skill_command, arguments, settle, note,
-                   attempts=SKILL_TYPE_ATTEMPTS):
+                   attempts=SKILL_TYPE_ATTEMPTS, accepted=None):
         """Type one skill invocation and PROVE it was accepted, or say it wasn't.
 
         The rejection is read from the transcript FILE, from the byte offset
@@ -1406,6 +1406,10 @@ class Session(object):
         scoped to this command's own output and cannot be tripped by a corpus
         that happens to contain the phrase, nor missed because a ring buffer
         had already dropped it.
+
+        ``accepted`` is an optional exact external-evidence predicate for a
+        monitored run.  It may only report the already-validated root hook;
+        a terminal repaint cannot become acceptance on its own.
 
         Returns True once the target accepts the command. Returns False after
         `attempts` rejections, each one preceded by a fresh readiness wait —
@@ -1415,7 +1419,18 @@ class Session(object):
         """
         invocation = skill_invocation(skill_command, arguments)
         needle = SKILL_REJECTED_FMT % skill_command
+
+        def exact_acceptance(attempt, where):
+            if accepted is None or not accepted():
+                return False
+            note("skill_command_accepted",
+                 "attempt %d/%d — exact monitored invocation proof %s"
+                 % (attempt, attempts, where))
+            return True
+
         for attempt in range(1, attempts + 1):
+            if exact_acceptance(attempt, "arrived before retry"):
+                return True
             try:
                 self.transcript.flush()
                 before = self.transcript.tell()
@@ -1435,6 +1450,8 @@ class Session(object):
             rejected = False
             probe_deadline = time.time() + SKILL_REJECT_PROBE_S
             while True:
+                if exact_acceptance(attempt, "arrived during rejection probe"):
+                    return True
                 try:
                     with open(self.transcript_path, "rb") as fh:
                         fh.seek(before)
@@ -1443,7 +1460,13 @@ class Session(object):
                     fresh = ""
                 if needle in fresh:
                     rejected = True
-                    break
+                    # In a monitored run this visible needle can be an old
+                    # Qwen repaint.  Keep the existing bounded probe alive
+                    # for the exact hook proof before retyping a task that
+                    # might already be running.  Unmonitored callers retain
+                    # the prompt rejection fast path.
+                    if accepted is None:
+                        break
                 if time.time() >= probe_deadline:
                     break
                 self.pump(0.2)
@@ -1454,6 +1477,8 @@ class Session(object):
                  "starting up, so waiting for readiness and retyping"
                  % (attempt, attempts, needle))
             self.wait_ready()
+            if exact_acceptance(attempt, "arrived during readiness wait"):
+                return True
         return False
 
     def escape(self, settle=0.5):
@@ -1723,7 +1748,18 @@ def drive(argv, cwd, work, first_prompt, reseed, stage_budget_s, settle_s,
             note("init_wait_timeout",
                  "target never looked ready within %.0fs; typing anyway "
                  "rather than hanging" % INIT_WAIT_S)
-        if not ses.type_skill(skill_command, first_prompt, settle_s, note):
+        startup_invocation = skill_invocation(skill_command, first_prompt)
+        try:
+            startup_accepted = (
+                lambda: monitored_start_evidence(
+                    observer_dir, run_nonce, startup_invocation, skill_root
+                )["state"] == "complete") if observer_dir else None
+            skill_loaded = ses.type_skill(skill_command, first_prompt, settle_s,
+                                          note, accepted=startup_accepted)
+        except ClearProofError as exc:
+            note("CLEAR_NOT_EFFECTIVE", str(exc))
+            return 8, events
+        if not skill_loaded:
             note("SKILL_NOT_LOADED",
                  "the target rejected %s on every one of %d attempts — the "
                  "skill is not registered, so the session would run with no "
@@ -1731,8 +1767,7 @@ def drive(argv, cwd, work, first_prompt, reseed, stage_budget_s, settle_s,
                  "that for 28 minutes and never sent a request)"
                  % (skill_command, SKILL_TYPE_ATTEMPTS))
             return 11, events
-        if observer_dir and wait_for_start_state(
-                skill_invocation(skill_command, first_prompt)) is None:
+        if observer_dir and wait_for_start_state(startup_invocation) is None:
             return 8, events
         # WHEN THE RUN ACTUALLY BEGAN, for the nudge. Until the first upstream
         # call there is no ledger to read, and `ledger_quiet_s` used to answer
@@ -2065,7 +2100,17 @@ def drive(argv, cwd, work, first_prompt, reseed, stage_budget_s, settle_s,
                     clear_anchor, "await_invocation", invocation) is None:
                 return 8, events
             wait_before("the combined skill invocation")
-            if not ses.type_skill(skill_command, line, settle_s, note):
+            try:
+                reset_accepted = (
+                    lambda: monitored_clear_evidence(
+                        observer_dir, run_nonce, clear_anchor, invocation,
+                        skill_root)["state"] == "complete") if observer_dir else None
+                skill_loaded = ses.type_skill(skill_command, line, settle_s,
+                                              note, accepted=reset_accepted)
+            except ClearProofError as exc:
+                note("CLEAR_NOT_EFFECTIVE", str(exc))
+                return 8, events
+            if not skill_loaded:
                 note("SKILL_NOT_LOADED",
                      "the target rejected %s during reseed" % skill_command)
                 return 11, events

@@ -1609,8 +1609,7 @@ def run_guardian(observer, run_nonce, boot_id, controller_pid,
     while True:
         started = time.monotonic_ns()
         try:
-            check_supervision(observer, run_nonce, boot_id,
-                              now_monotonic_ns=started)
+            check_supervision(observer, run_nonce, boot_id)
         except LifecycleFault as exc:
             outcome = {"schema": SCHEMA, "run_nonce": run_nonce,
                        "reason": exc.reason, "detail": exc.detail,

@@ -12,8 +12,8 @@ HARNESS=/home/claude-developer/hack/sherlock-v50-harness-20260906-r1
 TARGET_NONCES=/home/claude-developer/hack/sherlock-paid-admission-nonces
 
 cd "$REPO"
-test "$(sha256sum "$LIFECYCLE" | awk '{print $1}')" = 0d6aacbb7ed0d5e2f665113154a79122b5e9f9072cc0ec721bc436c1da44c0ee
-test "$(sha256sum "$REPO/measure/interactive-drive.py" | awk '{print $1}')" = 6095a501e5b7f338f82276eb309624c165ad108027c332a022592f89bcd83717
+test "$(sha256sum "$LIFECYCLE" | awk '{print $1}')" = 861593a235903f6de92c53a0b27d9bde5888aaead2d06acf97f3c3529c0fc2cb
+test "$(sha256sum "$REPO/measure/interactive-drive.py" | awk '{print $1}')" = c31be32f3d52a59423ad40b157eb550ba097e89833e47339eecbf15516b436b0
 test "$(readlink -f /home/claude-developer/.local/bin/qwen)" = "$QWEN"
 test "$(sudo -u claude-developer env HOME="$DEV_HOME" PATH="$DEV_PATH" qwen --version)" = 0.22.0
 test ! -e "$TARGET"
