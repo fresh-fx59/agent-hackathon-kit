@@ -104,6 +104,32 @@ heartbeats; 60-second freshness and 600-second request watchdog unchanged.
   The frozen v50 runtime remains
   `0f95b5a59dcc41500168d3f2dc6df3e237b8c68e9d3666bf181716983d902ee7`
   and is outside the diff.
+- 2026-09-06 — Post-PASS subscription qualification exposed one real-command
+  compatibility defect: `load_command` rejected the intentional empty values
+  after `--tools` and `--setting-sources`, so r4 failed closed before
+  invoking Claude and published no observation. The narrow correction keeps
+  the executable nonempty and every argument a string while accepting empty
+  later values. Its regression reads the actual pinned command. Independent
+  rerun passed 16/16 plus compile and diff checks. This supersedes only the
+  monitor/test pins above: monitor
+  `78e96502f4941ea353ab4337d5c2428af3f17e9aa3df62ef0c29ce32ef123dd8`;
+  tests
+  `9dc6ccafb79efbce50d971ccf10a4b59f122c60b3b57c39438caefb4fcfbaa60`.
+  Executed r2 launch artifacts remain immutable; fresh r5 artifacts live in
+  launch-preparation-r3.
+- 2026-09-06 — The fresh r5 qualification then exposed an earlier observer-init
+  boundary: identity was visible 69 ms before `lifecycle-launch.json`, and the
+  monitor exited on that absent file before invoking Claude. The narrow repair
+  waits for launch publication without changing observer timestamps or the
+  60-second freshness rule, rechecks terminal/fault state on each poll, and
+  still authenticates the launch strictly before snapshot/review. Independent
+  verification passed 17/17 plus compile/diff and the owned-launch stand-in.
+  Current monitor pin:
+  `dcf42026de753649a169d6499077e2f1f2570b7c9af5ed104fd7d97ccc3a388e`;
+  tests:
+  `1de8dc83975b944c3c5c71f8dc2fea4ed77b1cdf24ba3dab9b1a9f96ffaa78cc`.
+  Executed r3 launch artifacts remain immutable; fresh r6 artifacts live in
+  launch-preparation-r4.
 
 ## Findings
 

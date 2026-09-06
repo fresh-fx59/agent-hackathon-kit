@@ -1,0 +1,41 @@
+{
+  "schema": 1,
+  "report": "2026-09-06-v50-harness-r5.md",
+  "status": "rejected_initial_observation_missing",
+  "acceptance": false,
+  "runtime": {
+    "version": "v50",
+    "package_sha256": "0f95b5a59dcc41500168d3f2dc6df3e237b8c68e9d3666bf181716983d902ee7",
+    "arm_commit": "c9ee4d98ffe962bd2a104ee2202ed3de31b0c1d9",
+    "lifecycle_helper_sha256": "235d2e9a11a7a98b3390977f906d3c82315341ded3399b59fbfae66dff41b907"
+  },
+  "terminal": {
+    "observer_identity_at": "2026-09-06T18:37:29.212605Z",
+    "monitor_exit_after_identity_ms": 69,
+    "fault": "INITIAL_OBSERVATION_MISSING",
+    "fault_at": "2026-09-06T18:38:29.387747Z",
+    "identity_to_fault_seconds": 60.175142,
+    "receipt_at": "2026-09-06T18:38:29.418279Z",
+    "controller_status_at": "2026-09-06T18:38:29.435Z",
+    "controller_phase": "BLOCKED_UNKNOWN",
+    "controller_reason": "LIFECYCLE_LAUNCH_INVALID",
+    "expected_tools": 0,
+    "completed_tools": 0,
+    "reviewer_launched": false,
+    "deepseek_requests": 0
+  },
+  "cause": {
+    "failure": "monitor started before lifecycle-launch.json was available",
+    "monitor_error": "No such file or directory: lifecycle-launch.json",
+    "runtime_or_model_fault": false,
+    "acceptance": "not_reached"
+  },
+  "evidence": {
+    "run_tag": "run-20260906T183643Z-b67bfa8a9b21",
+    "run_nonce": "a075c7d159988a759d2bb4216031fdae",
+    "artifact_directory": "artifacts/2026-09-06-v50-harness-subscription-r5-failed/",
+    "mirror_files": 146,
+    "provider_free": true,
+    "review_artifacts": 0
+  }
+}

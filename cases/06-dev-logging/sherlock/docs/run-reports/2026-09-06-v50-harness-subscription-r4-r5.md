@@ -1,6 +1,6 @@
-# v50 subscription harness qualification r4/r5
+# v50 subscription harness qualification r4-r6
 
-Status: r4 rejected and preserved; narrow r5 repair under verification.
+Status: r4 and r5 rejected and preserved; r6 repair passed and awaits remote sync.
 
 ## Scope
 
@@ -57,9 +57,52 @@ provider-free. Every run root is fresh and terminal attempts remain immutable.
 - 2026-09-06 — The executed r2 launch artifacts retain their committed monitor
   pin. Fresh r5 launchers are being versioned separately under
   `artifacts/2026-09-06-v50-launch-preparation-r3/`.
+- 2026-09-06 — Independent review passed the narrow repair. The focused suite
+  passed 16/16; `py_compile`, all fresh-r3 launcher syntax, and
+  `git diff --check` exited zero. A provider-free r3 owned-monitor stand-in
+  propagated controller exit 7, kept the fresh root absent, removed its exact
+  lock, and left no child. The executed r2 artifact directory is byte-identical
+  to committed HEAD. A remote exact-argv inventory found zero live monitor,
+  controller, or Qwen processes from r4.
+- 2026-09-06 18:36Z — The passed argv repair and fresh r3 launch artifacts
+  synced cleanly at commit
+  `c9ee4d98ffe962bd2a104ee2202ed3de31b0c1d9`. The combined launcher created
+  fresh root `/home/claude-developer/hack/sherlock-v50-harness-20260906-r5`
+  only after owned monitor PID `1157039` and its exact parent lock were live.
+- 2026-09-06 18:37Z — r5 failed before starting Claude. Observer identity mtime
+  was `18:37:29.212Z`; 69 ms later the monitor tried to read the not-yet-
+  published `lifecycle-launch.json` and exited with exact stderr
+  `[Errno 2] No such file or directory: '.../lifecycle-launch.json'`.
+  There was no snapshot, reviewer input/output/exit, monitor object, review
+  ledger, or observation. The lifecycle then recorded
+  `INITIAL_OBSERVATION_MISSING` 60.175 seconds after identity creation, and
+  the controller ended `BLOCKED_UNKNOWN/LIFECYCLE_LAUNCH_INVALID`.
+- 2026-09-06 — Correction to the transient chat status: identity discovery did
+  not mean the monitor had entered a real Sonnet review. The empty object store
+  and launch-file error prove that no Claude process was invoked.
+- 2026-09-06 — Mirrored the complete terminal r5 root, sibling monitor
+  directory, and launch/watch logs into
+  `artifacts/2026-09-06-v50-harness-subscription-r5-failed/`. All 144 local
+  files match their fresh remote SHA-256 manifest.
+- 2026-09-06 — The narrow readiness repair polls while
+  `lifecycle-launch.json` is absent after identity discovery, without changing
+  any observer timestamp or freshness rule. Each poll rechecks fault, receipt,
+  and normal terminal state; once the launch exists, `run_cycle` retains its
+  strict signature and identity validation. A deterministic regression
+  reproduces the held-launch ordering and proves no cycle starts early.
+- 2026-09-06 — Independent verification passed 17/17 focused tests,
+  `py_compile`, fresh-r4 launcher syntax, and `git diff --check`. A
+  provider-free owned-monitor stand-in again propagated controller exit 7,
+  preserved root freshness, removed its exact lock, and left no child. Remote
+  exact-argv inventory was zero. Monitor candidate:
+  `dcf42026de753649a169d6499077e2f1f2570b7c9af5ed104fd7d97ccc3a388e`;
+  tests:
+  `1de8dc83975b944c3c5c71f8dc2fea4ed77b1cdf24ba3dab9b1a9f96ffaa78cc`.
+  Executed launch-preparation-r2 and r3 directories are byte-identical to HEAD;
+  fresh harness r6 is separately versioned in launch-preparation-r4.
 
 ## Current decision
 
-r4 is rejected evidence and cannot be reused. Do not run the paid target probe
-or corpus. After the narrow fix, fresh launch artifacts, focused checks, review,
-commit, and remote sync pass, start subscription harness r5 at a new root.
+r4 and r5 are rejected evidence and cannot be reused. Do not run the paid target
+probe or corpus. After commit and remote sync of the passed repair and
+separately versioned launcher, start subscription harness r6 at a new root.

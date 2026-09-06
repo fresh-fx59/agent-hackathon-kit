@@ -720,6 +720,9 @@ def watch(args):
                 return 0
             if terminal_boundary(run_root, observer):
                 return 0
+            if not os.path.lexists(observer.parent / "lifecycle-launch.json"):
+                time.sleep(args.poll_s)
+                continue
             run_cycle(run_root, observer, nonce, boot, args.helper, args.prompt,
                       args.review_command_json, monitor_dir,
                       deadline_s=args.cycle_deadline_s, dynamic_capacity=args.dynamic_byte_capacity)

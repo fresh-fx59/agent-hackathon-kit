@@ -8,6 +8,7 @@ from pathlib import Path
 import sys
 import tempfile
 import time
+import types
 import unittest
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -133,6 +134,38 @@ class DedicatedReviewMonitorTest(unittest.TestCase):
         with self.assertRaisesRegex(MONITOR.MonitorError, "run-root sibling"):
             MONITOR.prepare_monitor(fresh, other)
         lock.unlink()
+
+    def test_watch_waits_for_lifecycle_launch_before_starting_cycle(self):
+        launch = self.trace / "lifecycle-launch.json"
+        held_launch = self.trace / ".lifecycle-launch.held"
+        os.replace(launch, held_launch)
+        lock = self.root / ".monitor.lock"
+        lock.write_text("lock\n")
+        events = []
+        original_prepare, original_cycle, original_sleep = (
+            MONITOR.prepare_monitor, MONITOR.run_cycle, MONITOR.time.sleep)
+
+        def release_launch(_):
+            events.append("sleep")
+            if held_launch.exists():
+                os.replace(held_launch, launch)
+
+        def record_cycle(*_args, **_kwargs):
+            events.append("cycle")
+            (self.trace / "lifecycle-receipt.json").write_text("{}\n")
+
+        MONITOR.prepare_monitor = lambda *_: lock
+        MONITOR.run_cycle = record_cycle
+        MONITOR.time.sleep = release_launch
+        try:
+            args = types.SimpleNamespace(run_root=str(self.root), monitor_dir=str(self.monitor),
+                                         helper="unused", prompt="unused", review_command_json="unused",
+                                         poll_s=0, cycle_deadline_s=45, dynamic_byte_capacity=1024)
+            self.assertEqual(MONITOR.watch(args), 0)
+        finally:
+            MONITOR.prepare_monitor, MONITOR.run_cycle, MONITOR.time.sleep = (
+                original_prepare, original_cycle, original_sleep)
+        self.assertEqual(events, ["sleep", "cycle", "sleep"])
 
     def test_denied_pre_without_post_and_fresh_checkpoint_absence_are_reviewed(self):
         event = {"hook_event_name": "PreToolUse", "tool_call_id": "denied-1",

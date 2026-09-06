@@ -1,0 +1,1 @@
+{"context_window":262000,"execution_mode":"operator_monitored","max_consecutive_provider_failures":null,"max_output_tokens":20000,"max_request_bytes":null,"max_upstream_attempts":null,"max_wall_seconds":null,"request_timeout_ms":600000,"schema":2,"session_token_limit":230000}
