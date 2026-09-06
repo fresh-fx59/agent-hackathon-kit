@@ -1,0 +1,4 @@
+CONSTRAINT 1 — the provider's generation clock: a 3600s window at 20 tok/s with 120s reserved for the first token delivers at most 69600 output tokens.
+CONSTRAINT 2 — qwen's compaction reserve: COMPACT_MAX_OUTPUT_TOKENS = 20000, the budget a compaction summary needs to finish. Below it the summary is cut at finish_reason=length.
+declared max_tokens = 20000
+✓ the output budget 20000 satisfies every declared constraint

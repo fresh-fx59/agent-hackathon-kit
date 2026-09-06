@@ -1,0 +1,2 @@
+  ↻ upstream route (hot-swappable, read per call): /home/claude-developer/hack/sherlock-v50-harness-20260906-r10/runs/run-20260906T194715Z-b01eeed6435f.upstream.route.json
+      hack/swap-upstream-route.sh /home/claude-developer/hack/sherlock-v50-harness-20260906-r10/runs/run-20260906T194715Z-b01eeed6435f.upstream.route.json <base> <model> [identity]

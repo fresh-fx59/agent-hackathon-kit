@@ -225,6 +225,63 @@ class DedicatedReviewMonitorTest(unittest.TestCase):
         self.assertEqual(second["sequence"], 1)
         self.assertEqual(json.loads((self.observer / "current-observation.json").read_text())["last_completed_request"], "request-2")
 
+    def test_optional_inflight_disappearance_publishes_captured_review_then_next_state(self):
+        inflight = self.trace / "upstream-inflight.json"
+        self.write_json(inflight, {"request_id": "request-1", "state": "active"})
+        once = self.root / "remove-inflight-once"
+        self.stub.write_text(
+            "import hashlib,json,pathlib,sys\n"
+            "raw=sys.stdin.buffer.read(); part=raw.split(b'\\nSNAPSHOT_SHA256=',1)[1]; s=json.loads(part.split(b'\\n',1)[1])\n"
+            "once,inflight=pathlib.Path(sys.argv[1]),pathlib.Path(sys.argv[2])\n"
+            "if not once.exists(): inflight.unlink(); once.touch()\n"
+            "d={'schema':1,'snapshot_sha256':hashlib.sha256(json.dumps(s,sort_keys=True,ensure_ascii=False,separators=(',',':')).encode()).hexdigest(),'run_nonce':s['run_nonce'],'decision':'continue','last_completed_request':s['last_completed_request'],'last_completed_tool':s['last_completed_tool'],'pending_operation':'pending','reason':'fixture'}\n"
+            "print(json.dumps({'is_error':False,'subtype':'success','terminal_reason':'completed','modelUsage':{'claude-sonnet-5':{'canonicalModel':'claude-sonnet-5'}},'usage':{},'result':json.dumps(d,separators=(',',':'))},separators=(',',':')))\n", encoding="utf-8")
+        self.write_json(self.command, {"argv": [sys.executable, str(self.stub), str(once), str(inflight), "--model", "sonnet"]})
+
+        first_review = self.cycle()
+
+        first = json.loads((self.monitor / "objects" / first_review["snapshot_sha256"]).read_text())
+        second_review = self.cycle()
+        second = json.loads((self.monitor / "objects" / second_review["snapshot_sha256"]).read_text())
+        self.assertTrue(any(entry["path"].endswith("upstream-inflight.json") for entry in first["state"]))
+        self.assertFalse(any(entry["path"].endswith("upstream-inflight.json") for entry in second["state"]))
+        reviews = [json.loads(row) for row in (self.monitor / "reviews.jsonl").read_text().splitlines()]
+        self.assertEqual([review["sequence"] for review in reviews], [0, 1])
+        self.assertEqual(reviews[0]["snapshot_sha256"], first_review["snapshot_sha256"])
+
+    def test_optional_inflight_disappearance_between_exists_and_read_is_queued(self):
+        inflight = self.trace / "upstream-inflight.json"
+        self.write_json(inflight, {"request_id": "request-1", "state": "active"})
+        original = MONITOR.static_entry
+
+        def disappear(run_root, path, capacity):
+            if Path(path) == inflight:
+                inflight.unlink()
+            return original(run_root, path, capacity)
+
+        MONITOR.static_entry = disappear
+        try:
+            snapshot, _, _, _ = MONITOR.collect_snapshot(
+                self.root, self.observer, self.monitor,
+                {"schema": MONITOR.SCHEMA, "sources": {},
+                 "last_completed_request": None, "last_completed_tool": None}, capacity=2 * 1024 * 1024)
+        finally:
+            MONITOR.static_entry = original
+        self.assertFalse(any(entry["path"].endswith("upstream-inflight.json") for entry in snapshot["state"]))
+
+    def test_controller_state_replacement_before_publication_is_queued(self):
+        self.stub.write_text(
+            "import hashlib,json,pathlib,sys\n"
+            "raw=sys.stdin.buffer.read(); part=raw.split(b'\\nSNAPSHOT_SHA256=',1)[1]; s=json.loads(part.split(b'\\n',1)[1])\n"
+            "pathlib.Path(sys.argv[1]).write_text('{\"schema\":1,\"phase\":\"QWEN_RUNNING\",\"reason\":\"changed\"}\\n')\n"
+            "d={'schema':1,'snapshot_sha256':hashlib.sha256(json.dumps(s,sort_keys=True,ensure_ascii=False,separators=(',',':')).encode()).hexdigest(),'run_nonce':s['run_nonce'],'decision':'continue','last_completed_request':s['last_completed_request'],'last_completed_tool':s['last_completed_tool'],'pending_operation':'pending','reason':'fixture'}\n"
+            "print(json.dumps({'is_error':False,'subtype':'success','terminal_reason':'completed','modelUsage':{'claude-sonnet-5':{'canonicalModel':'claude-sonnet-5'}},'usage':{},'result':json.dumps(d,separators=(',',':'))},separators=(',',':')))\n", encoding="utf-8")
+        self.write_json(self.command, {"argv": [sys.executable, str(self.stub), str(self.status), "--model", "sonnet"]})
+        review = self.cycle()
+        self.assertEqual(review["sequence"], 0)
+        self.assertTrue((self.observer / "current-observation.json").exists())
+        self.assertFalse((self.observer / "fault.json").exists())
+
     def test_bad_or_stop_reviewer_output_never_publishes(self):
         self.stub.write_text("import sys; sys.stdin.buffer.read(); sys.exit(7)\n", encoding="utf-8")
         with self.assertRaisesRegex(MONITOR.MonitorError, "exit 7"):

@@ -1,0 +1,5 @@
+window=262000 max_tokens=20000
+auto=222700 hard=239000
+TURN_GROWTH_HEADROOM=53369
+handoff_threshold=169331
+margin (auto - handoff_threshold)=53369

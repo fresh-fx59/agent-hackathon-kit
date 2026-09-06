@@ -1,0 +1,1 @@
+{"base": "http://127.0.0.1:8317/v1", "expected_returned_identity": "gpt-5.5", "generation": 0, "model": "gpt-5.5", "schema": 1}

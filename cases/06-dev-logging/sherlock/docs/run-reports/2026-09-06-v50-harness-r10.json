@@ -1,0 +1,64 @@
+{
+  "schema": 1,
+  "report": "2026-09-06-v50-harness-r10.md",
+  "status": "rejected_monitor_toc_then_observation_stale",
+  "acceptance": false,
+  "runtime": {
+    "version": "v50",
+    "package_sha256": "0f95b5a59dcc41500168d3f2dc6df3e237b8c68e9d3666bf181716983d902ee7",
+    "arm_commit": "5f69390f83d501bceaffaee387a030e6d4e2be4",
+    "monitor_sha256": "8522cdee6c8e7a2a25523c7105f36ed82f9bdee3b1b455e5d344f416a749548f"
+  },
+  "health": {"verdict": "HEALTHY", "checks": [
+    {"size_kb": 100, "status": 200, "returned_model": "gpt-5.5"},
+    {"size_kb": 250, "status": 200, "returned_model": "gpt-5.5"},
+    {"size_kb": 400, "status": 200, "returned_model": "gpt-5.5"}
+  ]},
+  "observations": {
+    "accepted_count": 3,
+    "sequences": [0, 1, 2],
+    "first_published_at": "2026-09-06T19:48:01.104950Z",
+    "last_published_at": "2026-09-06T19:48:20.123Z",
+    "same_uid_mode_0600": true
+  },
+  "qwen": {
+    "controller_phase": "QWEN_RUNNING",
+    "completed_requests": 5,
+    "completed_tool_pairs": 4,
+    "expected_tools": 6,
+    "first_request_id": "17930a6c05d54cdaac1f958d0b4acbd6",
+    "first_request_duration_seconds": 9.317,
+    "first_request_bytes": 170111,
+    "first_stream_bytes": 46916,
+    "first_request_tokens": 35839
+  },
+  "terminal": {
+    "monitor_error_at": "2026-09-06T19:48:29.630Z",
+    "monitor_error": "ENOENT optional upstream-inflight.json removed during revalidation",
+    "failure_json_written": false,
+    "stale_fault_at": "2026-09-06T19:49:20.152197Z",
+    "stale_elapsed_seconds": 60.027808548,
+    "lifecycle_terminal_at": "2026-09-06T19:49:22.699373Z",
+    "controller_terminal_at": "2026-09-06T19:49:22.719Z",
+    "controller_phase": "BLOCKED",
+    "controller_reason": "OBSERVATION_STALE",
+    "wrapper_rc": 2,
+    "lock_removed": true,
+    "active_processes": 0
+  },
+  "review_usage_list_price_usd": [
+    {"sonnet": 0.0267078, "haiku": 0.005039},
+    {"sonnet": 0.0282118, "haiku": 0.005115},
+    {"sonnet": 0.0288498, "haiku": 0.005547}
+  ],
+  "evidence": {
+    "run_tag": "run-20260906T194715Z-b01eeed6435f",
+    "run_nonce": "7bc456f7423ec123bc870f9f75d0e20a",
+    "artifact_directory": "artifacts/2026-09-06-v50-harness-subscription-r10-failed/",
+    "remote_manifest_sha256": "95a4a95b1e38fb58a66cabeee9a008eb9deb5c5701e2a5518a0c8dc8e50e29a",
+    "remote_inventory_files": 325,
+    "deepseek_requests": 0,
+    "paid_target_started": false,
+    "corpus_report_accepted": false
+  }
+}

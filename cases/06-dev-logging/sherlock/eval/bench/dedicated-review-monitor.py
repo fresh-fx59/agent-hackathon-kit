@@ -229,6 +229,14 @@ def source_paths(run_root, observer):
     return append_only, state, trees
 
 
+def optional_mutable_state(path, observer):
+    trace = Path(observer).parent
+    return Path(path) in {
+        trace / "upstream-inflight.json",
+        trace / "workspace" / "work" / "checkpoint.json",
+    }
+
+
 def tree_files(tree):
     if not os.path.lexists(tree):
         return []
@@ -402,12 +410,20 @@ def collect_snapshot(run_root, observer, monitor_dir, state, *, capacity):
     for path in statics:
         if not os.path.lexists(path):
             continue
-        entry, raw, file_identity = static_entry(run_root, path, capacity - total)
+        try:
+            entry, raw, file_identity = static_entry(run_root, path, capacity - total)
+        except FileNotFoundError:
+            if optional_mutable_state(path, observer):
+                continue
+            raise MonitorError("state source disappeared %s" % path)
+        except OSError as exc:
+            raise MonitorError("state source unreadable %s" % path) from exc
         total += len(raw)
         if total > capacity:
             raise MonitorError("dynamic evidence capacity exceeded")
         state_entries.append(entry)
-        validation.append((path, raw, file_identity, "critical" if path.name == "identity.json" else "mutable"))
+        mode = "critical" if path.name == "identity.json" else "mutable"
+        validation.append((path, raw, file_identity, mode))
         if path.name == "status.json":
             controller = strict_object(raw)
         if path.name == "identity.json":
@@ -462,7 +478,14 @@ def collect_snapshot(run_root, observer, monitor_dir, state, *, capacity):
 
 def revalidate(validation):
     for path, captured, identity, mode in validation:
-        current, current_identity = read_regular(path)
+        # Mutable state is valid only at its independently captured instant;
+        # its later replacement or removal is evidence for the next snapshot.
+        if mode == "mutable":
+            continue
+        try:
+            current, current_identity = read_regular(path)
+        except OSError as exc:
+            raise MonitorError("source unavailable before publish %s" % path) from exc
         if mode in {"append", "critical"} and current_identity != identity:
             raise MonitorError("source identity changed before publish %s" % path)
         if mode == "append":
