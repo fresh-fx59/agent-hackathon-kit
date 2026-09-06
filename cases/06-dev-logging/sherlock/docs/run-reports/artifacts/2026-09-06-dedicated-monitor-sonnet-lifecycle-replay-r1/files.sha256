@@ -1,0 +1,13 @@
+a6500dbccd7c4273c594b7349b0950f6ffcf428406dcdd2729d0baf26011a737  docs/run-reports/artifacts/2026-09-06-dedicated-monitor-sonnet-lifecycle-replay-r1/execution-summary.json
+f4fe216a6380ef8265e4235f715f376884fc1a4e4d1b44f6942931a292222773  docs/run-reports/artifacts/2026-09-06-dedicated-monitor-sonnet-lifecycle-replay-r1/files.sha256.tmp
+ae4f5261a3c901b29bc568b1e169a6f777247f413839a548a4a8313825be46a9  docs/run-reports/artifacts/2026-09-06-dedicated-monitor-sonnet-lifecycle-replay-r1/r3-fault.input.txt
+3d075e801ebae49c428861814c851047f3354eca0514f449875a1a4eb2d17c86  docs/run-reports/artifacts/2026-09-06-dedicated-monitor-sonnet-lifecycle-replay-r1/r3-fault.snapshot.json
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  docs/run-reports/artifacts/2026-09-06-dedicated-monitor-sonnet-lifecycle-replay-r1/r3-fault.stderr.txt
+31e75bdf65e09c440c3105fe58ed4e73adb5aa44b0e6e32cda9430e38d4ca5c4  docs/run-reports/artifacts/2026-09-06-dedicated-monitor-sonnet-lifecycle-replay-r1/r3-fault.stdout.json
+f2037402e86defa71761c4c63263691cbf80b37e46e045a91b64bea4da63a1e1  docs/run-reports/artifacts/2026-09-06-dedicated-monitor-sonnet-lifecycle-replay-r1/r9.input.txt
+2f71cb2be2424303e0ebbf6c44226b6e46e67100441800ccf40ada597d93f483  docs/run-reports/artifacts/2026-09-06-dedicated-monitor-sonnet-lifecycle-replay-r1/r9.snapshot.json
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  docs/run-reports/artifacts/2026-09-06-dedicated-monitor-sonnet-lifecycle-replay-r1/r9.stderr.txt
+ff2ff0ae429b1a5b2f5b3bf25a7a02483229fe9e7231ecd7f39fc9dd5d8c49ea  docs/run-reports/artifacts/2026-09-06-dedicated-monitor-sonnet-lifecycle-replay-r1/r9.stdout.json
+93271f12995f6396cf2d8262219f07fd8592d7760298c543af683c7425559081  docs/run-reports/artifacts/2026-09-06-dedicated-monitor-sonnet-lifecycle-replay-r1/replay-manifest.json
+202791838b91a3375dcfc1df62c160592dfe56be37815e467f56cb9201e62b8e  docs/run-reports/artifacts/2026-09-06-dedicated-monitor-sonnet-lifecycle-replay-r1/review-command.json
+d289a6dd5ad3b6efe5d07124e4e838e6c8a992aa232f4efc26fe01548aa0389c  docs/run-reports/artifacts/2026-09-06-dedicated-monitor-sonnet-lifecycle-replay-r1/run-replays.py

@@ -1,0 +1,83 @@
+{
+  "schema": 1,
+  "report": "2026-09-06-v50-harness-r9.md",
+  "status": "rejected_reviewer_misclassified_fresh_bootstrap",
+  "acceptance": false,
+  "runtime": {
+    "version": "v50",
+    "package_sha256": "0f95b5a59dcc41500168d3f2dc6df3e237b8c68e9d3666bf181716983d902ee7",
+    "arm_commit": "b3540e1f8bbed35b4fd8bf3b9a488ce4a5e9604f",
+    "monitor_sha256": "dcf42026de753649a169d6499077e2f1f2570b7c9af5ed104fd7d97ccc3a388e"
+  },
+  "health": {
+    "checked_at": "2026-09-06T19:24:51.178988Z",
+    "verdict": "HEALTHY",
+    "checks": [
+      {"size_kb": 100, "status": 200, "response_bytes": 683, "returned_model": "gpt-5.5", "error_code": null},
+      {"size_kb": 250, "status": 200, "response_bytes": 683, "returned_model": "gpt-5.5", "error_code": null},
+      {"size_kb": 400, "status": 200, "response_bytes": 684, "returned_model": "gpt-5.5", "error_code": null}
+    ]
+  },
+  "review": {
+    "identity_created_at": "2026-09-06T19:24:52.141338Z",
+    "lifecycle_launch_at": "2026-09-06T19:24:52.255232Z",
+    "snapshot_collected_at": "2026-09-06T19:24:53.008919Z",
+    "api_duration_ms": 6470,
+    "model": "claude-sonnet-5",
+    "auxiliary_model": "claude-haiku-4-5",
+    "decision": "stop",
+    "last_completed_request": null,
+    "last_completed_tool": null,
+    "snapshot_sha256": "ed5e74fd44e5c10a56ba24e53727d58b1dcf6ea7ea287622c738d08985962b82",
+    "sonnet_list_price_usd": 0.0253278,
+    "auxiliary_haiku_list_price_usd": 0.004779,
+    "total_list_price_estimate_usd": 0.0301068,
+    "invoice": false
+  },
+  "terminal": {
+    "failure_at": "2026-09-06T19:25:00.716944Z",
+    "fault_at": "2026-09-06T19:25:00.758129Z",
+    "controller_status_at": "2026-09-06T19:25:52.300Z",
+    "controller_phase": "BLOCKED_UNKNOWN",
+    "controller_reason": "LIFECYCLE_LAUNCH_INVALID",
+    "fault_reason": "REVIEW_MONITOR_FAILED",
+    "wrapper_rc": 2,
+    "observation_published": false,
+    "qwen_launched": false,
+    "deepseek_requests": 0
+  },
+  "evidence": {
+    "run_tag": "run-20260906T192412Z-a923b7346dd4",
+    "run_nonce": "75e6abddb99d7bdfffd1dd16ffe15e68",
+    "artifact_directory": "artifacts/2026-09-06-v50-harness-subscription-r9-failed/",
+    "remote_manifest_sha256": "d8f20cb92ac73e3cad634b3ebc5aa6822afa6e5691cc8c1275b97b3de3e085f2",
+    "remote_inventory_files": 151,
+    "fresh_bootstrap_empty_state": true,
+    "no_qwen_or_corpus_acceptance": true,
+    "classification_replay": {
+      "artifact_directory": "artifacts/2026-09-06-dedicated-monitor-sonnet-lifecycle-replay-r1/",
+      "monitor_sha256": "8522cdee6c8e7a2a25523c7105f36ed82f9bdee3b1b455e5d344f416a749548f",
+      "prompt_sha256": "cd91a67a9128123934167ca2e9d65df5e7030688d72b016dc2ab084e8b420efb",
+      "r9": {
+        "decision": "continue",
+        "api_duration_ms": 5658,
+        "snapshot_sha256": "ebae1f6383baefa52aa7cdc491ec911cc25d7780108ac3f4608a76aa8aef903f",
+        "observer_age_seconds": 0.87,
+        "pending_operation": "awaiting initial controller permit",
+        "sonnet_list_price_usd": 0.0245458,
+        "auxiliary_haiku_list_price_usd": 0.005057,
+        "total_list_price_estimate_usd": 0.0296028
+      },
+      "archived_r3_fault": {
+        "decision": "stop",
+        "api_duration_ms": 6794,
+        "snapshot_sha256": "10f348fffd7bd428aaeb87ca65ca320a758af7aa716f14d22b3ed137465f9b08",
+        "last_completed_request": "34b10648b21247818c0869b120d424fc",
+        "last_completed_tool": "call_5dtxPc7bvJIyYHlpLn0LAYW3",
+        "sonnet_list_price_usd": 0.0759318,
+        "auxiliary_haiku_list_price_usd": 0.016577,
+        "total_list_price_estimate_usd": 0.0925088
+      }
+    }
+  }
+}

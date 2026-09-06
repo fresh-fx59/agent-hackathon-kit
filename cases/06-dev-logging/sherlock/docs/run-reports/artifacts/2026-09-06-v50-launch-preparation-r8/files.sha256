@@ -1,0 +1,12 @@
+b81c7f71605f714e7336879f6ea56803b00d71284e4f1510156e54528ed72d5e  docs/run-reports/artifacts/2026-09-06-v50-launch-preparation-r8/README.md
+202791838b91a3375dcfc1df62c160592dfe56be37815e467f56cb9201e62b8e  docs/run-reports/artifacts/2026-09-06-v50-launch-preparation-r8/review-command-sonnet-low.json
+aee60611f88257d88c8bc6cc06e9f2281687db283cd9dfbff7d5a07cac7b80a0  docs/run-reports/artifacts/2026-09-06-v50-launch-preparation-r8/scripts/v50-launch-full-independent-r1.sh
+f6eb15b6ff005f7980c221f147c8f4ad72867e96ba0de75d465eea71276513d2  docs/run-reports/artifacts/2026-09-06-v50-launch-preparation-r8/scripts/v50-launch-full-wine-r1.sh
+013646ebf50c46d77e97b99ea02e20e8a8c2f45111f84b9d6017d403862af09b  docs/run-reports/artifacts/2026-09-06-v50-launch-preparation-r8/scripts/v50-launch-harness-r10.sh
+431bad7d760b3df60072ae5b6ce525aa5e5eac2e00ee9ad6eba77b7a3660d689  docs/run-reports/artifacts/2026-09-06-v50-launch-preparation-r8/scripts/v50-launch-independent-qualification-r2.sh
+c395aff7b50694f10dab9f527cc7c6cafbdc211d163f5b4ba7db11aca3af9634  docs/run-reports/artifacts/2026-09-06-v50-launch-preparation-r8/scripts/v50-launch-target-qualification-r2.sh
+ecac91a4fcdb322cb7f6865ff3ebe36d1db58d14dc9ec291a6111ddbe0630589  docs/run-reports/artifacts/2026-09-06-v50-launch-preparation-r8/scripts/v50-monitor-audit-r2.sh
+4fcd56cb74edc2d5d8f5230428ecc17b315e1a6bbd823bc7e56fe90f834d4e85  docs/run-reports/artifacts/2026-09-06-v50-launch-preparation-r8/scripts/v50-monitor-watch-r2.sh
+920bb79c635e106d7b8d31d58581f2ff004ad7144afd9b02a5590985e1e9a7e1  docs/run-reports/artifacts/2026-09-06-v50-launch-preparation-r8/scripts/v50-owned-review-monitor-r1.sh
+713bb3b180e389b4277587790a2e37e9c078c567d9abb50c8d9e140881cfa675  docs/run-reports/artifacts/2026-09-06-v50-launch-preparation-r8/scripts/v50-prepare-independent-qualification-r2.sh
+3c80d91f1becd9d86e90768a783af8f6d04bbf8ee4dfffdb8933f1ca40da4f9b  docs/run-reports/artifacts/2026-09-06-v50-launch-preparation-r8/scripts/v50-prepare-target-qualification-r2.sh

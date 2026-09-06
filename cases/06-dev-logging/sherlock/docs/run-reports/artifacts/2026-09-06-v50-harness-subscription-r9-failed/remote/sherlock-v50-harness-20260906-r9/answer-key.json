@@ -1,0 +1,1 @@
+{"dataset":"harness-qualification","defects":[{"id":"HQ-001","proof_locations":[{"file":"System.jsonl","line_end":1,"line_start":1}]}],"files":[{"lines":12,"on_disk_bytes":4764,"path":"System.jsonl","sha256":"1457221a63ecb846f0ab79461d89aa139eeb726cea7d1e01f4b8178f435aacce"}]}

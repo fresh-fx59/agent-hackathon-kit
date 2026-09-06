@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Provider-free tests for the dedicated subscription-review observation lane."""
 import importlib.util
+import datetime as dt
 import gzip
 import json
 import os
@@ -405,6 +406,48 @@ class DedicatedReviewMonitorTest(unittest.TestCase):
             "denied": {"tool_call_id": "denied", "pre": {"sequence": 4, "output": {"continue": False}},
                         "post": None}}}
         self.assertEqual(MONITOR.latest_tool(pairs, None), "denied")
+
+    def test_fresh_health_checking_without_work_is_explicit_pending_lifecycle(self):
+        """A controller before its first permit is live, not a stalled terminal run."""
+        fresh_at = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(seconds=1)).isoformat().replace("+00:00", "Z")
+        self.write_json(self.status, {"schema": 1, "phase": "HEALTH_CHECKING", "reason": None,
+                                      "updated_at": fresh_at})
+        self.upstream.write_bytes(b"")
+        initial = {"schema": MONITOR.SCHEMA, "sources": {},
+                   "last_completed_request": None, "last_completed_tool": None}
+
+        snapshot, _, _, _ = MONITOR.collect_snapshot(
+            self.root, self.observer, self.monitor, initial, capacity=2 * 1024 * 1024)
+
+        self.assertIsNone(snapshot["last_completed_request"])
+        self.assertIsNone(snapshot["last_completed_tool"])
+        lifecycle = snapshot["review_lifecycle"]
+        self.assertEqual(lifecycle["controller_phase"], "HEALTH_CHECKING")
+        self.assertTrue(lifecycle["initial_pending"])
+        self.assertEqual(lifecycle["pending_operation"], "awaiting initial controller permit")
+        self.assertEqual(lifecycle["controller_status_updated_at"], fresh_at)
+        self.assertEqual(lifecycle["observer_identity_created_at"],
+                         json.loads((self.observer / "identity.json").read_text())["created_at"])
+        self.assertGreaterEqual(lifecycle["observer_identity_age_seconds"], 0)
+        self.assertLess(lifecycle["observer_identity_age_seconds"], 60)
+        self.assertIn("initial_pending", self.prompt.read_text(encoding="utf-8"))
+
+    def test_initial_pending_requires_fresh_nonfuture_observer_identity(self):
+        collected_at = dt.datetime(2026, 9, 6, 19, 24, 53, tzinfo=dt.timezone.utc)
+        cases = [
+            ("2026-09-06T19:24:52Z", True, 1.0),
+            ("2026-09-06T19:23:53Z", False, 60.0),
+            ("not-a-timestamp", False, None),
+            ("2026-09-06T19:24:54Z", False, None),
+        ]
+        for created_at, pending, age in cases:
+            with self.subTest(created_at=created_at):
+                lifecycle = MONITOR.review_lifecycle(
+                    {"phase": "HEALTH_CHECKING", "updated_at": "2026-09-06T18:24:53Z"},
+                    {"created_at": created_at}, None, None, collected_at)
+                self.assertEqual(lifecycle["initial_pending"], pending)
+                self.assertEqual(lifecycle["observer_identity_age_seconds"], age)
+                self.assertEqual(lifecycle["controller_status_age_seconds"], 3600.0)
 
     def test_gzip_provider_body_exposes_one_readable_json_representation(self):
         body = self.trace / ".upstream.bodies" / "provider.req.json.gz"

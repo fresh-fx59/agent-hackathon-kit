@@ -23,6 +23,9 @@ import time
 SCHEMA = 1
 DEFAULT_DYNAMIC_CAPACITY = 512 * 1024
 DEFAULT_CYCLE_DEADLINE_S = 45.0
+# Matches lifecycle-supervisor.MAX_OBSERVATION_AGE_NS: an initial controller
+# status is evidence of a live pending permit only inside the existing window.
+INITIAL_PENDING_MAX_AGE_S = 60.0
 TERMINAL_PHASES = {"BLOCKED", "BLOCKED_UNKNOWN", "FAILED", "SUCCEEDED", "COMPLETE", "TERMINAL"}
 NORMAL_TERMINAL_PHASES = {"SUCCEEDED", "COMPLETE", "TERMINAL"}
 
@@ -42,6 +45,34 @@ def canonical(value):
 
 def wall_now():
     return dt.datetime.now(dt.timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def timestamp_age(value, collected_at):
+    if not isinstance(value, str) or not value.endswith("Z"):
+        return None
+    try:
+        timestamp = dt.datetime.fromisoformat(value[:-1] + "+00:00")
+        age = (collected_at - timestamp).total_seconds()
+        return age if age >= 0 else None
+    except (OverflowError, ValueError):
+        return None
+
+
+def review_lifecycle(controller, identity, last_request, last_tool, collected_at):
+    """Expose the bounded initial-permit state without inventing activity."""
+    updated_at = controller.get("updated_at")
+    created_at = identity.get("created_at")
+    status_age = timestamp_age(updated_at, collected_at)
+    identity_age = timestamp_age(created_at, collected_at)
+    initial_pending = (controller["phase"] == "HEALTH_CHECKING"
+                       and last_request is None and last_tool is None
+                       and identity_age is not None and identity_age < INITIAL_PENDING_MAX_AGE_S)
+    return {"controller_phase": controller["phase"], "initial_pending": initial_pending,
+            "pending_operation": "awaiting initial controller permit" if initial_pending else None,
+            "controller_status_updated_at": updated_at,
+            "controller_status_age_seconds": status_age,
+            "observer_identity_created_at": created_at,
+            "observer_identity_age_seconds": identity_age}
 
 
 def strict_object(raw):
@@ -367,15 +398,20 @@ def collect_snapshot(run_root, observer, monitor_dir, state, *, capacity):
         next_sources[key] = {"offset": len(raw), "identity": list(identity),
                              "prefix_sha256": sha256(raw)}
     state_entries = []
+    controller, observer_identity = None, None
     for path in statics:
         if not os.path.lexists(path):
             continue
-        entry, raw, identity = static_entry(run_root, path, capacity - total)
+        entry, raw, file_identity = static_entry(run_root, path, capacity - total)
         total += len(raw)
         if total > capacity:
             raise MonitorError("dynamic evidence capacity exceeded")
         state_entries.append(entry)
-        validation.append((path, raw, identity, "critical" if path.name == "identity.json" else "mutable"))
+        validation.append((path, raw, file_identity, "critical" if path.name == "identity.json" else "mutable"))
+        if path.name == "status.json":
+            controller = strict_object(raw)
+        if path.name == "identity.json":
+            observer_identity = strict_object(raw)
     mutable_tree_paths = {relative(run_root, statics_path) for statics_path in statics}
     for tree in trees:
         for path in tree_files(tree):
@@ -402,12 +438,21 @@ def collect_snapshot(run_root, observer, monitor_dir, state, *, capacity):
     if pairs_entry is None:
         raise MonitorError("pairs missing")
     pairs = strict_object(base64.b64decode(pairs_entry["data_base64"]))
+    if controller is None or not isinstance(controller.get("phase"), str):
+        raise MonitorError("controller phase")
+    if observer_identity is None or not isinstance(observer_identity.get("run_nonce"), str):
+        raise MonitorError("observer identity")
     upstream = next((item for item in captured if item["path"].endswith(".upstream.jsonl")), None)
     request_delta = base64.b64decode(upstream["data_base64"]) if upstream else b""
-    snapshot = {"schema": SCHEMA, "run_nonce": load_json_optional(Path(observer) / "identity.json")["run_nonce"],
-                "collected_at": wall_now(), "dynamic": captured, "state": state_entries,
-                "last_completed_request": latest_request(request_delta, state.get("last_completed_request")),
-                "last_completed_tool": latest_tool(pairs, state.get("last_completed_tool")),
+    last_request = latest_request(request_delta, state.get("last_completed_request"))
+    last_tool = latest_tool(pairs, state.get("last_completed_tool"))
+    collected_at = dt.datetime.now(dt.timezone.utc)
+    snapshot = {"schema": SCHEMA, "run_nonce": observer_identity["run_nonce"],
+                "collected_at": collected_at.isoformat().replace("+00:00", "Z"),
+                "dynamic": captured, "state": state_entries,
+                "last_completed_request": last_request, "last_completed_tool": last_tool,
+                "review_lifecycle": review_lifecycle(
+                    controller, observer_identity, last_request, last_tool, collected_at),
                 "capacity_bytes": capacity, "captured_dynamic_bytes": total}
     raw = canonical(snapshot)
     return snapshot, raw, validation, {"schema": SCHEMA, "sources": next_sources,

@@ -1,0 +1,8 @@
+shape=history tools=25
+size   ok/total   median s   returned
+ 100K  1/1           4.2     gpt-5.5
+ 250K  1/1           2.7     gpt-5.5
+ 400K  1/1           2.3     gpt-5.5
+
+uploaded 0.69 MB across 3 calls; worst-size fail rate 0.0%
+VERDICT: HEALTHY — fit to run
