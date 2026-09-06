@@ -1,0 +1,19 @@
+Correctness gaps:
+
+1. “Exact skill-command prefix” is underspecified. Define accepted syntax, whitespace/newline handling, quoting, and whether only a prefix at byte 0 counts. Otherwise task preservation and deduplication are not testable deterministically.
+
+2. The clear boundary has a race: “natural idle and no inflight provider/tools/children” lacks an observable predicate and required stability interval/event ordering. A late tool/provider event could cross the clear despite the check.
+
+3. Receipt sequencing is inconsistent. The contract says clear after a “validated stage pause,” while acceptance only asserts “receipt consumed before clear.” Specify which receipt fields establish validation and whether consumption occurs before or after idle proof.
+
+4. Evidence requirements lack a canonical representation. “Equals,” “preserve exactly,” and hashes must define byte encoding, newline normalization, command/argument separation, and whether the hash covers raw user input or reconstructed event data.
+
+5. “Prompt contains real expanded skill instructions” has no reliable pass criterion. Define a pinned marker/content hash from the installed skill; merely finding recognizable prose can accept stale or partial expansion.
+
+6. “Fresh SessionStart” needs explicit session identity correlation and ordering constraints. Event order alone may accept a delayed SessionStart from another session.
+
+7. “Autonomous empty continuation hooks may remain only the already narrow observed form” is undefined and weakens the one-submission invariant. Enumerate the permitted event shape and prove it cannot trigger provider work before the combined reseed.
+
+8. The localhost integration test does not state how delayed responses/tools are deterministically released or how absence of requests is bounded, leaving race-sensitive false passes possible.
+
+9. “Subscription qualification” and “authorized target partial and full Winevtx” omit explicit success criteria and artifact/verdict handling, particularly how the preserved `OBSERVATION_STALE` verdict coexists with later qualification results.

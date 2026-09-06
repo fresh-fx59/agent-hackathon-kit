@@ -242,6 +242,16 @@ def run_settings(window, max_tokens, session_token_limit=None, timeout_ms=None,
         row["model"].pop("sessionTokenLimit", None)
     row["model"]["model_fallback"] = {"enabled": False}
     row["memory"] = {"enableManagedAutoMemory": False, "enableDreams": False}
+    if skill_directory:
+        # Qwen's direct `/skill` command expands the skill body but does not run
+        # SkillToolInvocation.execute(), which is where skill-frontmatter hooks
+        # are registered.  Install Stop in the emitted workspace settings so it
+        # runs for the direct user invocation too.  The command resolves the
+        # immutable installed arm through the runner-exported skill root.
+        row["hooks"] = {"Stop": [{"hooks": [{
+            "type": "command",
+            "command": 'python3 "$QWEN_SKILL_ROOT/tools/stopcheck.py"',
+        }]}]}
     # PIN THE BINARY FOR THE LIFE OF THE RUN. qwen-code 0.22.0 checks npm for
     # a newer version at TUI startup and STAGES it for the next launch: a
     # throwaway probe on 2026-09-02 printed «Update successful! The new

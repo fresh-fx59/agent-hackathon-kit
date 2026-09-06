@@ -73,6 +73,66 @@ class ClearProofError(ValueError):
     """The retained lifecycle rows contradict an exact parent reset."""
 
 
+def skill_invocation(skill_command, arguments):
+    """Return the one user turn which loads a skill and supplies its task.
+
+    A bare slash command is an autonomous user turn in Qwen.  It must never
+    precede the task/reseed in a fresh session: the model can start work before
+    that later input is accepted.  Preserve supplied arguments byte-for-byte
+    at the Python-string boundary; only prepend the command when it is absent.
+    """
+    if not isinstance(skill_command, str) or not skill_command:
+        raise ValueError("skill command is empty")
+    if not isinstance(arguments, str) or not arguments:
+        raise ValueError("skill arguments are empty")
+    # The PTY submission delimiter is CR. Preserve LF and tab supplied by the
+    # caller, but reject CR and terminal controls rather than rewriting them
+    # into a second submission or a different user prompt.
+    if ("\r" in arguments
+            or any(ord(char) < 32 and char not in "\n\t"
+                   for char in arguments)
+            or "\x7f" in arguments):
+        raise ValueError("skill arguments contain unsupported PTY control input")
+    if arguments.startswith(skill_command):
+        suffix = arguments[len(skill_command):]
+        if not suffix or suffix[0] in " \t\n\r":
+            if not suffix.strip():
+                raise ValueError("skill arguments are empty")
+            return arguments
+    if not arguments.strip():
+        raise ValueError("skill arguments are empty")
+    return skill_command + " " + arguments
+
+
+def skill_body(skill_root):
+    """Read the installed skill body and bind the exact bytes used as proof."""
+    path = Path(skill_root) / "SKILL.md"
+    try:
+        raw = path.read_bytes()
+    except OSError as exc:
+        raise ClearProofError("installed SKILL.md is unreadable") from exc
+    if raw.startswith(b"---\n"):
+        close = raw.find(b"\n---\n", 4)
+        if close < 0:
+            raise ClearProofError("installed SKILL.md has unterminated frontmatter")
+        raw = raw[close + len(b"\n---\n"):]
+    try:
+        body = raw.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise ClearProofError("installed SKILL.md is not UTF-8") from exc
+    if not body:
+        raise ClearProofError("installed SKILL.md body is empty")
+    return body, hashlib.sha256(raw).hexdigest()
+
+
+def expanded_skill_body(skill_root, prompt):
+    """Require the exact installed skill instructions in a hook prompt."""
+    body, body_sha256 = skill_body(skill_root)
+    if not isinstance(prompt, str) or body not in prompt:
+        raise ClearProofError("fresh-session prompt does not expand installed SKILL.md")
+    return body_sha256
+
+
 class DriverStopped(Exception):
     """The owner stopped the PTY driver and its separately grouped child."""
 
@@ -266,9 +326,40 @@ def capture_clear_anchor(observer_dir, run_nonce):
         "run_nonce", "sequence", "session_id", "input_sha256", "monotonic_ns")}
 
 
-def monitored_clear_evidence(observer_dir, run_nonce, anchor, skill_command,
-                             reseed_line):
-    """Reconstruct the installed-client clear → skill → reseed chain.
+def _only_qwen_continuations(rows, new_session_id):
+    """Reject any actual user input after a proven combined invocation."""
+    for row, event in rows:
+        if (row["session_id"] == new_session_id
+                and event.get("prompt") == ""
+                and "submitted_prompt" not in event):
+            continue
+        raise ClearProofError("unexpected root prompt after combined invocation")
+
+
+def monitored_start_evidence(observer_dir, run_nonce, expected_invocation,
+                             skill_root):
+    """Prove the very first root input is one expanded skill invocation."""
+    roots = _lifecycle_rows(observer_dir, "root-boundary-events.jsonl",
+                            "UserPromptSubmit", run_nonce)
+    if not roots:
+        return {"state": "await_invocation"}
+    row, event = roots[0]
+    if event.get("submitted_prompt") != expected_invocation:
+        raise ClearProofError("first startup prompt is not the expected invocation")
+    skill_body_sha256 = expanded_skill_body(skill_root, event.get("prompt"))
+    _only_qwen_continuations(roots[1:], row["session_id"])
+    return {
+        "state": "complete", "session_id": row["session_id"],
+        "startup_input_sha256": row["input_sha256"],
+        "expected_invocation_sha256": hashlib.sha256(
+            expected_invocation.encode("utf-8")).hexdigest(),
+        "skill_body_sha256": skill_body_sha256,
+    }
+
+
+def monitored_clear_evidence(observer_dir, run_nonce, anchor,
+                             expected_invocation, skill_root):
+    """Reconstruct clear → one combined fresh-session invocation.
 
     The returned state is a polling state, never an inferred success. Any
     observed event that conflicts with the expected next event raises.
@@ -305,45 +396,25 @@ def monitored_clear_evidence(observer_dir, run_nonce, anchor, skill_command,
            for row, _ in later_roots):
         raise ClearProofError("root prompt arrived before clear completed")
     if not later_roots:
-        return {"state": "await_skill", "new_session_id": clear_row["session_id"]}
+        return {"state": "await_invocation",
+                "new_session_id": clear_row["session_id"]}
 
-    slash_row, slash_event = later_roots[0]
-    if (slash_row["session_id"] != clear_row["session_id"]
-            or slash_event.get("submitted_prompt") != skill_command
-            or not isinstance(slash_event.get("prompt"), str)
-            or not slash_event["prompt"]):
-        raise ClearProofError("first fresh-session prompt is not the skill reload")
-    if len(later_roots) == 1:
-        return {"state": "await_reseed", "new_session_id": clear_row["session_id"]}
-
-    # Qwen's interactive client can emit autonomous continuation hooks while
-    # the slash-command turn is still active. Its raw hook input has exactly
-    # an empty prompt and no submitted_prompt: the client omits that field
-    # unless a non-empty user submission caused the event. This is not a
-    # reseed and must not consume the next actual user submission. Keep the
-    # exception this narrow: an empty submitted_prompt, a non-empty prompt,
-    # or a different session remains contradictory evidence and fails closed.
-    reseed_row = reseed_event = None
-    for candidate_row, candidate_event in later_roots[1:]:
-        if (candidate_row["session_id"] == clear_row["session_id"]
-                and candidate_event.get("prompt") == ""
-                and "submitted_prompt" not in candidate_event):
-            continue
-        reseed_row, reseed_event = candidate_row, candidate_event
-        break
-    if reseed_row is None:
-        return {"state": "await_reseed", "new_session_id": clear_row["session_id"]}
-    if (reseed_row["session_id"] != clear_row["session_id"]
-            or reseed_event.get("prompt") != reseed_line
-            or reseed_event.get("submitted_prompt") != reseed_line):
-        raise ClearProofError("fresh-session reseed prompt does not match")
+    invocation_row, invocation_event = later_roots[0]
+    if (invocation_row["session_id"] != clear_row["session_id"]
+            or invocation_event.get("submitted_prompt") != expected_invocation):
+        raise ClearProofError("first fresh-session prompt is not the expected invocation")
+    skill_body_sha256 = expanded_skill_body(skill_root,
+                                            invocation_event.get("prompt"))
+    _only_qwen_continuations(later_roots[1:], clear_row["session_id"])
     return {
         "state": "complete", "old_session_id": anchor["session_id"],
         "new_session_id": clear_row["session_id"],
         "anchor_input_sha256": anchor["input_sha256"],
         "clear_input_sha256": clear_row["input_sha256"],
-        "skill_input_sha256": slash_row["input_sha256"],
-        "reseed_input_sha256": reseed_row["input_sha256"],
+        "invocation_input_sha256": invocation_row["input_sha256"],
+        "expected_invocation_sha256": hashlib.sha256(
+            expected_invocation.encode("utf-8")).hexdigest(),
+        "skill_body_sha256": skill_body_sha256,
     }
 
 
@@ -1300,9 +1371,9 @@ class Session(object):
             if time.time() >= deadline:
                 return False
 
-    def type_skill(self, skill_command, settle, note,
+    def type_skill(self, skill_command, arguments, settle, note,
                    attempts=SKILL_TYPE_ATTEMPTS):
-        """Type the skill command and PROVE it was accepted, or say it wasn't.
+        """Type one skill invocation and PROVE it was accepted, or say it wasn't.
 
         The rejection is read from the transcript FILE, from the byte offset
         that was current before the command was typed — so the needle is
@@ -1316,6 +1387,7 @@ class Session(object):
         (the v43 `settings.skills.directories` failure), and is reported as a
         terminal instead of being run around for six hours.
         """
+        invocation = skill_invocation(skill_command, arguments)
         needle = SKILL_REJECTED_FMT % skill_command
         for attempt in range(1, attempts + 1):
             try:
@@ -1323,8 +1395,8 @@ class Session(object):
                 before = self.transcript.tell()
             except (OSError, IOError, ValueError):
                 before = 0
-            self.type(skill_command, settle=settle)
-            note("typed", skill_command)
+            self.type(invocation, settle=settle)
+            note("typed", invocation)
             # POLL, DON'T SLEEP. A fixed extra settle here is pure latency on
             # the happy path — and this driver's startup latency is inside
             # every test's own timeout arithmetic, so a blind second is not
@@ -1476,6 +1548,7 @@ def drive(argv, cwd, work, first_prompt, reseed, stage_budget_s, settle_s,
     # future refactor of `same_stage` cannot silently reintroduce carry-over.
     barren = 0
     last_seen = None
+    skill_root = os.environ.get("QWEN_SKILL_ROOT", "")
 
     def note(kind, detail=""):
         row = {"at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
@@ -1540,15 +1613,33 @@ def drive(argv, cwd, work, first_prompt, reseed, stage_budget_s, settle_s,
              "typing anyway (today's behaviour, never worse)"
              % (seen, clear_idle_wait_s, step_label))
 
-    def wait_for_reset_state(anchor, wanted, reseed_line=""):
+    def wait_for_start_state(expected_invocation):
+        """Poll the first root hook; a second user turn is contradictory."""
+        end = time.time() + max(settle_s * 4, 60.0)
+        while time.time() < end:
+            try:
+                proof = monitored_start_evidence(
+                    observer_dir, run_nonce, expected_invocation, skill_root)
+            except ClearProofError as exc:
+                note("CLEAR_NOT_EFFECTIVE", str(exc))
+                return None
+            if proof["state"] == "complete":
+                return proof
+            if not ses.pump(1.0) and not ses.alive():
+                break
+        note("CLEAR_NOT_EFFECTIVE",
+             "no exact startup invocation proof within the verification window")
+        return None
+
+    def wait_for_reset_state(anchor, wanted, expected_invocation):
         """Poll exact external hook evidence while keeping the PTY alive."""
-        ranks = {"await_clear": 0, "await_skill": 1,
-                 "await_reseed": 2, "complete": 3}
+        ranks = {"await_clear": 0, "await_invocation": 1, "complete": 2}
         end = time.time() + max(settle_s * 4, 60.0)
         while time.time() < end:
             try:
                 proof = monitored_clear_evidence(
-                    observer_dir, run_nonce, anchor, skill_command, reseed_line)
+                    observer_dir, run_nonce, anchor, expected_invocation,
+                    skill_root)
             except ClearProofError as exc:
                 note("CLEAR_NOT_EFFECTIVE", str(exc))
                 return None
@@ -1572,6 +1663,15 @@ def drive(argv, cwd, work, first_prompt, reseed, stage_budget_s, settle_s,
         if setup_stop[0]:
             stopping[0] = True
             raise DriverStopped()
+        if observer_dir:
+            if not skill_root:
+                note("CLEAR_NOT_EFFECTIVE", "QWEN_SKILL_ROOT is absent")
+                return 8, events
+            try:
+                skill_body(skill_root)
+            except ClearProofError as exc:
+                note("CLEAR_NOT_EFFECTIVE", str(exc))
+                return 8, events
         ses.pump(settle_s)                     # let the UI come up
         note("started", " ".join(argv))
         # SNAPSHOT THE STAGE BEFORE TYPING, NEVER AFTER. Found on the stand-in:
@@ -1597,7 +1697,7 @@ def drive(argv, cwd, work, first_prompt, reseed, stage_budget_s, settle_s,
             note("init_wait_timeout",
                  "target never looked ready within %.0fs; typing anyway "
                  "rather than hanging" % INIT_WAIT_S)
-        if not ses.type_skill(skill_command, settle_s, note):
+        if not ses.type_skill(skill_command, first_prompt, settle_s, note):
             note("SKILL_NOT_LOADED",
                  "the target rejected %s on every one of %d attempts — the "
                  "skill is not registered, so the session would run with no "
@@ -1605,8 +1705,9 @@ def drive(argv, cwd, work, first_prompt, reseed, stage_budget_s, settle_s,
                  "that for 28 minutes and never sent a request)"
                  % (skill_command, SKILL_TYPE_ATTEMPTS))
             return 11, events
-        ses.type(first_prompt, settle=2.0)
-        note("typed", "the task prompt")
+        if observer_dir and wait_for_start_state(
+                skill_invocation(skill_command, first_prompt)) is None:
+            return 8, events
         # WHEN THE RUN ACTUALLY BEGAN, for the nudge. Until the first upstream
         # call there is no ledger to read, and `ledger_quiet_s` used to answer
         # None there and call it "not a stall" — so the paid run's 28 silent
@@ -1912,14 +2013,6 @@ def drive(argv, cwd, work, first_prompt, reseed, stage_budget_s, settle_s,
             if ses.refusal.seen:
                 note("CLEAR_REFUSED", "a background task was still alive")
                 return 6, events
-            if observer_dir and wait_for_reset_state(
-                    clear_anchor, "await_skill") is None:
-                return 8, events
-            wait_before(skill_command)
-            ses.type(skill_command, settle=settle_s)
-            if observer_dir and wait_for_reset_state(
-                    clear_anchor, "await_reseed") is None:
-                return 8, events
             line = reseed % {"work": os.path.abspath(work), "stage": seen}
             if reseed_command:
                 # BUILT AT RESEED TIME, so it carries THIS boundary's numbers.
@@ -1941,18 +2034,25 @@ def drive(argv, cwd, work, first_prompt, reseed, stage_budget_s, settle_s,
                 except (OSError, subprocess.SubprocessError) as exc:
                     note("reseed_command_failed",
                          "%s — falling back to the static template" % exc)
-            wait_before("the reseed line")
-            ses.type(line, settle=2.0)
+            invocation = skill_invocation(skill_command, line)
+            if observer_dir and wait_for_reset_state(
+                    clear_anchor, "await_invocation", invocation) is None:
+                return 8, events
+            wait_before("the combined skill invocation")
+            if not ses.type_skill(skill_command, line, settle_s, note):
+                note("SKILL_NOT_LOADED",
+                     "the target rejected %s during reseed" % skill_command)
+                return 11, events
             note("reseeded", seen)
             if observer_dir:
-                proof = wait_for_reset_state(clear_anchor, "complete", line)
+                proof = wait_for_reset_state(clear_anchor, "complete", invocation)
                 if proof is None:
                     return 8, events
                 note("clear_verified",
                      "%s — exact SessionStart(clear) %s -> %s and exact "
-                     "skill/reseed root prompts (%s)"
+                     "combined root invocation (%s)"
                      % (seen, proof["old_session_id"], proof["new_session_id"],
-                        proof["reseed_input_sha256"]))
+                        proof["invocation_input_sha256"]))
             # DO NOT BELIEVE YOUR OWN KEYSTROKES. The refusal needle above
             # catches a /clear that says no; it cannot catch one that says
             # nothing and keeps the conversation, which is exactly what run

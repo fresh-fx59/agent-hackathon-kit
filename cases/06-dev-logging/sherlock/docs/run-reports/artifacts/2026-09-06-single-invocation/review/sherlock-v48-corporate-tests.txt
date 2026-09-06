@@ -1,0 +1,41 @@
+✓ measure/corporate-settings.py exists
+✓ emit exits 0
+✓ emit prints valid JSON
+✓ model.chatCompression.maxRecentFilesToRetain == 0
+✓ model.generationConfig.contextWindowSize == 262000
+✓ model.generationConfig.samplingParams.max_tokens == 20000
+✓ model.skipStartupContext == True
+✓ tools.core is a list
+✓ mcp.excluded is a list
+✓ skills.disabledLevels is a list
+✓ the allow-list keeps read_file — sherlock cannot work without it
+✓ the allow-list keeps run_shell_command — sherlock cannot work without it
+✓ the allow-list keeps write_file — sherlock cannot work without it
+✓ the allow-list keeps skill — sherlock cannot work without it
+✓ the allow-list drops cron_create
+✓ the allow-list drops get_goal
+✓ the allow-list drops artifact
+✓ the allow-list drops web_search
+✓ bundled skills are off (18,066 tokens of catalogue)
+✓ the project level stays OFF — that level IS the model's writable root, and is what let it edit its own grader twice in v42
+✓ the user level stays ON — the arm is installed there now, outside $W
+✓ the profile sets model.sessionTokenLimit — the only precise circuit breaker on this ceiling
+✓ the profile leaves per-call truncation at the stock default — a cap reschedules tokens rather than deleting them
+✓ the profile does NOT use toolOutputBatchBudget — its truncation is announced but unrecoverable at the send boundary
+✓ prove states plainly that hard is not a send ceiling
+✓ prove names the sessionTokenLimit backstop in its verdict
+✓ prove REFUSES to call a profile safe with no session token limit
+✓ prove exits 0 at the gate the profile was built for
+✓ prove states the worst reachable request
+✓ prove shows its arithmetic, not a verdict alone
+✓ a larger max_tokens still cannot breach the OBEDIENT path — the clamp bounds it at the same 248900
+✓ ...but prove now refuses it, because the backstop plus that budget would itself permit an illegal request
+✓ prove FAILS when the declared window exceeds the gate
+✓ prove FAILS on 6,700 — it starves the 20,000-token compaction summary, which is how r5 died
+✓ qwen-code bundle present for the key check (skipped off-box)
+✓ auto moved
+✓ handoff threshold is below auto
+✓ margin between threshold and auto is at least one turn's growth
+✓ threshold is not so low the run would clear constantly
+✓ the threshold uses the MEASURED max jump (53,369), not the brief's 20,000 placeholder
+✓ the corporate profile is provably under the gate

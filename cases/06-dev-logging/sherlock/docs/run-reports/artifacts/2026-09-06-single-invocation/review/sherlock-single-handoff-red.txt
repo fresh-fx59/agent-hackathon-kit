@@ -1,0 +1,45 @@
+.FFFFF
+======================================================================
+FAIL: test_full_and_partial_handoffs_carry_arguments_in_skill_submission (__main__.HandoffInvocationTests.test_full_and_partial_handoffs_carry_arguments_in_skill_submission) (partial=False, stage='draft')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/a/hack/wt-v42/cases/06-dev-logging/sherlock/tools/tests/test_single_invocation_handoff.py", line 16, in test_full_and_partial_handoffs_carry_arguments_in_skill_submission
+    self.assertIn('  2) /sherlock ПРОДОЛЖИ РАССЛЕДОВАНИЕ ИЗ /tmp/fresh work — СТУПЕНЬ '+stage,text)
+AssertionError: '  2) /sherlock ПРОДОЛЖИ РАССЛЕДОВАНИЕ ИЗ /tmp/fresh work — СТУПЕНЬ draft' not found in 'СТУПЕНЬ ЗАВЕРШЕНА: triage\nСОСТОЯНИЕ: /tmp/fresh work/checkpoint.json (stage=draft, разобрано 4 из 4)\n\nДАЛЬШЕ — ВЫПОЛНИ ТРИ ДЕЙСТВИЯ ПО ПОРЯДКУ, НЕ ПРОДОЛЖАЙ В ЭТОЙ СЕССИИ:\n  1) /clear\n  2) /sherlock\n  3) вставь одной строкой:\n     ПРОДОЛЖИ РАССЛЕДОВАНИЕ ИЗ /tmp/fresh work — СТУПЕНЬ draft\n\nПОЧЕМУ: следующая ступень должна начаться с чистого контекста — на оплаченном прогоне r6 одна сессия дошла до 327 639 токенов в запросе при потолке 262 000.\n/clear стирает загружённый навык, поэтому шаг 2 обязателен.\n/clear ОТКАЖЕТСЯ, пока живёт фоновая задача — фоновых задач тут быть не должно.\n'
+
+======================================================================
+FAIL: test_full_and_partial_handoffs_carry_arguments_in_skill_submission (__main__.HandoffInvocationTests.test_full_and_partial_handoffs_carry_arguments_in_skill_submission) (partial=False, stage='repair')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/a/hack/wt-v42/cases/06-dev-logging/sherlock/tools/tests/test_single_invocation_handoff.py", line 16, in test_full_and_partial_handoffs_carry_arguments_in_skill_submission
+    self.assertIn('  2) /sherlock ПРОДОЛЖИ РАССЛЕДОВАНИЕ ИЗ /tmp/fresh work — СТУПЕНЬ '+stage,text)
+AssertionError: '  2) /sherlock ПРОДОЛЖИ РАССЛЕДОВАНИЕ ИЗ /tmp/fresh work — СТУПЕНЬ repair' not found in 'СТУПЕНЬ ЗАВЕРШЕНА: triage\nСОСТОЯНИЕ: /tmp/fresh work/checkpoint.json (stage=repair, разобрано 4 из 4)\n\nДАЛЬШЕ — ВЫПОЛНИ ТРИ ДЕЙСТВИЯ ПО ПОРЯДКУ, НЕ ПРОДОЛЖАЙ В ЭТОЙ СЕССИИ:\n  1) /clear\n  2) /sherlock\n  3) вставь одной строкой:\n     ПРОДОЛЖИ РАССЛЕДОВАНИЕ ИЗ /tmp/fresh work — СТУПЕНЬ repair\n\nПОЧЕМУ: следующая ступень должна начаться с чистого контекста — на оплаченном прогоне r6 одна сессия дошла до 327 639 токенов в запросе при потолке 262 000.\n/clear стирает загружённый навык, поэтому шаг 2 обязателен.\n/clear ОТКАЖЕТСЯ, пока живёт фоновая задача — фоновых задач тут быть не должно.\n'
+
+======================================================================
+FAIL: test_full_and_partial_handoffs_carry_arguments_in_skill_submission (__main__.HandoffInvocationTests.test_full_and_partial_handoffs_carry_arguments_in_skill_submission) (partial=True, stage='triage')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/a/hack/wt-v42/cases/06-dev-logging/sherlock/tools/tests/test_single_invocation_handoff.py", line 16, in test_full_and_partial_handoffs_carry_arguments_in_skill_submission
+    self.assertIn('  2) /sherlock ПРОДОЛЖИ РАССЛЕДОВАНИЕ ИЗ /tmp/fresh work — СТУПЕНЬ '+stage,text)
+AssertionError: '  2) /sherlock ПРОДОЛЖИ РАССЛЕДОВАНИЕ ИЗ /tmp/fresh work — СТУПЕНЬ triage' not found in 'ЧАСТЬ СТУПЕНИ triage ЗАВЕРШЕНА — СТУПЕНЬ ПРОДОЛЖАЕТСЯ.\nСОСТОЯНИЕ: /tmp/fresh work/checkpoint.json (stage=triage, разобрано 4 из 4, осталось 0)\n\nДАЛЬШЕ — ВЫПОЛНИ ТРИ ДЕЙСТВИЯ ПО ПОРЯДКУ, НЕ ПРОДОЛЖАЙ В ЭТОЙ СЕССИИ:\n  1) /clear\n  2) /sherlock\n  3) вставь одной строкой:\n     ПРОДОЛЖИ РАССЛЕДОВАНИЕ ИЗ /tmp/fresh work — СТУПЕНЬ triage\n\nПОЧЕМУ: контекст этой сессии уже израсходован на разобранную часть. Следующая партия строк должна начаться с чистого контекста — на оплаченном прогоне одна сессия дошла до 327 639 токенов при потолке 262 000.\n/clear стирает загружённый навык, поэтому шаг 2 обязателен.\n/clear ОТКАЖЕТСЯ, пока живёт фоновая задача — фоновых задач тут быть не должно.\n'
+
+======================================================================
+FAIL: test_full_and_partial_handoffs_carry_arguments_in_skill_submission (__main__.HandoffInvocationTests.test_full_and_partial_handoffs_carry_arguments_in_skill_submission) (partial=True, stage='draft')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/a/hack/wt-v42/cases/06-dev-logging/sherlock/tools/tests/test_single_invocation_handoff.py", line 16, in test_full_and_partial_handoffs_carry_arguments_in_skill_submission
+    self.assertIn('  2) /sherlock ПРОДОЛЖИ РАССЛЕДОВАНИЕ ИЗ /tmp/fresh work — СТУПЕНЬ '+stage,text)
+AssertionError: '  2) /sherlock ПРОДОЛЖИ РАССЛЕДОВАНИЕ ИЗ /tmp/fresh work — СТУПЕНЬ draft' not found in 'ЧАСТЬ СТУПЕНИ triage ЗАВЕРШЕНА — СТУПЕНЬ ПРОДОЛЖАЕТСЯ.\nСОСТОЯНИЕ: /tmp/fresh work/checkpoint.json (stage=draft, разобрано 4 из 4, осталось 0)\n\nДАЛЬШЕ — ВЫПОЛНИ ТРИ ДЕЙСТВИЯ ПО ПОРЯДКУ, НЕ ПРОДОЛЖАЙ В ЭТОЙ СЕССИИ:\n  1) /clear\n  2) /sherlock\n  3) вставь одной строкой:\n     ПРОДОЛЖИ РАССЛЕДОВАНИЕ ИЗ /tmp/fresh work — СТУПЕНЬ draft\n\nПОЧЕМУ: контекст этой сессии уже израсходован на разобранную часть. Следующая партия строк должна начаться с чистого контекста — на оплаченном прогоне одна сессия дошла до 327 639 токенов при потолке 262 000.\n/clear стирает загружённый навык, поэтому шаг 2 обязателен.\n/clear ОТКАЖЕТСЯ, пока живёт фоновая задача — фоновых задач тут быть не должно.\n'
+
+======================================================================
+FAIL: test_full_and_partial_handoffs_carry_arguments_in_skill_submission (__main__.HandoffInvocationTests.test_full_and_partial_handoffs_carry_arguments_in_skill_submission) (partial=True, stage='repair')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/a/hack/wt-v42/cases/06-dev-logging/sherlock/tools/tests/test_single_invocation_handoff.py", line 16, in test_full_and_partial_handoffs_carry_arguments_in_skill_submission
+    self.assertIn('  2) /sherlock ПРОДОЛЖИ РАССЛЕДОВАНИЕ ИЗ /tmp/fresh work — СТУПЕНЬ '+stage,text)
+AssertionError: '  2) /sherlock ПРОДОЛЖИ РАССЛЕДОВАНИЕ ИЗ /tmp/fresh work — СТУПЕНЬ repair' not found in 'ЧАСТЬ СТУПЕНИ triage ЗАВЕРШЕНА — СТУПЕНЬ ПРОДОЛЖАЕТСЯ.\nСОСТОЯНИЕ: /tmp/fresh work/checkpoint.json (stage=repair, разобрано 4 из 4, осталось 0)\n\nДАЛЬШЕ — ВЫПОЛНИ ТРИ ДЕЙСТВИЯ ПО ПОРЯДКУ, НЕ ПРОДОЛЖАЙ В ЭТОЙ СЕССИИ:\n  1) /clear\n  2) /sherlock\n  3) вставь одной строкой:\n     ПРОДОЛЖИ РАССЛЕДОВАНИЕ ИЗ /tmp/fresh work — СТУПЕНЬ repair\n\nПОЧЕМУ: контекст этой сессии уже израсходован на разобранную часть. Следующая партия строк должна начаться с чистого контекста — на оплаченном прогоне одна сессия дошла до 327 639 токенов при потолке 262 000.\n/clear стирает загружённый навык, поэтому шаг 2 обязателен.\n/clear ОТКАЖЕТСЯ, пока живёт фоновая задача — фоновых задач тут быть не должно.\n'
+
+----------------------------------------------------------------------
+Ran 2 tests in 0.001s
+
+FAILED (failures=5)

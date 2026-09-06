@@ -11,7 +11,7 @@ from pathlib import Path
 
 
 SHERLOCK = Path(__file__).resolve().parents[2]
-PACKAGE = SHERLOCK / "skills" / "v46"
+PACKAGE = SHERLOCK / "skills" / os.environ.get("SHERLOCK_TEST_PACKAGE", "v46")
 
 
 class StagePauseV46Test(unittest.TestCase):

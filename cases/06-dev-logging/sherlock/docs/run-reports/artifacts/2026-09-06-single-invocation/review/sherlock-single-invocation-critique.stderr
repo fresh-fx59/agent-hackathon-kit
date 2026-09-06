@@ -1,0 +1,64 @@
+Reading additional input from stdin...
+OpenAI Codex v0.153.4
+--------
+workdir: /Users/a/hack/wt-v42
+model: gpt-5.6-sol
+provider: openai
+approval: never
+sandbox: read-only
+reasoning effort: medium
+reasoning summaries: none
+session id: 01a076ed-1237-7fb0-a9a0-2d8d00448923
+--------
+user
+Critique this ready specification only. Do not execute tools or edit files. Return PASS or concrete correctness gaps, under 500 words.
+
+<stdin>
+# One Sherlock invocation per session
+
+Goal: preserve cold-corpus task and checkpoint context while enforcing triage→draft→repair boundaries, so target-model reports can complete without queued or contextless investigations.
+
+## Observed cause
+
+V46 qualification r1 called `/sherlock` through `type_skill` and then separately typed a task already prefixed by `/sherlock` in run-bench.sh. First actual root submission13:23:31 began triage. Second actual submission13:28:19, in the same session, carried `/sherlock` plus task after triage boundary1. The stage-pause receipt stayed pending and draft began before clear. The continuation path likewise submits bare skill, then waits idle before the reseed; this permits autonomous work without the reseed. The fixture used global Stop settings and direct handoff input, so it did not prove the actual skill-scoped input composition. Terminal OBSERVATION_STALE13:31:06 is a separate root monitoring miss and must remain the original verdict.
+
+## Focused contract
+
+Each fresh session receives one actual user submission: `/sherlock <task arguments>`. Startup preserves the task exactly, recognizing an existing exact skill-command prefix so it is never duplicated. After a validated stage pause, wait for natural idle and no inflight provider/tools/children, clear, prove fresh SessionStart, then submit one skill invocation carrying the freshly generated checkpoint reseed as arguments. Do not send a bare skill turn followed by a task/reseed turn. Prove the first actual root submission equals the expected full invocation and its prompt contains real expanded skill instructions; preserve exact task/reseed and new-session hashes. Reject different-session, wrong-argument, unexpanded, or unexpected actual user input. Autonomous empty continuation hooks may remain only the already narrow observed form.
+
+Runtime v47 copies immutable v46, updates checkpoint handoff instructions and SKILL/README prose to match the one-submission protocol. Preserve receipt validation and all four final gates. No source version is edited after freeze. Existing driver and root event streams remain the mechanism; no new orchestrator.
+
+## Acceptance
+
+Red tests reproduce duplicate startup and continuation ordering. Green tests prove exactly one dispatch with intact multiline task, an already-prefixed prompt is not doubled, clear precedes combined continuation, and evidence refuses altered arguments/session/missing expansion. Actual installed Qwen 0.22.0 test uses a real discovered Sherlock skill and skill-scoped Stop hook (not only global Stop), full driver entry, scripted localhost responses, delayed tool/response, startup→triage handoff→clear→combined reseed. Assert no provider request sees bare/contextless skill, no second actual startup input, receipt consumed before clear, fresh-session combined reseed, all requests/tools accounted, marker retained. Then finalizer/stage-pause regressions, subscription qualification, authorized target partial and full Winevtx plus independent cold corpus on one final package hash.
+
+Non-goals: relaxing supervision deadlines, changing findings gates, new orchestration, or seeding investigation answers.
+</stdin>
+hook: SessionStart
+hook: SessionStart Completed
+hook: UserPromptSubmit
+hook: UserPromptSubmit Completed
+codex
+Correctness gaps:
+
+1. “Exact skill-command prefix” is underspecified. Define accepted syntax, whitespace/newline handling, quoting, and whether only a prefix at byte 0 counts. Otherwise task preservation and deduplication are not testable deterministically.
+
+2. The clear boundary has a race: “natural idle and no inflight provider/tools/children” lacks an observable predicate and required stability interval/event ordering. A late tool/provider event could cross the clear despite the check.
+
+3. Receipt sequencing is inconsistent. The contract says clear after a “validated stage pause,” while acceptance only asserts “receipt consumed before clear.” Specify which receipt fields establish validation and whether consumption occurs before or after idle proof.
+
+4. Evidence requirements lack a canonical representation. “Equals,” “preserve exactly,” and hashes must define byte encoding, newline normalization, command/argument separation, and whether the hash covers raw user input or reconstructed event data.
+
+5. “Prompt contains real expanded skill instructions” has no reliable pass criterion. Define a pinned marker/content hash from the installed skill; merely finding recognizable prose can accept stale or partial expansion.
+
+6. “Fresh SessionStart” needs explicit session identity correlation and ordering constraints. Event order alone may accept a delayed SessionStart from another session.
+
+7. “Autonomous empty continuation hooks may remain only the already narrow observed form” is undefined and weakens the one-submission invariant. Enumerate the permitted event shape and prove it cannot trigger provider work before the combined reseed.
+
+8. The localhost integration test does not state how delayed responses/tools are deterministically released or how absence of requests is bounded, leaving race-sensitive false passes possible.
+
+9. “Subscription qualification” and “authorized target partial and full Winevtx” omit explicit success criteria and artifact/verdict handling, particularly how the preserved `OBSERVATION_STALE` verdict coexists with later qualification results.
+hook: Stop
+hook: Stop Completed
+tokens used
+8 645
