@@ -99,6 +99,7 @@ class TargetContractProbeTest(unittest.TestCase):
         settings = json.loads((self.root / "corporate-settings.json").read_text())
         package = json.loads((self.root / "input-package.json").read_text())
 
+        self.assertEqual(profile["interactive"], {"enabled": True})
         self.assertEqual(profile["schema"], 2)
         self.assertEqual(profile["execution_mode"], "operator_monitored")
         self.assertEqual(profile["request_read_timeout_s"], 600)
@@ -125,7 +126,7 @@ class TargetContractProbeTest(unittest.TestCase):
             '--boot-id "$SHERLOCK_BOOT_ID"'
             % (ROOT / "eval" / "bench" / "lifecycle-supervisor.py"))
         for event in ("PreToolUse", "PostToolUse", "PostToolUseFailure", "PostToolBatch",
-                      "SubagentStart", "SubagentStop", "UserPromptSubmit"):
+                      "SubagentStart", "SubagentStop", "UserPromptSubmit", "SessionStart"):
             hook = settings["hooks"][event][0]["hooks"][0]
             self.assertEqual(hook, {"type": "command",
                                     "command": expected_hook_command,
@@ -137,6 +138,32 @@ class TargetContractProbeTest(unittest.TestCase):
         self.assertEqual(
             manifest["probe_budget_sha256"],
             hashlib.sha256((self.root / "probe-budget.json").read_bytes()).hexdigest())
+
+    def test_prepare_binds_interactive_driver_bytes(self):
+        self.probe.prepare(self.args)
+        package = json.loads((self.root / "input-package.json").read_text())
+        self.assertEqual(package["interactive_driver_sha256"],
+                         self._sha(ROOT / "measure" / "interactive-drive.py"))
+
+    def test_changed_interactive_driver_rejected_before_secret_or_contact(self):
+        self.args.operator_monitored = True
+        self.probe.prepare(self.args)
+        original_asset = self.probe._asset
+        driver = ROOT / "measure" / "interactive-drive.py"
+
+        def changed_asset(path, code="TARGET_PROBE_NOT_AUTHORIZED"):
+            raw, digest = original_asset(path, code)
+            if Path(path).resolve() == driver.resolve():
+                return raw + b"# changed\n", self._sha_bytes(raw + b"# changed\n")
+            return raw, digest
+
+        with mock.patch.object(self.probe, "_asset", side_effect=changed_asset):
+            with self.assertRaisesRegex(self.probe.ProbeFailure, "stable dependency changed"):
+                self.probe.run(self.root / "probe-manifest.json",
+                               self._sha(self.root / "probe-manifest.json"),
+                               self.root / "nonces", secret_reader=self._tripwire,
+                               proxy_starter=self._tripwire, runner=self._tripwire)
+        self.assertEqual(self.trips, [])
 
     def test_owned_runner_timeout_terminates_its_stubborn_process_group(self):
         """The outer watchdog must not orphan controller descendants."""
@@ -1035,7 +1062,7 @@ raise SystemExit(1)
         qwen = self.temp / "sealed-local-qwen.py"
         tools = ROOT / "skills" / "v44" / "tools"
         qwen.write_text("""#!/usr/bin/env python3
-import json, os, subprocess, sys, urllib.request
+import json, os, select, subprocess, sys, time, urllib.request
 from pathlib import Path
 if '--sherlock-flag-probe-sentinel' in sys.argv:
     raise SystemExit(0)
@@ -1057,12 +1084,17 @@ assert (skill_root / 'SKILL.md').is_file()
 try:
     prompt = sys.argv[sys.argv.index('-p') + 1]
 except (ValueError, IndexError):
-    raise SystemExit('Qwen did not receive a raw prompt')
+    # PTY stand-in: accept the skill command, then the actual multiline task.
+    assert sys.stdin.readline().strip() == '/sherlock'
+    prompt = sys.stdin.readline()
+    while select.select([sys.stdin], [], [], 0.2)[0]:
+        prompt += sys.stdin.readline()
+    assert prompt.strip(), 'Qwen did not receive a raw prompt'
 request = urllib.request.Request(os.environ['OPENAI_BASE_URL'].rstrip('/') + '/chat/completions',
     data=json.dumps({'model': os.environ.get('SHERLOCK_QWEN_MODEL', 'deepseek-v4-20260901'),
                      'messages': [{'role': 'user', 'content': prompt}], 'max_tokens': 7}).encode(),
     headers={'Authorization': 'Bearer fixture-token', 'Content-Type': 'application/json'})
-with urllib.request.urlopen(request, timeout=10) as response:
+with urllib.request.urlopen(request, timeout=60) as response:
     observed = json.loads(response.read().decode())
 assert observed['model'] == 'deepseek-v4-20260901', observed
 work, corpus = Path('work'), Path('corpus')
@@ -1096,12 +1128,20 @@ for source in (work / 'worklist.tsv').read_text(encoding='utf-8').splitlines():
 if (work / 'report.md').exists():
     raise SystemExit('report was not blank before model output')
 (work / 'report.md').write_text(observed['choices'][0]['message']['content'], encoding='utf-8')
+if '-p' not in sys.argv:
+    # Terminal stage is fixture output; real generic report gates still run.
+    (work / 'checkpoint.json').write_text(json.dumps({'stage': 'done', 'boundary_seq': 1}))
+    (work / 'handoff.txt').write_text('Fixture terminal boundary')
+    print('СТУПЕНЬ ЗАВЕРШЕНА', flush=True)
+    time.sleep(60)  # Stay alive until the PTY driver observes and closes it.
+
 print(json.dumps([{'type':'result','result':'ok','is_error':False,'session_id':'1234567890abcdef',
                    'num_turns':1,'usage':{'input_tokens':3,'output_tokens':2}}]))
 """ % (str(tools / "logmap.py"), str(tools / "worklist.py"), str(tools / "worklist.py")), encoding="utf-8")
         qwen.chmod(0o700)
 
         seen = []
+        fixture_expires_at = None
         class Upstream(http.server.BaseHTTPRequestHandler):
             def do_POST(inner):
                 length = int(inner.headers["Content-Length"])
@@ -1109,7 +1149,7 @@ print(json.dumps([{'type':'result','result':'ok','is_error':False,'session_id':'
                 prompt_raw = payload['messages'][0]['content'].encode('utf-8')
                 seen.append({'payload': payload, 'prompt_sha256': hashlib.sha256(prompt_raw).hexdigest()})
                 if cross_launch_window:
-                    time.sleep(9)
+                    time.sleep(max(0, fixture_expires_at - time.time()) + 1)
                 response = json.dumps({"id": "fixture-response", "object": "chat.completion",
                     "model": "deepseek-v4-20260901", "choices": [{"index": 0, "message": {"role": "assistant", "content": canonical_report}, "finish_reason": "stop"}],
                     "usage": {"prompt_tokens": 3, "completion_tokens": 2}}).encode()
@@ -1131,13 +1171,14 @@ print(json.dumps([{'type':'result','result':'ok','is_error':False,'session_id':'
                 # Both inputs are timely at authorization/dispatch, then expire
                 # while the already-contacted localhost fixture is responding.
                 now = dt.datetime.now(dt.timezone.utc)
+                fixture_expires_at = (now + dt.timedelta(seconds=30)).timestamp()
                 rate = json.loads((root / "probe-rate-snapshot.json").read_text())
-                rate["effective_at"] = self.probe._time_text(now - dt.timedelta(days=1) + dt.timedelta(seconds=8))
+                rate["effective_at"] = self.probe._time_text(now - dt.timedelta(days=1) + dt.timedelta(seconds=30))
                 rate.pop("sha256")
                 rate["sha256"] = self._sha_bytes(self.probe.canonical(rate))
                 (root / "probe-rate-snapshot.json").write_bytes(self.probe.canonical(rate) + b"\n")
                 manifest_row = json.loads(manifest.read_text())
-                manifest_row["expires_at"] = self.probe._time_text(now + dt.timedelta(seconds=8))
+                manifest_row["expires_at"] = self.probe._time_text(now + dt.timedelta(seconds=30))
                 manifest_row["rate_snapshot_sha256"] = self._sha(root / "probe-rate-snapshot.json")
                 manifest.write_bytes(self.probe.canonical(manifest_row) + b"\n")
             command = [sys.executable, str(PROBE_PATH), "run", "--manifest", str(manifest),

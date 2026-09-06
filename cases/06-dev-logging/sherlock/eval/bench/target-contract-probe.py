@@ -589,7 +589,8 @@ def _profile(args, settings_sha, package):
                "identity_mode": args.identity_mode, "temperature": 0, "top_p": 1,
                "max_output_tokens": PROBE_MAX_OUTPUT_TOKENS,
                "session_token_limit": PROBE_SESSION_TOKEN_LIMIT,
-               "cache": {"enabled": False}, "interactive": {"enabled": False},
+               "cache": {"enabled": False},
+               "interactive": {"enabled": monitored and int(package.version[1:]) >= 40},
                "qwen": ({"cli": str(qwen), "max_session_turns": -1,
                           "max_wall_time_s": -1, "max_tool_calls": -1,
                           "wall_time_cli": "omitted",
@@ -720,7 +721,7 @@ def prepare(args, secret_reader=None):
             hooks = settings_row.setdefault("hooks", {})
             for event in ("PreToolUse", "PostToolUse", "PostToolUseFailure",
                           "PostToolBatch", "SubagentStart", "SubagentStop",
-                          "UserPromptSubmit"):
+                          "UserPromptSubmit", "SessionStart"):
                 if event in hooks:
                     raise ProbeFailure("TARGET_PROBE_PREPARE",
                                        "lifecycle hook collision")
@@ -743,6 +744,7 @@ def prepare(args, secret_reader=None):
                      "settings_sha256": sha256(settings_bytes),
                      "runner_sha256": sha256((HERE / "bench-controller.sh").read_bytes()),
                      "driver_sha256": sha256((HERE / "run-bench.sh").read_bytes()),
+                     "interactive_driver_sha256": sha256((HERE.parent.parent / "measure" / "interactive-drive.py").read_bytes()),
                      "proxy_sha256": sha256((HERE.parent.parent / "measure" / "upstream-log-proxy.py").read_bytes()),
                      "lifecycle_helper_sha256": sha256(lifecycle_helper.read_bytes()),
                      "oracle_sha256": sha256((HERE / "target-contract-oracle.py").read_bytes()),
@@ -970,7 +972,7 @@ def _verify_package(root, manifest, code="TARGET_PROBE_NOT_AUTHORIZED", *, rate_
         raise ProbeFailure(code, "rate snapshot invalid") from exc
     package = values["input-package.json"]
     expected_package = {"schema", "arm", "package_version", "package_sha256", "fixture_tree_sha256", "fixture_expectations_sha256",
-                        "settings_sha256", "runner_sha256", "driver_sha256", "proxy_sha256",
+                        "settings_sha256", "runner_sha256", "driver_sha256", "interactive_driver_sha256", "proxy_sha256",
                         "lifecycle_helper_sha256",
                         "oracle_sha256", "audit_sha256", "bench_status_sha256", "run_verdict_sha256",
                         "qwen_sha256", "skill_sha256", "gate_sha256"}
@@ -978,7 +980,7 @@ def _verify_package(root, manifest, code="TARGET_PROBE_NOT_AUTHORIZED", *, rate_
             not isinstance(package.get("arm"), str) or not isinstance(package.get("package_version"), str) or \
             not _hex(package.get("package_sha256")) or not _hex(package.get("fixture_tree_sha256")) or \
             not _hex(package.get("fixture_expectations_sha256")) or \
-            any(not _hex(package.get(name)) for name in ("settings_sha256", "runner_sha256", "driver_sha256", "proxy_sha256", "lifecycle_helper_sha256", "oracle_sha256", "audit_sha256", "qwen_sha256", "skill_sha256")) or \
+            any(not _hex(package.get(name)) for name in ("settings_sha256", "runner_sha256", "driver_sha256", "interactive_driver_sha256", "proxy_sha256", "lifecycle_helper_sha256", "oracle_sha256", "audit_sha256", "qwen_sha256", "skill_sha256")) or \
             not isinstance(package.get("gate_sha256"), dict) or set(package["gate_sha256"]) != set(GATES) or \
             any(not _hex(value) for value in package["gate_sha256"].values()):
         raise ProbeFailure(code, "input package invalid")
@@ -1013,6 +1015,7 @@ def _verify_package(root, manifest, code="TARGET_PROBE_NOT_AUTHORIZED", *, rate_
         raise ProbeFailure(code, "ambient skills changed after preparation")
     dependencies = {
         "runner_sha256": HERE / "bench-controller.sh", "driver_sha256": HERE / "run-bench.sh",
+        "interactive_driver_sha256": HERE.parent.parent / "measure" / "interactive-drive.py",
         "proxy_sha256": HERE.parent.parent / "measure" / "upstream-log-proxy.py",
         "lifecycle_helper_sha256": HERE / "lifecycle-supervisor.py",
         "oracle_sha256": HERE / "target-contract-oracle.py", "audit_sha256": Path(__file__),
