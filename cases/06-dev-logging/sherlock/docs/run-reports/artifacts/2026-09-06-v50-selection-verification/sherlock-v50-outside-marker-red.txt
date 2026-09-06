@@ -1,0 +1,12 @@
+======================================================================
+FAIL: test_outside_caller_cannot_ignore_malformed_ancestor_marker (test_worklist_selection_v50.WorklistSelectionV50Test.test_outside_caller_cannot_ignore_malformed_ancestor_marker)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/a/hack/wt-v42/cases/06-dev-logging/sherlock/tools/tests/test_worklist_selection_v50.py", line 210, in test_outside_caller_cannot_ignore_malformed_ancestor_marker
+    self.assertNotEqual(result.returncode, 0)
+AssertionError: 0 == 0
+
+----------------------------------------------------------------------
+Ran 10 tests in 1.485s
+
+FAILED (failures=1)

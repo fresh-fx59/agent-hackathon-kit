@@ -164,3 +164,5 @@ catches OSError and load_marker catches open errors. No speculative exception
 wrapper is required. Core index fix, authority/history binding, relative seal
 keys and triage refresh were reviewed as sound. One focused correction/test pass
 remains before registration; no additional review panel.
+
+- 2026-09-06T16:29:00.328614+00:00 — Root verified outside-caller malformed-marker bypass (new test RED, init unexpectedly0). Removed unbounded-mode exception swallowing; valid unrelated parent markers above discovered workspace remain unvisited. Final selection10 PASS1.476s, boundary/Stop/finalization36 PASS5.152s, compile and diff check pass. Registered immutable v50 before actual execution.
