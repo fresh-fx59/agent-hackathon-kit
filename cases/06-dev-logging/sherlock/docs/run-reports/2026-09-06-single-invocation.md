@@ -50,3 +50,11 @@ The fixture made six loopback requests and four normal requests with no provider
 ## r6 — corrected watcher passes
 
 The corrected watcher waited for both Stop allow outputs and exit 0 before issuing the intentional fixture stop. The run made seven loopback requests and four normal requests, preserved the marker, consumed both receipts, and verified exact clear-to-new-session transitions. The expected fixture SIGTERM ended the run with driver exit 143 after the assertions had passed. This is a passing v48 loopback lifecycle fixture; it is not paid qualification or corpus acceptance.
+
+## r7 — newline fixture red
+
+The old v48 driver produced two normal loopback requests, but the first startup newline mismatch prevented the intentional fixture Stop from being reached. The terminal result is `AssertionError('driver did not reach the intentional fixture stop')`; no provider errors were recorded. This is the preserved red baseline for startup newline handling.
+
+## r8 — newline fixture green
+
+The corrected v48 driver produced six loopback requests, four normal requests, and two accepted Stop/clear cycles. The fixture passed with no provider errors. This validates the localhost newline normalization and receipt/clear lifecycle under the fixture; it is still not paid DeepSeek qualification or corpus acceptance.

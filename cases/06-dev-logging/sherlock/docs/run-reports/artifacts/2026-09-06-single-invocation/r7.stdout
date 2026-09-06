@@ -1,0 +1,77 @@
+{"at": "2026-09-06T14:20:47Z", "event": "started", "detail": "node /home/claude-developer/.local/lib/node_modules/@qwen-code/qwen-code/cli-entry.js --auth-type openai --model mock --approval-mode yolo"}
+{"at": "2026-09-06T14:20:57Z", "event": "typed", "detail": "/sherlock\n\nSYNTHETIC-START-ONLY: run the toy triage handoff and end the turn.\n"}
+{"at": "2026-09-06T14:20:58Z", "event": "CLEAR_NOT_EFFECTIVE", "detail": "first startup prompt is not the expected invocation"}
+{
+  "driver_events": [
+    {
+      "at": "2026-09-06T14:20:47Z",
+      "detail": "node /home/claude-developer/.local/lib/node_modules/@qwen-code/qwen-code/cli-entry.js --auth-type openai --model mock --approval-mode yolo",
+      "event": "started"
+    },
+    {
+      "at": "2026-09-06T14:20:57Z",
+      "detail": "/sherlock\n\nSYNTHETIC-START-ONLY: run the toy triage handoff and end the turn.\n",
+      "event": "typed"
+    },
+    {
+      "at": "2026-09-06T14:20:58Z",
+      "detail": "first startup prompt is not the expected invocation",
+      "event": "CLEAR_NOT_EFFECTIVE"
+    }
+  ],
+  "driver_exit": 8,
+  "error": "AssertionError('driver did not reach the intentional fixture stop')",
+  "fixture_stop_requested": [],
+  "normal_request_indices": [
+    0,
+    1
+  ],
+  "passed": false,
+  "provider": "loopback-only",
+  "provider_errors": [],
+  "provider_events": [
+    {
+      "completed_at_ns": 1788704452167709171,
+      "index": 0
+    }
+  ],
+  "request_count": 2,
+  "scope": "full driver startup and first clear; intentional fixture stop after second pause",
+  "skill_files": {
+    "README.md": "8646287249cbdfa14c278c47d9a131bf278fd61491b4f2e78563a547983dba6b",
+    "SKILL.md": "03583d51fd6c245f9c929d63d0d6d90c5cd195defbcf5b0fe371a0511c2b65dc",
+    "agents/sherlock-triage.md": "1f4b6ff70b63d9ca297bbe546891cc305173bb1e3f09ee7ae9936302d1ffc67f",
+    "reference/bulk-closure.md": "a49ded52c39e19a9c63609e9a4bb9b582fda8a93e51c9b93b5ad67c57a799106",
+    "reference/code-and-spec.md": "7991bc2716114e3ec646b2d8d9e1b9279431ffc944ab0b6e15373d2bb4b43178",
+    "reference/draft-and-verify.md": "e015430f195efbc7524b3c2411825401d5f330bf5110ea488f10197f1e2e9a5a",
+    "reference/enum-tables.tsv": "17dc22b4ad6abe46d23ac094179d25ce3ae3f0fbb00f7add0e0fea55cb397619",
+    "reference/logon-failure-reason.json": "61043b304f4d42b89b958f56046dbfc7d73b1fb5170270045901f118b5c0fb55",
+    "reference/population-scope.json": "658313dbe6254b1c698664de92fe081bc6f1146b5e4633f988a57c144ed83d4c",
+    "reference/report-contract.corporate.json": "97063f3a5ac3bb8a4b2613f8352c5803d8de614ea9cb37f97a91728afabd432d",
+    "reference/report-format.md": "11180e3c12c09ce5000d87c7955a5755468c97327e10973207886d4862b40b23",
+    "reference/tools.md": "2a71215fc1d2dbe719eead81864df8e3e0ae18eb0df3e8ab14d27a1f2283e098",
+    "tools/brief.py": "276fef136bd929897921091e417de6d4aae6947b365b6a6b05abb7623f8295a5",
+    "tools/checkpoint.py": "62040bf4427eb67c1b7df4d12a9dbdfa1b185403f0879c6c3b7d21db9a658c3b",
+    "tools/cite.py": "4e160e28fee7c0320041d033caa150d018ca8ad8a0fd9168203f8158ff5974f5",
+    "tools/citecheck.py": "9bd54583d622007ce3679ea042b58446beb75a483119f0c7a2a2846647c9da37",
+    "tools/covermap.py": "5c688f4d26ab373c48be84e14b958b21191765e777a51fce0863f3a8ac111b92",
+    "tools/finalize.py": "fb23ba8dc70f9be882d9c08b728273ca0c3e7e5c0e0fd99911ab7d09c7f4354f",
+    "tools/ingest.py": "44efe1620c880378e291a0c0d873ebd4d4f307fb993222d8693436e2a6dfe409",
+    "tools/logjoin.py": "97216118ffff64d23eddbb3323d74d57090afe58c16a00648503755562207db6",
+    "tools/logmap.py": "74b911f8d93682f44b8101de7e3eb222b3285eed861affa747d872b93a9f31fd",
+    "tools/reportcheck.py": "5c762a0c1867ea691fcf107ccfb9fa17a5d55fcebdf505b114d72f73ce266dda",
+    "tools/rollover.py": "47804ab04f9b3f9caf933a219a7a3e946820ddd6a5a1dd91808e999226ef378b",
+    "tools/stage-corpus.py": "93f0348a706304fb0608f98588fe67ff716a7895e3ac76766b11b3a03d944a54",
+    "tools/statecheck.py": "895d27d242eb4a6bdf675c97d9995d26c3086be29df4ae2c894186f8d3dfa105",
+    "tools/stopcheck.py": "4b4d6dcfbfc6b0c6684d3d4b9f8f8edd5b764820a578df642e326cd35ca1bf4e",
+    "tools/triagecheck.py": "a22b745173df0549839bfcc622c1fd942dc166a26ff6a54e05e817729bcb2aaa",
+    "tools/worklist.py": "dbc6fdf959e21e460f143a9641d83044bd24971b85e905e22fa2f41b6b64b269"
+  },
+  "source_sha256": {
+    "driver": "75d0c3dd65f69dddd551b0c15cbc7f4343231c8fde5930b01f267a6114640b9f",
+    "fixture": "b480a9011d69f12ee426db1ea3a8bb4309cb06cbd7b0ab4e4d09fd3e9463096b",
+    "helper": "b67790b700d0406aa0909e799b0672b4be8a0ab45088e0400b40b3d3032e4d2c",
+    "qwen": "68cb29eb7ccc936d78ece5564ef55cae41a55b630e6657dc417c1f2e561cf4c9",
+    "settings": "7547c46dae883bbfb1082c7301ed0fa5d4bdcd3ded08011b3f6474782aacb550"
+  }
+}

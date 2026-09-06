@@ -128,8 +128,48 @@
       "fixture_sha256": "0bacb99e748e3732de01baf6cc5b98e794367b39c3c9826bc52d772961297d30",
       "driver_sha256": "75d0c3dd65f69dddd551b0c15cbc7f4343231c8fde5930b01f267a6114640b9f",
       "interpretation": "corrected watcher waited for both Stop allow outputs and exit 0; marker and exact clear-to-new-session transitions verified before expected fixture SIGTERM"
+    },
+    {
+      "id": "r7",
+      "status": "newline_fixture_red",
+      "passed": false,
+      "provider": "loopback-only",
+      "provider_requests": 2,
+      "normal_request_indices": [
+        0,
+        1
+      ],
+      "error": "AssertionError('driver did not reach the intentional fixture stop')",
+      "provider_errors": [],
+      "inventory_entries": 1489,
+      "inventory_artifact": "artifacts/2026-09-06-single-invocation/inventory-r7.sha256.json",
+      "fixture_artifact": "artifacts/2026-09-06-single-invocation/r7/qwen_single_invocation_smoke.py",
+      "fixture_sha256": "b480a9011d69f12ee426db1ea3a8bb4309cb06cbd7b0ab4e4d09fd3e9463096b",
+      "driver_sha256": "75d0c3dd65f69dddd551b0c15cbc7f4343231c8fde5930b01f267a6114640b9f",
+      "interpretation": "old v48 driver rejected startup newline mismatch before intentional Stop"
+    },
+    {
+      "id": "r8",
+      "status": "newline_fixture_green",
+      "passed": true,
+      "provider": "loopback-only",
+      "provider_requests": 6,
+      "normal_request_indices": [
+        0,
+        1,
+        4,
+        5
+      ],
+      "error": null,
+      "provider_errors": [],
+      "inventory_entries": 1531,
+      "inventory_artifact": "artifacts/2026-09-06-single-invocation/inventory-r8.sha256.json",
+      "fixture_artifact": "artifacts/2026-09-06-single-invocation/r8/qwen_single_invocation_smoke.py",
+      "fixture_sha256": "b480a9011d69f12ee426db1ea3a8bb4309cb06cbd7b0ab4e4d09fd3e9463096b",
+      "driver_sha256": "6095a501e5b7f338f82276eb309624c165ad108027c332a022592f89bcd83717",
+      "interpretation": "corrected v48 driver passed four normal requests and two Stop/clear cycles"
     }
   ],
-  "next_step": "Run fresh v48 paid qualification only after the passing r6 lifecycle fixture is accepted by the root review; then review corpus report gates.",
+  "next_step": "Use the passing r8 fixture as the localhost gate, then run and review fresh v48 subscription qualification before DeepSeek and corpus acceptance.",
   "v48_candidate_sha256": "be96db39"
 }
