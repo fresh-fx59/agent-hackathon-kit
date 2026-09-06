@@ -10,9 +10,10 @@ LIFECYCLE=$REPO/eval/bench/lifecycle-supervisor.py
 TARGET=/home/claude-developer/hack/sherlock-v50-independent-qualification-20260906-r1
 HARNESS=/home/claude-developer/hack/sherlock-v50-harness-20260906-r4
 TARGET_NONCES=/home/claude-developer/hack/sherlock-paid-admission-nonces
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 
 cd "$REPO"
-test "$(sha256sum "$LIFECYCLE" | awk '{print $1}')" = 861593a235903f6de92c53a0b27d9bde5888aaead2d06acf97f3c3529c0fc2cb
+test "$(sha256sum "$LIFECYCLE" | awk '{print $1}')" = 235d2e9a11a7a98b3390977f906d3c82315341ded3399b59fbfae66dff41b907
 test "$(sha256sum "$REPO/measure/interactive-drive.py" | awk '{print $1}')" = c31be32f3d52a59423ad40b157eb550ba097e89833e47339eecbf15516b436b0
 test "$(readlink -f /home/claude-developer/.local/bin/qwen)" = "$QWEN"
 test "$(sudo -u claude-developer env HOME="$DEV_HOME" PATH="$DEV_PATH" qwen --version)" = 0.22.0
@@ -82,6 +83,11 @@ PY
 )"
 printf 'full paid approval sha256: %s\n' "$PAID_APPROVAL"
 
+RUN_ROOT="$FULL"
+export RUN_ROOT
+. "$SCRIPT_DIR/v50-owned-review-monitor-r1.sh"
+review_monitor_start
+
 sudo -u claude-developer mkdir -m 700 "$FULL" "$FULL/controller" "$FULL/runs" "$FULL/home"
 read -r CONTEXT MAXOUT SESSION REQUEST_MS <<EOF
 $($PY - "$ADMISSION/full-run-budget.json" "$ADMISSION/target-profile.json" <<'PY'
@@ -98,7 +104,7 @@ EOF
 test "$REQUEST_MS" = 600000
 FREE_TEST_COMMAND="$PY $REPO/tools/tests/test_run_manifest.py && $PY $REPO/tools/tests/test_run_state.py && $PY $REPO/tools/tests/test_run_verdict.py"
 
-sudo -u claude-developer env -i \
+if sudo -u claude-developer env -i \
   HOME="$DEV_HOME" PATH="$DEV_PATH" LANG=C.UTF-8 LC_ALL=C.UTF-8 \
   "$WITH_SECRET" neuraldeep_api_key --env SHERLOCK_API_KEY -- \
   env \
@@ -143,4 +149,9 @@ sudo -u claude-developer env -i \
     SHERLOCK_MAX_WALL_TIME_S=-1 SHERLOCK_WORKFLOW_AGENT_MAX_TURNS=200 \
     SHERLOCK_CACHE_GUARD=0 SHERLOCK_UPSTREAM_RETRY=0 \
     SHERLOCK_SUBSTITUTION_RETRY=0 \
-  bash "$REPO/eval/bench/bench-controller.sh" >"$FULL.launch.stdout" 2>"$FULL.launch.stderr"
+  bash "$REPO/eval/bench/bench-controller.sh" >"$FULL.launch.stdout" 2>"$FULL.launch.stderr"; then
+  CONTROLLER_RC=0
+else
+  CONTROLLER_RC=$?
+fi
+review_monitor_finish "$CONTROLLER_RC"

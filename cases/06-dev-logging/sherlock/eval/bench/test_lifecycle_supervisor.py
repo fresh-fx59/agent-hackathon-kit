@@ -197,12 +197,13 @@ class LifecycleSupervisorTest(unittest.TestCase):
                 now_monotonic_ns=10_000_000_000)
         self.assertTrue((self.observer / "fault.json").exists())
 
-    def test_fault_is_permanent_even_after_fresh_observation(self):
+    def test_fault_is_permanent_and_rejects_fresh_observation(self):
         with self.assertRaises(LIFECYCLE.LifecycleFault):
             LIFECYCLE.check_dispatch(
                 self.observer, self.nonce, self.boot,
                 now_monotonic_ns=10_000_000_000)
-        self.observe(monotonic_ns=10_000_000_000)
+        with self.assertRaisesRegex(LIFECYCLE.LifecycleFault, "TERMINAL_OBSERVATION"):
+            self.observe(monotonic_ns=10_000_000_000)
         with self.assertRaisesRegex(LIFECYCLE.LifecycleFault, "terminal"):
             LIFECYCLE.check_dispatch(
                 self.observer, self.nonce, self.boot,
@@ -849,6 +850,22 @@ class LifecycleSupervisorTest(unittest.TestCase):
                     interval_s=0.01)
         self.assertEqual(calls[0], 1)
         self.assertFalse((self.observer / "fault.json").exists())
+
+    def test_observation_rejected_after_fault_or_terminal_receipt(self):
+        LIFECYCLE.record_fault(self.observer, self.nonce, "FIXTURE_FAULT", "fixture")
+        with self.assertRaisesRegex(LIFECYCLE.LifecycleFault, "TERMINAL_OBSERVATION"):
+            LIFECYCLE.publish_observation(
+                self.observer, self.nonce, self.boot, sequence=0,
+                capability=self.capability)
+
+        shutil.rmtree(self.observer)
+        self.observer = LIFECYCLE.init_segment(self.trace, self.nonce, self.boot,
+                                               capability=self.capability)
+        (self.trace / "lifecycle-receipt.json").write_text("{}\n", encoding="utf-8")
+        with self.assertRaisesRegex(LIFECYCLE.LifecycleFault, "TERMINAL_OBSERVATION"):
+            LIFECYCLE.publish_observation(
+                self.observer, self.nonce, self.boot, sequence=0,
+                capability=self.capability)
 
     def test_guardian_expires_owned_controller_and_leaves_unrelated_process(self):
         shutil.rmtree(self.observer)

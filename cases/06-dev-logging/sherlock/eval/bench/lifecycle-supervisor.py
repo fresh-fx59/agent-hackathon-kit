@@ -383,6 +383,11 @@ def publish_observation(observer, run_nonce, boot_id, *, sequence,
         identity = _identity(observer)
         if identity.get("run_nonce") != run_nonce or identity.get("boot_id") != boot_id:
             raise LifecycleFault("SEGMENT_IDENTITY_MISMATCH", "observation writer")
+        trace = observer.parent
+        if os.path.lexists(observer / "fault.json"):
+            raise LifecycleFault("TERMINAL_OBSERVATION", "fault exists")
+        if os.path.lexists(trace / "lifecycle-receipt.json"):
+            raise LifecycleFault("TERMINAL_OBSERVATION", "terminal receipt exists")
         key = capability if capability is not None else _read_regular(
             observer / "observation.key", 32)
         if len(key) != 32 or not hmac.compare_digest(sha256(key), identity["capability_sha256"]):

@@ -1,1 +1,1 @@
-{"argv":["/home/claude-developer/.local/bin/claude","-p","--model","sonnet","--effort","low","--tools","","--setting-sources","","--no-session-persistence","--output-format","json"]}
+{"argv":["sudo","-u","claude-developer","env","HOME=/home/claude-developer","PATH=/home/claude-developer/.local/bin:/run/current-system/sw/bin:/usr/bin:/bin","LANG=C.UTF-8","LC_ALL=C.UTF-8","/home/claude-developer/.local/bin/claude","-p","--model","sonnet","--effort","low","--tools","","--setting-sources","","--no-session-persistence","--output-format","json"]}
