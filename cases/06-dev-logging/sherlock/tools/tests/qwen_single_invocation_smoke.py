@@ -152,8 +152,14 @@ def main():
                 events=[json.loads(l) for l in events_path.read_text().splitlines()]
                 cp=json.loads((work/'checkpoint.json').read_text())
                 with lock: quiet=not inflight
+                completed_stops=[]
+                for p,event in rows('Stop'):
+                    output=p.with_name(p.name.replace('.input.json','.output.json'))
+                    status=p.with_name(p.name.replace('.input.json','.exit'))
+                    if output.exists() and status.exists() and status.read_text()=='0':
+                        if json.loads(output.read_bytes()).get('decision')=='allow':completed_stops.append(event)
                 if (quiet and cp.get('boundary_seq',0)>=2 and cp.get('pending_handoff',{}).get('state')=='consumed'
-                        and any(e.get('event')=='clear_verified' for e in events)):
+                        and len(completed_stops)>=2 and any(e.get('event')=='clear_verified' for e in events)):
                     stop_requested.append(time.time_ns());os.kill(os.getpid(),signal.SIGTERM);return
             except (OSError,ValueError): pass
     watcher=threading.Thread(target=observe_fixture,daemon=True);watcher.start()
