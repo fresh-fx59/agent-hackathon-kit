@@ -1,0 +1,41 @@
+{
+  "schema": 1,
+  "report": "2026-09-06-v50-harness-r6.md",
+  "status": "rejected_review_monitor_failed",
+  "acceptance": false,
+  "runtime": {
+    "version": "v50",
+    "package_sha256": "0f95b5a59dcc41500168d3f2dc6df3e237b8c68e9d3666bf181716983d902ee7",
+    "arm_commit": "334d15e8a8f855c3267b38d19ac1ee2aee56d123",
+    "monitor_sha256": "dcf42026de753649a169d6499077e2f1f2570b7c9af5ed104fd7d97ccc3a388e",
+    "lifecycle_helper_sha256": "235d2e9a11a7a98b3390977f906d3c82315341ded3399b59fbfae66dff41b907"
+  },
+  "terminal": {
+    "observer_identity_at": "2026-09-06T18:47:51.258379Z",
+    "launch_at": "2026-09-06T18:47:51.312572Z",
+    "fault": "REVIEW_MONITOR_FAILED",
+    "fault_at": "2026-09-06T18:47:52.323595Z",
+    "review_exit_code": 127,
+    "controller_status_at": "2026-09-06T18:48:51.327Z",
+    "controller_phase": "BLOCKED_UNKNOWN",
+    "controller_reason": "LIFECYCLE_LAUNCH_INVALID",
+    "reviewer_launched": false,
+    "signed_observation": false,
+    "deepseek_requests": 0
+  },
+  "cause": {
+    "failure": "reviewer executable path was absent on the target host",
+    "executed_reviewer_path": "/home/claude-developer/.local/bin/claude",
+    "corrected_reviewer_path": "/run/current-system/sw/bin/claude",
+    "runtime_or_model_fault": false,
+    "acceptance": "not_reached"
+  },
+  "evidence": {
+    "run_tag": "run-20260906T184658Z-819305546497",
+    "run_nonce": "362a582c7de113f7d14fea0145770c3e",
+    "artifact_directory": "artifacts/2026-09-06-v50-harness-subscription-r6-failed/",
+    "remote_inventory_files": 150,
+    "provider_free_health_probe": "pass",
+    "review_response_count": 0
+  }
+}
