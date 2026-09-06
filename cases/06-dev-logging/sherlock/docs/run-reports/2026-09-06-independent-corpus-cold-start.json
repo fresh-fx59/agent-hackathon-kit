@@ -1,0 +1,42 @@
+{
+  "schema": 1,
+  "report": "2026-09-06-independent-corpus-cold-start.md",
+  "status": "prepared_syntax_validated",
+  "launched": false,
+  "provider_contact": false,
+  "decision": {
+    "reuse_harness_conditionally": true,
+    "reusable_harness": "/home/claude-developer/hack/sherlock-v48-harness-20260906-r3",
+    "fresh_target_required": true,
+    "fresh_admission_required": true,
+    "fresh_full_input_package_required": true,
+    "fresh_harness_if_shared_digest_drift": true
+  },
+  "runtime": {
+    "package_version": "v48",
+    "package_sha256": "be96db39cc0f4b8d36324dea9b66fdf2880d9dbefb1bea78fc927269f769c9ba",
+    "interactive_driver_sha256": "6095a501e5b7f338f82276eb309624c165ad108027c332a022592f89bcd83717",
+    "lifecycle_helper_sha256": "b67790b700d0406aa0909e799b0672b4be8a0ab45088e0400b40b3d3032e4d2c"
+  },
+  "source": "/home/claude-developer/hack/sherlock-final-inputs-20260906/independent",
+  "roots": {
+    "target": "/home/claude-developer/hack/sherlock-v48-independent-qualification-20260906-r1",
+    "admission": "/home/claude-developer/hack/sherlock-v48-independent-admission-20260906-r1",
+    "full": "/home/claude-developer/hack/sherlock-v48-independent-full-20260906-r1"
+  },
+  "scripts": [
+    "/tmp/sherlock-v48-prepare-independent-r1.sh",
+    "/tmp/sherlock-v48-launch-target-independent-r1.sh",
+    "/tmp/sherlock-v48-launch-full-independent-r1.sh"
+  ],
+  "validation": {
+    "bash_n": "passed_all_three",
+    "executed": false
+  },
+  "cold_start": {
+    "prior_findings": false,
+    "prior_worklists": false,
+    "prior_checkpoints": false,
+    "prior_pattern_cards": false
+  }
+}
