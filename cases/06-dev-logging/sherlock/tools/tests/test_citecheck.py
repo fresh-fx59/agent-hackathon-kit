@@ -20,6 +20,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 TOOLS = os.path.dirname(HERE)
 FIX = os.path.join(HERE, "fixtures")
 CITECHECK = os.path.join(TOOLS, "citecheck.py")
+V52_CITECHECK = os.path.join(os.path.dirname(TOOLS), "skills", "v52", "tools",
+                             "citecheck.py")
 REAL_LINUX = os.path.expanduser(
     "~/hack/logalyzer-real-world-testset/real-logs/Linux/Linux_2k.log")
 
@@ -34,6 +36,19 @@ def run(report_text, corpus=FIX, args=()):
         p = subprocess.run(
             [sys.executable, CITECHECK, path, "--corpus", corpus, "--json", *args],
             capture_output=True, text=True)
+        return p.returncode, json.loads(p.stdout), p.stderr
+    finally:
+        os.unlink(path)
+
+
+def run_versioned(program, report_text, corpus):
+    with tempfile.NamedTemporaryFile("w", suffix=".md", encoding="utf-8",
+                                     delete=False) as fh:
+        fh.write(report_text)
+        path = fh.name
+    try:
+        p = subprocess.run([sys.executable, program, path, "--corpus", corpus,
+                            "--json"], capture_output=True, text=True)
         return p.returncode, json.loads(p.stdout), p.stderr
     finally:
         os.unlink(path)
@@ -74,6 +89,33 @@ class TheRealMisattribution(unittest.TestCase):
 
 
 class Verdicts(unittest.TestCase):
+
+    def test_basename_only_citation_is_not_a_corpus_address(self):
+        """A report must retain the corpus-relative host/source prefix.
+
+        The old suffix/basename fallback made a shortened address pass whenever
+        a convenient unique file happened to exist.  That loses the identity of
+        the observed host and lets a later corpus add ambiguity silently.
+        """
+        with tempfile.TemporaryDirectory() as corpus:
+            nested = os.path.join(corpus, "host-a")
+            os.mkdir(nested)
+            with open(os.path.join(nested, "events.log"), "w", encoding="utf-8") as fh:
+                fh.write("baseline fact\n")
+            rc, data, _ = run("baseline fact — events.log:1", corpus=corpus)
+        self.assertEqual(verdicts(data), ["missing-file"])
+        self.assertEqual(rc, 1)
+
+    def test_v52_reports_basename_only_as_missing_file(self):
+        with tempfile.TemporaryDirectory() as corpus:
+            nested = os.path.join(corpus, "host-a")
+            os.mkdir(nested)
+            with open(os.path.join(nested, "events.log"), "w", encoding="utf-8") as fh:
+                fh.write("baseline fact\n")
+            rc, data, _ = run_versioned(
+                V52_CITECHECK, "baseline fact — events.log:1", corpus)
+        self.assertEqual(verdicts(data), ["missing-file"])
+        self.assertEqual(rc, 1)
 
     def test_out_of_range(self):
         rc, d, _ = run("session opened for user test — linux_syslog_excerpt.log:99999")

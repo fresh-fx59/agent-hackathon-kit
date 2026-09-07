@@ -101,14 +101,14 @@ def index_corpus(root):
 
 
 def resolve(cited, by_rel, by_base):
-    """Citation path -> candidate relpaths, best guess first."""
+    """Citation path -> its one exact corpus-relative address.
+
+    A basename or suffix is not an address: it loses the host/source identity and
+    can become ambiguous when the corpus grows.  Reports must retain the exact
+    relative path emitted by the corpus map.
+    """
     cited = cited.replace("\\", "/").lstrip("./")
-    if cited in by_rel:
-        return [cited]
-    hits = [r for r in by_rel if r == cited or r.endswith("/" + cited)]
-    if hits:
-        return sorted(hits, key=len)
-    return sorted(by_base.get(os.path.basename(cited), []), key=len)
+    return [cited] if cited in by_rel else []
 
 
 # --------------------------------------------------------------------------

@@ -246,12 +246,12 @@ def resolve_citecheck(root=SHERLOCK, want=None):
     return name, path
 
 
-def assert_ambiguity_capable(mod, name, path):
-    """RAISE unless this checker really produces `ambiguous` on a two-host corpus.
+def assert_noncanonical_path_fails_closed(mod, name, path):
+    """RAISE unless a basename-only address blocks on a two-host corpus.
 
-    Not `"ambiguous" in VERDICTS` — that is a string, and a string cannot go
-    stale in the direction that matters. This builds the exact shape v16 was
-    written for (one basename, two machines) and demands the verdict come out.
+    Older packages called this `ambiguous`; v52 rejects non-exact corpus-relative
+    paths earlier as `missing-file`. Both are fail-closed, whereas accepting one
+    machine's line would silently erase the host identity.
     """
     import shutil
     import tempfile as _tf
@@ -268,15 +268,15 @@ def assert_ambiguity_capable(mod, name, path):
         except Exception as e:
             raise RuntimeError("citecheck %s (%s) could not be run at all: %s"
                                % (name, path, e))
-        n = (got.get("summary") or {}).get("ambiguous")
+        summary = got.get("summary") or {}
+        n = summary.get("ambiguous") or summary.get("missing-file")
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
     if not n:
         raise RuntimeError(
-            "citecheck %s (%s) does not produce the `ambiguous` verdict: a bare "
-            "`auth.log:1` that could mean two machines came back %r. This scorer "
-            "promises to keep that column visible, and a checker without it turns "
-            "an unattributable citation into a confident one. Refusing to score."
+            "citecheck %s (%s) accepts a basename-only `auth.log:1` on two "
+            "machines: got %r. This scorer requires either an explicit "
+            "ambiguity or an exact-path rejection. Refusing to score."
             % (name, path, got.get("summary")))
     return True
 
@@ -284,7 +284,7 @@ def assert_ambiguity_capable(mod, name, path):
 CITECHECK_VERSION, CITECHECK_PATH = resolve_citecheck(SHERLOCK)
 CITECHECK_SHA = hashlib.sha1(open(CITECHECK_PATH, "rb").read()).hexdigest()
 citecheck = _load("citecheck_" + CITECHECK_VERSION.replace(".", "_"), CITECHECK_PATH)
-assert_ambiguity_capable(citecheck, CITECHECK_VERSION, CITECHECK_PATH)
+assert_noncanonical_path_fails_closed(citecheck, CITECHECK_VERSION, CITECHECK_PATH)
 score_case = _load("score_case", os.path.join(SHERLOCK, "measure", "score_case.py"))
 score_bench = _load("score_bench", os.path.join(HERE, "score-bench.py"))
 score_verdict = _load("score_verdict", os.path.join(HERE, "score-verdict.py"))
