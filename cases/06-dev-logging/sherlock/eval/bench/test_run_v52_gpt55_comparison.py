@@ -7,7 +7,6 @@ import shutil
 import tempfile
 from types import SimpleNamespace
 import unittest
-from unittest.mock import patch
 
 
 HERE = Path(__file__).resolve().parent
@@ -38,6 +37,47 @@ class TerminalClassificationTest(unittest.TestCase):
         with self.assertRaises(RUNNER.TerminalFailure) as raised:
             call(*args)
         return raised.exception
+
+    def prepared_root(self, *, timeout=660000, max_retries=0):
+        """Make only the immutable v52 inputs required by prepared_inventory."""
+        prepared = self.root / ("prepared-%s" % len(list(self.root.glob("prepared-*"))))
+        (prepared / ".qwen").mkdir(parents=True)
+        (prepared / "skills" / "v52").mkdir(parents=True)
+        (prepared / "corpus-source").mkdir()
+        (prepared / "corpus-source" / "event.json").write_text("{}\n", encoding="utf-8")
+        (prepared / "corpus").symlink_to(prepared / "corpus-source", target_is_directory=True)
+        (prepared / "prompt.txt").write_text("prompt\n", encoding="utf-8")
+        settings = {
+            "model": {
+                "sessionTokenLimit": 230000,
+                "generationConfig": {
+                    "contextWindowSize": 262000,
+                    "reasoning": False,
+                    "extra_body": {"thinking": {"type": "disabled"}},
+                    "samplingParams": {"max_tokens": 20000},
+                    "timeout": timeout,
+                    "maxRetries": max_retries,
+                },
+            },
+            "skills": {"directories": [str(prepared / "skills" / "v52")]},
+            "hooks": {"Stop": [{"hooks": [{
+                "command": "python3 \"$QWEN_SKILL_ROOT/tools/stopcheck.py\""}]}]},
+        }
+        (prepared / ".qwen" / "settings.json").write_text(
+            json.dumps(settings), encoding="utf-8")
+        return prepared
+
+    def test_prepared_root_requires_sealed_client_timeout_and_no_sdk_retries(self):
+        prepared = self.prepared_root()
+        self.assertTrue(RUNNER.prepared_inventory(prepared)[1])
+        for timeout, max_retries, message in (
+                (None, 0, "timeout"),
+                (RUNNER.WATCHDOG_SECONDS * 1000, 0, "timeout"),
+                (RUNNER.QWEN_REQUEST_TIMEOUT_MS - 1, 0, "timeout"),
+                (660000, 1, "maxRetries")):
+            prepared = self.prepared_root(timeout=timeout, max_retries=max_retries)
+            with self.assertRaisesRegex(RUNNER.Refusal, message):
+                RUNNER.prepared_inventory(prepared)
 
     def test_transport_rows_are_not_identity_mismatches(self):
         # This is the R2 failure shape: success on the required model, then a
@@ -122,20 +162,26 @@ class TerminalClassificationTest(unittest.TestCase):
             self.trace, strict_buffer_enabled=True)), 4)
 
     def test_prepare_binds_strict_buffer_transport(self):
+        prepared = self.prepared_root()
         proxy = self.root / "proxy.py"
         qwen = self.root / "qwen"
         proxy.write_text("# proxy", encoding="utf-8")
         (self.root / "lane_guard.py").write_text("# guard", encoding="utf-8")
         qwen.write_text("# qwen", encoding="utf-8")
-        args = SimpleNamespace(prepared_root=str(self.root), control_root=str(self.root / "control"),
+        args = SimpleNamespace(prepared_root=str(prepared), control_root=str(self.root / "control"),
                                qwen=str(qwen), proxy=str(proxy),
                                upstream_base="http://127.0.0.1:8317/v1",
                                authorization="approved")
-        with patch.object(RUNNER, "prepared_inventory", return_value=(self.root, [])):
-            RUNNER.prepare(args)
+        RUNNER.prepare(args)
         manifest = RUNNER.read_json(self.root / "control" / "manifest.json")
         self.assertEqual(manifest["transport"], {
             "mode": "strict_buffer_retry", "retry_max": 2, "deadline_seconds": 600})
+        self.assertEqual(manifest["qwen_client"], {
+            "request_timeout_ms": 660000, "max_retries": 0})
+        self.assertIsNone(RUNNER.validate_manifest(self.root / "control", manifest))
+        manifest["qwen_client"]["max_retries"] = 1
+        with self.assertRaisesRegex(RUNNER.Refusal, "timeout/retry binding"):
+            RUNNER.validate_manifest(self.root / "control", manifest)
 
     @unittest.skipUnless(CAPTURED_R2_LEDGER.is_file(), "captured R2 ledger unavailable")
     def test_captured_r2_ledger_classifies_as_transport_failure(self):

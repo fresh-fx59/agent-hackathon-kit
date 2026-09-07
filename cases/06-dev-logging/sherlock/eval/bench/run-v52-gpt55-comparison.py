@@ -26,6 +26,8 @@ SCHEMA = 1
 MODEL = "gpt-5.5"
 QWEN_VERSION = "0.22.0"
 WATCHDOG_SECONDS = 600
+QWEN_REQUEST_TIMEOUT_MS = 660000
+QWEN_MAX_RETRIES = 0
 FINALIZER_GATES = ("reportcheck", "citecheck", "triagecheck", "statecheck")
 FINALIZER_INPUTS = ("report", "worklist", "rules")
 STRICT_BUFFER_RETRY_MAX = 2
@@ -62,6 +64,16 @@ def read_json(path):
     if not p.is_file() or p.is_symlink(): raise Refusal("unsafe regular file: %s" % p)
     return json.loads(p.read_text(encoding="utf-8"))
 
+def qwen_client_policy(generation_config):
+    """Validate the Qwen boundary before it can open an upstream connection."""
+    timeout = generation_config.get("timeout")
+    if type(timeout) is not int or timeout < QWEN_REQUEST_TIMEOUT_MS:
+        raise Refusal("settings Qwen timeout must be at least 660000 ms")
+    max_retries = generation_config.get("maxRetries")
+    if type(max_retries) is not int or max_retries != QWEN_MAX_RETRIES:
+        raise Refusal("settings Qwen maxRetries must be 0")
+    return {"request_timeout_ms": timeout, "max_retries": max_retries}
+
 def tree_inventory(root):
     root = Path(root)
     rows = []
@@ -90,6 +102,7 @@ def prepared_inventory(root):
             or cfg.get("reasoning") is not False or cfg.get("extra_body", {}).get("thinking", {}).get("type") != "disabled"
             or cfg.get("samplingParams", {}).get("max_tokens") != 20000):
         raise Refusal("settings are not the v52 r3 comparison settings")
+    qwen_client_policy(cfg)
     dirs = settings.get("skills", {}).get("directories")
     if not isinstance(dirs, list) or len(dirs) != 1 or not dirs[0].endswith("/skills/v52"):
         raise Refusal("settings skill directory is not v52")
@@ -136,6 +149,10 @@ def validate_manifest(control, manifest):
         raise Refusal("600-second watchdog missing")
     if manifest.get("transport") != TRANSPORT:
         raise Refusal("strict buffered transport binding missing")
+    settings = read_json(root / ".qwen/settings.json")
+    if manifest.get("qwen_client") != qwen_client_policy(
+            settings.get("model", {}).get("generationConfig", {})):
+        raise Refusal("Qwen client timeout/retry binding missing")
     if manifest.get("authorization_sha256") != digest(manifest.get("authorization", "").encode()):
         raise Refusal("authorization binding")
 
@@ -254,12 +271,15 @@ def port_available(port):
 
 def prepare(args):
     prepared, inventory = prepared_inventory(args.prepared_root)
+    settings = read_json(prepared / ".qwen/settings.json")
+    qwen_client = qwen_client_policy(settings.get("model", {}).get("generationConfig", {}))
     control = Path(args.control_root)
     mkdir_new(control)
     manifest = {"schema": SCHEMA, "created_at": now(), "prepared_root": str(prepared),
                 "prepared_inventory": inventory, "harness_files": [{"path": str(Path(x).resolve()), "sha256": file_digest(x)} for x in [__file__, args.proxy, str(Path(args.proxy).with_name("lane_guard.py")), args.qwen]], "proxy": str(Path(args.proxy).resolve()), "qwen": str(Path(args.qwen).resolve()), "model": MODEL, "expected_returned_identity": MODEL,
                 "qwen_version": QWEN_VERSION, "watchdog_seconds": WATCHDOG_SECONDS,
                 "transport": TRANSPORT,
+                "qwen_client": qwen_client,
                 "upstream_base": args.upstream_base.rstrip("/"), "authorization": args.authorization,
                 "authorization_sha256": digest(args.authorization.encode("utf-8")),
                 "nonce": secrets.token_hex(32), "comparison": {"r3_qwen_skill_root": "unset_in_direct_launcher",
