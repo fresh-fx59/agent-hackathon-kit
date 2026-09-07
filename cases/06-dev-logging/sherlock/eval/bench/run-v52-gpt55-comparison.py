@@ -26,8 +26,20 @@ SCHEMA = 1
 MODEL = "gpt-5.5"
 QWEN_VERSION = "0.22.0"
 WATCHDOG_SECONDS = 600
+FINALIZER_GATES = ("reportcheck", "citecheck", "triagecheck", "statecheck")
+FINALIZER_INPUTS = ("report", "worklist", "rules")
+STRICT_BUFFER_RETRY_MAX = 2
+TRANSPORT = {"mode": "strict_buffer_retry",
+             "retry_max": STRICT_BUFFER_RETRY_MAX,
+             "deadline_seconds": WATCHDOG_SECONDS}
 
 class Refusal(RuntimeError): pass
+
+class TerminalFailure(Refusal):
+    """A post-contact failure whose terminal status is part of the evidence."""
+    def __init__(self, status, message):
+        super().__init__(message)
+        self.status = status
 
 def canonical(value):
     return (json.dumps(value, ensure_ascii=False, sort_keys=True,
@@ -122,6 +134,8 @@ def validate_manifest(control, manifest):
         raise Refusal("strict target identity")
     if manifest.get("watchdog_seconds") != WATCHDOG_SECONDS:
         raise Refusal("600-second watchdog missing")
+    if manifest.get("transport") != TRANSPORT:
+        raise Refusal("strict buffered transport binding missing")
     if manifest.get("authorization_sha256") != digest(manifest.get("authorization", "").encode()):
         raise Refusal("authorization binding")
 
@@ -129,6 +143,108 @@ def terminal(control, status, **extra):
     row = {"schema": SCHEMA, "finished_at": now(), "status": status, **extra}
     try: create(Path(control, "run-terminal.json"), canonical(row))
     except FileExistsError: pass
+
+def validate_qwen_output(path):
+    """Require a clean Qwen protocol result, not merely a zero child exit."""
+    try:
+        events = read_json(path)
+    except Exception as exc:
+        raise TerminalFailure("qwen_protocol_failed", "Qwen output is unreadable") from exc
+    if not isinstance(events, list) or not events:
+        raise TerminalFailure("qwen_protocol_failed", "Qwen output lacks result events")
+    for event in events:
+        if not isinstance(event, dict) or event.get("type") != "assistant":
+            continue
+        message = event.get("message")
+        if not isinstance(message, dict):
+            continue
+        for item in message.get("content", []):
+            if isinstance(item, dict) and item.get("type") == "text" and "[API Error:" in item.get("text", ""):
+                raise TerminalFailure("qwen_protocol_failed", "Qwen reported API stream error")
+    result = events[-1]
+    if (not isinstance(result, dict) or result.get("type") != "result"
+            or result.get("subtype") != "success" or result.get("is_error") is not False):
+        raise TerminalFailure("qwen_protocol_failed", "Qwen lacks a clean terminal result")
+
+def validate_finalizer_receipt(work):
+    """Require a clean finalizer receipt bound to the report it claims to validate."""
+    receipts = sorted(Path(work, "validation").glob("*/metadata.json"))
+    if not receipts:
+        raise TerminalFailure("validation_failed", "finalizer receipt missing")
+    try:
+        receipt = read_json(receipts[-1])
+    except Exception as exc:
+        raise TerminalFailure("validation_failed", "finalizer receipt unreadable") from exc
+    if receipt.get("verdict") != "clean" or receipt.get("inputs_changed_during_validation") is not False:
+        raise TerminalFailure("validation_failed", "finalizer verdict is not clean")
+    gates = receipt.get("gates")
+    if (not isinstance(gates, dict) or set(gates) != set(FINALIZER_GATES)
+            or any(not isinstance(gates[name], dict)
+                   or gates[name].get("exit_code") != 0
+                   or gates[name].get("parsed_blocking") != 0
+                   for name in FINALIZER_GATES)):
+        raise TerminalFailure("validation_failed", "finalizer gates are not clean")
+    inputs_after = receipt.get("inputs_after", {})
+    for name in FINALIZER_INPUTS:
+        current = Path(work, name + (".md" if name == "report" else ".tsv"))
+        expected = inputs_after.get(name, {}).get("sha256")
+        if not isinstance(expected, str) or not current.is_file() or file_digest(current) != expected:
+            raise TerminalFailure("validation_failed", "finalizer %s identity no longer matches" % name)
+
+def validate_terminal_ledger(trace, strict_buffer_enabled=False):
+    """Classify identity evidence separately from completed-call failures."""
+    ledger = Path(trace, "upstream.jsonl")
+    if not ledger.is_file():
+        raise TerminalFailure("transport_failed", "proxy ledger missing")
+    try:
+        # The proxy appends atomically enough for supervision to ignore an
+        # unfinished last line, as observe_trace already does.
+        rows = [json.loads(line) for line in ledger.read_bytes().split(b"\n")[:-1] if line]
+    except Exception as exc:
+        raise TerminalFailure("transport_failed", "proxy ledger is malformed") from exc
+    if not rows:
+        raise TerminalFailure("transport_failed", "proxy ledger has no completed calls")
+    failures = []
+    strict_pending = {}
+    for row in rows:
+        status = row.get("status")
+        successful = isinstance(status, int) and 200 <= status < 300
+        withheld_missing_identity = (strict_buffer_enabled
+                                     and row.get("strict_buffer_failure") is True
+                                     and row.get("returned_model") is None)
+        if successful and row.get("returned_model") != MODEL and not withheld_missing_identity:
+            raise TerminalFailure("identity_failed", "missing or wrong returned model identity")
+        failed = (not successful or row.get("upstream_error")
+                  or (row.get("stream") and row.get("stream_complete") is not True))
+        if failed and strict_buffer_enabled and row.get("strict_buffer_failure") is True:
+            client_request_id = row.get("client_request_id")
+            if isinstance(client_request_id, str) and client_request_id:
+                strict_pending[client_request_id] = strict_pending.get(client_request_id, 0) + 1
+                continue
+            failures.append(row)
+            continue
+        if failed:
+            failures.append(row)
+            continue
+        if strict_buffer_enabled and "strict_buffer_recovery" in row:
+            recovered = row["strict_buffer_recovery"]
+            client_request_id = row.get("client_request_id")
+            pending = strict_pending.get(client_request_id, 0)
+            if (not isinstance(client_request_id, str) or not client_request_id
+                    or not isinstance(recovered, int) or isinstance(recovered, bool)
+                    or recovered < 1 or pending < recovered):
+                failures.append(row)
+            else:
+                pending -= recovered
+                if pending:
+                    strict_pending[client_request_id] = pending
+                else:
+                    del strict_pending[client_request_id]
+    if strict_pending:
+        raise TerminalFailure("transport_failed", "strict buffered attempts remain unrecovered")
+    if failures:
+        raise TerminalFailure("transport_failed", "%d failed ledger responses" % len(failures))
+    return rows
 
 def port_available(port):
     s = socket.socket();
@@ -143,6 +259,7 @@ def prepare(args):
     manifest = {"schema": SCHEMA, "created_at": now(), "prepared_root": str(prepared),
                 "prepared_inventory": inventory, "harness_files": [{"path": str(Path(x).resolve()), "sha256": file_digest(x)} for x in [__file__, args.proxy, str(Path(args.proxy).with_name("lane_guard.py")), args.qwen]], "proxy": str(Path(args.proxy).resolve()), "qwen": str(Path(args.qwen).resolve()), "model": MODEL, "expected_returned_identity": MODEL,
                 "qwen_version": QWEN_VERSION, "watchdog_seconds": WATCHDOG_SECONDS,
+                "transport": TRANSPORT,
                 "upstream_base": args.upstream_base.rstrip("/"), "authorization": args.authorization,
                 "authorization_sha256": digest(args.authorization.encode("utf-8")),
                 "nonce": secrets.token_hex(32), "comparison": {"r3_qwen_skill_root": "unset_in_direct_launcher",
@@ -185,7 +302,7 @@ def run(args):
         penv = {"LISTEN_PORT": str(args.listen_port), "UPSTREAM_ROUTE_FILE": str(control / "proxy-route.json"),
                 "UPSTREAM_LOG": str(trace / "upstream.jsonl"), "UPSTREAM_BODY_DIR": str(trace / "bodies"),
                 "UPSTREAM_READ_TIMEOUT": str(WATCHDOG_SECONDS), "UPSTREAM_EXPECTED_RETURNED_IDENTITY": MODEL,
-                "UPSTREAM_SUBSTITUTION_RETRY_MAX": "0", "UPSTREAM_RETRY_MAX": "0", "UPSTREAM_ROUTE_FALLBACKS": "", "UPSTREAM_CACHE_GUARD": "0", "UPSTREAM_INFLIGHT": str(trace / "inflight.json"), "UPSTREAM_LANE_ABORT": str(trace / "lane-abort.json")}
+                "UPSTREAM_SUBSTITUTION_RETRY_MAX": "0", "UPSTREAM_RETRY_MAX": "0", "UPSTREAM_ROUTE_FALLBACKS": "", "UPSTREAM_CACHE_GUARD": "0", "UPSTREAM_STRICT_BUFFER_RETRY_MAX": str(STRICT_BUFFER_RETRY_MAX), "UPSTREAM_STRICT_BUFFER_DEADLINE_S": str(WATCHDOG_SECONDS), "UPSTREAM_INFLIGHT": str(trace / "inflight.json"), "UPSTREAM_LANE_ABORT": str(trace / "lane-abort.json")}
         env = os.environ.copy(); env.update(penv)
         proxy = subprocess.Popen([sys.executable, args.proxy], stdout=open(trace / "proxy.stdout", "wb"),
                                  stderr=open(trace / "proxy.stderr", "wb"), env=env, start_new_session=True)
@@ -215,20 +332,28 @@ def run(args):
                 try: validate_manifest(control, manifest)
                 except Exception:
                     qwen.terminate(); raise
-                observe_trace(trace)
+                observe_trace(trace, strict_buffer_enabled=True)
                 time.sleep(0.5)
             qwen_rc = qwen.returncode
             if proxy.poll() is not None: raise Refusal("proxy exited before run completion")
+            if qwen_rc != 0:
+                terminal(control, "qwen_failed", qwen_exit=qwen_rc,
+                         manifest_sha256=approved, nonce=manifest["nonce"])
+                return qwen_rc
             validate_manifest(control, manifest)
-            observe_trace(trace)
-            # Identity is the proxy's observable boundary; missing/wrong identity is a failed run.
-            records = [json.loads(line) for line in (trace / "upstream.jsonl").read_text(encoding="utf-8").splitlines() if line]
-            if not records or any(row.get("returned_model") != MODEL for row in records):
-                raise Refusal("missing or wrong returned model identity")
+            observe_trace(trace, strict_buffer_enabled=True)
+            validate_terminal_ledger(trace, strict_buffer_enabled=True)
+            validate_qwen_output(control / "qwen-output.json")
+            validate_finalizer_receipt(run_root / "work")
         finally: output.close(); err.close()
-        terminal(control, "completed" if qwen_rc == 0 else "qwen_failed", qwen_exit=qwen_rc,
+        terminal(control, "completed", qwen_exit=qwen_rc,
                  manifest_sha256=approved, nonce=manifest["nonce"])
         return qwen_rc
+    except TerminalFailure as exc:
+        terminal(control, exc.status, error="%s: %s" % (type(exc).__name__, exc),
+                 qwen_exit=qwen_rc)
+        print("launcher refusal: %s" % exc, file=sys.stderr)
+        return 2
     except Exception as exc:
         terminal(control, "precontact_refused" if proxy is None else "launcher_failed",
                  error="%s: %s" % (type(exc).__name__, exc))
@@ -245,7 +370,7 @@ def run(args):
                     except ProcessLookupError: pass
                     child.wait()
 
-def observe_trace(trace):
+def observe_trace(trace, strict_buffer_enabled=False):
     if (trace / "lane-abort.json").exists(): raise Refusal("proxy lane abort")
     inflight = trace / "inflight.json"
     if inflight.exists():
@@ -261,8 +386,10 @@ def observe_trace(trace):
         if not line: continue
         row = json.loads(line)
         status = row.get("status")
-        if isinstance(status, int) and 200 <= status < 300 and row.get("returned_model") != MODEL:
-            raise Refusal("missing or wrong returned model identity")
+        if (isinstance(status, int) and 200 <= status < 300 and row.get("returned_model") != MODEL
+                and not (strict_buffer_enabled and row.get("strict_buffer_failure") is True
+                         and row.get("returned_model") is None)):
+            raise TerminalFailure("identity_failed", "missing or wrong returned model identity")
         if row.get("body_capture_error") or row.get("body_request_truncated") or row.get("body_response_truncated"):
             raise Refusal("capture incomplete")
 

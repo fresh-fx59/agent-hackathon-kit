@@ -254,6 +254,17 @@ UPSTREAM_RETRY_BASE_MS = int(os.environ.get("UPSTREAM_RETRY_BASE_MS", "2000") or
 # `SHERLOCK_UPSTREAM_RETRY=0` cannot silently disable it.
 UPSTREAM_SUBSTITUTION_RETRY_MAX = int(
     os.environ.get("UPSTREAM_SUBSTITUTION_RETRY_MAX", "0") or 0)
+# Diagnostic-only transport recovery.  When enabled, an SSE response is held
+# until its model, JSON events, and [DONE] marker have all been validated.  A
+# transient incomplete stream may be replayed; wrong identity is never retried.
+UPSTREAM_STRICT_BUFFER_RETRY_MAX = int(
+    os.environ.get("UPSTREAM_STRICT_BUFFER_RETRY_MAX", "0") or 0)
+try:
+    UPSTREAM_STRICT_BUFFER_DEADLINE_S = float(
+        os.environ.get("UPSTREAM_STRICT_BUFFER_DEADLINE_S", "600") or 600)
+except ValueError:
+    UPSTREAM_STRICT_BUFFER_DEADLINE_S = 600.0
+STRICT_BUFFER_ENABLED = UPSTREAM_STRICT_BUFFER_RETRY_MAX > 0
 # THE UPSTREAM CREDENTIAL IS THE PROXY'S, NOT THE CLIENT'S.
 #
 # Until now the key was pinned into the qwen child's environment at launch
@@ -2504,6 +2515,11 @@ class Proxy(BaseHTTPRequestHandler):
         # landing mid-call cannot make this call send model A to provider B and
         # judge it against identity C.
         discarded = 0
+        client_request_id = uuid.uuid4().hex
+        strict_started = time.monotonic()
+        strict_deadline_at = (strict_started + UPSTREAM_STRICT_BUFFER_DEADLINE_S
+                              if STRICT_BUFFER_ENABLED else None)
+        strict_recoveries = 0
         reserved_next_turn = False
         while True:
             # A paid turn obtains its durable token before it can even learn a
@@ -2557,10 +2573,30 @@ class Proxy(BaseHTTPRequestHandler):
                     return
             outcome = self._relay_once(sent_body, headers, requested, sent,
                                        request_max_tokens, discarded, route,
-                                       dispatch_estimate, reserved_first=True)
+                                       dispatch_estimate, reserved_first=True,
+                                       strict_recoveries=strict_recoveries,
+                                       client_request_id=client_request_id,
+                                       strict_deadline_at=strict_deadline_at)
             if outcome == "SUBSTITUTED":
                 discarded += 1
                 continue
+            if outcome in ("STRICT_RETRY", "STRICT_EXHAUSTED"):
+                if (outcome == "STRICT_RETRY" and
+                        strict_recoveries < UPSTREAM_STRICT_BUFFER_RETRY_MAX and
+                        time.monotonic() - strict_started < UPSTREAM_STRICT_BUFFER_DEADLINE_S):
+                    strict_recoveries += 1
+                    continue
+                payload = json.dumps({"error": {"message":
+                    "proxy: strict buffered upstream response incomplete"}}).encode()
+                self.send_response(502)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(payload)))
+                self.send_header("Connection", "close")
+                self.end_headers()
+                self.wfile.write(payload)
+                self.wfile.flush()
+                self.close_connection = True
+                return
             if outcome != "EXHAUSTED":
                 return
             # THE CAP IS SPENT. Before this fix that was the end of the run.
@@ -2597,7 +2633,9 @@ class Proxy(BaseHTTPRequestHandler):
             return
 
     def _relay_once(self, body, headers, requested, sent, request_max_tokens,
-                    discarded, route, dispatch_estimate=None, reserved_first=False):
+                    discarded, route, dispatch_estimate=None, reserved_first=False,
+                    strict_recoveries=0, client_request_id=None,
+                    strict_deadline_at=None):
         """One upstream call.
 
         Returns "SUBSTITUTED" when the provider answered as the wrong model
@@ -2607,13 +2645,14 @@ class Proxy(BaseHTTPRequestHandler):
         and `_relay` decides whether another provider can serve it. Anything
         else means the client has been answered and `_relay` must stop.
         """
-        retryable = discarded < UPSTREAM_SUBSTITUTION_RETRY_MAX
+        retryable = (not STRICT_BUFFER_ENABLED and
+                     discarded < UPSTREAM_SUBSTITUTION_RETRY_MAX)
         # HOLD ON THE LAST ATTEMPT TOO. Holding only while a retry remains
         # would relay the wrong-model body on the attempt that exhausts the
         # cap — the exact thing the abort is supposed to prevent, arrived at
         # by the back door. The hold is on whenever the feature is on; whether
         # the discarded call is re-issued or ends the run is decided after.
-        hold = UPSTREAM_SUBSTITUTION_RETRY_MAX > 0
+        hold = UPSTREAM_SUBSTITUTION_RETRY_MAX > 0 or STRICT_BUFFER_ENABLED
         # Every ledger row this turn writes carries the route it was sent on,
         # so lane_guard.audit_ledger can judge a mid-flight-swapped run row by
         # row instead of declaring a family mismatch on every pre-swap call.
@@ -2674,6 +2713,7 @@ class Proxy(BaseHTTPRequestHandler):
                  "stream_events": 0, "stream_parse_errors": 0,
                  "content_events": 0, "ttft_ms": None, "stream_started_at": None,
                  "deadline_unenforceable": False,
+                 "strict_deadline_at": strict_deadline_at,
                  "stream_complete": None, "stream_bytes": 0,
                  "response_valid": False, "res_chunks": [],
                  # The substitution retry's own state: bytes held back from the
@@ -2704,7 +2744,11 @@ class Proxy(BaseHTTPRequestHandler):
                     # The reservation is exactly this enforced end-to-end bound,
                     # not urllib's per-read timeout.
                     state["action_deadline"] = time.monotonic() + UPSTREAM_READ_TIMEOUT
-                resp = urllib.request.urlopen(req, timeout=UPSTREAM_READ_TIMEOUT)
+                timeout = UPSTREAM_READ_TIMEOUT
+                if strict_deadline_at is not None:
+                    timeout = max(0.001, min(timeout,
+                        strict_deadline_at - time.monotonic()))
+                resp = urllib.request.urlopen(req, timeout=timeout)
                 status = resp.getcode()
                 break
             except urllib.error.HTTPError as e:
@@ -2715,7 +2759,7 @@ class Proxy(BaseHTTPRequestHandler):
                 # the body is read here THIS branch owns the row and the
                 # client's copy — nothing falls through to the pump, so one
                 # attempt still writes exactly one ledger row.
-                eager = (status == 400
+                eager = (status == 400 or (STRICT_BUFFER_ENABLED and status >= 500)
                          or (status in _RETRYABLE and attempt <= UPSTREAM_RETRY_MAX))
                 if eager:
                     # EVERY attempt is recorded, because every attempt re-uploads
@@ -2747,6 +2791,8 @@ class Proxy(BaseHTTPRequestHandler):
                     # clean ledger keeps the exact shape every previous run
                     # wrote and no reader sees a new field appear unbidden.
                     named = {"upstream_refusal_class": refusal} if refusal else {}
+                    if STRICT_BUFFER_ENABLED and status >= 500:
+                        named["strict_buffer_failure"] = True
                     try:
                         record(**_capture_row(capture), **named, **route_fields,
                                request_max_tokens=request_max_tokens, requested_model=requested, returned_model=None,
@@ -2754,6 +2800,7 @@ class Proxy(BaseHTTPRequestHandler):
                                duration_ms=attempt_ms,
                                sent_model=sent, request_bytes=len(body),
                                path=self.path, stream=False, upstream_error=why,
+                               client_request_id=client_request_id,
                                messages_count=messages_count, session_id=session_id,
                                **({"action_attempt_id": action_attempt_id,
                                    "action_contact_completed": True}
@@ -2767,6 +2814,17 @@ class Proxy(BaseHTTPRequestHandler):
                     except BudgetUnknown:
                         self._budget_refusal()
                         return
+                    # Strict buffering owns retry accounting at _relay level so
+                    # each discarded pre-body attempt and its eventual replay
+                    # share one client_request_id.  The ordinary inner retry
+                    # loop would otherwise make a clean replay look unrelated
+                    # to this failure in the durable ledger.
+                    if STRICT_BUFFER_ENABLED and status >= 500:
+                        try:
+                            e.close()
+                        except Exception:
+                            pass
+                        return "STRICT_RETRY"
                     if (refusal is None and status in _RETRYABLE
                             and attempt <= UPSTREAM_RETRY_MAX):
                         time.sleep(min(60.0, (UPSTREAM_RETRY_BASE_MS / 1000.0)
@@ -2784,14 +2842,18 @@ class Proxy(BaseHTTPRequestHandler):
                     return outcome
                 break
             except Exception as e:                   # DNS, TLS, refused, timeout
+                strict_failure_fields = ({"strict_buffer_failure": True}
+                                         if STRICT_BUFFER_ENABLED else {})
                 try:
-                    record(**_capture_row(capture), **route_fields,
+                    record(**_capture_row(capture), **strict_failure_fields,
+                           **route_fields,
                            request_max_tokens=request_max_tokens, requested_model=requested, returned_model=None,
                            tool_call=False, status=None, error=str(e)[:300],
                            attempt=attempt,
                            duration_ms=int((time.time() - t0) * 1000), sent_model=sent,
                            request_bytes=len(body), path=self.path, stream=False,
                            messages_count=messages_count, session_id=session_id,
+                           client_request_id=client_request_id,
                            **({"action_attempt_id": action_attempt_id,
                                "action_contact_completed": True}
                               if _ACTION_BUDGET_ENABLED else {}))
@@ -2803,6 +2865,8 @@ class Proxy(BaseHTTPRequestHandler):
                     _record_budget_result(False)
                 except BudgetUnknown:
                     pass
+                if STRICT_BUFFER_ENABLED:
+                    return "STRICT_RETRY"
                 self.send_response(502)
                 payload = json.dumps({"error": {"message": "proxy: %s" % e}}).encode()
                 self.send_header("Content-Type", "application/json")
@@ -2914,6 +2978,16 @@ class Proxy(BaseHTTPRequestHandler):
                   discard_fields = {"discarded_substitution": True,
                                     "substitution_attempt": discarded + 1,
                                     "substitution_retry_exhausted": not retryable}
+              strict_failed = (STRICT_BUFFER_ENABLED and streaming and
+                               not state["substituted"] and
+                               not (state["stream_complete"] is True and
+                                    state["stream_parse_errors"] == 0 and
+                                    state["error"] is None and
+                                    state["returned_model"] == route.expected_identity))
+              if strict_failed:
+                  discard_fields["strict_buffer_failure"] = True
+              elif STRICT_BUFFER_ENABLED and strict_recoveries:
+                  discard_fields["strict_buffer_recovery"] = strict_recoveries
               ledger_durable = False
               try:
                   record(**_capture_row(capture), **discard_fields,
@@ -2925,6 +2999,7 @@ class Proxy(BaseHTTPRequestHandler):
                          duration_ms=row_duration_ms, sent_model=sent,
                          request_bytes=len(body), path=self.path, stream=streaming,
                          messages_count=messages_count, session_id=session_id,
+                         client_request_id=client_request_id,
                          # THE ESTIMATE, BESIDE THE PROVIDER'S OWN COUNT. One
                          # integer, so UPSTREAM_CHARS_PER_TOKEN can be re-derived
                          # from any future run's ledger instead of argued about —
@@ -2976,6 +3051,12 @@ class Proxy(BaseHTTPRequestHandler):
                                          "status": status,
                                          "returned_model": state["returned_model"],
                                          "usage": state["usage"]}
+              elif strict_failed:
+                  try:
+                      resp.close()
+                  except Exception:
+                      pass
+                  outcome = "STRICT_RETRY" if UPSTREAM_STRICT_BUFFER_RETRY_MAX else "STRICT_EXHAUSTED"
               else:
                   # AFTER the row, always. The call that trips the guard has to
                   # be in the ledger, or the artifact that explains the abort is
@@ -3235,25 +3316,43 @@ class Proxy(BaseHTTPRequestHandler):
         # SSE event can make several successful socket reads while it waits for
         # one newline, resetting a per-read timeout each time.  In action mode
         # own the buffering and deadline check between bounded raw fragments.
-        if _ACTION_BUDGET_ENABLED:
+        if _ACTION_BUDGET_ENABLED or STRICT_BUFFER_ENABLED:
             buffered = b""
             reader = getattr(resp, "read1", None)
             if not callable(reader):
-                state["error"] = "action_wall_deadline_unenforceable"
+                state["error"] = ("action_wall_deadline_unenforceable"
+                                  if _ACTION_BUDGET_ENABLED else
+                                  "strict_buffer_deadline_unenforceable")
                 return
             while True:
                 try:
-                    _action_remaining_deadline(state, sock)
+                    if state.get("strict_deadline_at") is not None:
+                        remaining = state["strict_deadline_at"] - time.monotonic()
+                        if remaining <= 0:
+                            state["error"] = "strict_buffer_deadline_exceeded"
+                            return
+                        if sock is None:
+                            state["error"] = "strict_buffer_deadline_unenforceable"
+                            return
+                        sock.settimeout(min(remaining, UPSTREAM_READ_TIMEOUT))
+                    if _ACTION_BUDGET_ENABLED:
+                        _action_remaining_deadline(state, sock)
                     raw = reader(4096)
                 except TimeoutError:
-                    state["error"] = "action_wall_deadline_exceeded"
+                    state["error"] = ("action_wall_deadline_exceeded"
+                                      if _ACTION_BUDGET_ENABLED else
+                                      "strict_buffer_deadline_exceeded")
                     return
                 except socket.timeout:
-                    state["error"] = "action_wall_deadline_exceeded"
+                    state["error"] = ("action_wall_deadline_exceeded"
+                                      if _ACTION_BUDGET_ENABLED else
+                                      "strict_buffer_deadline_exceeded")
                     return
                 except OSError as exc:
                     if "timed out" in str(exc).lower():
-                        state["error"] = "action_wall_deadline_exceeded"
+                        state["error"] = ("action_wall_deadline_exceeded"
+                                          if _ACTION_BUDGET_ENABLED else
+                                          "strict_buffer_deadline_exceeded")
                         return
                     raise
                 if not raw:
@@ -3268,6 +3367,13 @@ class Proxy(BaseHTTPRequestHandler):
 
         it = iter(resp)
         while True:
+            if state.get("strict_deadline_at") is not None:
+                remaining = state["strict_deadline_at"] - time.monotonic()
+                if remaining <= 0:
+                    state["error"] = "strict_buffer_deadline_exceeded"
+                    return
+                if sock is not None:
+                    sock.settimeout(min(remaining, UPSTREAM_READ_TIMEOUT))
             try:
                 _action_remaining_deadline(state, sock)
             except TimeoutError:
@@ -3310,7 +3416,13 @@ class Proxy(BaseHTTPRequestHandler):
             return
         # No Content-Length is known up front and chunked framing is one more
         # thing to get wrong, so the response ends at connection close.
-        self._relay_headers(resp, 200, extra=[("Connection", "close")])
+        extra = [("Connection", "close")]
+        # Strict mode releases only a fully buffered, validated stream.  Its
+        # exact length is therefore known; framing it prevents a client from
+        # treating the intentionally closed HTTP/1.1 connection as a reset.
+        if STRICT_BUFFER_ENABLED:
+            extra.append(("Content-Length", str(sum(len(raw) for raw in state["held"]))))
+        self._relay_headers(resp, 200, extra=extra)
         self.end_headers()
         self.close_connection = True
         state["released"] = True
@@ -3328,13 +3440,20 @@ class Proxy(BaseHTTPRequestHandler):
 
     def _pump_stream(self, resp, state, hold=False, expected=""):
         state["stream_started_at"] = time.time()
-        sock = _stream_socket(resp) if (UPSTREAM_FIRST_TOKEN_MS or _ACTION_BUDGET_ENABLED) else None
+        if STRICT_BUFFER_ENABLED:
+            # The deadline starts before the upstream connection and is shared
+            # by every replay attempt; this is deliberately not reset here.
+            state.setdefault("strict_deadline_at", None)
+        sock = _stream_socket(resp) if (UPSTREAM_FIRST_TOKEN_MS or _ACTION_BUDGET_ENABLED
+                                        or STRICT_BUFFER_ENABLED) else None
         if UPSTREAM_FIRST_TOKEN_MS and sock is None:
             # Never pretend to be armed. Recorded in its own field, NOT in
             # `error`: `_scan_obj` only fills `error` when it is empty, so
             # putting a diagnostic there would mask a real rate_limit_error
             # spliced into the 200 body — the two fixes cancelling out.
             state["deadline_unenforceable"] = True
+        if STRICT_BUFFER_ENABLED and sock is None:
+            state["error"] = "strict_buffer_deadline_unenforceable"
         if sock is not None:
             if _ACTION_BUDGET_ENABLED:
                 _action_remaining_deadline(state, sock)
@@ -3391,7 +3510,7 @@ class Proxy(BaseHTTPRequestHandler):
                 # reserved wall bound.  Knowing the model is enough to release
                 # schema-1's stream, but not enough to tell an action client
                 # success: another fragmented event can still cross the bound.
-                if (_LIFECYCLE is None and not _ACTION_BUDGET_ENABLED and
+                if (not STRICT_BUFFER_ENABLED and _LIFECYCLE is None and not _ACTION_BUDGET_ENABLED and
                         (state["returned_model"] or self._hold_expired(state))):
                     self._release_head(resp, state)
             state["response_valid"] = (
@@ -3405,6 +3524,11 @@ class Proxy(BaseHTTPRequestHandler):
             # including a stream that ended, errored or timed out before it
             # ever named a model. Holding is a delay, never a loss.
             if (not state["substituted"] and not state["lifecycle_refused"]
+                    and not (STRICT_BUFFER_ENABLED and
+                             not (state["stream_complete"] is True and
+                                  state["stream_parse_errors"] == 0 and
+                                  state["error"] is None and
+                                  state["returned_model"] == expected))
                     and not (_ACTION_BUDGET_ENABLED and state["error"] is not None)):
                 self._release_head(resp, state)
 

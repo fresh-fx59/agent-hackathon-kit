@@ -20,6 +20,7 @@ import importlib.util
 import json
 import os
 import pathlib
+import socket
 import subprocess
 import sys
 import tempfile
@@ -55,6 +56,34 @@ class Stub(BaseHTTPRequestHandler):
                                  "raw_body": body,
                                  "body": json.loads(body or b"{}")})
         mode = self.server.mode
+        if mode == "strict_502_then_sse" and len(self.server.seen) == 1:
+            payload = b'{"error":{"message":"gateway unavailable"}}'
+            self.send_response(502)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+            return
+        if mode == "strict_disconnect_then_sse" and len(self.server.seen) == 1:
+            # No status line/body at all: this is the failure path urllib
+            # reports as a pre-body disconnect rather than HTTPError.
+            self.connection.shutdown(socket.SHUT_RDWR)
+            self.close_connection = True
+            return
+        if mode == "strict_drip_then_sse" and len(self.server.seen) == 1:
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.end_headers()
+            # Keep the socket active but never finish one SSE line.  A
+            # readline()-based deadline silently resets on every byte.
+            for _ in range(30):
+                try:
+                    self.wfile.write(b"x")
+                    self.wfile.flush()
+                except (BrokenPipeError, ConnectionResetError):
+                    return
+                time.sleep(0.04)
+            return
         # Simulate a provider BURST: fail the next N calls, then behave. This is
         # what linkapi actually does — transient, minute-scale, independent of
         # request size and shape (both controlled for on 2026-08-02).
@@ -146,6 +175,22 @@ class Stub(BaseHTTPRequestHandler):
             self.wfile.write(b'data: {"model":"DeepSeek-V4-Flash"}\n\n')
             self.wfile.write(b'data: {"object":"chat.completioHTTP/1.1 502 Bad Gateway\n\n')
             self.wfile.flush()
+        elif mode in ("broken_then_valid_sse", "broken_sse", "wrong_model_sse",
+                      "strict_502_then_sse", "strict_disconnect_then_sse",
+                      "strict_drip_then_sse", "missing_identity_sse"):
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.end_headers()
+            model = ("Other-Model" if mode == "wrong_model_sse" else
+                     (None if mode == "missing_identity_sse" else "DeepSeek-V4-Flash"))
+            event = {"choices": [{"delta": {"content": "part"}}]}
+            if model is not None:
+                event["model"] = model
+            self.wfile.write((b"data: " + json.dumps(event).encode() + b"\n\n"))
+            if mode in ("broken_then_valid_sse", "strict_502_then_sse",
+                        "strict_disconnect_then_sse", "strict_drip_then_sse") and len(self.server.seen) > 1:
+                self.wfile.write(b"data: [DONE]\n\n")
+            self.wfile.flush()
         elif mode == "error":
             payload = json.dumps({"error": {"message": "Upstream request failed"}}).encode()
             self.send_response(400)
@@ -204,6 +249,27 @@ class ProxyCase(unittest.TestCase):
                 time.sleep(0.05)
         out, err = self.proc.communicate(timeout=5)
         self.fail("proxy never came up: %s %s" % (out, err))
+
+    def start_strict(self, mode, retries=1, deadline_s="10", upstream_port=None):
+        self.srv.mode = mode
+        env = dict(os.environ,
+                   UPSTREAM_BASE="http://127.0.0.1:%d/v1" % (upstream_port or self.up_port),
+                   UPSTREAM_LOG=self.log, LISTEN_PORT=str(self.px_port),
+                   UPSTREAM_EXPECTED_RETURNED_IDENTITY="DeepSeek-V4-Flash",
+                   UPSTREAM_STRICT_BUFFER_RETRY_MAX=str(retries),
+                   UPSTREAM_STRICT_BUFFER_DEADLINE_S=str(deadline_s))
+        self.proc = subprocess.Popen([sys.executable, PROXY], env=env,
+                                     stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        for _ in range(100):
+            try:
+                with urllib.request.urlopen("http://127.0.0.1:%d/healthz" % self.px_port,
+                                            timeout=1) as r:
+                    r.read()
+                return
+            except Exception:
+                time.sleep(0.05)
+        out, err = self.proc.communicate(timeout=5)
+        self.fail("strict proxy never came up: %s %s" % (out, err))
 
     def start_lifecycle(self, case="healthy", **updates):
         self.srv.mode = "json_toolcall"
@@ -1038,6 +1104,92 @@ class ItReservesPaidBudgetBeforeForwarding(ProxyCase):
         self.assertEqual(status, 503)
         self.assertEqual(self.srv.seen, [])
         self.assertFalse(pathlib.Path(self.budget_state).exists())
+
+class ItStrictBuffering(ProxyCase):
+
+    def test_strict_retries_prebody_502_without_leaking_error(self):
+        self.start_strict("strict_502_then_sse", retries=1)
+        status, body = self.post()
+        self.assertEqual(status, 200)
+        self.assertIn(b"[DONE]", body)
+        self.assertEqual(len(self.srv.seen), 2)
+        rows = [json.loads(line) for line in pathlib.Path(self.log).read_text().splitlines()]
+        self.assertTrue(rows[0]["strict_buffer_failure"])
+        self.assertEqual(rows[1]["strict_buffer_recovery"], 1)
+        self.assertEqual(rows[0]["client_request_id"], rows[1]["client_request_id"])
+
+    def test_strict_retries_prebody_disconnect_with_linked_failure_row(self):
+        self.start_strict("strict_disconnect_then_sse", retries=1)
+        status, body = self.post()
+        self.assertEqual(status, 200)
+        self.assertIn(b"[DONE]", body)
+        rows = [json.loads(line) for line in pathlib.Path(self.log).read_text().splitlines()]
+        self.assertEqual(len(rows), 2)
+        self.assertTrue(rows[0]["strict_buffer_failure"])
+        self.assertEqual(rows[1]["strict_buffer_recovery"], 1)
+        self.assertEqual(rows[0]["client_request_id"], rows[1]["client_request_id"])
+
+    def test_strict_retries_connection_failure_with_linked_failure_rows(self):
+        # A port reserved then released cannot produce a usable upstream
+        # answer.  Some urllib stacks surface that as a synthetic HTTP 502;
+        # either form must be durable, strict, and tied to this client turn.
+        refused_port = free_port()
+        self.start_strict("sse", retries=1, upstream_port=refused_port)
+        status, body = self.post()
+        self.assertEqual(status, 502)
+        self.assertIn(b"strict buffered upstream response incomplete", body)
+        rows = [json.loads(line) for line in pathlib.Path(self.log).read_text().splitlines()]
+        self.assertEqual(len(rows), 2)
+        self.assertTrue(all(row["strict_buffer_failure"] for row in rows))
+        self.assertEqual(len({row["client_request_id"] for row in rows}), 1)
+
+    def test_strict_deadline_cuts_unterminated_drip_without_waiting_for_eof(self):
+        self.start_strict("strict_drip_then_sse", retries=1, deadline_s="0.2")
+        started = time.monotonic()
+        status, body = self.post()
+        self.assertEqual(status, 502)
+        self.assertIn(b"strict buffered upstream response incomplete", body)
+        self.assertLess(time.monotonic() - started, 1.0)
+        rows = [json.loads(line) for line in pathlib.Path(self.log).read_text().splitlines()]
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["upstream_error"], "strict_buffer_deadline_exceeded")
+        self.assertTrue(rows[0]["strict_buffer_failure"])
+        self.assertIsInstance(rows[0]["client_request_id"], str)
+
+    def test_strict_buffer_replays_broken_sse_without_leaking_partial_bytes(self):
+        self.start_strict("broken_then_valid_sse", retries=1)
+        status, body = self.post()
+        self.assertEqual(status, 200)
+        self.assertIn(b"[DONE]", body)
+        self.assertEqual(body.count(b"data:"), 2)
+        self.assertEqual(len(self.srv.seen), 2)
+
+    def test_strict_buffer_exhaustion_is_explicit(self):
+        self.start_strict("broken_then_valid_sse", retries=1)
+        self.srv.mode = "broken_sse"
+        status, body = self.post()
+        self.assertEqual(status, 502)
+        self.assertIn(b"strict buffered upstream response incomplete", body)
+        self.assertEqual(len(self.srv.seen), 2)
+
+    def test_strict_buffer_wrong_identity_is_not_retried_or_relayed(self):
+        self.start_strict("wrong_model_sse", retries=2)
+        status, body = self.post()
+        self.assertNotEqual(status, 200)
+        self.assertNotIn(b"Other-Model", body)
+        self.assertEqual(len(self.srv.seen), 1)
+
+    def test_strict_buffer_malformed_sse_fails_closed(self):
+        self.start_strict("malformed_sse", retries=1)
+        status, body = self.post()
+        self.assertNotEqual(status, 200)
+        self.assertNotIn(b"DeepSeek-V4-Flash", body)
+
+    def test_strict_buffer_missing_identity_fails_closed(self):
+        self.start_strict("missing_identity_sse", retries=1)
+        status, body = self.post()
+        self.assertNotEqual(status, 200)
+        self.assertNotIn(b"DeepSeek-V4-Flash", body)
 
 
 if __name__ == "__main__":
