@@ -1,0 +1,12 @@
+{
+  "report_chars": 32772,
+  "assistant_chars": 32768,
+  "report_sha256": "182b30ddb6e52bd2d033d563452fc38f46fc04c669f1882c98f287e51b7017b5",
+  "assistant_sha256": "61d491dfd6263f630e3c21b40fd1b08651cd193f4127e617b3dee14456d45507",
+  "decoded_exact_equal": false,
+  "assistant_is_exact_prefix": true,
+  "report_suffix_omitted_repr": "'\\n\\n\\n\\n'",
+  "normalized_eol_and_trailing_newline_equal": true,
+  "semantic_or_nonwhitespace_difference": false,
+  "source_raw": "openai-2026-09-07T10-27-45.652Z-feb25497.json"
+}
