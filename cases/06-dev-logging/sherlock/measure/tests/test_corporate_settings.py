@@ -83,6 +83,8 @@ def main():
     want = {
         "model.generationConfig.contextWindowSize": GATE,
         "model.generationConfig.samplingParams.max_tokens": 20000,
+        "model.generationConfig.reasoning": False,
+        "model.generationConfig.extra_body.thinking.type": "disabled",
         "model.skipStartupContext": True,
         "model.chatCompression.maxRecentFilesToRetain": 0,
     }

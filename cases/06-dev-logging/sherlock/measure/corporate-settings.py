@@ -159,6 +159,13 @@ def profile(window=GATE, max_tokens=MAX_TOKENS, skill_directory=None):  # noqa: 
             "generationConfig": {
                 "contextWindowSize": window,
                 "samplingParams": {"max_tokens": max_tokens},
+                # DeepSeek-v4-flash defaults to thinking.  Reasoning-only
+                # completions can consume the entire 20k reserve without a
+                # visible tool call or answer.  Qwen consumes `reasoning`;
+                # the explicit OpenAI-compatible body shape also reaches the
+                # corporate proxy, whose hostname is not api.deepseek.com.
+                "reasoning": False,
+                "extra_body": {"thinking": {"type": "disabled"}},
             },
             # The startup context block is corpus-independent bytes on call one.
             "skipStartupContext": True,
