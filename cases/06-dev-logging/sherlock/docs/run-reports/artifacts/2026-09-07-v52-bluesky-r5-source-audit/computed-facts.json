@@ -1,0 +1,636 @@
+{
+  "source": {
+    "path": "/Users/a/hack/sherlock-final-inputs-20260906/independent/corpus/BlueSkyRansomware.jsonl",
+    "sha256": "28b73f0be7b2a6ed7d102c8a8ba86d7c186887e0b71fcacfb8f73dcb0e37ff58",
+    "records": 469,
+    "bytes": 467262
+  },
+  "report": {
+    "path": "/Users/a/Documents/projects/personal-os/docs/run-reports/artifacts/2026-09-07-v52-bluesky-r5-live-snapshot/report.md",
+    "sha256": "53257f5296d2d92a3196a14873b2272424bffa22cf8b9c3265a14a8e20595024",
+    "bytes": 34511,
+    "status": "draft/live snapshot; semantic FAIL"
+  },
+  "channels": {
+    "Windows PowerShell": 133,
+    "Application": 336
+  },
+  "computers": {
+    "DESKTOP-7EQVM78": 469
+  },
+  "time_bounds": [
+    "2024-04-21T00:32:42.803382Z",
+    "2024-04-23T10:11:10.425516Z"
+  ],
+  "days": {
+    "2024-04-21": 388,
+    "2024-04-23": 81
+  },
+  "record_windows": {
+    "Application": {
+      "count": 336,
+      "first": 2713,
+      "last": 3048,
+      "unique": 336,
+      "missing": []
+    },
+    "Windows PowerShell": {
+      "count": 133,
+      "first": 1,
+      "last": 133,
+      "unique": 133,
+      "missing": []
+    }
+  },
+  "provider_ids": {
+    "PowerShell:600": 107,
+    "PowerShell:400": 16,
+    "PowerShell:403": 9,
+    "Microsoft-Windows-Winlogon:6000": 4,
+    "VMUpgradeHelper:260": 1,
+    "VMUpgradeHelper:272": 1,
+    "VMTools:108": 1,
+    "MSSQLSERVER:17147": 1,
+    "Microsoft-Windows-User Profiles Service:1532": 1,
+    "Microsoft-Windows-EventSystem:4625": 1,
+    "Microsoft-Windows-User Profiles Service:1531": 2,
+    "Microsoft-Windows-Winlogon:6003": 2,
+    "VMTools:105": 2,
+    "Microsoft-Windows-WMI:5615": 2,
+    "ESENT:102": 2,
+    "ESENT:105": 2,
+    "ESENT:326": 2,
+    "Microsoft-Windows-WMI:5617": 2,
+    "Microsoft-Windows-Search:1003": 2,
+    "VMUpgradeHelper:258": 2,
+    "Microsoft-Windows-Complus:781": 2,
+    "VMUpgradeHelper:271": 2,
+    "Microsoft-Windows-MSDTC 2:4202": 2,
+    "edgeupdate:0": 3,
+    "MSSQLSERVER:17069": 2,
+    "MSSQLSERVER:49916": 2,
+    "MSSQLSERVER:17101": 2,
+    "MSSQLSERVER:17103": 2,
+    "MSSQLSERVER:17104": 2,
+    "MSSQLSERVER:18496": 2,
+    "MSSQLSERVER:15268": 2,
+    "MSSQLSERVER:17111": 2,
+    "MSSQLSERVER:49904": 2,
+    "MSSQLSERVER:17110": 2,
+    "MSSQLSERVER:17115": 2,
+    "MSSQLSERVER:17164": 2,
+    "MSSQLSERVER:17162": 2,
+    "MSSQLSERVER:49903": 2,
+    "MSSQLSERVER:852": 2,
+    "MSSQLSERVER:894": 2,
+    "MSSQLSERVER:49917": 2,
+    "MSSQLSERVER:873": 2,
+    "MSSQLSERVER:17264": 2,
+    "MSSQLSERVER:17811": 2,
+    "MSSQLSERVER:17176": 2,
+    "MSSQLSERVER:17152": 2,
+    "MSSQLSERVER:17125": 2,
+    "MSSQLSERVER:17118": 2,
+    "MSSQLSERVER:9048": 2,
+    "MSSQLSERVER:49910": 2,
+    "MSSQLSERVER:17137": 14,
+    "MSSQLSERVER:958": 2,
+    "MSSQLSERVER:10981": 2,
+    "MSSQLSERVER:33217": 2,
+    "MSSQLSERVER:33218": 2,
+    "MSSQLSERVER:25753": 8,
+    "MSSQLSERVER:6253": 2,
+    "MSSQLSERVER:19030": 2,
+    "MSSQLSERVER:17663": 2,
+    "MSSQLSERVER:17136": 2,
+    "MSSQLSERVER:41110": 2,
+    "MSSQLSERVER:41111": 2,
+    "MSSQLSERVER:17117": 2,
+    "MSSQLSERVER:9666": 4,
+    "MSSQLSERVER:9688": 2,
+    "MSSQLSERVER:26018": 2,
+    "MSSQLSERVER:26022": 8,
+    "MSSQLSERVER:26048": 4,
+    "MSSQLSERVER:17201": 2,
+    "MSSQLSERVER:26076": 2,
+    "MSSQLSERVER:3408": 2,
+    "MSSQLSERVER:17126": 2,
+    "MSSQLSERVER:26067": 4,
+    "Microsoft-Windows-Security-SPP:900": 3,
+    "Microsoft-Windows-Security-SPP:16394": 10,
+    "Microsoft-Windows-Security-SPP:1066": 2,
+    "Microsoft-Windows-Security-SPP:1003": 2,
+    "Microsoft-Windows-Security-SPP:902": 2,
+    "SecurityCenter:1": 3,
+    "SecurityCenter:15": 12,
+    "Microsoft-Windows-Security-SPP:16384": 10,
+    "Microsoft-Windows-Security-SPP:903": 2,
+    "VSS:8224": 3,
+    "MSSQLSERVER:18453": 15,
+    "MSSQLSERVER:33090": 3,
+    "MSSQLSERVER:8128": 3,
+    "MSSQLSERVER:1": 2,
+    "MSSQLSERVER:25754": 4,
+    "MSSQLSERVER:18456": 44,
+    "MSSQLSERVER:18454": 4,
+    "Microsoft-Windows-RestartManager:10000": 2,
+    "Microsoft-Windows-RestartManager:10001": 2,
+    "Microsoft-Windows-WMI:5611": 1,
+    "ESENT:300": 1,
+    "ESENT:301": 1,
+    "ESENT:302": 1,
+    "MSSQLSERVER:3406": 4,
+    "MSSQLSERVER:3407": 4,
+    "MSSQLSERVER:3454": 1,
+    "PowerShell:800": 1,
+    "Windows Error Reporting:1001": 11,
+    "MSSQLSERVER:17177": 1,
+    "Microsoft-Windows-Security-SPP:1034": 10,
+    "Microsoft-Windows-Security-SPP:1033": 1,
+    "Microsoft-Windows-RestartManager:10010": 1,
+    "Microsoft-Windows-RestartManager:10005": 1,
+    "SecurityCenter:2": 1,
+    "MSSQLSERVER:15457": 2
+  },
+  "sql_failure_count": 44,
+  "failure_payload_counts": {
+    "['sa', ' Reason: Password did not match that for the login provided.', ' [CLIENT: 87.96.21.84]']": 44
+  },
+  "failure_days": {
+    "2024-04-21": {
+      "count": 22,
+      "first": "2024-04-21T04:51:02.988886Z",
+      "last": "2024-04-21T04:51:03.066977Z",
+      "elapsed_seconds": 0.078091
+    },
+    "2024-04-23": {
+      "count": 22,
+      "first": "2024-04-23T09:59:54.644152Z",
+      "last": "2024-04-23T09:59:54.784581Z",
+      "elapsed_seconds": 0.140429
+    }
+  },
+  "sql_success_lines": [
+    186,
+    454,
+    455,
+    458
+  ],
+  "integrated_users": {
+    "DESKTOP-7EQVM78\\Win 10": 8,
+    "NT SERVICE\\SQLTELEMETRY": 7
+  },
+  "telemetry_gaps_seconds": [
+    632.445616,
+    900.093982,
+    600.078043,
+    65860.548339,
+    123459.786871,
+    1028.779373
+  ],
+  "sa_trace_lines": [
+    109,
+    295
+  ],
+  "ps_ids": {
+    "600": 107,
+    "400": 16,
+    "403": 9,
+    "800": 1
+  },
+  "ps_hostnames": {
+    "ConsoleHost": 70,
+    "Default Host": 46,
+    "Visual Studio Code Host": 8,
+    "MSFConsole": 9
+  },
+  "config_to_ps_seconds": 65.593929,
+  "securitycenter_states": {
+    "['Windows Defender', 'SECURITY_PRODUCT_STATE_ON']": 8,
+    "['Windows Defender', 'SECURITY_PRODUCT_STATE_SNOOZED']": 4
+  },
+  "absent_ids": {
+    "4624": [],
+    "4672": [],
+    "4688": [],
+    "4103": [],
+    "4104": [],
+    "1116": [],
+    "1117": []
+  },
+  "citations": [
+    {
+      "report_line": 23,
+      "source_line": 164,
+      "exists": true,
+      "quote": "#attributes\":{\"Qualifiers\":49152},\"#text\":18456},\"Version\":0,\"Level\":0,\"Task\":4,\"Opcode\":0",
+      "exact_quote": true
+    },
+    {
+      "report_line": 24,
+      "source_line": 164,
+      "exists": true,
+      "quote": "ata\":{\"Data\":{\"#text\":[\"sa\",\" Reason: Password did not match that for the login provided.\"",
+      "exact_quote": true
+    },
+    {
+      "report_line": 25,
+      "source_line": 432,
+      "exists": true,
+      "quote": "#attributes\":{\"Qualifiers\":49152},\"#text\":18456},\"Version\":0,\"Level\":0,\"Task\":4,\"Opcode\":0",
+      "exact_quote": true
+    },
+    {
+      "report_line": 26,
+      "source_line": 432,
+      "exists": true,
+      "quote": "at for the login provided.\",\" [CLIENT: 87.96.21.84]\"]},\"Binary\":\"184800000E000000100000004",
+      "exact_quote": true
+    },
+    {
+      "report_line": 52,
+      "source_line": 454,
+      "exists": true,
+      "quote": "#attributes\":{\"Qualifiers\":16384},\"#text\":18454},\"Version\":0,\"Level\":0,\"Task\":4,\"Opcode\":0",
+      "exact_quote": true
+    },
+    {
+      "report_line": 53,
+      "source_line": 454,
+      "exists": true,
+      "quote": "ata\":{\"Data\":{\"#text\":[\"sa\",\" [CLIENT: 87.96.21.84]\"]},\"Binary\":\"164800000A000000100000004",
+      "exact_quote": true
+    },
+    {
+      "report_line": 54,
+      "source_line": 455,
+      "exists": true,
+      "quote": "ata\":{\"Data\":{\"#text\":[\"sa\",\" [CLIENT: 87.96.21.84]\"]},\"Binary\":\"164800000A000000100000004",
+      "exact_quote": true
+    },
+    {
+      "report_line": 55,
+      "source_line": 458,
+      "exists": true,
+      "quote": "ata\":{\"Data\":{\"#text\":[\"sa\",\" [CLIENT: 87.96.21.84]\"]},\"Binary\":\"164800000A000000100000004",
+      "exact_quote": true
+    },
+    {
+      "report_line": 56,
+      "source_line": 456,
+      "exists": true,
+      "quote": "l},\"EventData\":{\"Data\":{\"#text\":[\"show advanced options\",\"0\",\"1\"]},\"Binary\":\"613C00000A000",
+      "exact_quote": true
+    },
+    {
+      "report_line": 57,
+      "source_line": 457,
+      "exists": true,
+      "quote": "#attributes\":{\"Qualifiers\":16384},\"#text\":15457},\"Version\":0,\"Level\":4,\"Task\":2,\"Opcode\":0",
+      "exact_quote": true
+    },
+    {
+      "report_line": 58,
+      "source_line": 457,
+      "exists": true,
+      "quote": "\":null},\"EventData\":{\"Data\":{\"#text\":[\"xp_cmdshell\",\"0\",\"1\"]},\"Binary\":\"613C00000A00000010",
+      "exact_quote": true
+    },
+    {
+      "report_line": 59,
+      "source_line": 186,
+      "exists": true,
+      "quote": "urity\":null},\"EventData\":{\"Data\":{\"#text\":[\"sa\",\" [CLIENT: 87.96.21.84]\"]},\"Binary\":\"16480",
+      "exact_quote": true
+    },
+    {
+      "report_line": 82,
+      "source_line": 459,
+      "exists": true,
+      "quote": "r\\n\\tSequenceNumber=1\\r\\n\\r\\n\\tHostName=MSFConsole\\r\\n\\tHostVersion=0.1\\r\\n\\tHostId=1693e6",
+      "exact_quote": true
+    },
+    {
+      "report_line": 83,
+      "source_line": 467,
+      "exists": true,
+      "quote": "D\":{\"#attributes\":{\"Qualifiers\":0},\"#text\":400},\"Version\":0,\"Level\":4,\"Task\":4,\"Opcode\":0,",
+      "exact_quote": true
+    },
+    {
+      "report_line": 84,
+      "source_line": 467,
+      "exists": true,
+      "quote": "8356-4245271c31e8\\r\\n\\tHostApplication=winlogon.exe\\r\\n\\tEngineVersion=5.1.19041.4291\\r\\n\\",
+      "exact_quote": true
+    },
+    {
+      "report_line": 85,
+      "source_line": 24,
+      "exists": true,
+      "quote": "bject { $_.ExecutablePath -eq 'C:\\\\Users\\\\Win 10\\\\AppData\\\\Local\\\\Programs\\\\Microsoft VS C",
+      "exact_quote": true
+    },
+    {
+      "report_line": 102,
+      "source_line": 365,
+      "exists": true,
+      "quote": "vscode.powershell-2024.2.1\\\\modules\\\\PSScriptAnalyzer\\\\1.22.0\\\\PSScriptAnalyzer.psm1\\r\\n\\t",
+      "exact_quote": true
+    },
+    {
+      "report_line": 103,
+      "source_line": 360,
+      "exists": true,
+      "quote": "Start-EditorServices -HostName 'Visual Studio Code Host' -HostProfileId 'Microsoft.VSCode",
+      "exact_quote": true
+    },
+    {
+      "report_line": 114,
+      "source_line": 423,
+      "exists": true,
+      "quote": "\":{\"#text\":[\"Windows Defender\",\"SECURITY_PRODUCT_STATE_ON\"]},\"Binary\":null}}}",
+      "exact_quote": true
+    },
+    {
+      "report_line": 115,
+      "source_line": 425,
+      "exists": true,
+      "quote": "indows Defender\",\"SECURITY_PRODUCT_STATE_SNOOZED\"]},\"Binary\":null}}}",
+      "exact_quote": true
+    },
+    {
+      "report_line": 116,
+      "source_line": 431,
+      "exists": true,
+      "quote": "ttributes\":{\"SystemTime\":\"2024-04-23T09:54:57.294511Z\"}},\"EventRecordID\":3019,\"Correlation",
+      "exact_quote": true
+    },
+    {
+      "report_line": 128,
+      "source_line": 143,
+      "exists": true,
+      "quote": "Data\":{\"Data\":{\"#text\":[\"DESKTOP-7EQVM78\\\\Win 10\",\" [CLIENT: fe80::6742:7b8e:1350:5571%9]\"",
+      "exact_quote": true
+    },
+    {
+      "report_line": 129,
+      "source_line": 155,
+      "exists": true,
+      "quote": "ntData\":{\"Data\":{\"#text\":[\"NT SERVICE\\\\SQLTELEMETRY\",\" [CLIENT: <local machine>]\"]},\"Binar",
+      "exact_quote": true
+    },
+    {
+      "report_line": 139,
+      "source_line": 24,
+      "exists": true,
+      "quote": "bject { $_.ExecutablePath -eq 'C:\\\\Users\\\\Win 10\\\\AppData\\\\Local\\\\Programs\\\\Microsoft VS C",
+      "exact_quote": true
+    },
+    {
+      "report_line": 140,
+      "source_line": 109,
+      "exists": true,
+      "quote": "y\":null},\"EventData\":{\"Data\":{\"#text\":[\"1\",\"sa\"]},\"Binary\":\"564A00000A00000010000000440045",
+      "exact_quote": true
+    },
+    {
+      "report_line": 141,
+      "source_line": 155,
+      "exists": true,
+      "quote": "ntData\":{\"Data\":{\"#text\":[\"NT SERVICE\\\\SQLTELEMETRY\",\" [CLIENT: <local machine>]\"]},\"Binar",
+      "exact_quote": true
+    },
+    {
+      "report_line": 151,
+      "source_line": 53,
+      "exists": true,
+      "quote": "\":{\"#attributes\":{\"xmlns\":\"http://schemas.microsoft.com/win/2004/08/events/event\"},\"System",
+      "exact_quote": true
+    },
+    {
+      "report_line": 195,
+      "source_line": 71,
+      "exists": true,
+      "quote": null,
+      "exact_quote": null
+    },
+    {
+      "report_line": 196,
+      "source_line": 71,
+      "exists": true,
+      "quote": null,
+      "exact_quote": null
+    },
+    {
+      "report_line": 197,
+      "source_line": 71,
+      "exists": true,
+      "quote": null,
+      "exact_quote": null
+    },
+    {
+      "report_line": 198,
+      "source_line": 77,
+      "exists": true,
+      "quote": null,
+      "exact_quote": null
+    },
+    {
+      "report_line": 199,
+      "source_line": 79,
+      "exists": true,
+      "quote": null,
+      "exact_quote": null
+    },
+    {
+      "report_line": 200,
+      "source_line": 80,
+      "exists": true,
+      "quote": null,
+      "exact_quote": null
+    },
+    {
+      "report_line": 201,
+      "source_line": 109,
+      "exists": true,
+      "quote": null,
+      "exact_quote": null
+    },
+    {
+      "report_line": 202,
+      "source_line": 24,
+      "exists": true,
+      "quote": null,
+      "exact_quote": null
+    },
+    {
+      "report_line": 202,
+      "source_line": 143,
+      "exists": true,
+      "quote": null,
+      "exact_quote": null
+    },
+    {
+      "report_line": 203,
+      "source_line": 155,
+      "exists": true,
+      "quote": null,
+      "exact_quote": null
+    },
+    {
+      "report_line": 204,
+      "source_line": 121,
+      "exists": true,
+      "quote": null,
+      "exact_quote": null
+    },
+    {
+      "report_line": 204,
+      "source_line": 122,
+      "exists": true,
+      "quote": null,
+      "exact_quote": null
+    },
+    {
+      "report_line": 205,
+      "source_line": 164,
+      "exists": true,
+      "quote": null,
+      "exact_quote": null
+    },
+    {
+      "report_line": 205,
+      "source_line": 432,
+      "exists": true,
+      "quote": null,
+      "exact_quote": null
+    },
+    {
+      "report_line": 206,
+      "source_line": 143,
+      "exists": true,
+      "quote": null,
+      "exact_quote": null
+    },
+    {
+      "report_line": 207,
+      "source_line": 360,
+      "exists": true,
+      "quote": null,
+      "exact_quote": null
+    },
+    {
+      "report_line": 207,
+      "source_line": 365,
+      "exists": true,
+      "quote": null,
+      "exact_quote": null
+    },
+    {
+      "report_line": 208,
+      "source_line": 459,
+      "exists": true,
+      "quote": null,
+      "exact_quote": null
+    },
+    {
+      "report_line": 208,
+      "source_line": 467,
+      "exists": true,
+      "quote": null,
+      "exact_quote": null
+    },
+    {
+      "report_line": 209,
+      "source_line": 456,
+      "exists": true,
+      "quote": null,
+      "exact_quote": null
+    },
+    {
+      "report_line": 209,
+      "source_line": 457,
+      "exists": true,
+      "quote": null,
+      "exact_quote": null
+    },
+    {
+      "report_line": 210,
+      "source_line": 423,
+      "exists": true,
+      "quote": null,
+      "exact_quote": null
+    },
+    {
+      "report_line": 210,
+      "source_line": 425,
+      "exists": true,
+      "quote": null,
+      "exact_quote": null
+    },
+    {
+      "report_line": 214,
+      "source_line": 454,
+      "exists": true,
+      "quote": null,
+      "exact_quote": null
+    },
+    {
+      "report_line": 214,
+      "source_line": 455,
+      "exists": true,
+      "quote": null,
+      "exact_quote": null
+    },
+    {
+      "report_line": 214,
+      "source_line": 458,
+      "exists": true,
+      "quote": null,
+      "exact_quote": null
+    },
+    {
+      "report_line": 214,
+      "source_line": 164,
+      "exists": true,
+      "quote": null,
+      "exact_quote": null
+    },
+    {
+      "report_line": 214,
+      "source_line": 432,
+      "exists": true,
+      "quote": null,
+      "exact_quote": null
+    },
+    {
+      "report_line": 214,
+      "source_line": 456,
+      "exists": true,
+      "quote": null,
+      "exact_quote": null
+    },
+    {
+      "report_line": 214,
+      "source_line": 457,
+      "exists": true,
+      "quote": null,
+      "exact_quote": null
+    },
+    {
+      "report_line": 214,
+      "source_line": 459,
+      "exists": true,
+      "quote": null,
+      "exact_quote": null
+    },
+    {
+      "report_line": 214,
+      "source_line": 467,
+      "exists": true,
+      "quote": null,
+      "exact_quote": null
+    }
+  ]
+}
