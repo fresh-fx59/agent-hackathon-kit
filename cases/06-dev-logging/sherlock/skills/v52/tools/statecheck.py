@@ -153,6 +153,19 @@ def _provider(system):
     return p.get("Name")
 
 
+def usable_identity(system):
+    """True only for the provider/EventID shape a valid event record requires."""
+    provider = _provider(system)
+    if not isinstance(provider, str) or not provider.strip():
+        return False
+    raw = system.get("EventID")
+    if isinstance(raw, dict):
+        raw = raw.get("#text")
+    if isinstance(raw, bool) or not isinstance(raw, (str, int)):
+        return False
+    return _eventid(system) is not None
+
+
 def _flatten(data):
     """EventData as a flat str->str dict, whatever shape the exporter chose."""
     out = {}
@@ -201,9 +214,11 @@ def classify(rec):
     return label, (actor or "-"), subject[:MAX_EXEMPLAR], eid, record_time(system)
 
 
-def census(corpus):
+def census(corpus, stats=None):
     """Stream the corpus once. -> list of group dicts, ordered file then line."""
     groups = {}
+    valid_records = 0
+    invalid_records = 0
     order = []
     for root, dirs, files in os.walk(corpus):
         dirs.sort()
@@ -213,16 +228,27 @@ def census(corpus):
             try:
                 fh = _open(path)
             except OSError:
+                invalid_records += 1
                 continue
             with fh:
                 for n, line in enumerate(fh, 1):
                     line = line.strip()
-                    if not line.startswith("{"):
+                    if not line:
                         continue
                     try:
                         rec = json.loads(line)
                     except ValueError:
+                        invalid_records += 1
                         continue
+                    ev = rec.get("Event") if isinstance(rec, dict) else None
+                    system = ev.get("System") if isinstance(ev, dict) else None
+                    if not isinstance(system, dict):
+                        invalid_records += 1
+                        continue
+                    if not usable_identity(system):
+                        invalid_records += 1
+                        continue
+                    valid_records += 1
                     hit = classify(rec)
                     if hit is None:
                         continue
@@ -238,6 +264,9 @@ def census(corpus):
                     g["lines"].append(n)
                     g["records"].append({"line": n, "ts": ts, "eventid": eid,
                                          "subject": subject})
+    if stats is not None:
+        stats["valid_records"] = valid_records
+        stats["invalid_records"] = invalid_records
     return [groups[k] for k in order]
 
 
@@ -323,7 +352,10 @@ def main():
     if not os.path.isdir(a.corpus):
         sys.stderr.write("statecheck: нет корпуса: %s\n" % a.corpus)
         return 2
-    groups = census(a.corpus)
+    stats = {}
+    groups = census(a.corpus, stats)
+    valid_records = stats["valid_records"]
+    invalid_records = stats["invalid_records"]
 
     text = ""
     if a.report:
@@ -348,13 +380,20 @@ def main():
     # is not a verdict, and an empty census means the gate had nothing to grade.
     bad = [g for g in groups if g.get("accounted_line") is None and a.report]
     no_report = not a.report
-    empty_census = not groups
+    # No matching state transition is not the same as no readable event.  This
+    # catalogue is intentionally narrow; a valid corpus of volume-only logs has
+    # nothing for this particular gate to grade.  An empty or malformed corpus
+    # remains a blocking input failure.
+    not_applicable = not groups and valid_records > 0 and not invalid_records
+    empty_census = bool(not groups and (not valid_records or invalid_records))
     if a.json:
         json.dump({"version": VERSION,
                    "groups": [{k: (sorted(v) if isinstance(v, set) else v)
                                for k, v in g.items() if k != "records"}
                               for g in groups],
                    "total_records": sum(len(g["lines"]) for g in groups),
+                   "valid_records": valid_records,
+                   "invalid_records": invalid_records,
                    "unaccounted": len(bad),
                    # THE NUMBER THE RUNNER READS, at top level and under the
                    # name every gate uses. run-bench.sh looked for "blocking"
@@ -364,7 +403,8 @@ def main():
                    "blocking": len(bad) + (1 if no_report else 0)
                                + (1 if empty_census else 0),
                    "no_report": no_report,
-                   "empty_census": empty_census},
+                   "empty_census": empty_census,
+                   "not_applicable": not_applicable},
                   sys.stdout, ensure_ascii=False, indent=1)
         sys.stdout.write("\n")
     else:
@@ -385,6 +425,10 @@ def main():
         sys.stderr.write("statecheck: без --report это только перепись, "
                          "а не результат гейта.\n")
         return 4
+    if not_applicable:
+        sys.stderr.write("statecheck: нет совпадений с каталогом изменений состояния в %s; "
+                         "гейт неприменим к этому валидному корпусу.\n" % a.corpus)
+        return 0
     return 1 if bad else 0
 
 
