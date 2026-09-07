@@ -1,0 +1,4 @@
+/home/claude-developer/hack/sherlock-v52-bluesky-20260907-r3/openai-logs/openai-2026-09-07T05-45-27.462Z-3abb5167-subagent-sherlock-triage-0b6de055.json
+/home/claude-developer/hack/sherlock-v52-bluesky-20260907-r3/openai-logs/openai-2026-09-07T05-46-02.729Z-0f5fe1e5-subagent-sherlock-triage-0b6de055.json
+/home/claude-developer/hack/sherlock-v52-bluesky-20260907-r3/openai-logs/openai-2026-09-07T05-46-43.436Z-5e46d222-subagent-sherlock-triage-0b6de055.json
+/home/claude-developer/hack/sherlock-v52-bluesky-20260907-r3/openai-logs/openai-2026-09-07T05-46-59.470Z-e9c61991-subagent-sherlock-triage-0b6de055.json

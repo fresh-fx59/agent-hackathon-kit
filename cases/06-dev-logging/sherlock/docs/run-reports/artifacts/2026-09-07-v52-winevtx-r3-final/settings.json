@@ -1,0 +1,74 @@
+{
+  "context": {
+    "autoCompactThreshold": 0.7
+  },
+  "general": {
+    "enableAutoUpdate": false
+  },
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "command": "python3 \"$QWEN_SKILL_ROOT/tools/stopcheck.py\"",
+            "type": "command"
+          }
+        ]
+      }
+    ]
+  },
+  "mcp": {
+    "excluded": []
+  },
+  "memory": {
+    "enableDreams": false,
+    "enableManagedAutoMemory": false
+  },
+  "model": {
+    "chatCompression": {
+      "maxRecentFilesToRetain": 0
+    },
+    "generationConfig": {
+      "contextWindowSize": 262000,
+      "extra_body": {
+        "thinking": {
+          "type": "disabled"
+        }
+      },
+      "reasoning": false,
+      "samplingParams": {
+        "max_tokens": 20000
+      }
+    },
+    "model_fallback": {
+      "enabled": false
+    },
+    "sessionTokenLimit": 230000,
+    "skipStartupContext": true
+  },
+  "skills": {
+    "directories": [
+      "/home/claude-developer/hack/sherlock-v52-winevtx-20260907-r3/skills/v52"
+    ],
+    "disabledLevels": [
+      "bundled",
+      "extension",
+      "project"
+    ]
+  },
+  "tools": {
+    "core": [
+      "read_file",
+      "write_file",
+      "edit",
+      "grep_search",
+      "glob",
+      "run_shell_command",
+      "todo_write",
+      "list_directory",
+      "skill",
+      "agent"
+    ]
+  },
+  "$version": 4
+}

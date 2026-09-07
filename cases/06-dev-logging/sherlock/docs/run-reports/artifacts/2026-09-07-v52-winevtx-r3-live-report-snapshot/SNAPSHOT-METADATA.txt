@@ -1,0 +1,2 @@
+captured_at=2026-09-07T05:29:49Z
+status=draft_snapshot_before_terminal

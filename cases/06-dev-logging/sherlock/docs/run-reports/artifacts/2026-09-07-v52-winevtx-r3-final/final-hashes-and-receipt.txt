@@ -1,0 +1,6 @@
+49828debdfcebd9579a454c58c60fb43caa948de1b2054e99fcb3b6248024dc5  docs/run-reports/artifacts/2026-09-07-v52-winevtx-r3-final/report.md
+a95a80c61ea62fde395983c287e9cf7617d5520c505e468cf57cdf0882633514  docs/run-reports/artifacts/2026-09-07-v52-winevtx-r3-final/settings.json
+0f9ee46d268e048ec7f361adb102e6eaccad50ac74897cca4f89b1f117a2182c  docs/run-reports/artifacts/2026-09-07-v52-winevtx-r3-final/citation-catalog.ndjson
+snapshot_report_sha256=49828debdfcebd9579a454c58c60fb43caa948de1b2054e99fcb3b6248024dc5
+terminal=2026-09-07T05:34:01Z 0 
+exit_status=0

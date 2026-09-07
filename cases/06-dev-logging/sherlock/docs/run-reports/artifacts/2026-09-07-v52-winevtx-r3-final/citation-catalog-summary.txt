@@ -1,0 +1,6 @@
+catalog_sha256=0f9ee46d268e048ec7f361adb102e6eaccad50ac74897cca4f89b1f117a2182c
+citations=46
+resolved=43
+MISSING=LocalSessionManager-4Operational.jsonl:40
+MISSING=RdpCoreTS-4Operational.jsonl:4
+MISSING=RemoteConnectionManager-4Admin.jsonl:2

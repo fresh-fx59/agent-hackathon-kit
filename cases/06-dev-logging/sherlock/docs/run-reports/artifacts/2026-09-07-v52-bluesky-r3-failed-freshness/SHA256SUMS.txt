@@ -1,0 +1,11 @@
+634c70e8e1a87ca0fc74fffda79f10ea8233b3d33cfb3f1464d1bb41ead2beef  docs/run-reports/artifacts/2026-09-07-v52-bluesky-r3-failed-freshness/input-preflight.txt
+0cac3aec6287f126e7ae565a403abe487670bd67280635c8e5a7810d22e7f638  docs/run-reports/artifacts/2026-09-07-v52-bluesky-r3-failed-freshness/launch-receipt.txt
+f27387e52abba1522f1a8e67c2aad924949cc97a38a5950ede4fce0301ccca09  docs/run-reports/artifacts/2026-09-07-v52-bluesky-r3-failed-freshness/offending-raw-paths.txt
+24d7cd23bb8eeb61ec2549e6a929af876e0f90d434d38838eb41a4212fd48693  docs/run-reports/artifacts/2026-09-07-v52-bluesky-r3-failed-freshness/openai-2026-09-07T05-45-27.462Z-3abb5167-subagent-sherlock-triage-0b6de055.json
+95e38f9be8ea790d6d2c2af24f6c753fb98368ded90c617b71546efc3fd57903  docs/run-reports/artifacts/2026-09-07-v52-bluesky-r3-failed-freshness/openai-2026-09-07T05-46-02.729Z-0f5fe1e5-subagent-sherlock-triage-0b6de055.json
+c23b28397eaeb56e8b2110ccb3610d9a078699224b3c8606899bd32dd00314d9  docs/run-reports/artifacts/2026-09-07-v52-bluesky-r3-failed-freshness/openai-2026-09-07T05-46-43.436Z-5e46d222-subagent-sherlock-triage-0b6de055.json
+1b38be01f29c380b925bfefa28386a34ffe0c39f52f760c6afa2ecd650b9e0a7  docs/run-reports/artifacts/2026-09-07-v52-bluesky-r3-failed-freshness/openai-2026-09-07T05-46-59.470Z-e9c61991-subagent-sherlock-triage-0b6de055.json
+346370998f829ea0a9e5ab06855836ace710238107223d2d48700aaada776ed4  docs/run-reports/artifacts/2026-09-07-v52-bluesky-r3-failed-freshness/package-sha256.txt
+4355a46b19d348dc2f57c046f8ef63d4538ebb936000f3c9ee954a27460dd865  docs/run-reports/artifacts/2026-09-07-v52-bluesky-r3-failed-freshness/qwen-exit-status.txt
+6b0c3f58839c792f47683f58003119f4d4bc6c5fe18bb523dcf29678cd0ddad9  docs/run-reports/artifacts/2026-09-07-v52-bluesky-r3-failed-freshness/qwen-terminal.txt
+e6542f2dee752d04936999144304398912109133a2551bec8d910fe787d0ee09  docs/run-reports/artifacts/2026-09-07-v52-bluesky-r3-failed-freshness/workspace-cwd-launcher.txt

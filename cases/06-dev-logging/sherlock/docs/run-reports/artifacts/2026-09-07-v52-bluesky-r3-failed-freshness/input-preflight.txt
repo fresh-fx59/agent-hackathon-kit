@@ -1,0 +1,5 @@
+input_directory=/home/claude-developer/hack/sherlock-final-inputs-20260906/independent/corpus
+input_file=/home/claude-developer/hack/sherlock-final-inputs-20260906/independent/corpus/BlueSkyRansomware.jsonl
+28b73f0be7b2a6ed7d102c8a8ba86d7c186887e0b71fcacfb8f73dcb0e37ff58  /home/claude-developer/hack/sherlock-final-inputs-20260906/independent/corpus/BlueSkyRansomware.jsonl
+469 /home/claude-developer/hack/sherlock-final-inputs-20260906/independent/corpus/BlueSkyRansomware.jsonl
+bytes=467262
