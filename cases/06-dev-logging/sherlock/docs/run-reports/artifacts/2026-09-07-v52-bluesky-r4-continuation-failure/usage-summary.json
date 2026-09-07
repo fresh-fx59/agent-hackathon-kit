@@ -1,0 +1,47 @@
+{
+  "total_files": 266,
+  "investigator_or_compaction": {
+    "role": "investigator_or_compaction",
+    "calls": 156,
+    "requested_models": [
+      "deepseek-v4-flash"
+    ],
+    "returned_models": [
+      "deepseek-v4-flash"
+    ],
+    "errors": 0,
+    "prompt_tokens": 13594989,
+    "completion_tokens": 320914,
+    "total_tokens": 13915903,
+    "finish_reasons": [
+      {
+        "value": "stop",
+        "count": 156
+      }
+    ],
+    "returned_reasoning_chars": 902558,
+    "nonempty_visible": 73
+  },
+  "permission_classifiers": {
+    "role": "permission_classifier",
+    "calls": 110,
+    "requested_models": [
+      "deepseek-v4-flash"
+    ],
+    "returned_models": [
+      "deepseek-v4-flash"
+    ],
+    "errors": 0,
+    "prompt_tokens": 893941,
+    "completion_tokens": 4706,
+    "total_tokens": 898647,
+    "finish_reasons": [
+      {
+        "value": "stop",
+        "count": 110
+      }
+    ],
+    "returned_reasoning_chars": 0,
+    "nonempty_visible": 0
+  }
+}

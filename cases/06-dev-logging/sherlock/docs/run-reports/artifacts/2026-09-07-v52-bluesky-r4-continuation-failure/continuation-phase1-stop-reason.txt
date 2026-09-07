@@ -1,0 +1,1 @@
+2026-09-07T06:45:xxZ phase1 continuation stopped: three post-compaction preparation turns continued with no report; phase2 resumes same session with CLI core-tool whitelist write_file only.

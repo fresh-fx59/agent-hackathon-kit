@@ -1,0 +1,1 @@
+2026-09-07T06:35:xxZ operator-authorized diagnostic continuation: stopped unassisted Qwen after 16/16 closure and >40m no report; preserve raw logs and resume same session with generic write-now instruction

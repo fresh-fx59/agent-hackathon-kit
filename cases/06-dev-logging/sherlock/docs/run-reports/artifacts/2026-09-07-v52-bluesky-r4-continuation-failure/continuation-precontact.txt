@@ -1,0 +1,4 @@
+cwd=/home/claude-developer/hack/sherlock-v52-bluesky-isolated-20260907-r4
+session=b1a1628e-d561-4abf-9154-71e1c567bc06
+source_sha256=28b73f0be7b2a6ed7d102c8a8ba86d7c186887e0b71fcacfb8f73dcb0e37ff58
+old_winevtx_path=denied

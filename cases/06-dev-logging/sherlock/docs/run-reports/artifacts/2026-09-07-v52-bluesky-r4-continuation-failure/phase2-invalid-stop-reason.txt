@@ -1,0 +1,1 @@
+2026-09-07T06:46:59Z phase2 invalid: raw request exposed tools beyond write_file and response attempted read_file/run_shell_command; stop before accepting any report.
