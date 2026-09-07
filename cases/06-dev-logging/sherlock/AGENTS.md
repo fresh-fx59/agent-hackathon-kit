@@ -47,7 +47,13 @@ from scratch. Benchmark engineering alone is not completion.
    focused repair with intact evidence. Stop demonstrated loops; a slow useful
    request is not failure. Retain the 600-second request watchdog; never invent
    aggregate time/call/spending cutoffs. Rejected output remains rejected.
-8. **One specified task at a time.** State goal contribution, hypothesis, files,
+8. **Wait for remote jobs once.** Every remote job writes a done-file on exit.
+   Never poll, sleep, or repeatedly SSH-check it: use exactly one
+   `/Users/a/Documents/projects/personal-os/tools/waitfor.sh --host contabo-prod
+   --done <donefile> --log <logfile> --tail 40 --timeout 3600` invocation.
+   The tool exits `0` when finished, `124` on timeout, and prints the done-file
+   plus the requested log tail in its single result.
+9. **One specified task at a time.** State goal contribution, hypothesis, files,
    non-goals and acceptance before edits. Reproduce → fix → verify → scoped
    review → version → run → report. Record rulings; park unrelated changes.
 
