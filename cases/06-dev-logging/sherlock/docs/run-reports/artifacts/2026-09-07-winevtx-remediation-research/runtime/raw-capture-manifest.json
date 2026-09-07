@@ -1,0 +1,1022 @@
+[
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-05-58.691Z-706a08e2.json",
+    "bytes": 140335,
+    "sha256": "ac9cbe96eb6b1478984627c12db983d1bd0e29b4c4bf71c79c91a537f4bb6be7"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-06-00.272Z-21e8da19.json",
+    "bytes": 141119,
+    "sha256": "a91398ac7d77f398ef29121acbba3b8ddefe90faee5bfa7eb5ebc67a1fdcf69b"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-06-02.602Z-6564eda1.json",
+    "bytes": 142144,
+    "sha256": "3da5a68af581763d3b0539c45bd211f15bbd5ecd850fcfeb17f15b6cf1bf0b0c"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-06-05.540Z-1ed4bf9e.json",
+    "bytes": 143703,
+    "sha256": "674a0235604219a14ae402f9d8aecb147a68c1be982fbf869ed1763caec8d28d"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-06-08.317Z-917c3937.json",
+    "bytes": 149415,
+    "sha256": "32c465bcc8fa9dcba20758ce3c9b791ea11485af937d7a1f18b9d07eb9860516"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-06-13.213Z-b42c76e1.json",
+    "bytes": 177045,
+    "sha256": "3d1c050c0e0100dd62af67ebe816cd3b7412f881deeef764953e7dc5f2887dd4"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-06-21.455Z-d31ce93e.json",
+    "bytes": 187276,
+    "sha256": "20d3ae3d0e310d13cb5cf8ea5ef84de76f6b5aabac3d48d74392b91bfbd7a735"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-06-22.498Z-eb848bc0-side-query-permission_classifier_stage1.json",
+    "bytes": 12303,
+    "sha256": "5d83f72df33f84dcf1bc1fa07c35a1e149a6b275eba3b9607911489dedcd4a6f"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-06-28.356Z-5bd57ef5.json",
+    "bytes": 190889,
+    "sha256": "45d35ff039e7390a09081f2f9e62843c2b40584451185c6ecbacb41f66f53e5a"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-06-29.795Z-b72e8c69-side-query-permission_classifier_stage1.json",
+    "bytes": 13446,
+    "sha256": "300c82f524eb2acc62ecf3842b984aded6568ed9d615326772287e6333994e47"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-06-31.695Z-6e715bc4-side-query-permission_classifier_stage1.json",
+    "bytes": 13444,
+    "sha256": "05ceaddc04eaf4ea18e4b7b571cb009e0d5a518f166ab7143f74384d253421d1"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-06-32.895Z-c88a0565-side-query-permission_classifier_stage1.json",
+    "bytes": 13449,
+    "sha256": "49552b4ded624713035681a1ada42e7d57e5f62a48a135285d7534a4a9536d79"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-06-37.947Z-114d449e.json",
+    "bytes": 196288,
+    "sha256": "2726e88cd6b5424aa41284195c346737acb0107176ab302a8e0c16b3c26ae637"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-06-39.206Z-914eb684-side-query-permission_classifier_stage1.json",
+    "bytes": 14719,
+    "sha256": "53049a92239f71aaa98006cfc333f7cf91393933ad6e1c9ebc04f5056e1c552b"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-06-40.220Z-b093d790-side-query-permission_classifier_stage1.json",
+    "bytes": 14724,
+    "sha256": "4366141340b26a9daa01e0dee55281c77463e20eb84cfa637a0c7d51dd1ce12e"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-06-41.188Z-5432cc83-side-query-permission_classifier_stage1.json",
+    "bytes": 14718,
+    "sha256": "526d8beac53db2f167facd93e23696809d3cba05b4b08aea1c7f714d8173cf46"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-06-47.100Z-c9b0e87d.json",
+    "bytes": 201351,
+    "sha256": "fbe08d6b12b2be55df71dc12ee87c2a4d9f4d9765727010b9de67603d34ee053"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-06-47.997Z-5bafbaa7-side-query-permission_classifier_stage1.json",
+    "bytes": 15825,
+    "sha256": "2a588fb1a941e65e31da7c9a528b98a02cbbe85aecee8ef69c99d219bf06fcc8"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-06-52.252Z-ae3cd32a.json",
+    "bytes": 215683,
+    "sha256": "31955260808b199608479272d95f86c3a080bfb21ef3c54c34f065e7158d2dfa"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-06-53.532Z-5956587d-side-query-permission_classifier_stage1.json",
+    "bytes": 17060,
+    "sha256": "f7ba69e1a7bb0412d2727c559c82581136242dd42f530a294d846561cc0333ed"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-06-59.563Z-5c31ab84.json",
+    "bytes": 218760,
+    "sha256": "1681ebfd6217058b2a351951b8b54bc9338e0b104748fbc2c304af54b7671b90"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-07-00.760Z-87c73ca4-side-query-permission_classifier_stage1.json",
+    "bytes": 16901,
+    "sha256": "4c420861eeb83627c18d82662e43a7de8d1494ef966cb4edbaddcb604fa16bda"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-07-14.330Z-0c17c3c4.json",
+    "bytes": 240198,
+    "sha256": "e4c27c4a7066ec6f60967043fd02fbe83b79d4d9cf40ffa43ac70e7783285e4c"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-07-15.401Z-1a2e41a5-side-query-permission_classifier_stage1.json",
+    "bytes": 17803,
+    "sha256": "b53efbaa059d516a7b59ec0fb205c18a59e653abac9b2d6e4940e36e0d18b1a2"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-07-21.034Z-8ba4d8f4.json",
+    "bytes": 243331,
+    "sha256": "cf19a4ea7c75e585c6ed52ae48c574405d39547878a407d1b89ca2403fd06e85"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-07-22.198Z-2fb66adf-side-query-permission_classifier_stage1.json",
+    "bytes": 17899,
+    "sha256": "5d959a7ed422c5554a01af0be42b71cbad0373ad16adf887812c8b6d58412018"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-07-27.944Z-0219ff95.json",
+    "bytes": 245146,
+    "sha256": "178e9dddf779bf74fe9a7cfd838c26bbb1cd6ab9aebd09808976e8111155d80f"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-07-29.074Z-26eb75b9-side-query-permission_classifier_stage1.json",
+    "bytes": 18261,
+    "sha256": "7aca4bebc72aac1d5be48d71a9c4dac70523d6bca9c6d0a5fb0d4a21e72ce667"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-07-39.631Z-6f8ba617.json",
+    "bytes": 249874,
+    "sha256": "1567428a1530b0075445ec024274a45fd7f5e76fd9d3350ebe53a1ad69eec005"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-07-40.807Z-316d8a96-side-query-permission_classifier_stage1.json",
+    "bytes": 18751,
+    "sha256": "20f339bea516d47e24534fa57433e9280088e3f519b2d3efbcfba87bfb39a491"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-08-00.004Z-67cd49eb.json",
+    "bytes": 261601,
+    "sha256": "eb4a46fe433028dde670d2f14980ce1ff5b8608df2141b541a4380b5731fa069"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-08-02.315Z-36e14bb7.json",
+    "bytes": 262395,
+    "sha256": "2d643513ef6394d42c57ff4d24f8b0035b8ab46a5aaeca7d4789ea966ba81596"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-08-03.551Z-2bc9e770-side-query-permission_classifier_stage1.json",
+    "bytes": 19590,
+    "sha256": "002c364a074afae88decdb637d2d3a373beeab7bec8fc5f2e89fc8b7a20bceeb"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-08-08.941Z-7a2e3e3e.json",
+    "bytes": 265821,
+    "sha256": "6b52caf6b9b730190bb85d2fd2bf56b55fc615aa20e913a297139e83330165b4"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-08-15.172Z-7f08fe21.json",
+    "bytes": 293765,
+    "sha256": "35580f9f465a0a79c786aba40e765d100beb60a78a745bed6ffce71b0a70eb5e"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-08-38.342Z-861deeb1.json",
+    "bytes": 325300,
+    "sha256": "fa795fbe6c4abae9cf31217d58b45543c2b982cd98a850fa440f13bce8448385"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-08-43.037Z-59c127ca.json",
+    "bytes": 327428,
+    "sha256": "95bebadbb2c77d99c891ab6d25894777df3415b1be269bea012583e19a9348ca"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-08-44.340Z-c96ba310-side-query-permission_classifier_stage1.json",
+    "bytes": 20764,
+    "sha256": "c80ee387c6b34a358089d7929d036694dd5ab20422d21b7b3aa90aad1a47c66d"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-08-55.670Z-de8274bf.json",
+    "bytes": 353991,
+    "sha256": "8159d3e2a4068da3b1f0a1ddb195334288f733ba9d0090617c041f95a06e5879"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-08-57.050Z-0a5522b6-side-query-permission_classifier_stage1.json",
+    "bytes": 23050,
+    "sha256": "110d0dcd26cb01eedec61e00e4c62c0a7d05ee548d0091868179f40e70778db7"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-09-08.861Z-f1220c6c.json",
+    "bytes": 362331,
+    "sha256": "25d0c680a3032425291b8426f60ca6a44b1b945615a486709657ebf2e149936f"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-09-09.977Z-b8d7bdf6-side-query-permission_classifier_stage1.json",
+    "bytes": 23031,
+    "sha256": "26629bb2199a70a112c5973be00b809bec3ac12b290bafc28d3ca019563d15b4"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-09-23.580Z-23c3960a.json",
+    "bytes": 375886,
+    "sha256": "891ba6c1e8d38241a09043a3ca2b0f814b57168d74a6c806b28c57484c048d3a"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-09-24.878Z-121de9c4-side-query-permission_classifier_stage1.json",
+    "bytes": 23838,
+    "sha256": "cf5b9263fb18ecac1742ad52833357b662db3d24a89c7eee8975630c2c33140e"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-09-33.183Z-a01c60f8.json",
+    "bytes": 393489,
+    "sha256": "5939d86383005d15870a8592e6168440a9ad95028b70baa42c1bb4ab9c60f634"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-09-34.218Z-5e47babc-side-query-permission_classifier_stage1.json",
+    "bytes": 23946,
+    "sha256": "832beefa5869acb01665147ade3599a10a0ae99f67f3da2d58c329f07020922b"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-09-44.305Z-7fb64278.json",
+    "bytes": 404406,
+    "sha256": "121a03d53db9688a45c77fb84fa423fde5e0d06f322695bab99dc8bbd321ec80"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-09-47.051Z-c6a6392e.json",
+    "bytes": 406106,
+    "sha256": "99d07ab78aeacc5721dc9cdf4063758cee5e19ebacccc8fbe345c21d743e3e53"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-09-48.053Z-87af487e-side-query-permission_classifier_stage1.json",
+    "bytes": 23840,
+    "sha256": "d832ab12cf34a02df42e5d635fb7cb71305e5ae59cd4c5f30f02045c56d601b7"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-09-50.910Z-ca4dffa6.json",
+    "bytes": 415220,
+    "sha256": "5e8bb75140006c130f8f97f59c41f489c23ab6bdb43b15aad30fc4e540aed16c"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-10-04.025Z-36537bae.json",
+    "bytes": 427549,
+    "sha256": "c4ce94bf221ed914909f289289e44e1933897e3f97d45cbb683edca811696112"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-10-05.350Z-06502da7-side-query-permission_classifier_stage1.json",
+    "bytes": 23708,
+    "sha256": "a3d42084e299f6d537bcf549e3c1def18cafc707a3d29939543d62a1a6ee4b06"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-10-11.122Z-b3ab129f.json",
+    "bytes": 444717,
+    "sha256": "8f7790f61a607525096609889353631c12c4e78257287afda01d234b36c5ffda"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-10-12.139Z-fe13d01b-side-query-permission_classifier_stage1.json",
+    "bytes": 22666,
+    "sha256": "0984b2180864abc95b7a6f0b7f68c504231d5a533b5912f964809e434a88f703"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-10-16.296Z-c406d292.json",
+    "bytes": 456452,
+    "sha256": "e78795516203e06d4f50cc5eaf219c2a988fe3738d5f4c20b49b37b8c550ca7b"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-10-17.337Z-8c7cbcc5-side-query-permission_classifier_stage1.json",
+    "bytes": 22453,
+    "sha256": "06442184793d8a91ec94ee562e9526c035f8ba864a8063a2b0ad614e37d19ac5"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-10-26.671Z-c5e148b7.json",
+    "bytes": 463597,
+    "sha256": "904b14c00f69d577c9a8be3bb53306cafd711cd2fc88eb403586a9a3dfd4c0c9"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-10-27.732Z-45063a82-side-query-permission_classifier_stage1.json",
+    "bytes": 23038,
+    "sha256": "fe7453e378d0b3d9659ed55252dc9129e999cee1addf052adf2febdaee70f659"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-10-41.076Z-1280384a.json",
+    "bytes": 478672,
+    "sha256": "4a0fce4c52fdc7cdb6628dab2c89bbc0612a75bc2cf741fff50d0132d04c12f5"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-10-42.210Z-1aeacf86-side-query-permission_classifier_stage1.json",
+    "bytes": 24341,
+    "sha256": "b0ce9ac4405b464a29a83277b73f1b31b2199bfbc769b76c7cee2d1a5ab6efc6"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-10-47.922Z-176b61a5.json",
+    "bytes": 482869,
+    "sha256": "45c2f1d102c54f37e8d5488b692857399a9723b17fef66b71b3288d16ed50ae1"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-10-48.999Z-f9e393b9-side-query-permission_classifier_stage1.json",
+    "bytes": 24382,
+    "sha256": "60fd9f4fcbcfac658ed0e8ab15b416357bbfc6e16255fde1c7e0b98ae9764818"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-11-08.339Z-2745887c.json",
+    "bytes": 494127,
+    "sha256": "b9560b9a712e8122f50a0d097b27f0d698031ac0ebdd1ff82ee49e5f479b29db"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-11-09.678Z-1cbda050-side-query-permission_classifier_stage1.json",
+    "bytes": 25527,
+    "sha256": "83c8ff2c4d45b4061f2f786ba7ecfc5fbc8136dcc9f8304fe46307950b6a9099"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-11-14.721Z-b8185b4e.json",
+    "bytes": 501090,
+    "sha256": "e992d873940993aa4a153109f6ec7db1c98c0db50cc67161ece535b3f9785646"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-11-15.879Z-e8162056-side-query-permission_classifier_stage1.json",
+    "bytes": 26661,
+    "sha256": "88e4dbedd03f278f84d6271d6f3590cbaacf0bb5d07b1d6c848d2ccdd3072c2c"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-11-18.694Z-89dfdff1.json",
+    "bytes": 503294,
+    "sha256": "f0e274b80a0d316fc1a8a20177fee498cb03b736f14fac48387e93910d238178"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-11-28.025Z-a3c26a7a.json",
+    "bytes": 523383,
+    "sha256": "01d2907e69a291ebcb4f09d60b0f53fed3c15d02f7648566a130fdedf5a82dbb"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-11-29.198Z-0e95ab3b-side-query-permission_classifier_stage1.json",
+    "bytes": 28467,
+    "sha256": "9e21fb14953a2e908cb35851ca9b49f3c4a1d89489ac21d9e5ad522e89ba844b"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-11-35.980Z-51b78e1b.json",
+    "bytes": 528239,
+    "sha256": "2e856fe31cc6b313a877abac1fefd7fc9a7be988f214c96c364609e2296d66e6"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-11-37.091Z-fb04c21f-side-query-permission_classifier_stage1.json",
+    "bytes": 30215,
+    "sha256": "481a5a8e39278e2537ae9688cc3cf118addf1700c69cd6743839162e29aa226e"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-11-45.693Z-70d3af6d.json",
+    "bytes": 534011,
+    "sha256": "738b15ca75930b571a5f48ce0132ec94a629df4a34e58ecc415747a977ff5880"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-11-48.596Z-b12f10c3.json",
+    "bytes": 537063,
+    "sha256": "cffc73174240e1ae76a89d2583ee8d6a38c1e56b2c8cd51d84e0af26421b42bf"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-12-02.854Z-3d3703b8.json",
+    "bytes": 544826,
+    "sha256": "26d7950812cf57c990a7c4be299e99c1b8821c3593f099dfc11b8b48195d4420"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-12-03.923Z-1d6eaed7-side-query-permission_classifier_stage1.json",
+    "bytes": 29250,
+    "sha256": "e536869fc268c54b784229ff719ca8823bb8446813adb4f8873c5f8447b0350a"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-12-08.331Z-2feaae70.json",
+    "bytes": 551746,
+    "sha256": "0e3a713382eff05f31e3a58db5cedfa2e519db407b03c5c0027aa658d2c9ee0a"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-12-22.135Z-cb1494da.json",
+    "bytes": 559999,
+    "sha256": "e5ad7df0b316bb364edba08d7df842da5655e51a5aa1c9239ac034e465675aea"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-12-23.170Z-93adb3fd-side-query-permission_classifier_stage1.json",
+    "bytes": 28261,
+    "sha256": "d1165301ab4dd4d3cf7cec6f207fc8e4ca2a90848b6374854ee34e1030d5d426"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-12-46.027Z-56c3faa4.json",
+    "bytes": 570739,
+    "sha256": "861e588fae11b07df46972d89a499d5d05223a0c67145f30c7167a9010335a73"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-12-47.046Z-09cd34b0-side-query-permission_classifier_stage1.json",
+    "bytes": 27005,
+    "sha256": "2de0331e88a933eefd1bdd0ba50e76bcb329207b42a431af3eb0a469e71a4925"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-12-50.872Z-43ef0387.json",
+    "bytes": 576949,
+    "sha256": "42865641cdc766ea7c13949eb279dc7fcb47bdfd649a7428a619cc481cbbc3ab"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-12-57.530Z-b55f798a.json",
+    "bytes": 603233,
+    "sha256": "489a6420556813afd7dfeeca71a0864353fa1f548e2bfc31218a7e7335964f3e"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-12-58.832Z-3d5359de-side-query-permission_classifier_stage1.json",
+    "bytes": 27884,
+    "sha256": "5021721d437b7e7b4d6f8297b19759930d45da89fb19a8d31591a92db9f975a9"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-13-10.820Z-883bda94.json",
+    "bytes": 609841,
+    "sha256": "60614a5acdf5fcac847889aa5a0597123dd327eb1ae83b5d19c784bd0910332a"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-13-12.167Z-2a31ccc2-side-query-permission_classifier_stage1.json",
+    "bytes": 29908,
+    "sha256": "5af28a33eeab0838d491d787f9d91da12e300a643f82eb8f1ae934e7a8333ff7"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-13-19.190Z-ee43fb5d.json",
+    "bytes": 616671,
+    "sha256": "17bcfec252cbee1eb6a90fa3fa0d3d852669e881f937d538b6eb95f7c950607f"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-13-20.934Z-37c55399-side-query-permission_classifier_stage1.json",
+    "bytes": 30379,
+    "sha256": "ca31b4824259aebacd2703070971e92a9bec9aa3fba514a6fee8ae115005237b"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-13-38.222Z-466b06eb.json",
+    "bytes": 626853,
+    "sha256": "84e03375b4c119007801aab2960a25d8ba551a49086662413a993d703b593a9e"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-13-45.211Z-2e0ce659.json",
+    "bytes": 651616,
+    "sha256": "1c9a5c2974fa3e6c2d91e6897505a0445d9e37b46970d702f73ad93573f78dcb"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-13-46.278Z-7c1661ab-side-query-permission_classifier_stage1.json",
+    "bytes": 28904,
+    "sha256": "763cb2095ed6c491227db5d6bfb058d40f8a26ece40491d150d6b2ab5eedfae1"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-14-28.225Z-4b4c0e81.json",
+    "bytes": 677388,
+    "sha256": "e3cab9a6e3c79da36db663d0a6436be77fb45df937e610c6388a21c8cb3962e0"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-14-30.981Z-a78eea6f.json",
+    "bytes": 152119,
+    "sha256": "80297a7b5b22b0ba155f5ea691ef6a51d97da8af2d6c396960efeca2405fbd38"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-14-32.123Z-15e64bee-side-query-permission_classifier_stage1.json",
+    "bytes": 21479,
+    "sha256": "a3f889cef38b57c0bc96077153c539d3192583420a2c3d1e7488775b3976c68e"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-14-35.625Z-7b325ff6.json",
+    "bytes": 155440,
+    "sha256": "e2ec05766d6803d6bfc50bcd60d24d582131a31bb803d0e50d50bc7bf9359cec"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-14-36.671Z-6fe267fd-side-query-permission_classifier_stage1.json",
+    "bytes": 22139,
+    "sha256": "e3fcd7f543d062f668f767a9351b259990e3f761f3366a2baf0361af79f6e5a0"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-14-38.825Z-e9b0a339.json",
+    "bytes": 157764,
+    "sha256": "5ad657bd45796740d434868455e42610456385bdc02085edfa59d748a805552b"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-14-40.992Z-f6dd035f.json",
+    "bytes": 158631,
+    "sha256": "44737bc01156ecd907ca42cedd550fcbaafb3d7b784afd4940ec61d7c118f367"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-14-44.046Z-b71939c7.json",
+    "bytes": 160301,
+    "sha256": "de0e4a52a20a719ba0b8057f374f634ec4e16ef12917a92ff0edd52ccf98e47b"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-14-49.113Z-043e5a03.json",
+    "bytes": 163611,
+    "sha256": "620276d9bb6de01b959c45f35a0e3cf182f94711294debd5474a8b16067c90cb"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-14-50.909Z-4a3cf437.json",
+    "bytes": 170477,
+    "sha256": "70aaa61262f35c6030e70a3df0b2fc372826ecbc227dc141eb4f9a347d169533"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-14-53.564Z-75b2977b.json",
+    "bytes": 172741,
+    "sha256": "3b973e69212f964db30a8d3829a63158f1b48abaeab0b6c07dab1cfc84a1ab0a"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-15-15.075Z-25f00de8.json",
+    "bytes": 212910,
+    "sha256": "a1ccd2c4ae17903ea0160b4a552f11ff6d6bf539051da355f8b727880d0b853e"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-15-16.104Z-37b138bb-side-query-permission_classifier_stage1.json",
+    "bytes": 24069,
+    "sha256": "58b5c06ac53b4763ebb387b5289c03f235c1dbc7d51ed666d6b03d7e7d099a0c"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-15-18.030Z-2b1b2bfb-side-query-permission_classifier_stage1.json",
+    "bytes": 24307,
+    "sha256": "23aefbaea903c95cc57aab9cd925f5bd25a719451500e4b8e6a13f8f9f1f1437"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-15-35.965Z-990840b9.json",
+    "bytes": 223042,
+    "sha256": "29b4f4b3143b5d3f7100af52026cab4e94f0f556cacb698a7b2daeb15798513a"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-15-56.898Z-0d05761e.json",
+    "bytes": 280453,
+    "sha256": "b55911521f8b303e4d9c3fbc1c7880b5b0f087234550acc52fa9898c1828bfa5"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-16-00.067Z-687c553f.json",
+    "bytes": 294820,
+    "sha256": "318e02d04644c931a191fa5c8d79a455627b4c221c3aa27d6dfdbf37d5677da8"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-17-25.594Z-bb8e048e.json",
+    "bytes": 336660,
+    "sha256": "4a29ad951aade63845024de1370b1241efdde567cdc6cf719ea3f276c69d095e"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-17-27.575Z-3bbab576.json",
+    "bytes": 337429,
+    "sha256": "3ff6be063a0cbcf198b1c94a75ca64970941b11c12b0cf298b61dedeb96b4a5a"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-17-28.740Z-dfb84bb7-side-query-permission_classifier_stage1.json",
+    "bytes": 25643,
+    "sha256": "b96f1396cd25121813854d86c2c0ce2f5471fd3dca8ad088b20794978aeed141"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-17-44.984Z-9cbb7959.json",
+    "bytes": 351903,
+    "sha256": "b5a8f3d91d274a35273004d0b78f399764bcfb5df86b6ddd91ecbd4ddc345e33"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-17-46.480Z-8094e9ca-side-query-permission_classifier_stage1.json",
+    "bytes": 26946,
+    "sha256": "db9355037c3e9264243b5fa5144008751558e4b72673637409416f513bea11c8"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-18-06.705Z-5cf12e1d.json",
+    "bytes": 366949,
+    "sha256": "d58474a98ddd1210994cd4f5a870fe4c3fff1985def12d6a6c301ad0af85677c"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-18-08.637Z-60ab9b57.json",
+    "bytes": 368138,
+    "sha256": "33c1ae566a7d693ffeebf5f563c5a89c68e069ec6473382002559265039f6f5d"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-18-09.829Z-147718c2-side-query-permission_classifier_stage1.json",
+    "bytes": 27644,
+    "sha256": "1c8aea9ee13b421f83dddb7c78899a52aa5a70d219bc387b5543fceed621ca38"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-18-53.235Z-359f3b15.json",
+    "bytes": 407414,
+    "sha256": "699481b2975c9e3b88d943c25ca5190cc096eb33f0f9a758a6cd034ccbb54fc0"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-18-55.705Z-93656f50.json",
+    "bytes": 408243,
+    "sha256": "5889331903fc20c493e4871ab1c8d9e2a9501e323ee18b2b8649bfbbbc7360c8"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-18-56.805Z-b445b298-side-query-permission_classifier_stage1.json",
+    "bytes": 28378,
+    "sha256": "9f4bf964fd6957faab87b5334666e0574ff4f760018bc830c3935998fe691a86"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-19-03.420Z-17456d3a.json",
+    "bytes": 409125,
+    "sha256": "997bed20b34f9c7d014b29ffd3cea210464b4e2c882b7aa63a3da6a92994665e"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-20-09.517Z-9bcb52ee.json",
+    "bytes": 453914,
+    "sha256": "f1385962490b53abda8b4464878bd1d55b21e50b29a7c41808a24efd2f829a76"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-20-17.774Z-4007bbdb.json",
+    "bytes": 458825,
+    "sha256": "968c00849635a699707ab9698deb24948e548e30bb4f4e89fbfad9c969f1709f"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-20-20.440Z-41c4d412.json",
+    "bytes": 459740,
+    "sha256": "9015f10ab9146882dd7f51931267d3290d63494fcc58ad96ded49054d52f4e4f"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-20-21.708Z-231c07ac-side-query-permission_classifier_stage1.json",
+    "bytes": 18000,
+    "sha256": "34857a26c44cd6a07d6c65dab132c0c5d83f78fa064fd9cdb47892f4d7cd2fd1"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-20-24.920Z-3c8837ab.json",
+    "bytes": 461155,
+    "sha256": "c7ff256240d78988220f532c084e8a3b6aad02869df8ea5a84a72408e673c376"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-20-45.039Z-0046fe0d.json",
+    "bytes": 475061,
+    "sha256": "8a652fd7240e1ed1be6d816f5f7f5dbdb173cabf189c3ed16f105908c37d15ea"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-20-51.222Z-83451de8.json",
+    "bytes": 479296,
+    "sha256": "ebbf2667a4b40738d955c732babf38545255a6e24bfe1f2e2e7400433846155a"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-20-53.566Z-1fd17605.json",
+    "bytes": 480283,
+    "sha256": "9cfe68e24105a54aabb67dfe162ff858de22ecd6f39e592b929814734dcaa272"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-20-54.834Z-dc899378-side-query-permission_classifier_stage1.json",
+    "bytes": 19047,
+    "sha256": "c05f7c2cac82d693378b0c4b5981b7fc6dc05f36cb9b45fca8e46895b12d00d6"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-20-59.410Z-98303d30.json",
+    "bytes": 484730,
+    "sha256": "ed3ee29ba1157f0b4318b414a739525adf4d904a9997243c7ffc4946425a3bed"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-21-02.288Z-1f3c8ce5.json",
+    "bytes": 486405,
+    "sha256": "faa59672fb0b5b0a82f17cc55d1508bfa4a409c462e5616c3f4386125873f95e"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-21-03.318Z-2a9b0bf7-side-query-permission_classifier_stage1.json",
+    "bytes": 19059,
+    "sha256": "f88ca1bf4971c3bbfaeca30cac841df6da640ede757faa4c243f1afb81e942e2"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-21-13.929Z-c6e506ef.json",
+    "bytes": 497177,
+    "sha256": "fbedeb43063388bb6a6abd9eeebfd75ad8914ac5e4fc74af4830389179542cd9"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-21-17.454Z-d53661f4.json",
+    "bytes": 499549,
+    "sha256": "07db289ad73354b287cf090ee8f9d5d5d21602375574929adb9b6db2c37a3032"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-21-20.372Z-182f9a6e.json",
+    "bytes": 500440,
+    "sha256": "ddcd0c1e06613610afb408ae748a8c0e359ef8854ff881cd4216e0798e68a9f0"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-21-21.534Z-4c811543-side-query-permission_classifier_stage1.json",
+    "bytes": 20272,
+    "sha256": "84369069fea6baa8e1a3dab038a5fe5242dcd197abd7d420cfde522cc7fc9cd7"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-21-31.103Z-13385b07.json",
+    "bytes": 505013,
+    "sha256": "b590f5e9cb801d4a134d7d8a19f2563d3acf39f65026a6798f19bfef51922f5c"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-21-35.825Z-9340b9e3.json",
+    "bytes": 507683,
+    "sha256": "ebc79833cb13ea57e3ee0f4cc091819169546c3521aaf7cb2a89867933a205eb"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-21-39.541Z-a2cb3149.json",
+    "bytes": 510346,
+    "sha256": "c92a5829b29aa7ef0be6ad5fb450f54562f34af77e0f1a7cb78893d7fc4fc93a"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-21-43.357Z-842df529.json",
+    "bytes": 512190,
+    "sha256": "b9775124a1660472c347602c77c6895cd7ce1653cb31cfb3a6b4c2f6941e5a82"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-21-46.081Z-0fb5e0cd.json",
+    "bytes": 513983,
+    "sha256": "eaf690819674d25da80c759e204bf66caef7a9e9df695bddc14237021c7dfa85"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-21-47.357Z-c5e0bea7-side-query-permission_classifier_stage1.json",
+    "bytes": 21590,
+    "sha256": "3afc7d9dcda84939b7691ab280aad388bcafab28593b2142c06d2cdaa93b2181"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-22-16.898Z-2445dce6.json",
+    "bytes": 533907,
+    "sha256": "3b896b3aa47c338eaf5831cf523b3e7cf7c018fa193f39765f58f960e5102abe"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-22-19.349Z-ffbb97f6.json",
+    "bytes": 534723,
+    "sha256": "54b93852dcaf9279c24a64387472d5aee19b79d987a3ba5b6bf597588868cd91"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-22-20.696Z-8b3df7f3-side-query-permission_classifier_stage1.json",
+    "bytes": 21656,
+    "sha256": "72b2e89bb713a3db52744cb73599a896d4fee03dd0e9c2534c5570f6de3b513f"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-22-48.737Z-dc582dbf.json",
+    "bytes": 574249,
+    "sha256": "5698fbe06d86a4db2e4f0428039392ef567574ef59cdd05b662a02ca18444f3d"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-23-00.308Z-0699d36d.json",
+    "bytes": 581992,
+    "sha256": "2e86e92dfec492f0ef565ed53f03453ced8f83bfe002309005785f1ac48c63b4"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-23-01.685Z-66a598c4-side-query-permission_classifier_stage1.json",
+    "bytes": 22961,
+    "sha256": "a79a83c1db6f528775b7d0d980faa7f5268935ae3e1fa83a5b0ac8a2056c07bd"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-23-28.120Z-82c008c8.json",
+    "bytes": 600825,
+    "sha256": "a375b45eedaa72e0397baca7f682e02d2e9df7c2953dc7b860648c399b9875aa"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-23-29.785Z-7b077af6-side-query-permission_classifier_stage1.json",
+    "bytes": 24317,
+    "sha256": "01b547dbfdaca5971657d27fd7d35f7480515f2ecf1a3dfc59a049de3ac4e30e"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-23-50.244Z-a2ea82d6.json",
+    "bytes": 611837,
+    "sha256": "8ff405f9cbdb6b209f6db802a40a8fc06e4a1ee03d022a976da7533d0b4072fd"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-23-51.249Z-05ffe5a5-side-query-permission_classifier_stage1.json",
+    "bytes": 24733,
+    "sha256": "b3ec9366e8152a7e6b0602ee3fa01b51f3f26dab8612e9d69595f5dc3f61a868"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-24-16.442Z-12ab5dfc.json",
+    "bytes": 634430,
+    "sha256": "82191af03b7c5b32245eff9096ed5d58c1f8bed7c1964eaf630c45be3daf1589"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-24-19.152Z-3b9f144c.json",
+    "bytes": 635194,
+    "sha256": "3eea213c974689b0d802dee7669a4397a052d1a473f3b3d8772d4d4067cc65da"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-24-20.271Z-c8a2349a-side-query-permission_classifier_stage1.json",
+    "bytes": 24085,
+    "sha256": "9616cd74d5db7ac8d4c10bfd4729725532c5a4fc1fcb6db8f2681d1fc72dd723"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-24-46.845Z-0a8fc5de.json",
+    "bytes": 648615,
+    "sha256": "ed8f5f6a8b3367d3b09b39bb961ae71fdcdd45651283d4d4a839e2b89d4de92d"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-24-48.081Z-eec7d7ac-side-query-permission_classifier_stage1.json",
+    "bytes": 28655,
+    "sha256": "505be1b8e5640eeeda91294b389439cdb27c7d9ced7c868505377e2aa2c88714"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-25-58.158Z-da197103.json",
+    "bytes": 684311,
+    "sha256": "2c815eb7aa2fe0d48f381c0f26ae62a26ceef5c7fc5a9bf2635753757ac60b3c"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-25-59.387Z-43e55f9c-side-query-permission_classifier_stage1.json",
+    "bytes": 27256,
+    "sha256": "1f2fc283d0bb5184a0389d995849b33bd8aa99d0dc262a407a15947ce59036f8"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-27-54.434Z-ca6ad1a8.json",
+    "bytes": 741923,
+    "sha256": "ad8c2a4d99dea79fac537cb66999284320d99b3dd5525f082d4a10a66acb29ef"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-29-10.349Z-350832bd.json",
+    "bytes": 205409,
+    "sha256": "1aa386267d0f6684df687dae2f555d890b1d835d7638bce42a42587709c429e8"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-29-13.632Z-b5a32d24.json",
+    "bytes": 206684,
+    "sha256": "1be2a9b756eb5278b1823db7e6a7f1e3b042e7cc0eee5d88b272981595f6a0bf"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-29-14.798Z-3020b363-side-query-permission_classifier_stage1.json",
+    "bytes": 32072,
+    "sha256": "8e25eb2535e061e7ec8ff7514f0a65683c9a9ee2ea411c3be7056c05f1fb4a6b"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-29-18.756Z-2bc5a500.json",
+    "bytes": 208940,
+    "sha256": "6e21e94089d162227d83928eddcff65435ff9ddbee1e49de68323a54f53fb662"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-29-23.104Z-e9950bbe.json",
+    "bytes": 210936,
+    "sha256": "ad42ffe045092943c0ba50319352460e11e3c7e82a1c140d39db87be5c158a95"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-29-26.921Z-ea6b6053.json",
+    "bytes": 212843,
+    "sha256": "7512f7b603e25b83e5bb49717adf01c6d463fba5793d34b683953cc43d09bdc0"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-29-31.558Z-34b5d463.json",
+    "bytes": 215536,
+    "sha256": "c90285755b47dba75c1d6ef1822e118ae1c84fbb75d1c5f7af34f5d2a80d227a"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-29-38.934Z-d126da7c.json",
+    "bytes": 245012,
+    "sha256": "153efbbd328f617ef388e9fb64f2caca43bd642e0ccbc978cdb8a3d904bcd8c3"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-29-46.799Z-6f7c5713.json",
+    "bytes": 248878,
+    "sha256": "3cfa7a02fc7a498fdab5f4130f38965925d25a5c266c5d73ff2007bfcfe780ad"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-29-50.177Z-a84350c9.json",
+    "bytes": 263108,
+    "sha256": "ea12ea21e1af2e7efb63099209c9a193225c16a067bfe5e0a6413b4e1a8ea449"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-29-55.251Z-2304df6e.json",
+    "bytes": 267474,
+    "sha256": "56a7a0ad08d25409c556c35dafdb041551b281a9cf6d64de2b532b2faf756052"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-29-57.065Z-9df4be72-side-query-permission_classifier_stage1.json",
+    "bytes": 34495,
+    "sha256": "87730280f11b0e572ae90e07e608ef073283b13021ea956ffcfa0e913efba6a3"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-30-01.546Z-09d9d5e1.json",
+    "bytes": 292240,
+    "sha256": "46803c57df2215035bf882c739650c89fbf8c76a706509774f3111bcc4c8b994"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-30-04.335Z-9dd04522-side-query-permission_classifier_stage1.json",
+    "bytes": 34746,
+    "sha256": "1e483bc772ab29ab88eacbd3ff12726375c72eda9a23f2b2998a0d2597b682de"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-30-06.870Z-a1c39519-side-query-permission_classifier_stage2.json",
+    "bytes": 35657,
+    "sha256": "53a0b85179bcd5626729a92eee67968a4aa62c2e0ec19a4d0b303257e4e73ebc"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-30-19.741Z-15507faf.json",
+    "bytes": 304301,
+    "sha256": "9f65abde1fd961be5195c754d8e69533996ca46812bd37964a2ec9978b1fd007"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-30-21.086Z-b5286e60-side-query-permission_classifier_stage1.json",
+    "bytes": 35206,
+    "sha256": "1618fd1e17c50f92e6a4c26d6786949095df5851cac5ecedc3de640e015c8964"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-30-42.812Z-56848acf.json",
+    "bytes": 337182,
+    "sha256": "ca245d644e387183ffda5280f39487108885c8a4e6cc05605f4a97382f211049"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-30-56.335Z-5c851fc6.json",
+    "bytes": 358641,
+    "sha256": "e5ef7d867f29175a20b39bc06e563929046010b9804e63eb1559599eef85b48d"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-30-58.147Z-bf5489dd-side-query-permission_classifier_stage1.json",
+    "bytes": 36171,
+    "sha256": "4d2338a72320cb3b5d46f883c709ac267a1ff409fbdbeb9e0673222692a3f80e"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-31-37.970Z-104638d5.json",
+    "bytes": 372824,
+    "sha256": "eba8c81a9445f205c1646e0212661fe9d8839d976fe8b90b602c0ee80c90ef7c"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-31-39.628Z-73278e48-side-query-permission_classifier_stage1.json",
+    "bytes": 36397,
+    "sha256": "74f7a5047065b2182ed0b155c25b65a94dae64b09ea174310f9c0205070ff8bc"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-31-49.241Z-ee882259.json",
+    "bytes": 377743,
+    "sha256": "9f26f93d9af21e182b4a52c4a50bca4240c7cb1e95acb0a0e452f3cabad9f2a2"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-31-50.657Z-1dde3fa2-side-query-permission_classifier_stage1.json",
+    "bytes": 36783,
+    "sha256": "1f5cbda0dfe94c0f43675cdf1ed634098806efed97788f3ce9855ee6e189e5b0"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-31-55.290Z-cc07dbc3-side-query-permission_classifier_stage2.json",
+    "bytes": 38680,
+    "sha256": "dd9894c5058ebfb1c2561575937f3179dad4b2f2f28d8c44f815e9cfef276861"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-32-01.359Z-9304d02e.json",
+    "bytes": 380906,
+    "sha256": "dc9dcfd066e0c0f1d5564c6b1b7897438543bcda8984109869952d73d890b8a2"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-32-10.040Z-bc516139.json",
+    "bytes": 384619,
+    "sha256": "87fbe29b01bfd64f64895e915bd2b7e3af44eeb3909ff505705bd9a3879589ea"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-32-20.982Z-57a2516d.json",
+    "bytes": 389665,
+    "sha256": "33edafdc2cb125a9956e778065d836aed834990f957a3440f4887c6ab2bcfe44"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-32-30.148Z-5417abad.json",
+    "bytes": 393789,
+    "sha256": "89d598ee919d556992768551a4e038f1d7a6dbaa9d19825250e488a180d40e38"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-32-40.097Z-3eafaa0e.json",
+    "bytes": 398032,
+    "sha256": "f63938a138cee62fe80e86ef941420ea370542107f529ea5a0c6963c6cf0fa93"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-32-47.920Z-86acaa0b.json",
+    "bytes": 401165,
+    "sha256": "4a7702cdc1873c1c1ea858f6a0cfcd506d67b71d4792b7ee1dd84c4875282bd7"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-32-58.262Z-58ff90c3.json",
+    "bytes": 406091,
+    "sha256": "13586ab03dc2e498a57661b21d695d9abccf3d779b19577f6c321af219493530"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-32-59.573Z-bef86640-side-query-permission_classifier_stage1.json",
+    "bytes": 15657,
+    "sha256": "62fc158bb14c5e5ef601dd0b9d79f30236fef6ede414556c19553721290da9fb"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-33-02.757Z-d21d568e-side-query-permission_classifier_stage2.json",
+    "bytes": 17174,
+    "sha256": "8891c7386a179485251a755ea40245c281504ccac96018db3f02e4481ae8fb00"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-33-06.649Z-17f800da.json",
+    "bytes": 407619,
+    "sha256": "8e88ccffd7898071a21dd04c974e048e70afe1a6cc84a880e4301468c483e80d"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-33-10.357Z-bf748333.json",
+    "bytes": 408851,
+    "sha256": "4023a3eee364beb84dd35672fefa8428702c61cf03316eb4aa98381811f6b349"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-33-17.940Z-e46d9c6b.json",
+    "bytes": 411982,
+    "sha256": "8270735d1cc61efbcd1863ebed6f04d16b9dffb4a8f7587bfa6b87179e16a599"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-33-20.958Z-038506f9.json",
+    "bytes": 412803,
+    "sha256": "b586a34c3d031059d4e83b5308c03292888a0083fc7ce8a01a5b4c912f270722"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-33-25.706Z-ffcd294b.json",
+    "bytes": 414483,
+    "sha256": "c3bc944cd2cb21f5faf7a0d6f84e81dfc681d1a385fd945c2279c065c9b7c710"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-33-31.304Z-cf2148a3.json",
+    "bytes": 416846,
+    "sha256": "ccac5975cdd16eeb6ee676e0903f9de0ce5dea96edb6fb846b13c6d4a5176e78"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-33-39.787Z-d170f089.json",
+    "bytes": 420227,
+    "sha256": "b244be71c718379e76fae0c6c2abddc3d0cf0304f62832ba9fde97336b5e1379"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-33-45.723Z-b0c090cf.json",
+    "bytes": 422656,
+    "sha256": "60283ed7923019c5d2144320e70044362c4184013d282c867245b2ab98cf2a53"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-33-52.668Z-dc9857f0.json",
+    "bytes": 425559,
+    "sha256": "4cabe61ea6c3b2a30fe06940af472c87a608b8f87591e1e9368ca676ed9fedd7"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-33-58.009Z-e664a2cf.json",
+    "bytes": 427390,
+    "sha256": "de2f28f896369871ac3dd9295eb82bd0ae891aa5cbae22efbe28953989efe672"
+  },
+  {
+    "file": "remote-r3-capture/openai-logs/openai-2026-09-07T05-34-00.691Z-81330b1b.json",
+    "bytes": 428070,
+    "sha256": "96426d5f654c965fa5e0c84173ec79b052e5e28ce76ab8461f406416da55d3db"
+  }
+]

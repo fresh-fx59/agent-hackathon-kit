@@ -1,0 +1,107 @@
+[
+  {
+    "path": ".gitignore",
+    "bytes": 28,
+    "sha256": "703326a4f1315561272f5da0ad9fc4f0ad3f0c551aa5ab44a36be0ce3989df78"
+  },
+  {
+    "path": "README.md",
+    "bytes": 2256,
+    "sha256": "65e08d646ecc5b3acabda63fad41548de2353b96b0c96838c31d8b4d0311a975"
+  },
+  {
+    "path": "claude/assessment.md",
+    "bytes": 7493,
+    "sha256": "470e86c05379d0cb3d87d79936e31b9edf368d1bff77c298fc4a0bc5f22a0fb2"
+  },
+  {
+    "path": "claude/prompt.txt",
+    "bytes": 20767,
+    "sha256": "7f731e32d7ff36f625727d501bd4f77cc201c45f24d0050733ab08968d6924e2"
+  },
+  {
+    "path": "claude/result.json",
+    "bytes": 9356,
+    "sha256": "2be77883c6e9d694924d010d61af90ac9959d00d53bf1075c9b20cce7ba24a2c"
+  },
+  {
+    "path": "claude/stderr.txt",
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "path": "claude/terminal.json",
+    "bytes": 172,
+    "sha256": "10bc0eef50e4be818342ae7e6d0cdfa73737f414a7e4434c9b4945da1d2b10fc"
+  },
+  {
+    "path": "runtime/raw-capture-manifest.json",
+    "bytes": 43902,
+    "sha256": "76535d0248a10cc2cb7f09b7482bde2bd50b2cb2b9919e17b3fc106a2d8d7f3e"
+  },
+  {
+    "path": "runtime/research-memo.md",
+    "bytes": 6492,
+    "sha256": "cbed563d8fee99038264a5b72a39d62df52a952cd29bf364edc9460ddd973c62"
+  },
+  {
+    "path": "runtime/selected-trace-evidence.json",
+    "bytes": 55007,
+    "sha256": "a50560a11052d53df8cfbcb5e02f8d186803bc6decfd694ff90768a69bdfb3c8"
+  },
+  {
+    "path": "runtime/timeline.md",
+    "bytes": 1602,
+    "sha256": "533c9375d78fe12687c4715b9b0bb1b76229dd9312523dc57d487afd76a04271"
+  },
+  {
+    "path": "sol/critique.md",
+    "bytes": 4353,
+    "sha256": "d5fed7e532687893fac4de03334d3243146a39ba83c83211b7893598aed8632b"
+  },
+  {
+    "path": "sol/prompt.txt",
+    "bytes": 22435,
+    "sha256": "e28903325f53977885212d204f8e8c4610c6d18e1bd114a7e5234c391b010c12"
+  },
+  {
+    "path": "sol/stderr.txt",
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "path": "sol/stdout.jsonl",
+    "bytes": 4743,
+    "sha256": "22d22d1c5936e2a51f80fe7dad4dc6cc308c06fe894558cc7245f59809ed6e8b"
+  },
+  {
+    "path": "sol/terminal.json",
+    "bytes": 131,
+    "sha256": "e2e886b34f1ac1f3abb53f9c4320f086e12096c1c15a8b523bbb11c5cc6c7c10"
+  },
+  {
+    "path": "source/README.md",
+    "bytes": 4487,
+    "sha256": "f425d2a13aaa24d22c87d6e16745bc83103392d36c2bc6e401d7ac3582599552"
+  },
+  {
+    "path": "source/evidence.json",
+    "bytes": 372476,
+    "sha256": "86bc4bb73b6ecc8b68923cb53db6de8a9bc04a18d730b1bd13dd1fa2eac6d063"
+  },
+  {
+    "path": "source/extract_evidence.py",
+    "bytes": 4642,
+    "sha256": "04926a39700f62876dbc410face772a3ce6c414a5e2bed254e735420ff546a7a"
+  },
+  {
+    "path": "web/research.md",
+    "bytes": 5099,
+    "sha256": "34cd69627f1c9ffb3ed1e008f1d85ef009ff15c87f367d02cfc96f2d62cf2e3b"
+  },
+  {
+    "path": "workflow-economy-review.json",
+    "bytes": 3030,
+    "sha256": "f522c65f1a622b815d00887dd6742b07c002701f704c58e4ea08ec18fbc94e87"
+  }
+]

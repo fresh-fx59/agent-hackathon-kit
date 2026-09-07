@@ -1,0 +1,166 @@
+Review this completed specification only. Do not edit files or call tools. Identify factual overclaims, missing acceptance conditions, contradictions and unnecessary scope. Return a concise verdict with blockers and concrete corrections. Runtime implementation is not authorized. You are the final independent review, not a source auditor.
+
+# Sherlock Winevtx evidence correctness: planned changes
+
+Date: 2026-09-07. Scope: specification only; implementation and new target runs have not started.
+Tracking: [research project](../../../projects/active/2026-09-07-sherlock-winevtx-evidence-spec.md).
+
+## Decision and expected outcome
+
+Keep Sherlock's investigation workflow, but make material factual claims depend on reproducible evidence operations. Repair execution of completion checks, then strengthen their evidence contract. Reuse existing outcome, time and citation mechanisms before introducing new ones. Do not attempt to fix this through a longer prompt alone.
+
+The original Winevtx report gives useful broad context, but is **insufficient for reliable incident assessment**: it contains factual contradictions, not just omissions or stylistic weaknesses. Correct observations include substantial authentication failures and a configured 3proxy service. Incorrect universal negatives and chronology change the interpretation of those observations. Conversely, the corrections do not establish credential theft, a particular human attacker, or successful June compromise.
+
+Success means an unedited report from the intended DeepSeek-v4 Flash + Qwen Code configuration passes independent source review, with a functioning completion gate and an immutable run receipt. Editing a failed report afterward does not count.
+
+## Evidence and provenance
+
+All paths below are beneath `/Users/a/hack/wt-v42/cases/06-dev-logging/sherlock/` unless absolute.
+
+- Original report: `docs/run-reports/artifacts/2026-09-07-v52-winevtx-r3-live-report-snapshot/report.md`, SHA256 `49828debdfcebd9579a454c58c60fb43caa948de1b2054e99fcb3b6248024dc5`. Snapshot 05:29:49 UTC; terminal report hash matched. Terminal run receipt: 2026-09-07 05:34:01 UTC, exit 0. Process success is not forensic correctness.
+- Original audit: `docs/run-reports/artifacts/2026-09-07-v52-winevtx-r3-independent-source-audit/`, especially `source-audit.md`, `source-manifest.json`, and the focused evidence JSON files. Its reviewed report is an editorial artifact, not the original model output.
+- New research: `docs/run-reports/artifacts/2026-09-07-winevtx-remediation-research/`: source reproduction, runtime analysis, Claude assessment and web research.
+- Source mirror: `/tmp/winevtx-r3-independent-source`; 143 JSONL files, 90,267 records, 93,196,459 bytes. The new extraction compares every file's hash and line count with the preserved manifest: 143 compared, zero mismatches. Reproduction script and output are `source/extract_evidence.py` and `source/evidence.json` in the new research directory.
+- Immutable v52 runtime package SHA256 `1b75411584a04417044ed8bd8cdc88bdfb3048f8b2cc75b05075462e543bb49a`; recorded source commit `7f7344d744ddaf895407b1589dd9fe322a9ef953`.
+
+### Material findings
+
+References in this table are corpus-relative JSONL line numbers, not event record IDs. Existing focused audit artifacts contain full records; new reproduction independently checks the credential-success count, incoming-allow event count, classic PowerShell fields, May interval and source manifest. Other detailed findings remain attributed to the prior source audit.
+
+| Finding | Source-supported correction | Why it matters |
+|---|---|---|
+| 1,075 EID 5379 records described as failed/benign | 966 have ReturnCode 3221226021 and zero returned credentials; **109 have ReturnCode 0 and one returned credential**. Example `Security.jsonl:242`. | A majority outcome cannot represent all events. Successful reads are observed; theft or benign intent needs additional evidence. |
+| May identity and 3proxy attribution understated or confused | LSM contains `IPSERVER\\root`; `Security.jsonl:13511` maps SID ending 1001. `System.jsonl:263` contains the installation security context, 3proxy ImagePath, automatic start and LocalSystem configuration. | Distinguish account context, service execution identity, configured command, actual process execution, and human identity. |
+| Service installed “40 minutes after disconnect” | LSM operational line 47 reconnect: 2021-05-09 22:11:55.638239Z. Installation: 22:25:01.786082Z. Difference **786.147843 seconds**. Next disconnect at 23:34:00.597347Z. | Wrong ordering changes the apparent relationship between the session and installation. Temporal proximity still does not prove causality. |
+| PowerShell command evidence treated as absent | Classic `rendered/Windows-PowerShell.jsonl` has 200 records containing `HostApplication=`, all containing Write-Host; 25 records have EID 400. Prior references 191/199 are line numbers. Operational channel is separate. | Absence of 4103/4104 is not absence of all command-bearing evidence. These strings do not prove execution success or malicious intent. |
+| Broad incoming-firewall allow negative | 74 events have Direction=1 and Action=3; examples include mDNS/5353 beyond 3proxy. | Count rule events separately from unique rules and effective final policy. Normal rules also refute a universal negative. |
+| RDP/authentication correlation overclaimed | Security4625: 33,456 total; 33,455 NTLM/IP records and one local Advapi exception (`Security.jsonl:13497`). RCM and Security counts are not individual matches. Prior audit found 118/141 Core131 records near same-IP failures within two seconds, 137 within ten. | LogonType3 alone does not identify RDP, destination port or NLA. State correlation algorithm, unmatched records and ambiguity. |
+| Physical file end confused with time coverage | Latest Security event is at line 19933, not physical line34916; Core has later coverage. | Determine coverage from parsed timestamps across all records, separately per source. Absence conclusions are bounded by observed coverage. |
+
+### Causal conclusions and limits
+
+Verified: the final narrative contradicts source data; the original corpus contains enough evidence to correct the listed claims. Existing tools contain outcome/time support (`logmap` outcome rows/status axes and `logjoin`), so this is not evidence that all required primitives are absent.
+
+The original run also records repeated stop-hook failures involving an unset `QWEN_SKILL_ROOT` and `/tools/stopcheck.py`. That explains an enforcement failure, not by itself why the model selected each wrong interpretation. The recovered original r3 trace contains 204 persisted API records. It shows a custom Security script listing 5379 in one variable but omitting it from the executed selection; only the count was inspected in that step. Broad listing output was partially read. No persisted execution of the existing investigation/check tools was found; the model attempted an external `/tools/stopcheck.py` path and a blocked `/tools` symlink. These are observed workflow/enforcement failures; their influence on particular generated sentences is an inference. See research `runtime/research-memo.md`, `raw-capture-manifest.json` and `selected-trace-evidence.json` for exact pointers and hashes. Do not infer r3 model behavior from r2 logs. A model seeing a record, calculating a fact correctly, and using it correctly in the final report are three different observations.
+
+## Design options
+
+| Option | Benefit | Rejection or selection |
+|---|---|---|
+| Prompt-only reminders | Small change | Reject as primary repair: arithmetic, exhaustive quantification and final enforcement remain unverified. |
+| Targeted deterministic evidence operations plus material-claim records | Reproducible counts/times; limited report burden | **Select.** Reuse current tools, preserve generic-log support, add only missing contracts. |
+| Full sentence-by-sentence claim ledger | Broad traceability | Defer: high authoring burden, duplicated prose and false reassurance about semantic correctness. |
+
+Claude's independent audit-context assessment favors the selected option. Its unverified assumptions about single-pass execution/network access are not adopted. Public confidence markers remain `[!PROVEN]`, `[!REPORTED]`, `[!INFERENCE]`; no incompatible replacement vocabulary is introduced.
+
+## Requirements
+
+### R1 — Corpus and run identity at the input boundary
+
+Record selected case, canonical corpus root, complete manifest, total files/records/bytes, configuration, intended and observed model identity, runtime version/hash and task prompt hash before investigation. The caller explicitly selects Winevtx. Reject a resolved root or manifest inconsistent with that selection; never fall back silently to another corpus. Resume must validate the same identity or create a new run with explicit provenance.
+
+Do not embed Winevtx answers, maliciousness labels or expected timelines in the runtime. A manifest is identity evidence, not a truth oracle. Keep ground truth and review artifacts outside the model workspace. This scope gate prevents future dataset drift; current evidence does not establish that r3 itself mixed corpora or that the historical BlueSky launch was automatic fallback.
+
+### R2 — Field extraction with provenance and unknown states
+
+Extend the existing readers with a versioned Windows-export adapter, retaining the generic reader. Support scalar/dictionary EventID, EventData objects/lists and UserData nested records. Preserve original value, parsed value, JSON pointer, corpus-relative file, physical line, provider/channel/event/version and timestamp precision. Duplicate named fields remain distinguishable; ambiguous or malformed data is surfaced, never silently coerced to zero or success.
+
+Missing, empty, unparsable, unsupported and present values must remain distinct. Provider-specific meanings require qualified metadata and tests. Unknown event semantics retain raw values. Microsoft XML documentation is not a JSON-export schema: actual exporter variants must be tested directly.
+
+### R3 — Exhaustive evidence calculations
+
+Build on `logmap` rather than replace it. A partition operation returns predicate, scope, denominator, every outcome bucket, unknown/malformed counts and representative exact references. Bucket totals must reconcile with the scanned population. Material minority outcomes cannot disappear behind top-N summaries. Large result sets use complete pagination or streamed artifacts with continuation/completion receipts; no oldest/newest fixed-window cap.
+
+Counts must declare their unit: events, unique entities, sessions, rules, or reconstructed state. Distinct counts require a stated identity key. Effective policy claims require a complete supported state reconstruction; otherwise report only observed events/configuration. Full bucket evidence can remain in artifacts; the report summarizes material exceptions without printing every row.
+
+Build on `logjoin` for chronology and correlation. Compute min/max and deltas from parsed UTC timestamps, not physical line order. Preserve precision and invalid timestamp counts. Join receipts declare keys, time window, direction, tie handling, reused matches, unmatched records and one-to-many ambiguity. Never turn proximity into causal or one-to-one proof.
+
+### R4 — Narrowly defined material-claim evidence
+
+Introduce a versioned sidecar for material quantitative, chronological, universal-negative, identity/configuration and cross-source claims. Suggested record:
+
+```json
+{
+  "schema_version": 1,
+  "claim_id": "c17",
+  "report_anchor": "finding-3",
+  "kind": "partition",
+  "scope_ref": "scope-2",
+  "operation_ref": "operation-9",
+  "result_ref": "result-9",
+  "source_refs": [{"file": "channel.jsonl", "line": 42, "pointer": "/Event/EventData/Code"}],
+  "qualification": "Observed outcome; intent unknown"
+}
+```
+
+This is a proposed contract, not implemented API. Operation parameters and results must be serialized, content-addressed and replayable with deterministic tools, not executable model-generated shell strings. Claims bind to a corpus manifest and final report digest; edits invalidate the final validation receipt.
+
+Scope includes channel/provider/event population, time bounds, predicates, parse failures, scan completion and coverage gaps. A negative can mean only “no matching evidence in this declared scope”; missing channels or unsupported fields cannot produce an exhaustive negative. Material identity claims distinguish subject, target, session user, service logon identity, process context and human actor. Configuration does not become observed execution.
+
+Reuse validated fact values when rendering structured findings/tables. Mechanical checks verify exact supported values and references within those blocks. Free prose still needs semantic review: a well-formed sidecar cannot prove that all nearby prose follows from evidence. Avoid promises of automatic general entailment or zero future hallucinations.
+
+### R5 — Completion checks must execute and report their real result
+
+The post-r3 runner commit `73c1c8f36a17c4ebaa55791b02ef86b723892112` already exports the hook skill root. Verify that repair through the actual hook before adding another fix; it does not retroactively validate r3. Fix or confirm runtime-root resolution using the installed script/package location, with explicit environment override validation. Missing root, missing check, nonzero check, crash, timeout or malformed response must produce an identifiable infrastructure/check failure. Preserve diagnostics and the draft report; do not label an unvalidated report PASS.
+
+Test the actual Qwen completion-hook invocation with the environment absent, not just direct Python calls. Determine the host's supported retry/stop behavior from a local integration fixture. A terminal receipt records which checks ran, their input hashes, status and final report hash. Separate process exit, artifact existence, structural validation and source/semantic acceptance.
+
+Compose existing stop/state/report/citation/worklist checks with the new deterministic claim checks. An absent sidecar for required claim types is a contract failure. Do not introduce a production LLM judge or an unconditional external-network dependency.
+
+### R6 — Reusable semantic references
+
+Ship only verified, provider/version-qualified mappings needed by the adapter, with source URL or metadata provenance and explicit unknown fallback. Preserve raw numbers alongside decoded labels. Review firewall direction/action mapping, logon type, and session lifecycle semantics independently. A global dictionary keyed only by EventID or a field name is forbidden.
+
+Microsoft primary references support schema, 4625 and firewall enum interpretation. This research did not establish authoritative standalone 5379 or LSM tables. Obtain official provider metadata/message resources or a reproducible version-qualified Windows export before including those mappings. Until then, keep raw fields and narrowly stated corpus observations.
+
+## Planned implementation sequence and files
+
+Do not modify immutable `skills/v52/`. Allocate the next unused runtime version at implementation time, respecting the code-local packaging rules and any concurrent work. Current code locations below identify reusable components, not permission to overwrite history.
+
+| Step | Planned code surfaces under Sherlock | Deliverable and gate |
+|---|---|---|
+| 1 | `eval/bench/run-clean-direct-qwen.sh`, its settings/hook construction and run receipts; next-version hook and `tools/stopcheck.py` | Case/manifest binding and working completion checks; reproduce unset-root failure, verify actual hook invocation and terminal status. |
+| 2 | Next-version shared event reader used by `tools/logmap.py`, `tools/logjoin.py`, citation checks | Provenance-preserving adapter with generic fallback; field-shape and ambiguity fixtures pass. Avoid independent incompatible parsers in each tool. |
+| 3 | `tools/logmap.py`, `tools/logjoin.py` in next version | Reconciled partitions, complete pagination, chronology/coverage and explicit join receipts; adversarial fixtures pass. |
+| 4 | Next-version `tools/reportcheck.py`, `tools/citecheck.py`, `tools/statecheck.py`, `tools/stopcheck.py`; report-format contract | Material-claim schema, deterministic replay and final artifact binding; wrong result, stale digest and missing checks fail visibly. |
+| 5 | Evaluator `tools/tests/` and report scoring/run-state tests | Source-backed adversarial suite and independent report-review rubric; all required checks pass. |
+| 6 | Version registry/package receipts/run ledger per local AGENTS | Publish new immutable development package, then fresh Winevtx-only target evaluation with original outputs retained. No BlueSky run in this workstream. |
+
+Existing relevant tests: `test_logmap.py`, `test_logmap_v32_odd_axis.sh`, `test_logmap_v32_late_axis.py`, `test_logjoin.py`, `test_logjoin_v11.py`, `test_logjoin_v32_window.py`, `test_report_contract_v42.py`, `test_report_evidence_v26.py`, `test_aggregate_citation_v39.py`, `test_worklist_cursor_v41.py`, `test_worklist_selection_v50.py`, `test_worklist_views_v39.py`, `test_stopcheck_v52_composed_ledger.py`, `test_statecheck_v52_not_applicable.py`, `test_score_report.py`, `test_run_state.py`. New tests should target missing behavior, not duplicate existing implementation assertions.
+
+## Acceptance matrix
+
+| Test | Required outcome |
+|---|---|
+| Wrong selected corpus or changed resume manifest | Reject before model investigation; receipt explains mismatch. |
+| Zero successful outcomes versus one success among many failures | Correct partition in both cases; universal failure claim rejected in minority-success case. |
+| Named/list/nested payloads, duplicate keys, missing values, provider-ID collision | Exact extraction or explicit unknown; no invented success/identity mapping. |
+| Out-of-order timestamps, offsets, malformed timestamps and fractional seconds | Correct UTC extrema/deltas; invalid/unknown population retained. |
+| Data beyond two pages, new late minority and high-cardinality partitions | Every source record accounted for; no hidden truncation or fixed cap. |
+| Classic PowerShell command field with no script-block events | Narrow script-block absence allowed; broad command-evidence absence rejected. |
+| Firewall create/change/duplicate events and ordinary allow rule | Event/distinct/state counts differ correctly; no maliciousness inferred from an ordinary allow alone. |
+| Same-IP many-to-many connections, equal times and missing service evidence | Ambiguity/unmatched events retained; no one-to-one or RDP/NLA assertion without support. |
+| Missing channel, partial scan or parse failure | Negative explicitly bounded; exhaustive corpus negative fails. |
+| Cited record exists but wrong field/value; stale claim/report digest | Reference/value/hash contract fails. Semantically unsupported prose is caught by independent review, not claimed solved by citation existence. |
+| Hook root absent, script absent, check crash and actual runner stop | Infrastructure failure visible; no false validated PASS. |
+| Known-normal events and malicious-looking configuration without execution evidence | Neutral observations and uncertainty; no forced attack narrative. |
+
+Development fixtures must be small synthetic cases with changed names, dates, frequencies and payload order. Winevtx facts stay in evaluator fixtures only. Preserve generic non-Windows tests so specialization does not break the broader tool contract.
+
+For final target assessment, evaluate the untouched report against the full corpus with deterministic claim replay and an independent semantic review. Require every material discrepancy listed above to be resolved or explicitly qualified, no new material unsupported claims, accurate citations, real completion-check receipts and case identity. Run at least three fresh target trials under the same frozen configuration before claiming repeatability; report pass count and all failures, not only the best report. Three passes support that limited observation, not a universal reliability claim. Target trials consume the configured provider budget and belong to implementation/evaluation, not this specification task.
+
+## Primary research and its limits
+
+These recommendations are engineering inferences from observed failures and guidance, not a certification by any source.
+
+- [Microsoft EventType schema](https://learn.microsoft.com/en-us/windows/win32/wes/eventschema-eventtype-complextype): preserve payload structure and distinguish system metadata from event-specific fields.
+- [Microsoft 4625](https://learn.microsoft.com/en-us/previous-versions/windows/it-pro/windows-10/security/threat-protection/auditing/event-4625): type3 denotes network logon; account roles and authentication fields have separate meanings.
+- [Windows PowerShell 5.1 event logs](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_eventlogs?view=powershell-5.1): classic engine/provider logging is distinct from script-block evidence.
+- [Microsoft FW_RULE_ACTION](https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-fasp/702e3c23-c9d8-43db-8380-b4c670dd7f7d): use documented enums within their qualified schema.
+- [NIST SP 800-86, sections3.2–3.4](https://nvlpubs.nist.gov/nistpubs/legacy/sp/nistspecialpublication800-86.pdf): preserve methods, separate examination from analysis/reporting, correlate sources and consider alternatives.
+- [NIST SP 800-61r3, April2025](https://csrc.nist.gov/pubs/sp/800/61/r3/final): incident analysis should support response decisions within risk management.
+- [Anthropic, Demystifying evals for AI agents](https://www.anthropic.com/engineering/demystifying-evals-for-ai-agents): distinguish transcript from outcome and use complementary graders and repeated trials.
+
+## Review and remaining uncertainty
+
+Source worker independently reproduced selected critical facts and all-file identity. Terra recovered and inspected the original runtime trace; Claude Opus assesses architecture from supplied audit context. Neither model agreement nor a mechanically valid ledger proves semantic correctness. Runtime trace limitations are stated above; a final Sol critique is recorded below before this specification is marked ready.
