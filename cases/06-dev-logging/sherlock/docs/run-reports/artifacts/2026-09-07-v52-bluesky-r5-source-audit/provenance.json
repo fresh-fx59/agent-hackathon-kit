@@ -16,6 +16,10 @@
       "sha256": "1a79d6a7b29b40266aca4faf7ed700375d6dcb14d30ce9bceaaa300c5fda98dc",
       "bytes": 16444
     },
+    "continuation-review-prompt-correction-final.txt": {
+      "sha256": "0596dfb57caaaed34d3388556dad44624bb9158426b8a8b35f9f03734d3a89c4",
+      "bytes": 4335
+    },
     "continuation-review-prompt-gate3.txt": {
       "sha256": "9c74dfa0e5d05e02c24f8a4b0aef06a2838fd7ff7259905e693542eaea26fc9f",
       "bytes": 5972
@@ -23,6 +27,14 @@
     "continuation-review-prompt.txt": {
       "sha256": "abc5f6a36a85b7d9c1f4e9c31fdadc40bbd246363e67adc45e159e21aba94503",
       "bytes": 5424
+    },
+    "correction-final-checks.json": {
+      "sha256": "dbc14a4ca0704366b7719cb44c7959be15d69a519ae952b6fb2dce2e7008d4c3",
+      "bytes": 16092
+    },
+    "correction-final-review.md": {
+      "sha256": "a6863992019840a557171e8aae2951550d2dc89c8c2fc1ee9bafa69e80f3e5bd",
+      "bytes": 9286
     },
     "gate2-checks.json": {
       "sha256": "97e3fc4eec569199b062c45bdff4ddd325f5381c7466bd5bed307c8ce9533c7d",
@@ -37,14 +49,22 @@
       "bytes": 1035
     },
     "source-audit.md": {
-      "sha256": "f0a8a18a27576669eb9780d615c6306d31bb0056b110524f03b8f9543a228d6e",
-      "bytes": 17791
+      "sha256": "7402b75fe194f2528883af21d954dbf8ceac922923035ae48300d159ce622263",
+      "bytes": 18489
     },
     "source-evidence.json": {
       "sha256": "c2e788739ad5e5ed9c202bdd4dd3d4fe18e2e6bc9827c227e575cbe027c1a5eb",
       "bytes": 53816
+    },
+    "verify-correction-final.py": {
+      "sha256": "1ded0094c037a7e6dfa11e39ae8f5360b486dfd97df4639f60fd12b315af3c0e",
+      "bytes": 4427
     }
   },
-  "latest_reviewed_report_sha256": "511a9c968712da844ba7dd28ed7c95fcfd2494daf587bf782a9ebb965e1cc09c",
-  "latest_status": "STABLE_GATE3_LIVE_SEMANTIC_FAIL_NOT_FINAL"
+  "latest_reviewed_report_sha256": "182b30ddb6e52bd2d033d563452fc38f46fc04c669f1882c98f287e51b7017b5",
+  "latest_status": "TERMINAL_CORRECTION_SEMANTIC_FAIL_THREE_RESIDUAL_INTERPRETATION_GROUPS",
+  "latest_report_path": "../2026-09-07-v52-bluesky-r5-terminal-evidence/report-correction-final.md",
+  "latest_report_preservation_commit": "dda3a533aac1ec379fea81a5f19135bc0fe13723",
+  "historical_fields_note": "Top-level report_sha256/status/target_model_received_audit describe the original draft audit. The later terminal correction follows the root-managed continuation; this reviewer did not send the final residual prompt to the model.",
+  "latest_source_check": "Fresh full469 parse and SHA verification;59/59 exact quotations; see correction-final-checks.json"
 }

@@ -81,3 +81,8 @@ The nine source-backed requests remain applicable. Prepared continuation prompt 
 ### Stable gate3 comparison
 
 Report `report-gate3.md`, SHA `511a9c968712da844ba7dd28ed7c95fcfd2494daf587bf782a9ebb965e1cc09c`, 38,233 bytes. Exact diff is one added blank line after gate2 line23; no factual, causal, negative, quotation or verdict content changed. All E1–E9 and the gate2 section review apply (later report line numbers shift by1). Mechanical reportcheck reportedly has0 blockers; **semantic FAIL remains**, and run/state inventory qualification is not established. Latest ready prompt is `continuation-review-prompt-gate3.txt`; no model steering performed.
+
+
+### Correction final review — terminal 2026-09-07T10:27:49Z
+
+Reviewed terminal report SHA `182b30ddb6e52bd2d033d563452fc38f46fc04c669f1882c98f287e51b7017b5`: **semantic FAIL with three residual interpretation groups**, not the former nine uncorrected groups. All59 citations are exact and the corrected source counts/chronology pass. See `correction-final-review.md` for the complete E1–E9 closure matrix, remaining ownership/stranger-attribution/normality contradictions, and contract-valid narrower treatments. `verify-correction-final.py` and `correction-final-checks.json` preserve the reproducible final checks. Earlier snapshot verdicts and evidence above remain historical, unchanged.
