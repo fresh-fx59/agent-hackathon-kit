@@ -898,10 +898,32 @@ def compose_worklists(items, out_dir, deadline=None):
     return real(tmp), tmp
 
 
+def compose_stopcheck_worklists(items, out_dir, deadline=None):
+    """Compose a gate-only ledger outside the authoritative worklist directory.
+
+    `triagecheck` intentionally audits a ledger's cursor witness.  The composite
+    exists only for one gate invocation, so it has no such witness; placing it
+    beside `worklist.manifest.json` would make that expected absence look like a
+    broken authoritative ledger.  Its own private directory leaves the global
+    triage semantics intact while original ledgers are verified separately.
+    """
+    stage = tempfile.mkdtemp(prefix=".stopcheck-stage-", dir=out_dir)
+    try:
+        ledger, tmp = compose_worklists(items, stage, deadline)
+    except Exception:
+        try:
+            os.rmdir(stage)
+        except OSError:
+            pass
+        raise
+    return ledger, tmp, stage
+
+
 def check_children(corpus, out_dir, report, lists, root, workspace, deadline):
     check_deadline(deadline)
     triage = tool_path(root, "triagecheck.py")
     cite = tool_path(root, "citecheck.py")
+    cursor = tool_path(root, "worklist.py")
     # v42: stopcheck IS the delivery blocker — it is the only thing that runs a
     # gate whether or not the model remembered to. The 20260827T173511Z-v41 run
     # proves that a gate the stop hook does not run is a gate a run can walk
@@ -909,7 +931,7 @@ def check_children(corpus, out_dir, report, lists, root, workspace, deadline):
     # never checked at all. So reportcheck joins them here, and its absence is
     # "tools missing", not a silent skip.
     report_gate = tool_path(root, "reportcheck.py")
-    if not triage or not cite or not report_gate:
+    if not triage or not cite or not cursor or not report_gate:
         return "Sherlock: tools missing or unsafe; reinstall the v30 skill or run checks manually."
     rules_path = os.path.join(out_dir, "rules.tsv")
     if os.path.lexists(rules_path):
@@ -918,9 +940,21 @@ def check_children(corpus, out_dir, report, lists, root, workspace, deadline):
             return "Sherlock: work/rules.tsv is unsafe; replace it with a regular file before stopping."
     else:
         rules = rules_path
-    ledger, tmp = None, None
+    ledger, tmp, stage = None, None, None
     try:
-        ledger, tmp = compose_worklists(lists, out_dir, deadline)
+        # Preserve the cursor witness on every authoritative ledger.  Triage
+        # still receives one composite ledger below because rules and receipts
+        # may span hosts.
+        for item in lists:
+            check_deadline(deadline)
+            source_ledger = worklist_path(item)
+            r = run_child([sys.executable, cursor, "verify", "--work",
+                           os.path.dirname(source_ledger), "--ledger",
+                           os.path.basename(source_ledger)], deadline)
+            if r.returncode != 0:
+                return ("Sherlock: worklist witness failed for %s; repair the cursor provenance before delivering work/report.md."
+                        % rel(source_ledger, workspace))
+        ledger, tmp, stage = compose_stopcheck_worklists(lists, out_dir, deadline)
         check_deadline(deadline)
         r = run_child([sys.executable, triage, "--worklist", ledger, "--rules", rules,
                        "--corpus", corpus], deadline)
@@ -953,6 +987,11 @@ def check_children(corpus, out_dir, report, lists, root, workspace, deadline):
         if tmp:
             try:
                 os.remove(tmp)
+            except OSError:
+                pass
+        if stage:
+            try:
+                os.rmdir(stage)
             except OSError:
                 pass
 
