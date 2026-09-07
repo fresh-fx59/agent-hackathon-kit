@@ -16,7 +16,7 @@ python3 "$settings_generator" emit-run --skill-directory "$skill_dir" > "$root/.
 (cd "$root" && pwd) > "$root/workspace-cwd-precontact.txt"
 cd "$root"
 set +e
-HOME="$root/home" OPENAI_BASE_URL=https://api.neuraldeep.ru/v1 \
+HOME="$root/home" QWEN_SKILL_ROOT="$skill_dir" OPENAI_BASE_URL=https://api.neuraldeep.ru/v1 \
   "$secret_wrapper" neuraldeep_api_key --env OPENAI_API_KEY -- \
   /home/claude-developer/.local/bin/qwen --auth-type openai --model deepseek-v4-flash \
   --max-session-turns -1 --max-tool-calls -1 --openai-logging \
