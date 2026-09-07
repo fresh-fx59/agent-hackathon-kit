@@ -1,0 +1,112 @@
+--- target-direct-unfinished-output.md
++++ independent-reviewer-authored-report.md
+@@ -1,35 +1,76 @@
+-Работаю над воспроизведением корректных агрегатных строк перед финализацией.
++# Отчёт по корпусу BlueSkyRansomware.jsonl — независимый разбор исходных событий
+ 
+-<｜｜DSML｜｜tool_calls>
+-<｜｜DSML｜｜invoke name="run_shell_command">
+-<｜｜DSML｜｜parameter name="command" string="true">python3 - <<'EOF'
+-import json
+-lines=open('corpus/BlueSkyRansomware.jsonl',encoding='utf-8',errors='surrogateescape').read().splitlines()
+-from collections import Counter
+-c=Counter(); cc=Counter(); ps_day=Counter(); ps_msf=0; ps_winlogon=0; e600_ps=0
+-for i,l in enumerate(lines,1):
+-    try: e=json.loads(l)
+-    except Exception as ex: print('bad',i,ex); continue
+-    ch=e['Event']['System']['Channel']
+-    c[ch]+=1
+-    evid=e['Event']['System']['EventID'].get('#text')
+-    if evid=='600': cc['600']+=1
+-    if ch=='Windows PowerShell':
+-        ps_day[e['Event']['System']['TimeCreated']['#attributes']['SystemTime'][:10]]+=1
+-        if evid=='600': e600_ps+=1
+-        s=json.dumps(e['Event'],ensure_ascii=False)
+-        if 'MSFConsole' in s: ps_msf+=1
+-        if 'winlogon.exe' in s: ps_winlogon+=1
+-print('channels',c)
+-print('600 total',cc['600'])
+-print('ps_day',dict(ps_day),'ps_msf',ps_msf,'ps_winlogon',ps_winlogon,'e600_ps',e600_ps)
+-EOF</｜｜DSML｜｜parameter>
+-<｜｜DSML｜｜parameter name="description" string="true">Aggregate counts for line probes</｜｜DSML｜｜parameter>
+-<｜｜DSML｜｜parameter name="directory" string="true">/home/claude-developer/hack/sherlock-v52-bluesky-isolated-20260907-r4</｜｜DSML｜｜parameter>
+-</｜｜DSML｜｜invoke>
+-<｜｜DSML｜｜invoke name="run_shell_command">
+-<｜｜DSML｜｜parameter name="command" string="true">head -80 work/map*.tsv 2>/dev/null; echo ===; cat work/coverage.md; echo ===; cat work/axis3.tsv 2>/dev/null; echo ===; ls work/</｜｜DSML｜｜parameter>
+-<｜｜DSML｜｜parameter name="description" string="true">Check coverage and rollover content</｜｜DSML｜｜parameter>
+-<｜｜DSML｜｜parameter name="directory" string="true">/home/claude-developer/hack/sherlock-v52-bluesky-isolated-20260907-r4</｜｜DSML｜｜parameter>
+-</｜｜DSML｜｜invoke>
+-</｜｜DSML｜｜tool_calls>+Проверено 2026-09-07. Это самостоятельно составленный проверяющим отчёт по оригинальным 469 записям. Целевая модель не завершила отчёт: её [неизменённый ответ](report-direct-original.md) содержит статус и неисполненные запросы инструментов. Этот документ не является успешным автономным результатом DeepSeek/Qwen и не повышает оценку запуска.
++
++Источник: один файл, **467 262 байта, 469 JSONL-записей**, SHA256 `28b73f0be7b2a6ed7d102c8a8ba86d7c186887e0b71fcacfb8f73dcb0e37ff58`. Имя файла используется только как адрес источника; оно не доказывает наличие ransomware. Время ниже — UTC из SystemTime, номера строк физические. **[ФАКТ]** означает проверенные поля/агрегаты, **[ВЫВОД]** — интерпретацию с обозначенными пределами.
++
++## 1. Основной результат
++
++**[ФАКТ]** На `DESKTOP-7EQVM78` зарегистрированы **44 неуспешных и четыре успешных SQL Server-входа пользователя `sa` с клиентского IP `87.96.21.84`**. Все отказы содержат причину несовпадения пароля. Два коротких эпизода — 21 и 23 апреля 2024 года; после каждого потока из 22 отказов имеется успешный вход с теми же именем и адресом (`BlueSkyRansomware.jsonl:164`, строки 165–186; `BlueSkyRansomware.jsonl:432`, строки 433–455).
++
++**[ВЫВОД]** Последовательность согласуется с автоматизированным подбором SQL-пароля, завершившимся доступом к `sa`. Успешная аутентификация непосредственно подтверждена, но происхождение пароля, его сложность и законность действий из событий не определяются. IP — наблюдаемый клиентский адрес, не идентификация человека или организации.
++
++**[ФАКТ]** 23 апреля после успешных SQL-входов зарегистрировано изменение `show advanced options` и `xp_cmdshell` с `0` на `1` (`BlueSkyRansomware.jsonl:456`, `BlueSkyRansomware.jsonl:457`). Через 65.59 с после второй записи появляются события PowerShell с `HostName=MSFConsole`, `HostApplication=winlogon.exe`; двигатель переходит в `Available` (`BlueSkyRansomware.jsonl:459`, строки 460–467).
++
++**[ВЫВОД]** Это подозрительная последовательность доступа к SQL и последующей активности PowerShell, требующая проверки возможной компрометации. Но в данных нет прямой связи SQL-сессии с изменением конфигурации, вызова xp_cmdshell с конкретной командой или дерева процессов, связывающего SQL Server и указанный PowerShell-хост. `winlogon.exe` — значение HostApplication без полного пути; оно не доказывает подлинность системного файла или внедрение в настоящий Winlogon. Название `MSFConsole` характерно для инструментария Metasploit, но одной строки недостаточно для безусловной атрибуции конкретному инструменту/оператору.
++
++**[ФАКТ]** SecurityCenter сообщает `Windows Defender=SECURITY_PRODUCT_STATE_SNOOZED` начиная с **09:54:01Z 23 апреля** — раньше второго потока SQL-отказов в 09:59:54Z (`BlueSkyRansomware.jsonl:425`). Кто и как изменил состояние, не установлено. Прямых свидетельств шифрования файлов, ransomware-процесса, записки о выкупе или эксфильтрации в этих двух каналах не найдено; название семейства BlueSky из имени файла не выводится.
++
++## 2. Состав и среда
++
++Все 469 записей относятся к `DESKTOP-7EQVM78`; присутствуют только **Application — 336** и **Windows PowerShell — 133**. Удержанное окно: **2024-04-21T00:32:42.803382Z** (`BlueSkyRansomware.jsonl:1`) — **2024-04-23T10:11:10.425516Z** (`BlueSkyRansomware.jsonl:469`). Физический порядок отдельных соседних записей не всегда совпадает с SystemTime; хронология здесь строится по времени, а не только по номеру строки.
++
++Основные провайдеры: MSSQLSERVER — 216, PowerShell — 133, Microsoft-Windows-Security-SPP — 42, SecurityCenter — 16, Windows Error Reporting — 11. Полный каталог — [source-summary.json](source-summary.json). У EventID поле `#text` — число; сравнение с текстом `'600'` дало бы неверный нулевой результат.
++
++**[ФАКТ]** `BlueSkyRansomware.jsonl:71` и строка 238 содержат Microsoft SQL Server 2022 RTM **16.0.1000.6**, Developer Edition 64-bit, Windows 10 Pro build19045, Hypervisor. Строки 76/243 указывают VMware, Inc. / VMware20,1. Эти поля описывают среду, но сами по себе не объясняют инцидент.
++
++**[ФАКТ]** MSSQLSERVER 26022 фиксирует слушатели `'any'` IPv6/IPv4 на **1433** (`BlueSkyRansomware.jsonl:121`, `BlueSkyRansomware.jsonl:122`; повторно строки 277–278). На 1434 указаны loopback `::1` и `127.0.0.1` (строки 125–126,281–282). Также указаны named pipes (строки 123–124,279–280). Это поддерживает наличие SQL-слушателя 1433, но успешные входы 18454 не содержат собственного destinationport: точный сетевой маршрут каждого входа этим не доказан.
++
++## 3. Подтверждённая последовательность SQL и PowerShell
++
++| UTC | Исходные строки | Наблюдение |
++|---|---|---|
++| 21 апреля 04:51:02.988886–04:51:03.066977 | `BlueSkyRansomware.jsonl:164`, строки 165–185 | 22 MSSQLSERVER 18456: `sa`, неверный пароль, CLIENT87.96.21.84 |
++| 21 апреля 04:51:03.066977 | `BlueSkyRansomware.jsonl:186` | MSSQLSERVER 18454: успешная SQL-аутентификация `sa`, тот жеIP |
++| 23 апреля 09:54:01.302195–09:54:11.746475 | `BlueSkyRansomware.jsonl:425`, строки 427–429 | Четыре SecurityCenter 15: Defender SNOOZED |
++| 23 апреля 09:59:54.644152–09:59:54.784581 | `BlueSkyRansomware.jsonl:432`, строки 433–453 | Ещё 22 MSSQLSERVER 18456: `sa`, неверный пароль, тот жеIP |
++| 23 апреля 09:59:54.784581 | `BlueSkyRansomware.jsonl:454` | Успешный SQL-вход `sa`, тот жеIP |
++| 23 апреля 10:00:11.878462 | `BlueSkyRansomware.jsonl:455` | Повторный успешный SQL-вход `sa`, тот жеIP |
++| 23 апреля 10:00:12.238113 | `BlueSkyRansomware.jsonl:456` | MSSQLSERVER 15457: `show advanced options`,0→1 |
++| 23 апреля 10:00:12.284576 | `BlueSkyRansomware.jsonl:457` | MSSQLSERVER 15457: `xp_cmdshell`,0→1 |
++| 23 апреля 10:00:28.081526 | `BlueSkyRansomware.jsonl:458` | Ещё один успешный SQL-вход `sa`, тот жеIP |
++| 23 апреля 10:01:17.878505–10:01:18.144425 | `BlueSkyRansomware.jsonl:459`, строки 460–467 | Восемь PowerShell 600 и один 400: MSFConsole / winlogon.exe; состояние двигателя Available |
++
++Интервалы потоков отказов — **0.078091 с** и **0.140429 с** по удержанным отметкам. Совпадающие времена разных событий не служат основанием удалять записи как дубликаты. Короткие серии согласуются с автоматизацией; они не раскрывают число различных проверенных паролей.
++
++В четырёх 18454 применяется SQL Server authentication. Ещё **15 MSSQLSERVER 18453** относятся к Integrated authentication: восемь — `DESKTOP-7EQVM78\Win 10` с IPv6 link-local адресом, семь — `NT SERVICE\SQLTELEMETRY` с `<local machine>` (`BlueSkyRansomware.jsonl:143`, строки 146–148,151–155; строки 207,210–211,317,426,469). Эти фоновые интегрированные входы нельзя смешивать с четырьмя `sa`/публичныйIP.
++
++Изменение значения конфигурации 15457 — непосредственное свидетельство изменения 0→1; [официальное описание Microsoft](https://learn.microsoft.com/en-us/sql/relational-databases/errors-events/database-engine-events-and-errors-15000-to-15999?view=sql-server-ver16) отдельно указывает применение через RECONFIGURE. Оно не содержит имени SQL-клиента/логина, текста следующего вызова или подтверждения выполнения конкретной команды. Отдельных данных о применённом runtimeзначении через RECONFIGURE/`value_in_use` нет. Поэтому причинная формулировка «именно этот sa-сеанс исполнил payload через xp_cmdshell» остаётся гипотезой.
++
++## 4. PowerShell: что действительно видно
++
++Всего **133 события**: 107 EID600,16 EID400,9 EID403 и одинEID800. По дням:124 события 21 апреля, девять 23 апреля. HostApplication и остальные поля находятся внутри многострочного `Event.EventData.Data.#text`; отсутствие Security4688 не означает отсутствие командной информации.
++
++Ранние команды описывают разные действия: проверки INF-файлов (`BlueSkyRansomware.jsonl:9`); команду остановки процессов с путём VSCode `code-tunnel.exe` (строки 24–31); Start/Stop/Start службы npcap (строки 32–39); Register-ScheduledTask `npcapwatchdog` с CheckStatus.bat, SYSTEM и AtStartup (строки 40–47). **[ФАКТ]** Строки запуска содержат эти команды. **[ОГРАНИЧЕНИЕ]** Они не удостоверяют конечный результат каждой операции или злой умысел: npcap/VSCode-контекст согласуется также с администрированием и установкой программ.
++
++61 событие в строках 323–383 связано с запуском PowerShellEditorServices для VSCode. Единственный EID800, `BlueSkyRansomware.jsonl:365`, показывает `Add-Type -Path "$PSScriptRoot/Newtonsoft.Json.dll"` в PSScriptAnalyzer.psm1 с конкретным путём DLL внутри расширения VSCode. Сам по себе этот Add-Type не является свидетельством вредоносного payload.
++
++Все девять последних PowerShell-событий, строки 459–467, имеют один HostId `1693e66c-ce22-41d0-8356-4245271c31e8`, HostName `MSFConsole`, HostVersion0.1, HostApplication `winlogon.exe`. EID400 в строке 467 содержит EngineVersion5.1.19041.4291 и RunspaceId `e61e01fe-a742-4249-8b10-dce1feb7ebba`. **[ФАКТ]** PowerShell-хост запустил двигатель. Поля CommandLine/ScriptName здесь пусты; полезная нагрузка, полный путь/хеш процесса, родитель и его связь с SQL неизвестны. Полная извлечённая структура — [powershell-evidence.json](powershell-evidence.json).
++
++## 5. Defender, фоновые события и пределы отрицаний
++
++Из 12 SecurityCenter 15 восемь имеют состояниеON, четыре — SNOOZED. ПоследнееON перед сменой — **23 апреля 09:52:59.188634Z** (`BlueSkyRansomware.jsonl:423`); первоеSNOOZED — **09:54:01.302195Z** (строка 425), затем 427–429. После этого имеются SecurityCenter 2/1 (строки 430–431), но нет новой записи 15, подтверждающей восстановление ON. Названия состояний сохранены буквально: нельзя без дополнительных данных приравниватьSNOOZED к конкретной команде полного отключения всех функций Defender.
++
++Сам канал Microsoft-Windows-Windows-Defender/Operational отсутствует. Поэтому здесь нет достаточного покрытия для вывода «Defender ничего не обнаруживал». Смена состояния раньше второго SQL-потока не позволяет приписать её входу 09:59:54 или появившемуся позже MSFConsole.
++
++`BlueSkyRansomware.jsonl:55` имеет EventID4625 провайдера **Microsoft-Windows-EventSystem** и поля SuppressDuplicateDuration; это не неуспешный Windows-вход Security. VSS8224 (включая строку 424) без команды удаления теневых копий не доказывает саботаж резервных копий. WER1001 (включая строку 468 с SearchApp.exe/RADAR_PRE_LEAK_64), перезапуски и фоновые SQL-события не отнесены к атаке без отдельной причинной связи.
++
++В корпусе нет каналов Security, System, Sysmon, RDP/TerminalServices, DefenderOperational или PowerShellOperational. В этих 469 записях нет 4103/4104, но EID800 и HostApplication дают часть командной информации. Не найдено событий, прямо показывающих шифрование/переименование файлов, записку о выкупе, вредоносный исполняемый файл, C2-соединения или вынос данных. Это предел данного набора, не доказательство отсутствия таких действий на машине.
++
++## 6. Практический вывод
++
++Обоснованный предмет расследования — **успешный доступ к SQL Server под sa после серии неверных паролей**, изменение конфигурации xp_cmdshell и последующий необычный PowerShell-хост. Заявлять только «неуспешный перебор» было бы неверно: четыре успешных входа есть. Заявлять доказанную атаку BlueSky ransomware, конкретный эксплойт или завершённую цепочку SQL→xp_cmdshell→инъекция в Winlogon→шифрование было бы сильнее имеющихся свидетельств.
++
++Для завершения причинного разбора нужны SQLERRORLOG/аудит с сессиями и командами, история конфигурации и runtimeзначений, процессные/сетевые события вокруг 10:00–10:02, сведения о законности использования 87.96.21.84 и причинах состояния Defender. При отсутствии санкционированного объяснения успешный доступsa следует рассматривать как возможную компрометацию и проверять доступностьSQL, учётные данные и исполнение на хосте. Какие действия уже выполнены операторами, этот отчёт не утверждает.
++
++Семантика SQL18453/18454/18456 сверена с [каталогом Microsoft Database Engine18000–18999](https://learn.microsoft.com/en-us/sql/relational-databases/errors-events/database-engine-events-and-errors-18000-to-18999?view=sql-server-ver16). Связь названияmsfconsole с Metasploit описана в [документации Rapid7](https://github.com/rapid7/metasploit-framework/blob/master/docs/metasploit-framework.wiki/Using-Metasploit.md); она поддерживает только осторожную интерпретацию имени хоста, а не идентификацию бинарного файла в этом инциденте.

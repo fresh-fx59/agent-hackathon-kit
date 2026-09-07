@@ -1,0 +1,19 @@
+{
+  "approved_source_path": "/Users/a/hack/sherlock-final-inputs-20260906/independent/corpus/BlueSkyRansomware.jsonl",
+  "approved_source_remote": "/home/claude-developer/hack/sherlock-final-inputs-20260906/independent/corpus/BlueSkyRansomware.jsonl",
+  "source_sha256": "28b73f0be7b2a6ed7d102c8a8ba86d7c186887e0b71fcacfb8f73dcb0e37ff58",
+  "source_bytes": 467262,
+  "source_records": 469,
+  "original_direct_output_path": "report-direct-original.md",
+  "original_direct_output_sha256": "525ff388ec5df407e482d0a880cb291912a3b7e94d2c77d9917f44e2a2d23096",
+  "original_direct_output_bytes": 2148,
+  "original_direct_output_verdict": "FAIL: status plus unexecuted DSML tool requests, no substantive final report",
+  "reviewer_authored_report": "report-reviewed.md",
+  "reviewer_authored_report_sha256": "0720eb6bc2ee583759abbbfb0c0be96b4172c2002905f6314fe62f74436e5ea3",
+  "reviewer_report_status": "Independently authored and source-verified; not autonomous target-model output",
+  "explicit_citations_checked": 20,
+  "diff": "report-completion.diff",
+  "full_qualification": "NOT CLAIMED",
+  "source_findings_seeded_to_target": false,
+  "source_and_target_inputs_modified": false
+}

@@ -1,0 +1,1117 @@
+[
+  {
+    "file": "BlueSkyRansomware.jsonl",
+    "line": 1,
+    "sha256": "135bc45e5457d06820b67f1f40650884f9e37e72c7d106a961a55bd5c0a749e4",
+    "event": {
+      "Event": {
+        "#attributes": {
+          "xmlns": "http://schemas.microsoft.com/win/2004/08/events/event"
+        },
+        "System": {
+          "Provider": {
+            "#attributes": {
+              "Name": "PowerShell"
+            }
+          },
+          "EventID": {
+            "#attributes": {
+              "Qualifiers": 0
+            },
+            "#text": 600
+          },
+          "Version": 0,
+          "Level": 4,
+          "Task": 6,
+          "Opcode": 0,
+          "Keywords": "0x80000000000000",
+          "TimeCreated": {
+            "#attributes": {
+              "SystemTime": "2024-04-21T00:32:42.803382Z"
+            }
+          },
+          "EventRecordID": 1,
+          "Correlation": null,
+          "Execution": {
+            "#attributes": {
+              "ProcessID": 0,
+              "ThreadID": 0
+            }
+          },
+          "Channel": "Windows PowerShell",
+          "Computer": "DESKTOP-7EQVM78",
+          "Security": null
+        },
+        "EventData": {
+          "Data": {
+            "#text": [
+              "Registry",
+              "Started",
+              "\tProviderName=Registry\r\n\tNewProviderState=Started\r\n\r\n\tSequenceNumber=1\r\n\r\n\tHostName=ConsoleHost\r\n\tHostVersion=5.1.19041.4291\r\n\tHostId=1c66ed64-9f9d-4fd2-a6ad-9a3de9ea4210\r\n\tHostApplication=powershell.exe -ExecutionPolicy Restricted -Command Write-Host 'Final result: 1';\r\n\tEngineVersion=\r\n\tRunspaceId=\r\n\tPipelineId=\r\n\tCommandName=\r\n\tCommandType=\r\n\tScriptName=\r\n\tCommandPath=\r\n\tCommandLine="
+            ]
+          },
+          "Binary": null
+        }
+      }
+    }
+  },
+  {
+    "file": "BlueSkyRansomware.jsonl",
+    "line": 9,
+    "sha256": "db908a9660ce692f1bfae6d257ca4d9e50fa268814e619a322bc31d019fa9595",
+    "event": {
+      "Event": {
+        "#attributes": {
+          "xmlns": "http://schemas.microsoft.com/win/2004/08/events/event"
+        },
+        "System": {
+          "Provider": {
+            "#attributes": {
+              "Name": "PowerShell"
+            }
+          },
+          "EventID": {
+            "#attributes": {
+              "Qualifiers": 0
+            },
+            "#text": 600
+          },
+          "Version": 0,
+          "Level": 4,
+          "Task": 6,
+          "Opcode": 0,
+          "Keywords": "0x80000000000000",
+          "TimeCreated": {
+            "#attributes": {
+              "SystemTime": "2024-04-21T00:32:45.648212Z"
+            }
+          },
+          "EventRecordID": 9,
+          "Correlation": null,
+          "Execution": {
+            "#attributes": {
+              "ProcessID": 0,
+              "ThreadID": 0
+            }
+          },
+          "Channel": "Windows PowerShell",
+          "Computer": "DESKTOP-7EQVM78",
+          "Security": null
+        },
+        "EventData": {
+          "Data": {
+            "#text": [
+              "Registry",
+              "Started",
+              "\tProviderName=Registry\r\n\tNewProviderState=Started\r\n\r\n\tSequenceNumber=1\r\n\r\n\tHostName=ConsoleHost\r\n\tHostVersion=5.1.19041.4291\r\n\tHostId=ddee7ba2-bb87-4da0-a78b-08c48be75778\r\n\tHostApplication=powershell.exe -ExecutionPolicy Restricted -Command $Res = 0; $Infs = Get-Item -Path ($env:WinDir + '\\inf\\*.inf'); foreach ($Inf in $Infs) { $Data = Get-Content $Inf.FullName; if ($Data -match '\\[defaultinstall.nt(amd64|arm|arm64|x86)\\]') { $Res = 1; break; } } Write-Host 'Final result:', $Res;\r\n\tEngineVersion=\r\n\tRunspaceId=\r\n\tPipelineId=\r\n\tCommandName=\r\n\tCommandType=\r\n\tScriptName=\r\n\tCommandPath=\r\n\tCommandLine="
+            ]
+          },
+          "Binary": null
+        }
+      }
+    }
+  },
+  {
+    "file": "BlueSkyRansomware.jsonl",
+    "line": 55,
+    "sha256": "385770a33425a02564caa3e88833db102ec4301676edc1d85805dd1eba6a5460",
+    "event": {
+      "Event": {
+        "#attributes": {
+          "xmlns": "http://schemas.microsoft.com/win/2004/08/events/event"
+        },
+        "System": {
+          "Provider": {
+            "#attributes": {
+              "Name": "Microsoft-Windows-EventSystem",
+              "Guid": "{899daace-4868-4295-afcd-9eb8fb497561}",
+              "EventSourceName": "EventSystem"
+            }
+          },
+          "EventID": {
+            "#attributes": {
+              "Qualifiers": 16384
+            },
+            "#text": 4625
+          },
+          "Version": 0,
+          "Level": 4,
+          "Task": 0,
+          "Opcode": 0,
+          "Keywords": "0x80000000000000",
+          "TimeCreated": {
+            "#attributes": {
+              "SystemTime": "2024-04-21T04:36:03.260381Z"
+            }
+          },
+          "EventRecordID": 2720,
+          "Correlation": null,
+          "Execution": {
+            "#attributes": {
+              "ProcessID": 0,
+              "ThreadID": 0
+            }
+          },
+          "Channel": "Application",
+          "Computer": "DESKTOP-7EQVM78",
+          "Security": null
+        },
+        "EventData": {
+          "param1": "86400",
+          "param2": "SuppressDuplicateDuration",
+          "param3": "Software\\Microsoft\\EventSystem\\EventLog"
+        }
+      }
+    }
+  },
+  {
+    "file": "BlueSkyRansomware.jsonl",
+    "line": 71,
+    "sha256": "4641ce283a908b950380f7fbb5aaa578873627b77decaf1196f3a306d478faff",
+    "event": {
+      "Event": {
+        "#attributes": {
+          "xmlns": "http://schemas.microsoft.com/win/2004/08/events/event"
+        },
+        "System": {
+          "Provider": {
+            "#attributes": {
+              "Name": "MSSQLSERVER"
+            }
+          },
+          "EventID": {
+            "#attributes": {
+              "Qualifiers": 16384
+            },
+            "#text": 17069
+          },
+          "Version": 0,
+          "Level": 4,
+          "Task": 2,
+          "Opcode": 0,
+          "Keywords": "0x80000000000000",
+          "TimeCreated": {
+            "#attributes": {
+              "SystemTime": "2024-04-21T04:38:06.584519Z"
+            }
+          },
+          "EventRecordID": 2736,
+          "Correlation": null,
+          "Execution": {
+            "#attributes": {
+              "ProcessID": 0,
+              "ThreadID": 0
+            }
+          },
+          "Channel": "Application",
+          "Computer": "DESKTOP-7EQVM78",
+          "Security": null
+        },
+        "EventData": {
+          "Data": {
+            "#text": "Microsoft SQL Server 2022 (RTM) - 16.0.1000.6 (X64) \n\tOct  8 2022 05:58:25 \n\tCopyright (C) 2022 Microsoft Corporation\n\tDeveloper Edition (64-bit) on Windows 10 Pro 10.0 <X64> (Build 19045: ) (Hypervisor)\n"
+          },
+          "Binary": "AD4200000A000000100000004400450053004B0054004F0050002D0037004500510056004D0037003800000000000000"
+        }
+      }
+    }
+  },
+  {
+    "file": "BlueSkyRansomware.jsonl",
+    "line": 121,
+    "sha256": "76b62e7ecb5e18b15d795abb0a4713e12b58c3f4418782ff4605d3547c8d43e5",
+    "event": {
+      "Event": {
+        "#attributes": {
+          "xmlns": "http://schemas.microsoft.com/win/2004/08/events/event"
+        },
+        "System": {
+          "Provider": {
+            "#attributes": {
+              "Name": "MSSQLSERVER"
+            }
+          },
+          "EventID": {
+            "#attributes": {
+              "Qualifiers": 16384
+            },
+            "#text": 26022
+          },
+          "Version": 0,
+          "Level": 4,
+          "Task": 2,
+          "Opcode": 0,
+          "Keywords": "0x80000000000000",
+          "TimeCreated": {
+            "#attributes": {
+              "SystemTime": "2024-04-21T04:38:07.412675Z"
+            }
+          },
+          "EventRecordID": 2786,
+          "Correlation": null,
+          "Execution": {
+            "#attributes": {
+              "ProcessID": 0,
+              "ThreadID": 0
+            }
+          },
+          "Channel": "Application",
+          "Computer": "DESKTOP-7EQVM78",
+          "Security": null
+        },
+        "EventData": {
+          "Data": {
+            "#text": [
+              "'any'",
+              "ipv6",
+              "1433",
+              "1"
+            ]
+          },
+          "Binary": "A66500000A000000100000004400450053004B0054004F0050002D0037004500510056004D0037003800000000000000"
+        }
+      }
+    }
+  },
+  {
+    "file": "BlueSkyRansomware.jsonl",
+    "line": 122,
+    "sha256": "b32e57621c27cb652972dddbbd6b4411c88e76048f6b982a8e8203407c227449",
+    "event": {
+      "Event": {
+        "#attributes": {
+          "xmlns": "http://schemas.microsoft.com/win/2004/08/events/event"
+        },
+        "System": {
+          "Provider": {
+            "#attributes": {
+              "Name": "MSSQLSERVER"
+            }
+          },
+          "EventID": {
+            "#attributes": {
+              "Qualifiers": 16384
+            },
+            "#text": 26022
+          },
+          "Version": 0,
+          "Level": 4,
+          "Task": 2,
+          "Opcode": 0,
+          "Keywords": "0x80000000000000",
+          "TimeCreated": {
+            "#attributes": {
+              "SystemTime": "2024-04-21T04:38:07.412675Z"
+            }
+          },
+          "EventRecordID": 2787,
+          "Correlation": null,
+          "Execution": {
+            "#attributes": {
+              "ProcessID": 0,
+              "ThreadID": 0
+            }
+          },
+          "Channel": "Application",
+          "Computer": "DESKTOP-7EQVM78",
+          "Security": null
+        },
+        "EventData": {
+          "Data": {
+            "#text": [
+              "'any'",
+              "ipv4",
+              "1433",
+              "1"
+            ]
+          },
+          "Binary": "A66500000A000000100000004400450053004B0054004F0050002D0037004500510056004D0037003800000000000000"
+        }
+      }
+    }
+  },
+  {
+    "file": "BlueSkyRansomware.jsonl",
+    "line": 143,
+    "sha256": "1547be2028872de5feceeb97d7869dd3ab6cec0d058c80c5d26a12fcfb1b548a",
+    "event": {
+      "Event": {
+        "#attributes": {
+          "xmlns": "http://schemas.microsoft.com/win/2004/08/events/event"
+        },
+        "System": {
+          "Provider": {
+            "#attributes": {
+              "Name": "MSSQLSERVER"
+            }
+          },
+          "EventID": {
+            "#attributes": {
+              "Qualifiers": 16384
+            },
+            "#text": 18453
+          },
+          "Version": 0,
+          "Level": 0,
+          "Task": 4,
+          "Opcode": 0,
+          "Keywords": "0xa0000000000000",
+          "TimeCreated": {
+            "#attributes": {
+              "SystemTime": "2024-04-21T04:40:28.271453Z"
+            }
+          },
+          "EventRecordID": 2808,
+          "Correlation": null,
+          "Execution": {
+            "#attributes": {
+              "ProcessID": 0,
+              "ThreadID": 0
+            }
+          },
+          "Channel": "Application",
+          "Computer": "DESKTOP-7EQVM78",
+          "Security": {
+            "#attributes": {
+              "UserID": "S-1-5-21-2183273635-3824754276-2634149291-1000"
+            }
+          }
+        },
+        "EventData": {
+          "Data": {
+            "#text": [
+              "DESKTOP-7EQVM78\\Win 10",
+              " [CLIENT: fe80::6742:7b8e:1350:5571%9]"
+            ]
+          },
+          "Binary": "154800000A000000100000004400450053004B0054004F0050002D0037004500510056004D00370038000000070000006D00610073007400650072000000"
+        }
+      }
+    }
+  },
+  {
+    "file": "BlueSkyRansomware.jsonl",
+    "line": 164,
+    "sha256": "4f38f401abc17c6ae901462af7b7bd30bc44205003158475a31df1017debe144",
+    "event": {
+      "Event": {
+        "#attributes": {
+          "xmlns": "http://schemas.microsoft.com/win/2004/08/events/event"
+        },
+        "System": {
+          "Provider": {
+            "#attributes": {
+              "Name": "MSSQLSERVER"
+            }
+          },
+          "EventID": {
+            "#attributes": {
+              "Qualifiers": 49152
+            },
+            "#text": 18456
+          },
+          "Version": 0,
+          "Level": 0,
+          "Task": 4,
+          "Opcode": 0,
+          "Keywords": "0x90000000000000",
+          "TimeCreated": {
+            "#attributes": {
+              "SystemTime": "2024-04-21T04:51:02.988886Z"
+            }
+          },
+          "EventRecordID": 2829,
+          "Correlation": null,
+          "Execution": {
+            "#attributes": {
+              "ProcessID": 0,
+              "ThreadID": 0
+            }
+          },
+          "Channel": "Application",
+          "Computer": "DESKTOP-7EQVM78",
+          "Security": null
+        },
+        "EventData": {
+          "Data": {
+            "#text": [
+              "sa",
+              " Reason: Password did not match that for the login provided.",
+              " [CLIENT: 87.96.21.84]"
+            ]
+          },
+          "Binary": "184800000E000000100000004400450053004B0054004F0050002D0037004500510056004D00370038000000070000006D00610073007400650072000000"
+        }
+      }
+    }
+  },
+  {
+    "file": "BlueSkyRansomware.jsonl",
+    "line": 186,
+    "sha256": "1610e6e215a105c7d7cbb3c9cf1f88fb65b680d6be3e601a388c7115c1bdeb94",
+    "event": {
+      "Event": {
+        "#attributes": {
+          "xmlns": "http://schemas.microsoft.com/win/2004/08/events/event"
+        },
+        "System": {
+          "Provider": {
+            "#attributes": {
+              "Name": "MSSQLSERVER"
+            }
+          },
+          "EventID": {
+            "#attributes": {
+              "Qualifiers": 16384
+            },
+            "#text": 18454
+          },
+          "Version": 0,
+          "Level": 0,
+          "Task": 4,
+          "Opcode": 0,
+          "Keywords": "0xa0000000000000",
+          "TimeCreated": {
+            "#attributes": {
+              "SystemTime": "2024-04-21T04:51:03.066977Z"
+            }
+          },
+          "EventRecordID": 2851,
+          "Correlation": null,
+          "Execution": {
+            "#attributes": {
+              "ProcessID": 0,
+              "ThreadID": 0
+            }
+          },
+          "Channel": "Application",
+          "Computer": "DESKTOP-7EQVM78",
+          "Security": null
+        },
+        "EventData": {
+          "Data": {
+            "#text": [
+              "sa",
+              " [CLIENT: 87.96.21.84]"
+            ]
+          },
+          "Binary": "164800000A000000100000004400450053004B0054004F0050002D0037004500510056004D00370038000000070000006D00610073007400650072000000"
+        }
+      }
+    }
+  },
+  {
+    "file": "BlueSkyRansomware.jsonl",
+    "line": 365,
+    "sha256": "cf01dfe15033313bf1cda3ffcbb7b7c4e07ebbaf44a087f3ca16e03689c75bf3",
+    "event": {
+      "Event": {
+        "#attributes": {
+          "xmlns": "http://schemas.microsoft.com/win/2004/08/events/event"
+        },
+        "System": {
+          "Provider": {
+            "#attributes": {
+              "Name": "PowerShell"
+            }
+          },
+          "EventID": {
+            "#attributes": {
+              "Qualifiers": 0
+            },
+            "#text": 800
+          },
+          "Version": 0,
+          "Level": 4,
+          "Task": 8,
+          "Opcode": 0,
+          "Keywords": "0x80000000000000",
+          "TimeCreated": {
+            "#attributes": {
+              "SystemTime": "2024-04-21T23:39:30.956444Z"
+            }
+          },
+          "EventRecordID": 106,
+          "Correlation": null,
+          "Execution": {
+            "#attributes": {
+              "ProcessID": 0,
+              "ThreadID": 0
+            }
+          },
+          "Channel": "Windows PowerShell",
+          "Computer": "DESKTOP-7EQVM78",
+          "Security": null
+        },
+        "EventData": {
+          "Data": {
+            "#text": [
+              "    Add-Type -Path \"$PSScriptRoot/Newtonsoft.Json.dll\"\n",
+              "\tDetailSequence=1\r\n\tDetailTotal=1\r\n\r\n\tSequenceNumber=88\r\n\r\n\tUserId=DESKTOP-7EQVM78\\Win 10\r\n\tHostName=Default Host\r\n\tHostVersion=5.1.19041.4291\r\n\tHostId=89387fac-2e08-42b0-a0db-66f9395f50bd\r\n\tHostApplication=C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe -NoProfile -ExecutionPolicy Bypass -Command Import-Module 'c:\\Users\\Win 10\\.vscode\\extensions\\ms-vscode.powershell-2024.2.1\\modules\\PowerShellEditorServices\\PowerShellEditorServices.psd1'; Start-EditorServices -HostName 'Visual Studio Code Host' -HostProfileId 'Microsoft.VSCode' -HostVersion '2024.2.1' -BundledModulesPath 'c:\\Users\\Win 10\\.vscode\\extensions\\ms-vscode.powershell-2024.2.1\\modules' -EnableConsoleRepl -StartupBanner \"PowerShell Extension v2024.2.1\nCopyright (c) Microsoft Corporation.\n\nhttps://aka.ms/vscode-powershell\nType 'help' to get help.\n\" -LogLevel 'Normal' -LogPath 'c:\\Users\\Win 10\\AppData\\Roaming\\Code\\User\\globalStorage\\ms-vscode.powershell\\logs\\1713742747-e1969b37-4094-43cb-9aeb-726c7c8518f91713742616348' -SessionDetailsPath 'c:\\Users\\Win 10\\AppData\\Roaming\\Code\\User\\globalStorage\\ms-vscode.powershell\\sessions\\PSES-VSCode-4944-439190.json' -FeatureFlags @() \r\n\tEngineVersion=5.1.19041.4291\r\n\tRunspaceId=02c34e1b-1302-480b-bfd1-da1218167e06\r\n\tPipelineId=1\r\n\tScriptName=C:\\Users\\Win 10\\.vscode\\extensions\\ms-vscode.powershell-2024.2.1\\modules\\PSScriptAnalyzer\\1.22.0\\PSScriptAnalyzer.psm1\r\n\tCommandLine=    Add-Type -Path \"$PSScriptRoot/Newtonsoft.Json.dll\"\n",
+              "CommandInvocation(Add-Type): \"Add-Type\"\r\nParameterBinding(Add-Type): name=\"Path\"; value=\"C:\\Users\\Win 10\\.vscode\\extensions\\ms-vscode.powershell-2024.2.1\\modules\\PSScriptAnalyzer\\1.22.0/Newtonsoft.Json.dll\"\r\n"
+            ]
+          },
+          "Binary": null
+        }
+      }
+    }
+  },
+  {
+    "file": "BlueSkyRansomware.jsonl",
+    "line": 423,
+    "sha256": "a3163ba62b939818fa1c88ae24bd14912a91e0f6e16078890cb1ac5464207c7a",
+    "event": {
+      "Event": {
+        "#attributes": {
+          "xmlns": "http://schemas.microsoft.com/win/2004/08/events/event"
+        },
+        "System": {
+          "Provider": {
+            "#attributes": {
+              "Name": "SecurityCenter"
+            }
+          },
+          "EventID": {
+            "#attributes": {
+              "Qualifiers": 0
+            },
+            "#text": 15
+          },
+          "Version": 0,
+          "Level": 4,
+          "Task": 0,
+          "Opcode": 0,
+          "Keywords": "0x80000000000000",
+          "TimeCreated": {
+            "#attributes": {
+              "SystemTime": "2024-04-23T09:52:59.188634Z"
+            }
+          },
+          "EventRecordID": 3011,
+          "Correlation": null,
+          "Execution": {
+            "#attributes": {
+              "ProcessID": 0,
+              "ThreadID": 0
+            }
+          },
+          "Channel": "Application",
+          "Computer": "DESKTOP-7EQVM78",
+          "Security": null
+        },
+        "EventData": {
+          "Data": {
+            "#text": [
+              "Windows Defender",
+              "SECURITY_PRODUCT_STATE_ON"
+            ]
+          },
+          "Binary": null
+        }
+      }
+    }
+  },
+  {
+    "file": "BlueSkyRansomware.jsonl",
+    "line": 425,
+    "sha256": "ce9fa315cf619dc5b2899bed88b17c61a383fb6b84d289b7189fad8c8c186f84",
+    "event": {
+      "Event": {
+        "#attributes": {
+          "xmlns": "http://schemas.microsoft.com/win/2004/08/events/event"
+        },
+        "System": {
+          "Provider": {
+            "#attributes": {
+              "Name": "SecurityCenter"
+            }
+          },
+          "EventID": {
+            "#attributes": {
+              "Qualifiers": 0
+            },
+            "#text": 15
+          },
+          "Version": 0,
+          "Level": 4,
+          "Task": 0,
+          "Opcode": 0,
+          "Keywords": "0x80000000000000",
+          "TimeCreated": {
+            "#attributes": {
+              "SystemTime": "2024-04-23T09:54:01.302195Z"
+            }
+          },
+          "EventRecordID": 3013,
+          "Correlation": null,
+          "Execution": {
+            "#attributes": {
+              "ProcessID": 0,
+              "ThreadID": 0
+            }
+          },
+          "Channel": "Application",
+          "Computer": "DESKTOP-7EQVM78",
+          "Security": null
+        },
+        "EventData": {
+          "Data": {
+            "#text": [
+              "Windows Defender",
+              "SECURITY_PRODUCT_STATE_SNOOZED"
+            ]
+          },
+          "Binary": null
+        }
+      }
+    }
+  },
+  {
+    "file": "BlueSkyRansomware.jsonl",
+    "line": 432,
+    "sha256": "010115f58a616d51a564bc8a7f7783b35de295e761a78d651081996676a29d1b",
+    "event": {
+      "Event": {
+        "#attributes": {
+          "xmlns": "http://schemas.microsoft.com/win/2004/08/events/event"
+        },
+        "System": {
+          "Provider": {
+            "#attributes": {
+              "Name": "MSSQLSERVER"
+            }
+          },
+          "EventID": {
+            "#attributes": {
+              "Qualifiers": 49152
+            },
+            "#text": 18456
+          },
+          "Version": 0,
+          "Level": 0,
+          "Task": 4,
+          "Opcode": 0,
+          "Keywords": "0x90000000000000",
+          "TimeCreated": {
+            "#attributes": {
+              "SystemTime": "2024-04-23T09:59:54.644152Z"
+            }
+          },
+          "EventRecordID": 3020,
+          "Correlation": null,
+          "Execution": {
+            "#attributes": {
+              "ProcessID": 0,
+              "ThreadID": 0
+            }
+          },
+          "Channel": "Application",
+          "Computer": "DESKTOP-7EQVM78",
+          "Security": null
+        },
+        "EventData": {
+          "Data": {
+            "#text": [
+              "sa",
+              " Reason: Password did not match that for the login provided.",
+              " [CLIENT: 87.96.21.84]"
+            ]
+          },
+          "Binary": "184800000E000000100000004400450053004B0054004F0050002D0037004500510056004D00370038000000070000006D00610073007400650072000000"
+        }
+      }
+    }
+  },
+  {
+    "file": "BlueSkyRansomware.jsonl",
+    "line": 454,
+    "sha256": "ceafdf121c8d264b93d6a571d1b27dcebdc4d36d39dd8188ab200b3b0785efda",
+    "event": {
+      "Event": {
+        "#attributes": {
+          "xmlns": "http://schemas.microsoft.com/win/2004/08/events/event"
+        },
+        "System": {
+          "Provider": {
+            "#attributes": {
+              "Name": "MSSQLSERVER"
+            }
+          },
+          "EventID": {
+            "#attributes": {
+              "Qualifiers": 16384
+            },
+            "#text": 18454
+          },
+          "Version": 0,
+          "Level": 0,
+          "Task": 4,
+          "Opcode": 0,
+          "Keywords": "0xa0000000000000",
+          "TimeCreated": {
+            "#attributes": {
+              "SystemTime": "2024-04-23T09:59:54.784581Z"
+            }
+          },
+          "EventRecordID": 3042,
+          "Correlation": null,
+          "Execution": {
+            "#attributes": {
+              "ProcessID": 0,
+              "ThreadID": 0
+            }
+          },
+          "Channel": "Application",
+          "Computer": "DESKTOP-7EQVM78",
+          "Security": null
+        },
+        "EventData": {
+          "Data": {
+            "#text": [
+              "sa",
+              " [CLIENT: 87.96.21.84]"
+            ]
+          },
+          "Binary": "164800000A000000100000004400450053004B0054004F0050002D0037004500510056004D00370038000000070000006D00610073007400650072000000"
+        }
+      }
+    }
+  },
+  {
+    "file": "BlueSkyRansomware.jsonl",
+    "line": 455,
+    "sha256": "b06247ec6d1fc3823bdec20a031545ac150c57483976fa439cffa51fb5edf3a1",
+    "event": {
+      "Event": {
+        "#attributes": {
+          "xmlns": "http://schemas.microsoft.com/win/2004/08/events/event"
+        },
+        "System": {
+          "Provider": {
+            "#attributes": {
+              "Name": "MSSQLSERVER"
+            }
+          },
+          "EventID": {
+            "#attributes": {
+              "Qualifiers": 16384
+            },
+            "#text": 18454
+          },
+          "Version": 0,
+          "Level": 0,
+          "Task": 4,
+          "Opcode": 0,
+          "Keywords": "0xa0000000000000",
+          "TimeCreated": {
+            "#attributes": {
+              "SystemTime": "2024-04-23T10:00:11.878462Z"
+            }
+          },
+          "EventRecordID": 3043,
+          "Correlation": null,
+          "Execution": {
+            "#attributes": {
+              "ProcessID": 0,
+              "ThreadID": 0
+            }
+          },
+          "Channel": "Application",
+          "Computer": "DESKTOP-7EQVM78",
+          "Security": null
+        },
+        "EventData": {
+          "Data": {
+            "#text": [
+              "sa",
+              " [CLIENT: 87.96.21.84]"
+            ]
+          },
+          "Binary": "164800000A000000100000004400450053004B0054004F0050002D0037004500510056004D00370038000000070000006D00610073007400650072000000"
+        }
+      }
+    }
+  },
+  {
+    "file": "BlueSkyRansomware.jsonl",
+    "line": 456,
+    "sha256": "fbea5becf09444d11acd969bbbe1f56e7668316363d743f53a40c15bcdc73c64",
+    "event": {
+      "Event": {
+        "#attributes": {
+          "xmlns": "http://schemas.microsoft.com/win/2004/08/events/event"
+        },
+        "System": {
+          "Provider": {
+            "#attributes": {
+              "Name": "MSSQLSERVER"
+            }
+          },
+          "EventID": {
+            "#attributes": {
+              "Qualifiers": 16384
+            },
+            "#text": 15457
+          },
+          "Version": 0,
+          "Level": 4,
+          "Task": 2,
+          "Opcode": 0,
+          "Keywords": "0x80000000000000",
+          "TimeCreated": {
+            "#attributes": {
+              "SystemTime": "2024-04-23T10:00:12.238113Z"
+            }
+          },
+          "EventRecordID": 3044,
+          "Correlation": null,
+          "Execution": {
+            "#attributes": {
+              "ProcessID": 0,
+              "ThreadID": 0
+            }
+          },
+          "Channel": "Application",
+          "Computer": "DESKTOP-7EQVM78",
+          "Security": null
+        },
+        "EventData": {
+          "Data": {
+            "#text": [
+              "show advanced options",
+              "0",
+              "1"
+            ]
+          },
+          "Binary": "613C00000A000000100000004400450053004B0054004F0050002D0037004500510056004D00370038000000070000006D00610073007400650072000000"
+        }
+      }
+    }
+  },
+  {
+    "file": "BlueSkyRansomware.jsonl",
+    "line": 457,
+    "sha256": "e20a80a35007ded4543ad75108c6aff8de7694fa8e0e24ced041146f78012289",
+    "event": {
+      "Event": {
+        "#attributes": {
+          "xmlns": "http://schemas.microsoft.com/win/2004/08/events/event"
+        },
+        "System": {
+          "Provider": {
+            "#attributes": {
+              "Name": "MSSQLSERVER"
+            }
+          },
+          "EventID": {
+            "#attributes": {
+              "Qualifiers": 16384
+            },
+            "#text": 15457
+          },
+          "Version": 0,
+          "Level": 4,
+          "Task": 2,
+          "Opcode": 0,
+          "Keywords": "0x80000000000000",
+          "TimeCreated": {
+            "#attributes": {
+              "SystemTime": "2024-04-23T10:00:12.284576Z"
+            }
+          },
+          "EventRecordID": 3045,
+          "Correlation": null,
+          "Execution": {
+            "#attributes": {
+              "ProcessID": 0,
+              "ThreadID": 0
+            }
+          },
+          "Channel": "Application",
+          "Computer": "DESKTOP-7EQVM78",
+          "Security": null
+        },
+        "EventData": {
+          "Data": {
+            "#text": [
+              "xp_cmdshell",
+              "0",
+              "1"
+            ]
+          },
+          "Binary": "613C00000A000000100000004400450053004B0054004F0050002D0037004500510056004D00370038000000070000006D00610073007400650072000000"
+        }
+      }
+    }
+  },
+  {
+    "file": "BlueSkyRansomware.jsonl",
+    "line": 458,
+    "sha256": "84502b7ee0ad4f4f7935f7b5ca8985b8d77a0740599226749f222249b0948a87",
+    "event": {
+      "Event": {
+        "#attributes": {
+          "xmlns": "http://schemas.microsoft.com/win/2004/08/events/event"
+        },
+        "System": {
+          "Provider": {
+            "#attributes": {
+              "Name": "MSSQLSERVER"
+            }
+          },
+          "EventID": {
+            "#attributes": {
+              "Qualifiers": 16384
+            },
+            "#text": 18454
+          },
+          "Version": 0,
+          "Level": 0,
+          "Task": 4,
+          "Opcode": 0,
+          "Keywords": "0xa0000000000000",
+          "TimeCreated": {
+            "#attributes": {
+              "SystemTime": "2024-04-23T10:00:28.081526Z"
+            }
+          },
+          "EventRecordID": 3046,
+          "Correlation": null,
+          "Execution": {
+            "#attributes": {
+              "ProcessID": 0,
+              "ThreadID": 0
+            }
+          },
+          "Channel": "Application",
+          "Computer": "DESKTOP-7EQVM78",
+          "Security": null
+        },
+        "EventData": {
+          "Data": {
+            "#text": [
+              "sa",
+              " [CLIENT: 87.96.21.84]"
+            ]
+          },
+          "Binary": "164800000A000000100000004400450053004B0054004F0050002D0037004500510056004D00370038000000070000006D00610073007400650072000000"
+        }
+      }
+    }
+  },
+  {
+    "file": "BlueSkyRansomware.jsonl",
+    "line": 459,
+    "sha256": "fd02abf3a6523512f1792defef7aeef523a612326c6d7704678f759da4010ac1",
+    "event": {
+      "Event": {
+        "#attributes": {
+          "xmlns": "http://schemas.microsoft.com/win/2004/08/events/event"
+        },
+        "System": {
+          "Provider": {
+            "#attributes": {
+              "Name": "PowerShell"
+            }
+          },
+          "EventID": {
+            "#attributes": {
+              "Qualifiers": 0
+            },
+            "#text": 600
+          },
+          "Version": 0,
+          "Level": 4,
+          "Task": 6,
+          "Opcode": 0,
+          "Keywords": "0x80000000000000",
+          "TimeCreated": {
+            "#attributes": {
+              "SystemTime": "2024-04-23T10:01:17.878505Z"
+            }
+          },
+          "EventRecordID": 125,
+          "Correlation": null,
+          "Execution": {
+            "#attributes": {
+              "ProcessID": 0,
+              "ThreadID": 0
+            }
+          },
+          "Channel": "Windows PowerShell",
+          "Computer": "DESKTOP-7EQVM78",
+          "Security": null
+        },
+        "EventData": {
+          "Data": {
+            "#text": [
+              "Registry",
+              "Started",
+              "\tProviderName=Registry\r\n\tNewProviderState=Started\r\n\r\n\tSequenceNumber=1\r\n\r\n\tHostName=MSFConsole\r\n\tHostVersion=0.1\r\n\tHostId=1693e66c-ce22-41d0-8356-4245271c31e8\r\n\tHostApplication=winlogon.exe\r\n\tEngineVersion=\r\n\tRunspaceId=\r\n\tPipelineId=\r\n\tCommandName=\r\n\tCommandType=\r\n\tScriptName=\r\n\tCommandPath=\r\n\tCommandLine="
+            ]
+          },
+          "Binary": null
+        }
+      }
+    }
+  },
+  {
+    "file": "BlueSkyRansomware.jsonl",
+    "line": 469,
+    "sha256": "0bba70826ebd1156d9293935c90ec9af32fd4bc1056d28cc744ed8cc327be81c",
+    "event": {
+      "Event": {
+        "#attributes": {
+          "xmlns": "http://schemas.microsoft.com/win/2004/08/events/event"
+        },
+        "System": {
+          "Provider": {
+            "#attributes": {
+              "Name": "MSSQLSERVER"
+            }
+          },
+          "EventID": {
+            "#attributes": {
+              "Qualifiers": 16384
+            },
+            "#text": 18453
+          },
+          "Version": 0,
+          "Level": 0,
+          "Task": 4,
+          "Opcode": 0,
+          "Keywords": "0xa0000000000000",
+          "TimeCreated": {
+            "#attributes": {
+              "SystemTime": "2024-04-23T10:11:10.425516Z"
+            }
+          },
+          "EventRecordID": 3048,
+          "Correlation": null,
+          "Execution": {
+            "#attributes": {
+              "ProcessID": 0,
+              "ThreadID": 0
+            }
+          },
+          "Channel": "Application",
+          "Computer": "DESKTOP-7EQVM78",
+          "Security": {
+            "#attributes": {
+              "UserID": "S-1-5-80-2652535364-2169709536-2857650723-2622804123-1107741775"
+            }
+          }
+        },
+        "EventData": {
+          "Data": {
+            "#text": [
+              "NT SERVICE\\SQLTELEMETRY",
+              " [CLIENT: <local machine>]"
+            ]
+          },
+          "Binary": "154800000A000000100000004400450053004B0054004F0050002D0037004500510056004D00370038000000070000006D00610073007400650072000000"
+        }
+      }
+    }
+  }
+]

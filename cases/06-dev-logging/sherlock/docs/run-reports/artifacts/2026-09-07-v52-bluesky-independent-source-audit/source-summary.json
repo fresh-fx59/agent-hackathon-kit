@@ -1,0 +1,202 @@
+{
+  "source": "/Users/a/hack/sherlock-final-inputs-20260906/independent/corpus/BlueSkyRansomware.jsonl",
+  "sha256": "28b73f0be7b2a6ed7d102c8a8ba86d7c186887e0b71fcacfb8f73dcb0e37ff58",
+  "bytes": 467262,
+  "records": 469,
+  "providers": {
+    "PowerShell": 133,
+    "Microsoft-Windows-Winlogon": 6,
+    "VMUpgradeHelper": 6,
+    "VMTools": 3,
+    "MSSQLSERVER": 216,
+    "Microsoft-Windows-User Profiles Service": 3,
+    "Microsoft-Windows-EventSystem": 1,
+    "Microsoft-Windows-WMI": 5,
+    "ESENT": 9,
+    "Microsoft-Windows-Search": 2,
+    "Microsoft-Windows-Complus": 2,
+    "Microsoft-Windows-MSDTC 2": 2,
+    "edgeupdate": 3,
+    "Microsoft-Windows-Security-SPP": 42,
+    "SecurityCenter": 16,
+    "VSS": 3,
+    "Microsoft-Windows-RestartManager": 6,
+    "Windows Error Reporting": 11
+  },
+  "channels": {
+    "Windows PowerShell": 133,
+    "Application": 336
+  },
+  "provider_ids": {
+    "PowerShell:600": 107,
+    "PowerShell:400": 16,
+    "PowerShell:403": 9,
+    "Microsoft-Windows-Winlogon:6000": 4,
+    "VMUpgradeHelper:260": 1,
+    "VMUpgradeHelper:272": 1,
+    "VMTools:108": 1,
+    "MSSQLSERVER:17147": 1,
+    "Microsoft-Windows-User Profiles Service:1532": 1,
+    "Microsoft-Windows-EventSystem:4625": 1,
+    "Microsoft-Windows-User Profiles Service:1531": 2,
+    "Microsoft-Windows-Winlogon:6003": 2,
+    "VMTools:105": 2,
+    "Microsoft-Windows-WMI:5615": 2,
+    "ESENT:102": 2,
+    "ESENT:105": 2,
+    "ESENT:326": 2,
+    "Microsoft-Windows-WMI:5617": 2,
+    "Microsoft-Windows-Search:1003": 2,
+    "VMUpgradeHelper:258": 2,
+    "Microsoft-Windows-Complus:781": 2,
+    "VMUpgradeHelper:271": 2,
+    "Microsoft-Windows-MSDTC 2:4202": 2,
+    "edgeupdate:0": 3,
+    "MSSQLSERVER:17069": 2,
+    "MSSQLSERVER:49916": 2,
+    "MSSQLSERVER:17101": 2,
+    "MSSQLSERVER:17103": 2,
+    "MSSQLSERVER:17104": 2,
+    "MSSQLSERVER:18496": 2,
+    "MSSQLSERVER:15268": 2,
+    "MSSQLSERVER:17111": 2,
+    "MSSQLSERVER:49904": 2,
+    "MSSQLSERVER:17110": 2,
+    "MSSQLSERVER:17115": 2,
+    "MSSQLSERVER:17164": 2,
+    "MSSQLSERVER:17162": 2,
+    "MSSQLSERVER:49903": 2,
+    "MSSQLSERVER:852": 2,
+    "MSSQLSERVER:894": 2,
+    "MSSQLSERVER:49917": 2,
+    "MSSQLSERVER:873": 2,
+    "MSSQLSERVER:17264": 2,
+    "MSSQLSERVER:17811": 2,
+    "MSSQLSERVER:17176": 2,
+    "MSSQLSERVER:17152": 2,
+    "MSSQLSERVER:17125": 2,
+    "MSSQLSERVER:17118": 2,
+    "MSSQLSERVER:9048": 2,
+    "MSSQLSERVER:49910": 2,
+    "MSSQLSERVER:17137": 14,
+    "MSSQLSERVER:958": 2,
+    "MSSQLSERVER:10981": 2,
+    "MSSQLSERVER:33217": 2,
+    "MSSQLSERVER:33218": 2,
+    "MSSQLSERVER:25753": 8,
+    "MSSQLSERVER:6253": 2,
+    "MSSQLSERVER:19030": 2,
+    "MSSQLSERVER:17663": 2,
+    "MSSQLSERVER:17136": 2,
+    "MSSQLSERVER:41110": 2,
+    "MSSQLSERVER:41111": 2,
+    "MSSQLSERVER:17117": 2,
+    "MSSQLSERVER:9666": 4,
+    "MSSQLSERVER:9688": 2,
+    "MSSQLSERVER:26018": 2,
+    "MSSQLSERVER:26022": 8,
+    "MSSQLSERVER:26048": 4,
+    "MSSQLSERVER:17201": 2,
+    "MSSQLSERVER:26076": 2,
+    "MSSQLSERVER:3408": 2,
+    "MSSQLSERVER:17126": 2,
+    "MSSQLSERVER:26067": 4,
+    "Microsoft-Windows-Security-SPP:900": 3,
+    "Microsoft-Windows-Security-SPP:16394": 10,
+    "Microsoft-Windows-Security-SPP:1066": 2,
+    "Microsoft-Windows-Security-SPP:1003": 2,
+    "Microsoft-Windows-Security-SPP:902": 2,
+    "SecurityCenter:1": 3,
+    "SecurityCenter:15": 12,
+    "Microsoft-Windows-Security-SPP:16384": 10,
+    "Microsoft-Windows-Security-SPP:903": 2,
+    "VSS:8224": 3,
+    "MSSQLSERVER:18453": 15,
+    "MSSQLSERVER:33090": 3,
+    "MSSQLSERVER:8128": 3,
+    "MSSQLSERVER:1": 2,
+    "MSSQLSERVER:25754": 4,
+    "MSSQLSERVER:18456": 44,
+    "MSSQLSERVER:18454": 4,
+    "Microsoft-Windows-RestartManager:10000": 2,
+    "Microsoft-Windows-RestartManager:10001": 2,
+    "Microsoft-Windows-WMI:5611": 1,
+    "ESENT:300": 1,
+    "ESENT:301": 1,
+    "ESENT:302": 1,
+    "MSSQLSERVER:3406": 4,
+    "MSSQLSERVER:3407": 4,
+    "MSSQLSERVER:3454": 1,
+    "PowerShell:800": 1,
+    "Windows Error Reporting:1001": 11,
+    "MSSQLSERVER:17177": 1,
+    "Microsoft-Windows-Security-SPP:1034": 10,
+    "Microsoft-Windows-Security-SPP:1033": 1,
+    "Microsoft-Windows-RestartManager:10010": 1,
+    "Microsoft-Windows-RestartManager:10005": 1,
+    "SecurityCenter:2": 1,
+    "MSSQLSERVER:15457": 2
+  },
+  "computers": {
+    "DESKTOP-7EQVM78": 469
+  },
+  "bounds": [
+    {
+      "line": 1,
+      "sha256": "135bc45e5457d06820b67f1f40650884f9e37e72c7d106a961a55bd5c0a749e4",
+      "id": 600,
+      "provider": "PowerShell",
+      "channel": "Windows PowerShell",
+      "time": "2024-04-21T00:32:42.803382Z",
+      "computer": "DESKTOP-7EQVM78",
+      "data": {
+        "Data": {
+          "#text": [
+            "Registry",
+            "Started",
+            "\tProviderName=Registry\r\n\tNewProviderState=Started\r\n\r\n\tSequenceNumber=1\r\n\r\n\tHostName=ConsoleHost\r\n\tHostVersion=5.1.19041.4291\r\n\tHostId=1c66ed64-9f9d-4fd2-a6ad-9a3de9ea4210\r\n\tHostApplication=powershell.exe -ExecutionPolicy Restricted -Command Write-Host 'Final result: 1';\r\n\tEngineVersion=\r\n\tRunspaceId=\r\n\tPipelineId=\r\n\tCommandName=\r\n\tCommandType=\r\n\tScriptName=\r\n\tCommandPath=\r\n\tCommandLine="
+          ]
+        },
+        "Binary": null
+      },
+      "user": null,
+      "security": null,
+      "execution": {
+        "#attributes": {
+          "ProcessID": 0,
+          "ThreadID": 0
+        }
+      }
+    },
+    {
+      "line": 469,
+      "sha256": "0bba70826ebd1156d9293935c90ec9af32fd4bc1056d28cc744ed8cc327be81c",
+      "id": 18453,
+      "provider": "MSSQLSERVER",
+      "channel": "Application",
+      "time": "2024-04-23T10:11:10.425516Z",
+      "computer": "DESKTOP-7EQVM78",
+      "data": {
+        "Data": {
+          "#text": [
+            "NT SERVICE\\SQLTELEMETRY",
+            " [CLIENT: <local machine>]"
+          ]
+        },
+        "Binary": "154800000A000000100000004400450053004B0054004F0050002D0037004500510056004D00370038000000070000006D00610073007400650072000000"
+      },
+      "user": null,
+      "security": {
+        "#attributes": {
+          "UserID": "S-1-5-80-2652535364-2169709536-2857650723-2622804123-1107741775"
+        }
+      },
+      "execution": {
+        "#attributes": {
+          "ProcessID": 0,
+          "ThreadID": 0
+        }
+      }
+    }
+  ]
+}
