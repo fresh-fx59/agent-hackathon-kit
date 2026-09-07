@@ -1,0 +1,375 @@
+{
+  "report_path": "/Users/a/Documents/projects/personal-os/docs/run-reports/artifacts/2026-09-07-v52-bluesky-r5-live-snapshot/report-gate2.md",
+  "report_sha256": "b1dc5e90505499c8d6c530c4f0db753da5519cd753d4821dbf8b20a7aa0422e7",
+  "report_bytes": 38232,
+  "source_sha256": "28b73f0be7b2a6ed7d102c8a8ba86d7c186887e0b71fcacfb8f73dcb0e37ff58",
+  "source_records": 469,
+  "status": "STABLE_GATE2_LIVE_SEMANTIC_FAIL_NOT_FINAL",
+  "citations": [
+    {
+      "report_line": 26,
+      "source_line": 164,
+      "quote": "#attributes\":{\"Qualifiers\":49152},\"#text\":18456},\"Version\":0,\"Level\":0,\"Task\":4,\"Opcode\":0",
+      "exact_quote": true
+    },
+    {
+      "report_line": 27,
+      "source_line": 164,
+      "quote": "ata\":{\"Data\":{\"#text\":[\"sa\",\" Reason: Password did not match that for the login provided.\"",
+      "exact_quote": true
+    },
+    {
+      "report_line": 28,
+      "source_line": 432,
+      "quote": "#attributes\":{\"Qualifiers\":49152},\"#text\":18456},\"Version\":0,\"Level\":0,\"Task\":4,\"Opcode\":0",
+      "exact_quote": true
+    },
+    {
+      "report_line": 29,
+      "source_line": 432,
+      "quote": "at for the login provided.\",\" [CLIENT: 87.96.21.84]\"]},\"Binary\":\"184800000E000000100000004",
+      "exact_quote": true
+    },
+    {
+      "report_line": 57,
+      "source_line": 454,
+      "quote": "#attributes\":{\"Qualifiers\":16384},\"#text\":18454},\"Version\":0,\"Level\":0,\"Task\":4,\"Opcode\":0",
+      "exact_quote": true
+    },
+    {
+      "report_line": 58,
+      "source_line": 454,
+      "quote": "ata\":{\"Data\":{\"#text\":[\"sa\",\" [CLIENT: 87.96.21.84]\"]},\"Binary\":\"164800000A000000100000004",
+      "exact_quote": true
+    },
+    {
+      "report_line": 59,
+      "source_line": 455,
+      "quote": "ata\":{\"Data\":{\"#text\":[\"sa\",\" [CLIENT: 87.96.21.84]\"]},\"Binary\":\"164800000A000000100000004",
+      "exact_quote": true
+    },
+    {
+      "report_line": 60,
+      "source_line": 458,
+      "quote": "ata\":{\"Data\":{\"#text\":[\"sa\",\" [CLIENT: 87.96.21.84]\"]},\"Binary\":\"164800000A000000100000004",
+      "exact_quote": true
+    },
+    {
+      "report_line": 61,
+      "source_line": 456,
+      "quote": "l},\"EventData\":{\"Data\":{\"#text\":[\"show advanced options\",\"0\",\"1\"]},\"Binary\":\"613C00000A000",
+      "exact_quote": true
+    },
+    {
+      "report_line": 62,
+      "source_line": 457,
+      "quote": "#attributes\":{\"Qualifiers\":16384},\"#text\":15457},\"Version\":0,\"Level\":4,\"Task\":2,\"Opcode\":0",
+      "exact_quote": true
+    },
+    {
+      "report_line": 63,
+      "source_line": 457,
+      "quote": "\":null},\"EventData\":{\"Data\":{\"#text\":[\"xp_cmdshell\",\"0\",\"1\"]},\"Binary\":\"613C00000A00000010",
+      "exact_quote": true
+    },
+    {
+      "report_line": 64,
+      "source_line": 186,
+      "quote": "urity\":null},\"EventData\":{\"Data\":{\"#text\":[\"sa\",\" [CLIENT: 87.96.21.84]\"]},\"Binary\":\"16480",
+      "exact_quote": true
+    },
+    {
+      "report_line": 88,
+      "source_line": 459,
+      "quote": "r\\n\\tSequenceNumber=1\\r\\n\\r\\n\\tHostName=MSFConsole\\r\\n\\tHostVersion=0.1\\r\\n\\tHostId=1693e6",
+      "exact_quote": true
+    },
+    {
+      "report_line": 89,
+      "source_line": 467,
+      "quote": "D\":{\"#attributes\":{\"Qualifiers\":0},\"#text\":400},\"Version\":0,\"Level\":4,\"Task\":4,\"Opcode\":0,",
+      "exact_quote": true
+    },
+    {
+      "report_line": 90,
+      "source_line": 467,
+      "quote": "8356-4245271c31e8\\r\\n\\tHostApplication=winlogon.exe\\r\\n\\tEngineVersion=5.1.19041.4291\\r\\n\\",
+      "exact_quote": true
+    },
+    {
+      "report_line": 91,
+      "source_line": 24,
+      "quote": "bject { $_.ExecutablePath -eq 'C:\\\\Users\\\\Win 10\\\\AppData\\\\Local\\\\Programs\\\\Microsoft VS C",
+      "exact_quote": true
+    },
+    {
+      "report_line": 108,
+      "source_line": 365,
+      "quote": "vscode.powershell-2024.2.1\\\\modules\\\\PSScriptAnalyzer\\\\1.22.0\\\\PSScriptAnalyzer.psm1\\r\\n\\t",
+      "exact_quote": true
+    },
+    {
+      "report_line": 109,
+      "source_line": 360,
+      "quote": "Start-EditorServices -HostName 'Visual Studio Code Host' -HostProfileId 'Microsoft.VSCode",
+      "exact_quote": true
+    },
+    {
+      "report_line": 121,
+      "source_line": 423,
+      "quote": "\":{\"#text\":[\"Windows Defender\",\"SECURITY_PRODUCT_STATE_ON\"]},\"Binary\":null}}}",
+      "exact_quote": true
+    },
+    {
+      "report_line": 122,
+      "source_line": 425,
+      "quote": "indows Defender\",\"SECURITY_PRODUCT_STATE_SNOOZED\"]},\"Binary\":null}}}",
+      "exact_quote": true
+    },
+    {
+      "report_line": 123,
+      "source_line": 431,
+      "quote": "ttributes\":{\"SystemTime\":\"2024-04-23T09:54:57.294511Z\"}},\"EventRecordID\":3019,\"Correlation",
+      "exact_quote": true
+    },
+    {
+      "report_line": 135,
+      "source_line": 143,
+      "quote": "Win 10\",\" [CLIENT: fe80::6742:7b8e:1350:5571%9]\"]},\"Binary\":\"154800000A000000100",
+      "exact_quote": true
+    },
+    {
+      "report_line": 136,
+      "source_line": 155,
+      "quote": "ntData\":{\"Data\":{\"#text\":[\"NT SERVICE\\\\SQLTELEMETRY\",\" [CLIENT: <local machine>]\"]},\"Binar",
+      "exact_quote": true
+    },
+    {
+      "report_line": 147,
+      "source_line": 24,
+      "quote": "bject { $_.ExecutablePath -eq 'C:\\\\Users\\\\Win 10\\\\AppData\\\\Local\\\\Programs\\\\Microsoft VS C",
+      "exact_quote": true
+    },
+    {
+      "report_line": 148,
+      "source_line": 109,
+      "quote": "y\":null},\"EventData\":{\"Data\":{\"#text\":[\"1\",\"sa\"]},\"Binary\":\"564A00000A00000010000000440045",
+      "exact_quote": true
+    },
+    {
+      "report_line": 149,
+      "source_line": 155,
+      "quote": "ntData\":{\"Data\":{\"#text\":[\"NT SERVICE\\\\SQLTELEMETRY\",\" [CLIENT: <local machine>]\"]},\"Binar",
+      "exact_quote": true
+    },
+    {
+      "report_line": 159,
+      "source_line": 53,
+      "quote": "\":{\"#attributes\":{\"xmlns\":\"http://schemas.microsoft.com/win/2004/08/events/event\"},\"System",
+      "exact_quote": true
+    },
+    {
+      "report_line": 203,
+      "source_line": 71,
+      "quote": "\"Computer\":\"DESKTOP-7EQVM78\",\"Security\":null}",
+      "exact_quote": true
+    },
+    {
+      "report_line": 204,
+      "source_line": 71,
+      "quote": "Developer Edition (64-bit) on Windows 10 Pro 10.0 <X64> (Build 19045: ) (Hypervisor)",
+      "exact_quote": true
+    },
+    {
+      "report_line": 205,
+      "source_line": 71,
+      "quote": "\"Data\":{\"#text\":\"Microsoft SQL Server 2022 (RTM) - 16.0.1000.6 (X64)",
+      "exact_quote": true
+    },
+    {
+      "report_line": 206,
+      "source_line": 77,
+      "quote": "\"EventData\":{\"Data\":{\"#text\":\"MIXED\"",
+      "exact_quote": true
+    },
+    {
+      "report_line": 207,
+      "source_line": 79,
+      "quote": "NT Service\\\\MSSQLSERVER\"},\"Binary\":\"F0C200000A00000010",
+      "exact_quote": true
+    },
+    {
+      "report_line": 208,
+      "source_line": 80,
+      "quote": "-d C:\\\\Program Files\\\\Microsoft SQL Server\\\\MSSQL16.MSSQLSERVER\\\\MSSQL\\\\DATA\\\\master.mdf",
+      "exact_quote": true
+    },
+    {
+      "report_line": 209,
+      "source_line": 109,
+      "quote": "\"#text\":[\"1\",\"sa\"]},\"Binary\":\"564A00000A00000010",
+      "exact_quote": true
+    },
+    {
+      "report_line": 210,
+      "source_line": 24,
+      "quote": "bject { $_.ExecutablePath -eq 'C:\\\\Users\\\\Win 10\\\\AppData\\\\Local\\\\Programs\\\\Microsoft VS C",
+      "exact_quote": true
+    },
+    {
+      "report_line": 210,
+      "source_line": 143,
+      "quote": "Win 10\",\" [CLIENT: fe80::6742:7b8e:1350:5571%9]\"]},\"Binary\":\"154800000A000000100",
+      "exact_quote": true
+    },
+    {
+      "report_line": 211,
+      "source_line": 155,
+      "quote": "ntData\":{\"Data\":{\"#text\":[\"NT SERVICE\\\\SQLTELEMETRY\",\" [CLIENT: <local machine>]\"]},\"Binar",
+      "exact_quote": true
+    },
+    {
+      "report_line": 212,
+      "source_line": 121,
+      "quote": "\"#text\":[\"'any'\",\"ipv6\",\"1433\",\"1\"]},\"Binary\":\"A66500000A00000010",
+      "exact_quote": true
+    },
+    {
+      "report_line": 212,
+      "source_line": 122,
+      "quote": "\"#text\":[\"'any'\",\"ipv4\",\"1433\",\"1\"]},\"Binary\":\"A66500000A00000010",
+      "exact_quote": true
+    },
+    {
+      "report_line": 213,
+      "source_line": 164,
+      "quote": "\"#text\":[\"sa\",\" Reason: Password did not match that for the login provided.\",\" [CLIENT: 87.96.21.84]\"]},\"Binary\":\"184800000E0000",
+      "exact_quote": true
+    },
+    {
+      "report_line": 213,
+      "source_line": 432,
+      "quote": "\"#text\":[\"sa\",\" Reason: Password did not match that for the login provided.\",\" [CLIENT: 87.96.21.84]\"]},\"Binary\":\"184800000E0000",
+      "exact_quote": true
+    },
+    {
+      "report_line": 214,
+      "source_line": 143,
+      "quote": "Win 10\",\" [CLIENT: fe80::6742:7b8e:1350:5571%9]\"]},\"Binary\":\"154800000A000000100",
+      "exact_quote": true
+    },
+    {
+      "report_line": 215,
+      "source_line": 360,
+      "quote": "Start-EditorServices -HostName 'Visual Studio Code Host' -HostProfileId 'Microsoft.VSCode",
+      "exact_quote": true
+    },
+    {
+      "report_line": 215,
+      "source_line": 365,
+      "quote": "vscode.powershell-2024.2.1\\\\modules\\\\PSScriptAnalyzer\\\\1.22.0\\\\PSScriptAnalyzer.psm1\\r\\n\\t",
+      "exact_quote": true
+    },
+    {
+      "report_line": 216,
+      "source_line": 459,
+      "quote": "r\\n\\tSequenceNumber=1\\r\\n\\r\\n\\tHostName=MSFConsole\\r\\n\\tHostVersion=0.1\\r\\n\\tHostId=1693e6",
+      "exact_quote": true
+    },
+    {
+      "report_line": 216,
+      "source_line": 467,
+      "quote": "8356-4245271c31e8\\r\\n\\tHostApplication=winlogon.exe\\r\\n\\tEngineVersion=5.1.19041.4291\\r\\n\\",
+      "exact_quote": true
+    },
+    {
+      "report_line": 217,
+      "source_line": 456,
+      "quote": "l},\"EventData\":{\"Data\":{\"#text\":[\"show advanced options\",\"0\",\"1\"]},\"Binary\":\"613C00000A000",
+      "exact_quote": true
+    },
+    {
+      "report_line": 217,
+      "source_line": 457,
+      "quote": "\":null},\"EventData\":{\"Data\":{\"#text\":[\"xp_cmdshell\",\"0\",\"1\"]},\"Binary\":\"613C00000A00000010",
+      "exact_quote": true
+    },
+    {
+      "report_line": 218,
+      "source_line": 423,
+      "quote": "\":{\"#text\":[\"Windows Defender\",\"SECURITY_PRODUCT_STATE_ON\"]},\"Binary\":null}}}",
+      "exact_quote": true
+    },
+    {
+      "report_line": 218,
+      "source_line": 425,
+      "quote": "indows Defender\",\"SECURITY_PRODUCT_STATE_SNOOZED\"]},\"Binary\":null}}}",
+      "exact_quote": true
+    },
+    {
+      "report_line": 224,
+      "source_line": 164,
+      "quote": "ata\":{\"Data\":{\"#text\":[\"sa\",\" Reason: Password did not match that for the login provided.\"",
+      "exact_quote": true
+    },
+    {
+      "report_line": 225,
+      "source_line": 432,
+      "quote": "at for the login provided.\",\" [CLIENT: 87.96.21.84]\"]},\"Binary\":\"184800000E000000100000004",
+      "exact_quote": true
+    },
+    {
+      "report_line": 226,
+      "source_line": 454,
+      "quote": "ata\":{\"Data\":{\"#text\":[\"sa\",\" [CLIENT: 87.96.21.84]\"]},\"Binary\":\"164800000A000000100000004",
+      "exact_quote": true
+    },
+    {
+      "report_line": 227,
+      "source_line": 455,
+      "quote": "ata\":{\"Data\":{\"#text\":[\"sa\",\" [CLIENT: 87.96.21.84]\"]},\"Binary\":\"164800000A000000100000004",
+      "exact_quote": true
+    },
+    {
+      "report_line": 228,
+      "source_line": 458,
+      "quote": "ata\":{\"Data\":{\"#text\":[\"sa\",\" [CLIENT: 87.96.21.84]\"]},\"Binary\":\"164800000A000000100000004",
+      "exact_quote": true
+    },
+    {
+      "report_line": 229,
+      "source_line": 456,
+      "quote": "l},\"EventData\":{\"Data\":{\"#text\":[\"show advanced options\",\"0\",\"1\"]},\"Binary\":\"613C00000A000",
+      "exact_quote": true
+    },
+    {
+      "report_line": 230,
+      "source_line": 457,
+      "quote": "\":null},\"EventData\":{\"Data\":{\"#text\":[\"xp_cmdshell\",\"0\",\"1\"]},\"Binary\":\"613C00000A00000010",
+      "exact_quote": true
+    },
+    {
+      "report_line": 231,
+      "source_line": 459,
+      "quote": "r\\n\\tSequenceNumber=1\\r\\n\\r\\n\\tHostName=MSFConsole\\r\\n\\tHostVersion=0.1\\r\\n\\tHostId=1693e6",
+      "exact_quote": true
+    },
+    {
+      "report_line": 232,
+      "source_line": 467,
+      "quote": "8356-4245271c31e8\\r\\n\\tHostApplication=winlogon.exe\\r\\n\\tEngineVersion=5.1.19041.4291\\r\\n\\",
+      "exact_quote": true
+    }
+  ],
+  "issues_remaining": [
+    "E1",
+    "E2",
+    "E3",
+    "E4",
+    "E5",
+    "E6",
+    "E7",
+    "E8",
+    "E9"
+  ]
+}

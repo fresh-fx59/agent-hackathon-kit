@@ -59,3 +59,25 @@ Verification: source hashes, all469 parse, counts, actual fields, source record 
 - Revised snapshot `report-revised.md`, SHA `869577393552374b377bf9f5a3c61b7aee1ba9b67e961c7bea301f987747c310`, 34,730 bytes: only annotations/Markdown changed. After stripping those wrappers, substantive prose equals the audited original. E1–E9 remain.
 - Revised snapshot2 `report-revised-2.md`, SHA `421f29c6c4b1fa7096d989ba5f04165de1c0023855dd10b01d76fa7600e892a3`, 34,969 bytes: H3 outcome changed from success to attempt, still explicitly recording engine start while acknowledging unknown payload/result. K3 shortens the Win10 principal and its source143 quote; the replacement quote is exact. This does not resolve E1–E9. All59 citation references and27 literal quotations still pass in both snapshots.
 - Root requested waiting for a stable complete edit/gate rerun or terminal report, rather than reviewing each small active edit. Watcher notified. These are live-snapshot results only; no final-run verdict.
+
+### Stable gate2 comparison
+
+Report `report-gate2.md`, SHA `b1dc5e90505499c8d6c530c4f0db753da5519cd753d4821dbf8b20a7aa0422e7`, 38,232 bytes, 237 lines; gate receipt `20260907T085615Z-b69ddaffe05e4b7a9ac3ab408fe9a69f`. Still active/nonfinal. **Semantic FAIL remains separate from the reported one mechanical label conflict.** Read all changed substantive prose against previous reviewed versions, reverified original-source SHA/469 records and all current citations; 59 references now have 59 exact literal quotes. Added inventory quotes support unchanged inventory values. No newly introduced material factual claim outside existing issue groups.
+
+| Issue | Gate2 report lines | Current status |
+|---|---|---|
+| E1 identity/ownership |147–153 |Unresolved. Table now adds PROVEN labels to the unsupported owner conclusions; source identifiers remain insufficient for ownership/authorization. |
+| E2 sa-only-remote negative |152 |Unresolved; source295/19030 still omitted from the universal claim. |
+| E3 Defender exoneration |115–127 |Unresolved; unknown actor still used to reject attack and declare normal. |
+| E4 configuration runtime/causality |38/43/68/70/76/83/222 |Unresolved. Final now describes a state allowing OS commands, which still exceeds15457 configured-value evidence. H2 still claims the obtained session made the changes. |
+| E5 actual HostName baseline |76/96 |Unresolved;46 Default Host records omitted and360 still misused. |
+| E6 elapsed time |76 |Unresolved;~40–60 remains instead of65.593929seconds. |
+| E7 telemetry timing/normality |129–141/153 |Unresolved;regular~10minutes and categorical local-principal exoneration persist. |
+| E8 missing-Security limit |184 andH2 |Unresolved;recorded MSSQL18454 success is still discounted because Security is absent. |
+| E9 host/IDE exclusions and synthesis |78/82/96/113/222/233 |Partly softened wording, not resolved. Since revision2, H3 labels outcome attempt while still acknowledging actual engine startup; lack of payload does not erase that observation. Final222 removes the former literal established-attribution phrase and refers to H1–H3 limitations, but categorical compromise, runtime wording and unsupported injection/ordinary-execution exclusions remain. No prescribed final verdict: model must decide the supported confidence level from source. |
+
+The nine source-backed requests remain applicable. Prepared continuation prompt with current snapshot identity and delta context; not sent to model. Next comparison should bind to a stable subsequent gate or terminal hash.
+
+### Stable gate3 comparison
+
+Report `report-gate3.md`, SHA `511a9c968712da844ba7dd28ed7c95fcfd2494daf587bf782a9ebb965e1cc09c`, 38,233 bytes. Exact diff is one added blank line after gate2 line23; no factual, causal, negative, quotation or verdict content changed. All E1–E9 and the gate2 section review apply (later report line numbers shift by1). Mechanical reportcheck reportedly has0 blockers; **semantic FAIL remains**, and run/state inventory qualification is not established. Latest ready prompt is `continuation-review-prompt-gate3.txt`; no model steering performed.

@@ -16,21 +16,35 @@
       "sha256": "1a79d6a7b29b40266aca4faf7ed700375d6dcb14d30ce9bceaaa300c5fda98dc",
       "bytes": 16444
     },
+    "continuation-review-prompt-gate3.txt": {
+      "sha256": "9c74dfa0e5d05e02c24f8a4b0aef06a2838fd7ff7259905e693542eaea26fc9f",
+      "bytes": 5972
+    },
     "continuation-review-prompt.txt": {
       "sha256": "abc5f6a36a85b7d9c1f4e9c31fdadc40bbd246363e67adc45e159e21aba94503",
       "bytes": 5424
+    },
+    "gate2-checks.json": {
+      "sha256": "97e3fc4eec569199b062c45bdff4ddd325f5381c7466bd5bed307c8ce9533c7d",
+      "bytes": 12663
+    },
+    "gate3-checks.json": {
+      "sha256": "64ab5093b744dbeb612eade2c8ebd0d06e59893ba8762538e714c8916e0df6e2",
+      "bytes": 12748
     },
     "live-revision-checks.json": {
       "sha256": "88cfc3d53be4e375bc3b3a8600df62e0e6ea2a1c0c4118421ed7662ba5ea6794",
       "bytes": 1035
     },
     "source-audit.md": {
-      "sha256": "3b9f804e90caf17df38bbb39c58a9fec2b8af762bc5bfe8b55662f9b55fea08b",
-      "bytes": 14651
+      "sha256": "f0a8a18a27576669eb9780d615c6306d31bb0056b110524f03b8f9543a228d6e",
+      "bytes": 17791
     },
     "source-evidence.json": {
       "sha256": "c2e788739ad5e5ed9c202bdd4dd3d4fe18e2e6bc9827c227e575cbe027c1a5eb",
       "bytes": 53816
     }
-  }
+  },
+  "latest_reviewed_report_sha256": "511a9c968712da844ba7dd28ed7c95fcfd2494daf587bf782a9ebb965e1cc09c",
+  "latest_status": "STABLE_GATE3_LIVE_SEMANTIC_FAIL_NOT_FINAL"
 }
