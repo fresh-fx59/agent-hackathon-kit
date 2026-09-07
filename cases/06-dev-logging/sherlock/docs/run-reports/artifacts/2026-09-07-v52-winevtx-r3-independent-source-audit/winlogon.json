@@ -1,0 +1,226 @@
+[
+  {
+    "file": "rendered/Microsoft-Windows-Winlogon-4Operational.jsonl",
+    "line": 17,
+    "id": 1,
+    "time": "2021-05-09T21:43:08.601760Z",
+    "rid": 17,
+    "provider": "Microsoft-Windows-Winlogon",
+    "data": null,
+    "user": null,
+    "security": {
+      "#attributes": {
+        "UserID": "S-1-5-18"
+      }
+    }
+  },
+  {
+    "file": "rendered/Microsoft-Windows-Winlogon-4Operational.jsonl",
+    "line": 18,
+    "id": 2,
+    "time": "2021-05-09T21:43:08.639928Z",
+    "rid": 18,
+    "provider": "Microsoft-Windows-Winlogon",
+    "data": {
+      "Win32Status": 0
+    },
+    "user": null,
+    "security": {
+      "#attributes": {
+        "UserID": "S-1-5-18"
+      }
+    }
+  },
+  {
+    "file": "rendered/Microsoft-Windows-Winlogon-4Operational.jsonl",
+    "line": 49,
+    "id": 1,
+    "time": "2021-05-09T22:11:54.813752Z",
+    "rid": 49,
+    "provider": "Microsoft-Windows-Winlogon",
+    "data": null,
+    "user": null,
+    "security": {
+      "#attributes": {
+        "UserID": "S-1-5-18"
+      }
+    }
+  },
+  {
+    "file": "rendered/Microsoft-Windows-Winlogon-4Operational.jsonl",
+    "line": 50,
+    "id": 2,
+    "time": "2021-05-09T22:11:54.840514Z",
+    "rid": 50,
+    "provider": "Microsoft-Windows-Winlogon",
+    "data": {
+      "Win32Status": 0
+    },
+    "user": null,
+    "security": {
+      "#attributes": {
+        "UserID": "S-1-5-18"
+      }
+    }
+  },
+  {
+    "file": "rendered/Microsoft-Windows-Winlogon-4Operational.jsonl",
+    "line": 73,
+    "id": 1,
+    "time": "2021-05-10T00:03:52.152814Z",
+    "rid": 73,
+    "provider": "Microsoft-Windows-Winlogon",
+    "data": null,
+    "user": null,
+    "security": {
+      "#attributes": {
+        "UserID": "S-1-5-18"
+      }
+    }
+  },
+  {
+    "file": "rendered/Microsoft-Windows-Winlogon-4Operational.jsonl",
+    "line": 74,
+    "id": 2,
+    "time": "2021-05-10T00:03:52.183292Z",
+    "rid": 74,
+    "provider": "Microsoft-Windows-Winlogon",
+    "data": {
+      "Win32Status": 0
+    },
+    "user": null,
+    "security": {
+      "#attributes": {
+        "UserID": "S-1-5-18"
+      }
+    }
+  },
+  {
+    "file": "rendered/Microsoft-Windows-Winlogon-4Operational.jsonl",
+    "line": 113,
+    "id": 1,
+    "time": "2021-05-10T00:24:25.755755Z",
+    "rid": 113,
+    "provider": "Microsoft-Windows-Winlogon",
+    "data": null,
+    "user": null,
+    "security": {
+      "#attributes": {
+        "UserID": "S-1-5-18"
+      }
+    }
+  },
+  {
+    "file": "rendered/Microsoft-Windows-Winlogon-4Operational.jsonl",
+    "line": 114,
+    "id": 2,
+    "time": "2021-05-10T00:24:25.791012Z",
+    "rid": 114,
+    "provider": "Microsoft-Windows-Winlogon",
+    "data": {
+      "Win32Status": 0
+    },
+    "user": null,
+    "security": {
+      "#attributes": {
+        "UserID": "S-1-5-18"
+      }
+    }
+  },
+  {
+    "file": "rendered/Microsoft-Windows-Winlogon-4Operational.jsonl",
+    "line": 137,
+    "id": 1,
+    "time": "2021-05-10T00:50:52.173764Z",
+    "rid": 137,
+    "provider": "Microsoft-Windows-Winlogon",
+    "data": null,
+    "user": null,
+    "security": {
+      "#attributes": {
+        "UserID": "S-1-5-18"
+      }
+    }
+  },
+  {
+    "file": "rendered/Microsoft-Windows-Winlogon-4Operational.jsonl",
+    "line": 138,
+    "id": 2,
+    "time": "2021-05-10T00:50:52.206347Z",
+    "rid": 138,
+    "provider": "Microsoft-Windows-Winlogon",
+    "data": {
+      "Win32Status": 0
+    },
+    "user": null,
+    "security": {
+      "#attributes": {
+        "UserID": "S-1-5-18"
+      }
+    }
+  },
+  {
+    "file": "rendered/Microsoft-Windows-Winlogon-4Operational.jsonl",
+    "line": 161,
+    "id": 1,
+    "time": "2021-05-10T19:33:28.938905Z",
+    "rid": 161,
+    "provider": "Microsoft-Windows-Winlogon",
+    "data": null,
+    "user": null,
+    "security": {
+      "#attributes": {
+        "UserID": "S-1-5-18"
+      }
+    }
+  },
+  {
+    "file": "rendered/Microsoft-Windows-Winlogon-4Operational.jsonl",
+    "line": 162,
+    "id": 2,
+    "time": "2021-05-10T19:33:28.967020Z",
+    "rid": 162,
+    "provider": "Microsoft-Windows-Winlogon",
+    "data": {
+      "Win32Status": 0
+    },
+    "user": null,
+    "security": {
+      "#attributes": {
+        "UserID": "S-1-5-18"
+      }
+    }
+  },
+  {
+    "file": "rendered/Microsoft-Windows-Winlogon-4Operational.jsonl",
+    "line": 185,
+    "id": 1,
+    "time": "2021-05-11T13:44:24.342902Z",
+    "rid": 185,
+    "provider": "Microsoft-Windows-Winlogon",
+    "data": null,
+    "user": null,
+    "security": {
+      "#attributes": {
+        "UserID": "S-1-5-18"
+      }
+    }
+  },
+  {
+    "file": "rendered/Microsoft-Windows-Winlogon-4Operational.jsonl",
+    "line": 186,
+    "id": 2,
+    "time": "2021-05-11T13:44:24.370647Z",
+    "rid": 186,
+    "provider": "Microsoft-Windows-Winlogon",
+    "data": {
+      "Win32Status": 0
+    },
+    "user": null,
+    "security": {
+      "#attributes": {
+        "UserID": "S-1-5-18"
+      }
+    }
+  }
+]

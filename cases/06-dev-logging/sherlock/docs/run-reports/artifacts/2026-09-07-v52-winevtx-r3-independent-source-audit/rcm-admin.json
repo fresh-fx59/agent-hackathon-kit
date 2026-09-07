@@ -1,0 +1,464 @@
+[
+  {
+    "file": "rendered/Microsoft-Windows-TerminalServices-RemoteConnectionManager-4Admin.jsonl",
+    "line": 1,
+    "id": 1158,
+    "time": "2021-05-08T23:23:46.320929Z",
+    "rid": 1,
+    "provider": "Microsoft-Windows-TerminalServices-RemoteConnectionManager",
+    "data": null,
+    "user": {
+      "EventXML": {
+        "#attributes": {
+          "xmlns": "Event_NS"
+        },
+        "Param1": "5.63.117.101"
+      }
+    },
+    "security": {
+      "#attributes": {
+        "UserID": "S-1-5-20"
+      }
+    }
+  },
+  {
+    "file": "rendered/Microsoft-Windows-TerminalServices-RemoteConnectionManager-4Admin.jsonl",
+    "line": 2,
+    "id": 20521,
+    "time": "2021-05-09T21:43:08.807796Z",
+    "rid": 2,
+    "provider": "Microsoft-Windows-TerminalServices-RemoteConnectionManager",
+    "data": null,
+    "user": {
+      "EventXML": {
+        "#attributes": {
+          "xmlns": "Event_NS"
+        },
+        "Param1": "RDP-Tcp"
+      }
+    },
+    "security": {
+      "#attributes": {
+        "UserID": "S-1-5-20"
+      }
+    }
+  },
+  {
+    "file": "rendered/Microsoft-Windows-TerminalServices-RemoteConnectionManager-4Admin.jsonl",
+    "line": 3,
+    "id": 20521,
+    "time": "2021-05-09T22:11:55.093523Z",
+    "rid": 3,
+    "provider": "Microsoft-Windows-TerminalServices-RemoteConnectionManager",
+    "data": null,
+    "user": {
+      "EventXML": {
+        "#attributes": {
+          "xmlns": "Event_NS"
+        },
+        "Param1": "RDP-Tcp"
+      }
+    },
+    "security": {
+      "#attributes": {
+        "UserID": "S-1-5-20"
+      }
+    }
+  },
+  {
+    "file": "rendered/Microsoft-Windows-TerminalServices-RemoteConnectionManager-4Admin.jsonl",
+    "line": 4,
+    "id": 20521,
+    "time": "2021-05-10T00:03:52.888064Z",
+    "rid": 4,
+    "provider": "Microsoft-Windows-TerminalServices-RemoteConnectionManager",
+    "data": null,
+    "user": {
+      "EventXML": {
+        "#attributes": {
+          "xmlns": "Event_NS"
+        },
+        "Param1": "RDP-Tcp"
+      }
+    },
+    "security": {
+      "#attributes": {
+        "UserID": "S-1-5-20"
+      }
+    }
+  },
+  {
+    "file": "rendered/Microsoft-Windows-TerminalServices-RemoteConnectionManager-4Admin.jsonl",
+    "line": 5,
+    "id": 20521,
+    "time": "2021-05-10T00:24:25.877903Z",
+    "rid": 5,
+    "provider": "Microsoft-Windows-TerminalServices-RemoteConnectionManager",
+    "data": null,
+    "user": {
+      "EventXML": {
+        "#attributes": {
+          "xmlns": "Event_NS"
+        },
+        "Param1": "RDP-Tcp"
+      }
+    },
+    "security": {
+      "#attributes": {
+        "UserID": "S-1-5-20"
+      }
+    }
+  },
+  {
+    "file": "rendered/Microsoft-Windows-TerminalServices-RemoteConnectionManager-4Admin.jsonl",
+    "line": 6,
+    "id": 20521,
+    "time": "2021-05-10T00:50:52.814521Z",
+    "rid": 6,
+    "provider": "Microsoft-Windows-TerminalServices-RemoteConnectionManager",
+    "data": null,
+    "user": {
+      "EventXML": {
+        "#attributes": {
+          "xmlns": "Event_NS"
+        },
+        "Param1": "RDP-Tcp"
+      }
+    },
+    "security": {
+      "#attributes": {
+        "UserID": "S-1-5-20"
+      }
+    }
+  },
+  {
+    "file": "rendered/Microsoft-Windows-TerminalServices-RemoteConnectionManager-4Admin.jsonl",
+    "line": 7,
+    "id": 20521,
+    "time": "2021-05-10T19:33:29.535923Z",
+    "rid": 7,
+    "provider": "Microsoft-Windows-TerminalServices-RemoteConnectionManager",
+    "data": null,
+    "user": {
+      "EventXML": {
+        "#attributes": {
+          "xmlns": "Event_NS"
+        },
+        "Param1": "RDP-Tcp"
+      }
+    },
+    "security": {
+      "#attributes": {
+        "UserID": "S-1-5-20"
+      }
+    }
+  },
+  {
+    "file": "rendered/Microsoft-Windows-TerminalServices-RemoteConnectionManager-4Admin.jsonl",
+    "line": 8,
+    "id": 20521,
+    "time": "2021-05-11T13:44:24.510045Z",
+    "rid": 8,
+    "provider": "Microsoft-Windows-TerminalServices-RemoteConnectionManager",
+    "data": null,
+    "user": {
+      "EventXML": {
+        "#attributes": {
+          "xmlns": "Event_NS"
+        },
+        "Param1": "RDP-Tcp"
+      }
+    },
+    "security": {
+      "#attributes": {
+        "UserID": "S-1-5-20"
+      }
+    }
+  },
+  {
+    "file": "rendered/Microsoft-Windows-TerminalServices-RemoteConnectionManager-4Admin.jsonl",
+    "line": 9,
+    "id": 1158,
+    "time": "2021-05-11T17:25:15.529898Z",
+    "rid": 9,
+    "provider": "Microsoft-Windows-TerminalServices-RemoteConnectionManager",
+    "data": null,
+    "user": {
+      "EventXML": {
+        "#attributes": {
+          "xmlns": "Event_NS"
+        },
+        "Param1": "216.218.206.68"
+      }
+    },
+    "security": {
+      "#attributes": {
+        "UserID": "S-1-5-20"
+      }
+    }
+  },
+  {
+    "file": "rendered/Microsoft-Windows-TerminalServices-RemoteConnectionManager-4Admin.jsonl",
+    "line": 10,
+    "id": 1158,
+    "time": "2021-05-13T04:20:42.890235Z",
+    "rid": 10,
+    "provider": "Microsoft-Windows-TerminalServices-RemoteConnectionManager",
+    "data": null,
+    "user": {
+      "EventXML": {
+        "#attributes": {
+          "xmlns": "Event_NS"
+        },
+        "Param1": "71.6.167.142"
+      }
+    },
+    "security": {
+      "#attributes": {
+        "UserID": "S-1-5-20"
+      }
+    }
+  },
+  {
+    "file": "rendered/Microsoft-Windows-TerminalServices-RemoteConnectionManager-4Admin.jsonl",
+    "line": 11,
+    "id": 1158,
+    "time": "2021-05-13T04:21:07.373940Z",
+    "rid": 11,
+    "provider": "Microsoft-Windows-TerminalServices-RemoteConnectionManager",
+    "data": null,
+    "user": {
+      "EventXML": {
+        "#attributes": {
+          "xmlns": "Event_NS"
+        },
+        "Param1": "71.6.167.142"
+      }
+    },
+    "security": {
+      "#attributes": {
+        "UserID": "S-1-5-20"
+      }
+    }
+  },
+  {
+    "file": "rendered/Microsoft-Windows-TerminalServices-RemoteConnectionManager-4Admin.jsonl",
+    "line": 12,
+    "id": 1158,
+    "time": "2021-05-15T08:13:50.690994Z",
+    "rid": 12,
+    "provider": "Microsoft-Windows-TerminalServices-RemoteConnectionManager",
+    "data": null,
+    "user": {
+      "EventXML": {
+        "#attributes": {
+          "xmlns": "Event_NS"
+        },
+        "Param1": "184.105.139.68"
+      }
+    },
+    "security": {
+      "#attributes": {
+        "UserID": "S-1-5-20"
+      }
+    }
+  },
+  {
+    "file": "rendered/Microsoft-Windows-TerminalServices-RemoteConnectionManager-4Admin.jsonl",
+    "line": 13,
+    "id": 1158,
+    "time": "2021-05-18T15:08:29.558356Z",
+    "rid": 13,
+    "provider": "Microsoft-Windows-TerminalServices-RemoteConnectionManager",
+    "data": null,
+    "user": {
+      "EventXML": {
+        "#attributes": {
+          "xmlns": "Event_NS"
+        },
+        "Param1": "216.218.206.66"
+      }
+    },
+    "security": {
+      "#attributes": {
+        "UserID": "S-1-5-20"
+      }
+    }
+  },
+  {
+    "file": "rendered/Microsoft-Windows-TerminalServices-RemoteConnectionManager-4Admin.jsonl",
+    "line": 14,
+    "id": 1158,
+    "time": "2021-05-21T16:33:00.672320Z",
+    "rid": 14,
+    "provider": "Microsoft-Windows-TerminalServices-RemoteConnectionManager",
+    "data": null,
+    "user": {
+      "EventXML": {
+        "#attributes": {
+          "xmlns": "Event_NS"
+        },
+        "Param1": "193.118.53.194"
+      }
+    },
+    "security": {
+      "#attributes": {
+        "UserID": "S-1-5-20"
+      }
+    }
+  },
+  {
+    "file": "rendered/Microsoft-Windows-TerminalServices-RemoteConnectionManager-4Admin.jsonl",
+    "line": 15,
+    "id": 1158,
+    "time": "2021-05-24T08:38:13.027525Z",
+    "rid": 15,
+    "provider": "Microsoft-Windows-TerminalServices-RemoteConnectionManager",
+    "data": null,
+    "user": {
+      "EventXML": {
+        "#attributes": {
+          "xmlns": "Event_NS"
+        },
+        "Param1": "192.210.232.196"
+      }
+    },
+    "security": {
+      "#attributes": {
+        "UserID": "S-1-5-20"
+      }
+    }
+  },
+  {
+    "file": "rendered/Microsoft-Windows-TerminalServices-RemoteConnectionManager-4Admin.jsonl",
+    "line": 16,
+    "id": 1158,
+    "time": "2021-05-26T12:57:44.072853Z",
+    "rid": 16,
+    "provider": "Microsoft-Windows-TerminalServices-RemoteConnectionManager",
+    "data": null,
+    "user": {
+      "EventXML": {
+        "#attributes": {
+          "xmlns": "Event_NS"
+        },
+        "Param1": "88.86.225.249"
+      }
+    },
+    "security": {
+      "#attributes": {
+        "UserID": "S-1-5-20"
+      }
+    }
+  },
+  {
+    "file": "rendered/Microsoft-Windows-TerminalServices-RemoteConnectionManager-4Admin.jsonl",
+    "line": 17,
+    "id": 1158,
+    "time": "2021-05-29T03:51:14.598366Z",
+    "rid": 17,
+    "provider": "Microsoft-Windows-TerminalServices-RemoteConnectionManager",
+    "data": null,
+    "user": {
+      "EventXML": {
+        "#attributes": {
+          "xmlns": "Event_NS"
+        },
+        "Param1": "50.116.63.34"
+      }
+    },
+    "security": {
+      "#attributes": {
+        "UserID": "S-1-5-20"
+      }
+    }
+  },
+  {
+    "file": "rendered/Microsoft-Windows-TerminalServices-RemoteConnectionManager-4Admin.jsonl",
+    "line": 18,
+    "id": 1158,
+    "time": "2021-05-29T03:51:48.080513Z",
+    "rid": 18,
+    "provider": "Microsoft-Windows-TerminalServices-RemoteConnectionManager",
+    "data": null,
+    "user": {
+      "EventXML": {
+        "#attributes": {
+          "xmlns": "Event_NS"
+        },
+        "Param1": "167.172.40.240"
+      }
+    },
+    "security": {
+      "#attributes": {
+        "UserID": "S-1-5-20"
+      }
+    }
+  },
+  {
+    "file": "rendered/Microsoft-Windows-TerminalServices-RemoteConnectionManager-4Admin.jsonl",
+    "line": 19,
+    "id": 1158,
+    "time": "2021-05-30T15:46:06.410283Z",
+    "rid": 19,
+    "provider": "Microsoft-Windows-TerminalServices-RemoteConnectionManager",
+    "data": null,
+    "user": {
+      "EventXML": {
+        "#attributes": {
+          "xmlns": "Event_NS"
+        },
+        "Param1": "184.105.247.194"
+      }
+    },
+    "security": {
+      "#attributes": {
+        "UserID": "S-1-5-20"
+      }
+    }
+  },
+  {
+    "file": "rendered/Microsoft-Windows-TerminalServices-RemoteConnectionManager-4Admin.jsonl",
+    "line": 20,
+    "id": 1158,
+    "time": "2021-05-31T07:35:42.116615Z",
+    "rid": 20,
+    "provider": "Microsoft-Windows-TerminalServices-RemoteConnectionManager",
+    "data": null,
+    "user": {
+      "EventXML": {
+        "#attributes": {
+          "xmlns": "Event_NS"
+        },
+        "Param1": "65.49.20.66"
+      }
+    },
+    "security": {
+      "#attributes": {
+        "UserID": "S-1-5-20"
+      }
+    }
+  },
+  {
+    "file": "rendered/Microsoft-Windows-TerminalServices-RemoteConnectionManager-4Admin.jsonl",
+    "line": 21,
+    "id": 1158,
+    "time": "2021-06-02T14:53:57.016143Z",
+    "rid": 21,
+    "provider": "Microsoft-Windows-TerminalServices-RemoteConnectionManager",
+    "data": null,
+    "user": {
+      "EventXML": {
+        "#attributes": {
+          "xmlns": "Event_NS"
+        },
+        "Param1": "128.14.134.134"
+      }
+    },
+    "security": {
+      "#attributes": {
+        "UserID": "S-1-5-20"
+      }
+    }
+  }
+]

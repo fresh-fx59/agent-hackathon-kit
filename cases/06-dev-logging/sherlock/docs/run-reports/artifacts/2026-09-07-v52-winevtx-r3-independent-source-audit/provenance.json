@@ -1,0 +1,23 @@
+{
+  "original_path": "docs/run-reports/artifacts/2026-09-07-v52-winevtx-r3-live-report-snapshot/report.md",
+  "original_sha256": "49828debdfcebd9579a454c58c60fb43caa948de1b2054e99fcb3b6248024dc5",
+  "reviewed_path": "docs/run-reports/artifacts/2026-09-07-v52-winevtx-r3-independent-source-audit/report-reviewed.md",
+  "reviewed_sha256": "1b25697f8e66d6c4a9abd00ba2924f227f89b9fc34242aa01f65d3e317d8cb6f",
+  "original_verdict": "diagnostic FAIL: material source errors",
+  "reviewed_status": "editorial copy independently checked against original normalized corpus; no autonomous model acceptance implied",
+  "source_remote": "contabo-prod:/home/claude-developer/hack/sherlock-winevtx-corpus-v30-normalized-20260821/",
+  "source_local": "/tmp/winevtx-r3-independent-source",
+  "source_files": 143,
+  "source_events": 90267,
+  "source_bytes": 93196459,
+  "source_manifest_sha256": "62ac6f61dd7485fcfd8c89266f8c28be8a459dc34f13b921238574fb54d9e735",
+  "exact_edits": "report-corrections.diff",
+  "claim_matrix": "source-audit.md",
+  "citation_evidence": "reviewed-citation-evidence.json",
+  "model_original_unchanged": true,
+  "remote_hash_validation": "PASS: fresh remote SHA256 matches local source-manifest for all143files",
+  "remote_hash_manifest": "remote-source-sha256.txt",
+  "remote_hash_manifest_sha256": "8ea4ba053b204fadea6a0e108d2e743125aa30f12d14132d228f1e7800f355c5",
+  "full_qualification": "NOT CLAIMED: editorial source review is neither autonomous target-model acceptance nor two-corpus qualification",
+  "raw_source_policy": "Full143-file raw corpus remains on remote source and local /tmp copy; freshSHA256manifest committed. Redundant larger extraction JSON remain local and are not staged."
+}

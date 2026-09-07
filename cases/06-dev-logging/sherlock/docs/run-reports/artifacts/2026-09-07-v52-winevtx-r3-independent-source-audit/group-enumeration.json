@@ -1,0 +1,107 @@
+[
+  {
+    "file": "Security.jsonl",
+    "line": 10146,
+    "id": 4799,
+    "time": "2021-06-02T10:49:00.528942Z",
+    "rid": 427403,
+    "provider": "Microsoft-Windows-Security-Auditing",
+    "data": {
+      "TargetUserName": "Администраторы",
+      "TargetDomainName": "Builtin",
+      "TargetSid": "S-1-5-32-544",
+      "SubjectUserSid": "S-1-5-18",
+      "SubjectUserName": "IPSERVER$",
+      "SubjectDomainName": "WORKGROUP",
+      "SubjectLogonId": "0x3e7",
+      "CallerProcessId": "0x148c",
+      "CallerProcessName": "C:\\Windows\\System32\\svchost.exe"
+    },
+    "user": null,
+    "security": null
+  },
+  {
+    "file": "Security.jsonl",
+    "line": 10147,
+    "id": 4799,
+    "time": "2021-06-02T10:49:00.530363Z",
+    "rid": 427404,
+    "provider": "Microsoft-Windows-Security-Auditing",
+    "data": {
+      "TargetUserName": "Операторы архива",
+      "TargetDomainName": "Builtin",
+      "TargetSid": "S-1-5-32-551",
+      "SubjectUserSid": "S-1-5-18",
+      "SubjectUserName": "IPSERVER$",
+      "SubjectDomainName": "WORKGROUP",
+      "SubjectLogonId": "0x3e7",
+      "CallerProcessId": "0x148c",
+      "CallerProcessName": "C:\\Windows\\System32\\svchost.exe"
+    },
+    "user": null,
+    "security": null
+  },
+  {
+    "file": "Security.jsonl",
+    "line": 13511,
+    "id": 4798,
+    "time": "2021-06-02T14:53:59.906256Z",
+    "rid": 430768,
+    "provider": "Microsoft-Windows-Security-Auditing",
+    "data": {
+      "TargetUserName": "root",
+      "TargetDomainName": "IPSERVER",
+      "TargetSid": "S-1-5-21-2929202171-1942120112-2054978817-1001",
+      "SubjectUserSid": "S-1-5-18",
+      "SubjectUserName": "IPSERVER$",
+      "SubjectDomainName": "WORKGROUP",
+      "SubjectLogonId": "0x3e7",
+      "CallerProcessId": "0x294",
+      "CallerProcessName": "C:\\Windows\\System32\\LogonUI.exe"
+    },
+    "user": null,
+    "security": null
+  },
+  {
+    "file": "Security.jsonl",
+    "line": 29759,
+    "id": 4799,
+    "time": "2021-06-01T10:49:00.490597Z",
+    "rid": 412100,
+    "provider": "Microsoft-Windows-Security-Auditing",
+    "data": {
+      "TargetUserName": "Администраторы",
+      "TargetDomainName": "Builtin",
+      "TargetSid": "S-1-5-32-544",
+      "SubjectUserSid": "S-1-5-18",
+      "SubjectUserName": "IPSERVER$",
+      "SubjectDomainName": "WORKGROUP",
+      "SubjectLogonId": "0x3e7",
+      "CallerProcessId": "0x17f8",
+      "CallerProcessName": "C:\\Windows\\System32\\svchost.exe"
+    },
+    "user": null,
+    "security": null
+  },
+  {
+    "file": "Security.jsonl",
+    "line": 29760,
+    "id": 4799,
+    "time": "2021-06-01T10:49:00.491991Z",
+    "rid": 412101,
+    "provider": "Microsoft-Windows-Security-Auditing",
+    "data": {
+      "TargetUserName": "Операторы архива",
+      "TargetDomainName": "Builtin",
+      "TargetSid": "S-1-5-32-551",
+      "SubjectUserSid": "S-1-5-18",
+      "SubjectUserName": "IPSERVER$",
+      "SubjectDomainName": "WORKGROUP",
+      "SubjectLogonId": "0x3e7",
+      "CallerProcessId": "0x17f8",
+      "CallerProcessName": "C:\\Windows\\System32\\svchost.exe"
+    },
+    "user": null,
+    "security": null
+  }
+]

@@ -1,0 +1,860 @@
+[
+  {
+    "file": "Application.jsonl",
+    "bytes": 2577714,
+    "lines": 2942,
+    "sha256": "c20f44295ab736110dc96499d37a2eaa5332f79d689dae797318d4c38463c1f7"
+  },
+  {
+    "file": "HardwareEvents.jsonl",
+    "bytes": 0,
+    "lines": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "file": "Security.jsonl",
+    "bytes": 39000816,
+    "lines": 34916,
+    "sha256": "8cb82ae13837de89ed3bd315bfa06e50663a80160cdac0d04133f5df97640ae1"
+  },
+  {
+    "file": "Setup.jsonl",
+    "bytes": 11334,
+    "lines": 13,
+    "sha256": "59e78630d095356be7aa8d2c4842120709a2e332db6510d413b52c6cbecb7a41"
+  },
+  {
+    "file": "System.jsonl",
+    "bytes": 815552,
+    "lines": 1036,
+    "sha256": "ccb4ef27f9054d8af0016c8f69e5cd47f43b0c32a5a9ea3d6031da35e1578d43"
+  },
+  {
+    "file": "rendered/Internet-Explorer.jsonl",
+    "bytes": 0,
+    "lines": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "file": "rendered/Key-Management-Service.jsonl",
+    "bytes": 0,
+    "lines": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "file": "rendered/Microsoft-Client-Licensing-Platform-4Admin.jsonl",
+    "bytes": 217344,
+    "lines": 309,
+    "sha256": "6d715cd630ee0f0eed8441ec8f8f205271c731d0fd104aa76e897aabf4deb456"
+  },
+  {
+    "file": "rendered/Microsoft-Windows-AAD-4Operational.jsonl",
+    "bytes": 3656,
+    "lines": 4,
+    "sha256": "a64c771ac5c86f548443c9f69cc045b1f267d4a01836ef05c9cb6589575fd97b"
+  },
+  {
+    "file": "rendered/Microsoft-Windows-AppModel-Runtime-4Admin.jsonl",
+    "bytes": 281378,
+    "lines": 332,
+    "sha256": "29921774cd7fc19ff024918e21e0916efd9af34ecbab7cb440cd2aa46cb3a119"
+  },
+  {
+    "file": "rendered/Microsoft-Windows-AppReadiness-4Admin.jsonl",
+    "bytes": 338160,
+    "lines": 472,
+    "sha256": "aacb03dd0fef3f770473bf86485417ee666b9d2cf66299ded7b8ae0ab56d56f3"
+  },
+  {
+    "file": "rendered/Microsoft-Windows-AppReadiness-4Operational.jsonl",
+    "bytes": 127474,
+    "lines": 182,
+    "sha256": "0302a934a1be203538422016a92dc25eeee022e8f7880a6c9b5772abf1935f22"
+  },
+  {
+    "file": "rendered/Microsoft-Windows-AppXDeployment-4Operational.jsonl",
+    "bytes": 973503,
+    "lines": 1250,
+    "sha256": "d19a8b8cba26f5248e2a810f50f39f20ba529750ad89a15b3a32f818f9135774"
+  },
+  {
+    "file": "rendered/Microsoft-Windows-AppXDeploymentServer-4Operational.jsonl",
+    "bytes": 4706576,
+    "lines": 4194,
+    "sha256": "881bc194683aeba9f1eab2f26c133938de2bf1c8143ad4010d3dc38a91d76a17"
+  },
+  {
+    "file": "rendered/Microsoft-Windows-AppXDeploymentServer-4Restricted.jsonl",
+    "bytes": 0,
+    "lines": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "file": "rendered/Microsoft-Windows-Application-Experience-4Program-Compatibility-Assistant.jsonl",
+    "bytes": 880,
+    "lines": 1,
+    "sha256": "a3c89eef19a900e3881fa0921912dbbf6109a6b4be0e99dbcb14c59178de0115"
+  },
+  {
+    "file": "rendered/Microsoft-Windows-Application-Experience-4Program-Compatibility-Troubleshooter.jsonl",
+    "bytes": 0,
+    "lines": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "file": "rendered/Microsoft-Windows-Application-Experience-4Program-Inventory.jsonl",
+    "bytes": 0,
+    "lines": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "file": "rendered/Microsoft-Windows-Application-Experience-4Program-Telemetry.jsonl",
+    "bytes": 4025,
+    "lines": 4,
+    "sha256": "93cb8f3311e7a4273f40120dea91c6179fcec8bbd862be4655b2fbc320c32884"
+  },
+  {
+    "file": "rendered/Microsoft-Windows-Application-Experience-4Steps-Recorder.jsonl",
+    "bytes": 0,
+    "lines": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "file": "rendered/Microsoft-Windows-AppxPackaging-4Operational.jsonl",
+    "bytes": 1006990,
+    "lines": 1328,
+    "sha256": "cdd4d1be6835022ff85203fc4530bb4f6944d9ad96a84e7b7a3d082f85563e7f"
+  },
+  {
+    "file": "rendered/Microsoft-Windows-Biometrics-4Operational.jsonl",
+    "bytes": 3903,
+    "lines": 4,
+    "sha256": "3fdc04e9223f2ff22bfd20e850ace65b74aaae3ca7ecdaed73efb3ee46dc6cc5"
+  },
+  {
+    "file": "rendered/Microsoft-Windows-BitLocker-4BitLocker-Management.jsonl",
+    "bytes": 1430,
+    "lines": 2,
+    "sha256": "01fda6926bcbdfd5a7e90588ba8ef0b8855ea6c0c376ee65e9fba60e8c0740e0"
+  },
+  {
+    "file": "rendered/Microsoft-Windows-Bits-Client-4Operational.jsonl",
+    "bytes": 197516,
+    "lines": 218,
+    "sha256": "6024e4b0eaf45d8b6d3287b42bec69951e8920515d0ed98dae3be1a887298403"
+  },
+  {
+    "file": "rendered/Microsoft-Windows-CloudStore-4Operational.jsonl",
+    "bytes": 10345,
+    "lines": 13,
+    "sha256": "c858c440140eb2e3df65c0375ce6218c7c48d050c9b1d961e979b2c8bafd980e"
+  },
+  {
+    "file": "rendered/Microsoft-Windows-CodeIntegrity-4Operational.jsonl",
+    "bytes": 2151,
+    "lines": 3,
+    "sha256": "7091a285336e7de67b939def468b9b68d2387e850961c88032c80851add8722d"
+  },
+  {
+    "file": "rendered/Microsoft-Windows-Containers-BindFlt-4Operational.jsonl",
+    "bytes": 1889,
+    "lines": 3,
+    "sha256": "2d674e3877c07cfb4ff40cdb9156326bf5acdd150ddeb3f8066df63e6c4d9302"
+  },
+  {
+    "file": "rendered/Microsoft-Windows-Containers-Wcifs-4Operational.jsonl",
+    "bytes": 1878,
+    "lines": 3,
+    "sha256": "9a4ba518eb5a849becd8fe4b6f452c8cd68976529f1efe434b33bf46d7e283e7"
+  },
+  {
+    "file": "rendered/Microsoft-Windows-CoreSystem-SmsRouter-Events-4Operational.jsonl",
+    "bytes": 10359,
+    "lines": 16,
+    "sha256": "56dd0368b351bd6e8dd17207b2015773eeb6558132a2038dc76d104c7badadc3"
+  },
+  {
+    "file": "rendered/Microsoft-Windows-Crypto-DPAPI-4BackUpKeySvc.jsonl",
+    "bytes": 0,
+    "lines": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "file": "rendered/Microsoft-Windows-Crypto-DPAPI-4Operational.jsonl",
+    "bytes": 22143,
+    "lines": 26,
+    "sha256": "b5f18394a38186336f524b8c4eccae8e2a3e2196bd8c474ca8ce6e3c36e8c37a"
+  },
+  {
+    "file": "rendered/Microsoft-Windows-Crypto-NCrypt-4Operational.jsonl",
+    "bytes": 14047,
+    "lines": 17,
+    "sha256": "e13431610f8c8a0086bdaa65b532191b5df164082e64674b2f2b9e42763262ca"
+  },
+  {
+    "file": "rendered/Microsoft-Windows-DeviceManagement-Enterprise-Diagnostics-Provider-4Admin.jsonl",
+    "bytes": 52002,
+    "lines": 67,
+    "sha256": "fcee6b3f473b937c93344bd65f457bd326bc6c007e31bbaafe886a5b3aa1bca7"
+  },
+  {
+    "file": "rendered/Microsoft-Windows-DeviceManagement-Enterprise-Diagnostics-Provider-4Operational.jsonl",
+    "bytes": 39169,
+    "lines": 56,
+    "sha256": "52d9f50d6f219cb1283cfb4093ce91afd731c4bd612bff9bf622f0529869f3f7"
+  },
+  {
+    "file": "rendered/Microsoft-Windows-DeviceSetupManager-4Admin.jsonl",
+    "bytes": 148962,
+    "lines": 204,
+    "sha256": "f6e75e6e29b74b7b6d2eab5f4be927aa84ef6415a0b311b82165a004bef76d19"
+  },
+  {
+    "file": "rendered/Microsoft-Windows-DeviceSetupManager-4Operational.jsonl",
+    "bytes": 77143,
+    "lines": 111,
+    "sha256": "ed258309e879db80e79ae7d8f45fdef8728c1a6ceb056361a93c61832ed3c453"
+  },
+  {
+    "file": "rendered/Microsoft-Windows-Dhcp-Client-4Admin.jsonl",
+    "bytes": 0,
+    "lines": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "file": "rendered/Microsoft-Windows-Dhcpv6-Client-4Admin.jsonl",
+    "bytes": 0,
+    "lines": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "file": "rendered/Microsoft-Windows-Diagnosis-DPS-4Operational.jsonl",
+    "bytes": 8885,
+    "lines": 9,
+    "sha256": "a68526db618fe71c4d5c83224c4599a3e7c8b532f4dd77533e4f41dfa402c5fd"
+  },
+  {
+    "file": "rendered/Microsoft-Windows-Diagnosis-Scheduled-4Operational.jsonl",
+    "bytes": 0,
+    "lines": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "file": "rendered/Microsoft-Windows-DiskDiagnosticDataCollector-4Operational.jsonl",
+    "bytes": 0,
+    "lines": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "file": "rendered/Microsoft-Windows-FileHistory-Core-4WHC.jsonl",
+    "bytes": 0,
+    "lines": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "file": "rendered/Microsoft-Windows-GroupPolicy-4Operational.jsonl",
+    "bytes": 345601,
+    "lines": 507,
+    "sha256": "0d3781deb32818f5bab3e94befae931fdaf7bd4a90f70db276d8a15cb95ffdd9"
+  },
+  {
+    "file": "rendered/Microsoft-Windows-HelloForBusiness-4Operational.jsonl",
+    "bytes": 4642,
+    "lines": 7,
+    "sha256": "323a796eac0a58b234121673f4f27e93a284854530fb1663c1b2094b206a7f96"
+  },
+  {
+    "file": "rendered/Microsoft-Windows-HotspotAuth-4Operational.jsonl",
+    "bytes": 0,
+    "lines": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "file": "rendered/Microsoft-Windows-Kernel-Boot-4Operational.jsonl",
+    "bytes": 8240,
+    "lines": 12,
+    "sha256": "ae135f17f4dabffaa0da5f5c9c4008b63d9e13615f7783544dccac2cd1ae112e"
+  },
+  {
+    "file": "rendered/Microsoft-Windows-Kernel-EventTracing-4Admin.jsonl",
+    "bytes": 7308,
+    "lines": 10,
+    "sha256": "84a38fbaa45cce800fe9c8ad8df58fb2d98d74fef3c193d44737e052c2051a1b"
+  },
+  {
+    "file": "rendered/Microsoft-Windows-Kernel-PnP-4Configuration.jsonl",
+    "bytes": 304009,
+    "lines": 330,
+    "sha256": "d5ba2d2483891d2d765e046aafe06d9d961ff9eee512d1b7bf8f4b8a7339fd2f"
+  },
+  {
+    "file": "rendered/Microsoft-Windows-Kernel-PnP-4Driver-Watchdog.jsonl",
+    "bytes": 0,
+    "lines": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "file": "rendered/Microsoft-Windows-Kernel-Power-4Thermal-Operational.jsonl",
+    "bytes": 0,
+    "lines": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "file": "rendered/Microsoft-Windows-Kernel-ShimEngine-4Operational.jsonl",
+    "bytes": 736,
+    "lines": 1,
+    "sha256": "68cda5104c444ef4bb382f2516ac9788a4eaddb4bfc8762a1c3d82cf723941df"
+  },
+  {
+    "file": "rendered/Microsoft-Windows-Kernel-StoreMgr-4Operational.jsonl",
+    "bytes": 0,
+    "lines": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "file": "rendered/Microsoft-Windows-Kernel-WHEA-4Errors.jsonl",
+    "bytes": 0,
+    "lines": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "file": "rendered/Microsoft-Windows-Kernel-WHEA-4Operational.jsonl",
+    "bytes": 79125,
+    "lines": 12,
+    "sha256": "ded327bcfadc66138f33ad8d1d4d4f8397fcf2aca9a98ab6f1bed095f8d335bb"
+  },
+  {
+    "file": "rendered/Microsoft-Windows-Known-Folders-API-Service.jsonl",
+    "bytes": 48724,
+    "lines": 61,
+    "sha256": "3976f3ac76b860c3f9d8cd898d38276ab333d9b454667b2893947193cd63d882"
+  },
+  {
+    "file": "rendered/Microsoft-Windows-LanguagePackSetup-4Operational.jsonl",
+    "bytes": 11449,
+    "lines": 18,
+    "sha256": "6b6a8a9fc8060bc2c0badb1bc71b9a7cac02a8f193f5256aa0c5fa524d10f2f4"
+  },
+  {
+    "file": "rendered/Microsoft-Windows-LiveId-4Operational.jsonl",
+    "bytes": 1138460,
+    "lines": 675,
+    "sha256": "464cc149b8951ae3705e040663f7196fa3e4af0f74474ec83116f82ef7434113"
+  },
+  {
+    "file": "rendered/Microsoft-Windows-MUI-4Admin.jsonl",
+    "bytes": 0,
+    "lines": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "file": "rendered/Microsoft-Windows-MUI-4Operational.jsonl",
+    "bytes": 20454,
+    "lines": 29,
+    "sha256": "1ffe412131de918956a772d0db6628cbf9b793217fa4a6ef83309b610db62559"
+  },
+  {
+    "file": "rendered/Microsoft-Windows-NCSI-4Operational.jsonl",
+    "bytes": 3053,
+    "lines": 4,
+    "sha256": "ced3338e22ba9e01eb5c8f0dcd640c5ad8e2d0424b5e7b6dbc04d2d7d4c12af2"
+  },
+  {
+    "file": "rendered/Microsoft-Windows-NetworkProfile-4Operational.jsonl",
+    "bytes": 11100,
+    "lines": 14,
+    "sha256": "fe01a49f0b4611e1ceb6c9aa27f458a5bd0f82684ebe1d880646a331486ce6fc"
+  },
+  {
+    "file": "rendered/Microsoft-Windows-Ntfs-4Operational.jsonl",
+    "bytes": 4206897,
+    "lines": 2768,
+    "sha256": "6bd5dc4561105aa999cd54aac426619a4f4b225b434edca8ee4abcf6f64b4ea6"
+  },
+  {
+    "file": "rendered/Microsoft-Windows-Ntfs-4WHC.jsonl",
+    "bytes": 1818,
+    "lines": 3,
+    "sha256": "31132d95cb1c0f534bee232e36c9ec23af6b6c52159a5bcbec01191088d981b7"
+  },
+  {
+    "file": "rendered/Microsoft-Windows-Partition-4Diagnostic.jsonl",
+    "bytes": 52674,
+    "lines": 7,
+    "sha256": "308ef93963ffeadfc47b1d302782030e674fae7510a6c08548376bef504169a2"
+  },
+  {
+    "file": "rendered/Microsoft-Windows-PowerShell-4Admin.jsonl",
+    "bytes": 0,
+    "lines": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "file": "rendered/Microsoft-Windows-PowerShell-4Operational.jsonl",
+    "bytes": 51555,
+    "lines": 75,
+    "sha256": "89d8479de0db5612705207ead9e76a582631069f0796ecf9840540acc0a9d4a5"
+  },
+  {
+    "file": "rendered/Microsoft-Windows-PrintService-4Admin.jsonl",
+    "bytes": 7597,
+    "lines": 8,
+    "sha256": "0351a93cbd025f88ce7e32974af537a72e2edc21fd7e363c42686ddf3d3436ef"
+  },
+  {
+    "file": "rendered/Microsoft-Windows-Privacy-Auditing-4Operational.jsonl",
+    "bytes": 91231,
+    "lines": 104,
+    "sha256": "d5865b70ab789179398acbd6b38766263c2243cc79d5b3c06e730b18e7123506"
+  },
+  {
+    "file": "rendered/Microsoft-Windows-Program-Compatibility-Assistant-4CompatAfterUpgrade.jsonl",
+    "bytes": 0,
+    "lines": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "file": "rendered/Microsoft-Windows-Provisioning-Diagnostics-Provider-4Admin.jsonl",
+    "bytes": 37866,
+    "lines": 47,
+    "sha256": "78e79e819c5c39c4b225e4d7133e4e14b59954cad39c7e2c8ed7cc6d867a273f"
+  },
+  {
+    "file": "rendered/Microsoft-Windows-Provisioning-Diagnostics-Provider-4AutoPilot.jsonl",
+    "bytes": 0,
+    "lines": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "file": "rendered/Microsoft-Windows-Provisioning-Diagnostics-Provider-4ManagementService.jsonl",
+    "bytes": 0,
+    "lines": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "file": "rendered/Microsoft-Windows-PushNotification-Platform-4Admin.jsonl",
+    "bytes": 0,
+    "lines": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "file": "rendered/Microsoft-Windows-PushNotification-Platform-4Operational.jsonl",
+    "bytes": 1582685,
+    "lines": 1683,
+    "sha256": "eb329affe275d457c456e3e871d9bfabda361c9be9617dedeb368197852d278b"
+  },
+  {
+    "file": "rendered/Microsoft-Windows-ReadyBoost-4Operational.jsonl",
+    "bytes": 16827,
+    "lines": 23,
+    "sha256": "246f089f9d0cec72f034f290ecbec28ad39080ea69e193caebae6f7b1cfd0f43"
+  },
+  {
+    "file": "rendered/Microsoft-Windows-RemoteDesktopServices-RdpCoreTS-4Admin.jsonl",
+    "bytes": 0,
+    "lines": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "file": "rendered/Microsoft-Windows-RemoteDesktopServices-RdpCoreTS-4Operational.jsonl",
+    "bytes": 1601720,
+    "lines": 2082,
+    "sha256": "089539af738606972cc9eafc0a3931ba264c483319522549ac2b9aec1a6b6e0e"
+  },
+  {
+    "file": "rendered/Microsoft-Windows-Resource-Exhaustion-Detector-4Operational.jsonl",
+    "bytes": 1974,
+    "lines": 3,
+    "sha256": "41ba7c07cb46e4273e8027d6bcd0ad2a27ab9963ba2fd4382000878d28642caa"
+  },
+  {
+    "file": "rendered/Microsoft-Windows-RestartManager-4Operational.jsonl",
+    "bytes": 0,
+    "lines": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "file": "rendered/Microsoft-Windows-SMBClient-4Operational.jsonl",
+    "bytes": 0,
+    "lines": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "file": "rendered/Microsoft-Windows-SMBServer-4Audit.jsonl",
+    "bytes": 0,
+    "lines": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "file": "rendered/Microsoft-Windows-SMBServer-4Connectivity.jsonl",
+    "bytes": 0,
+    "lines": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "file": "rendered/Microsoft-Windows-SMBServer-4Operational.jsonl",
+    "bytes": 9213,
+    "lines": 12,
+    "sha256": "aa1453f2a5ce4c9a579c73c7fb47a2e5208aa4f87fb92992ba58ec873241911c"
+  },
+  {
+    "file": "rendered/Microsoft-Windows-SMBServer-4Security.jsonl",
+    "bytes": 0,
+    "lines": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "file": "rendered/Microsoft-Windows-Security-Mitigations-4KernelMode.jsonl",
+    "bytes": 74437,
+    "lines": 45,
+    "sha256": "f43ac74ce60af452aea5f8d913d2d482de695034affdfb94ae84046b3e11dc3a"
+  },
+  {
+    "file": "rendered/Microsoft-Windows-Security-Mitigations-4UserMode.jsonl",
+    "bytes": 0,
+    "lines": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "file": "rendered/Microsoft-Windows-Security-SPP-UX-Notifications-4ActionCenter.jsonl",
+    "bytes": 671,
+    "lines": 1,
+    "sha256": "dea404841413dafadd8b3471c8d1bc34f4c89e0d164796baba45b65f0b0f8132"
+  },
+  {
+    "file": "rendered/Microsoft-Windows-SettingSync-4Debug.jsonl",
+    "bytes": 17132,
+    "lines": 20,
+    "sha256": "c9d0353856f76ab50d9603af3ef7202a125e5ac5120cf2257d29a9a654ec5115"
+  },
+  {
+    "file": "rendered/Microsoft-Windows-SettingSync-4Operational.jsonl",
+    "bytes": 0,
+    "lines": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "file": "rendered/Microsoft-Windows-Shell-ConnectedAccountState-4ActionCenter.jsonl",
+    "bytes": 0,
+    "lines": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "file": "rendered/Microsoft-Windows-Shell-Core-4ActionCenter.jsonl",
+    "bytes": 0,
+    "lines": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "file": "rendered/Microsoft-Windows-Shell-Core-4AppDefaults.jsonl",
+    "bytes": 78684,
+    "lines": 102,
+    "sha256": "5d2c3133700253d1eeda95a1c552b65229e431a00ad17b9848f289e5337a2928"
+  },
+  {
+    "file": "rendered/Microsoft-Windows-Shell-Core-4LogonTasksChannel.jsonl",
+    "bytes": 0,
+    "lines": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "file": "rendered/Microsoft-Windows-Shell-Core-4Operational.jsonl",
+    "bytes": 294201,
+    "lines": 389,
+    "sha256": "a9f36784f421b34feda8798f216d03491d2645605275416b029840c689a055c9"
+  },
+  {
+    "file": "rendered/Microsoft-Windows-ShellCommon-StartLayoutPopulation-4Operational.jsonl",
+    "bytes": 16623,
+    "lines": 21,
+    "sha256": "da1d5ba56f2286d399e77b4321eb6a76c03d88cb845d2ae0833a6db0b0ca4b35"
+  },
+  {
+    "file": "rendered/Microsoft-Windows-SmartCard-DeviceEnum-4Operational.jsonl",
+    "bytes": 21336,
+    "lines": 32,
+    "sha256": "d7db3c3fb096c10c32705e47a9bcee7baebd1fe8c8bb9746fb3afcad9f14ade8"
+  },
+  {
+    "file": "rendered/Microsoft-Windows-SmbClient-4Audit.jsonl",
+    "bytes": 0,
+    "lines": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "file": "rendered/Microsoft-Windows-SmbClient-4Connectivity.jsonl",
+    "bytes": 4056,
+    "lines": 6,
+    "sha256": "07cfb951be87c8f1d6d09ef3d8bb8d8828d63eaa23c1c980b2c8150d0867d348"
+  },
+  {
+    "file": "rendered/Microsoft-Windows-SmbClient-4Security.jsonl",
+    "bytes": 0,
+    "lines": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "file": "rendered/Microsoft-Windows-StateRepository-4Operational.jsonl",
+    "bytes": 801648,
+    "lines": 1088,
+    "sha256": "3b54963ca24b9dbf8f2f467bf8f50d40b76d6d485b3728dbc9ec9234ad0513c4"
+  },
+  {
+    "file": "rendered/Microsoft-Windows-StateRepository-4Restricted.jsonl",
+    "bytes": 0,
+    "lines": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "file": "rendered/Microsoft-Windows-Storage-Storport-4Health.jsonl",
+    "bytes": 0,
+    "lines": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "file": "rendered/Microsoft-Windows-Storage-Storport-4Operational.jsonl",
+    "bytes": 1371794,
+    "lines": 566,
+    "sha256": "272d20348517ab67a7efe2ffdbb79f4f00b7612eb4002bc850a0188c4841c813"
+  },
+  {
+    "file": "rendered/Microsoft-Windows-StorageSpaces-Driver-4Diagnostic.jsonl",
+    "bytes": 0,
+    "lines": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "file": "rendered/Microsoft-Windows-StorageSpaces-Driver-4Operational.jsonl",
+    "bytes": 2448,
+    "lines": 3,
+    "sha256": "4e8b8dac6ea0a5502f05034eee3a3bb71c33e1105a6dce41709bd6fdaf069c42"
+  },
+  {
+    "file": "rendered/Microsoft-Windows-StorageSpaces-ManagementAgent-4WHC.jsonl",
+    "bytes": 0,
+    "lines": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "file": "rendered/Microsoft-Windows-Store-4Operational.jsonl",
+    "bytes": 22905283,
+    "lines": 23900,
+    "sha256": "ca84ddc5ba3da48c3f4dfaee77ad207ae8e4deece97d9bd2e78fe169f0949cfc"
+  },
+  {
+    "file": "rendered/Microsoft-Windows-Storsvc-4Diagnostic.jsonl",
+    "bytes": 27514,
+    "lines": 27,
+    "sha256": "49607d4c108bc77f21b579a502404a4d63d9193cc7271abe23427c0802992107"
+  },
+  {
+    "file": "rendered/Microsoft-Windows-TWinUI-4Operational.jsonl",
+    "bytes": 661,
+    "lines": 1,
+    "sha256": "97830e7eb1c316babfa13bc3d0ec8c941086ab4cc5f375301da1492624cbb0c8"
+  },
+  {
+    "file": "rendered/Microsoft-Windows-TZSync-4Operational.jsonl",
+    "bytes": 4880,
+    "lines": 8,
+    "sha256": "3ef7d4370eb358337396e1dfd67f51a3479933533ee4fc3241b713378f97c805"
+  },
+  {
+    "file": "rendered/Microsoft-Windows-TaskScheduler-4Maintenance.jsonl",
+    "bytes": 148990,
+    "lines": 202,
+    "sha256": "185f048e85160deb722781e2a317f4712e0ed28e9a62920fea8f22e17704a8ae"
+  },
+  {
+    "file": "rendered/Microsoft-Windows-TerminalServices-LocalSessionManager-4Admin.jsonl",
+    "bytes": 0,
+    "lines": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "file": "rendered/Microsoft-Windows-TerminalServices-LocalSessionManager-4Operational.jsonl",
+    "bytes": 80582,
+    "lines": 105,
+    "sha256": "c41e26dea4d51484321c2ca963f36e24ee1e65c071dc9b883632857a8f2c4eac"
+  },
+  {
+    "file": "rendered/Microsoft-Windows-TerminalServices-PnPDevices-4Admin.jsonl",
+    "bytes": 1294,
+    "lines": 2,
+    "sha256": "11bce6d3b872ec459fa4eef86c198c70ce244fb08be6a4d33ed0fe03b532fa0e"
+  },
+  {
+    "file": "rendered/Microsoft-Windows-TerminalServices-PnPDevices-4Operational.jsonl",
+    "bytes": 0,
+    "lines": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "file": "rendered/Microsoft-Windows-TerminalServices-RemoteConnectionManager-4Admin.jsonl",
+    "bytes": 16958,
+    "lines": 21,
+    "sha256": "83120fcc85d4875f54973b550fc8037ed53e775a574cd5f7e6ddc9def7ba2231"
+  },
+  {
+    "file": "rendered/Microsoft-Windows-TerminalServices-RemoteConnectionManager-4Operational.jsonl",
+    "bytes": 1606552,
+    "lines": 1964,
+    "sha256": "ab8555015c71059fc01332ccb3e161752e3173acf852939149000a1b5c98572a"
+  },
+  {
+    "file": "rendered/Microsoft-Windows-TerminalServices-ServerUSBDevices-4Admin.jsonl",
+    "bytes": 1318,
+    "lines": 2,
+    "sha256": "57f7d0fb8f2d2125d1722ee3d924836706bcbadee4d5bf9c202409b5b68a7b04"
+  },
+  {
+    "file": "rendered/Microsoft-Windows-TerminalServices-ServerUSBDevices-4Operational.jsonl",
+    "bytes": 0,
+    "lines": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "file": "rendered/Microsoft-Windows-Time-Service-4Operational.jsonl",
+    "bytes": 246767,
+    "lines": 247,
+    "sha256": "1c6ed6d920a9c7c9b118fa42d2fceb199a2175a50f124486865ce4ef845ab45c"
+  },
+  {
+    "file": "rendered/Microsoft-Windows-UniversalTelemetryClient-4Operational.jsonl",
+    "bytes": 366224,
+    "lines": 479,
+    "sha256": "ba291e66a9a10cfaf5dbdd5494d2f8d97899e283d106ada28f0130003dd5374e"
+  },
+  {
+    "file": "rendered/Microsoft-Windows-User-Device-Registration-4Admin.jsonl",
+    "bytes": 1029,
+    "lines": 1,
+    "sha256": "64b5a8863f2c6b09fb61c16c2ba105c70d1351c2967240abfa89d58d6701b602"
+  },
+  {
+    "file": "rendered/Microsoft-Windows-User-Profile-Service-4Operational.jsonl",
+    "bytes": 6463,
+    "lines": 9,
+    "sha256": "8e39e97792be868cc610b72cf3d0f04a4027c219761d8c20283da8e724140f50"
+  },
+  {
+    "file": "rendered/Microsoft-Windows-UserPnp-4ActionCenter.jsonl",
+    "bytes": 0,
+    "lines": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "file": "rendered/Microsoft-Windows-UserPnp-4DeviceInstall.jsonl",
+    "bytes": 6742,
+    "lines": 10,
+    "sha256": "b477973f9b6cc36f319a44342a42c705e97f86af75da886ae13b649591ed11f6"
+  },
+  {
+    "file": "rendered/Microsoft-Windows-VolumeSnapshot-Driver-4Operational.jsonl",
+    "bytes": 16575,
+    "lines": 22,
+    "sha256": "9090178480e796261a2b96d42c67df96f3e000e3ae9900f66639644cb2eb7e31"
+  },
+  {
+    "file": "rendered/Microsoft-Windows-WER-PayloadHealth-4Operational.jsonl",
+    "bytes": 6793,
+    "lines": 8,
+    "sha256": "10baacc81eff03747358edb60cfe3015f21a642d8d5d6d8eb3d81751c3855c7c"
+  },
+  {
+    "file": "rendered/Microsoft-Windows-WMI-Activity-4Operational.jsonl",
+    "bytes": 1594635,
+    "lines": 1774,
+    "sha256": "973931952e57b4910d6c3b0da269daf08cc595a668817c6abd375f8d32661452"
+  },
+  {
+    "file": "rendered/Microsoft-Windows-Wcmsvc-4Operational.jsonl",
+    "bytes": 52017,
+    "lines": 83,
+    "sha256": "e89b6b2b9971da5817bccefd0a34d87b2234c048c29223fe5f635540cfbfac1f"
+  },
+  {
+    "file": "rendered/Microsoft-Windows-WebAuthN-4Operational.jsonl",
+    "bytes": 3105,
+    "lines": 5,
+    "sha256": "b42a1a8be2dc0e28f08a810ccad3666aa7e0f58bef46aff7ff7a87201ab6b0e5"
+  },
+  {
+    "file": "rendered/Microsoft-Windows-WinINet-Config-4ProxyConfigChanged.jsonl",
+    "bytes": 776,
+    "lines": 1,
+    "sha256": "bba5ac97ab8a9be6af18338f79798788c24c363084a945d52640c7c4a3f84a67"
+  },
+  {
+    "file": "rendered/Microsoft-Windows-WinRM-4Operational.jsonl",
+    "bytes": 157259,
+    "lines": 172,
+    "sha256": "7ceee44c9676804bcc6a51e4f232fc1cd6d4ed4faf1d0d823a1909500b778149"
+  },
+  {
+    "file": "rendered/Microsoft-Windows-Windows-Defender-4Operational.jsonl",
+    "bytes": 1352874,
+    "lines": 1106,
+    "sha256": "9c667d703528accd6110e0af53580717ff728a6329b7680e801e7c3173b4e67f"
+  },
+  {
+    "file": "rendered/Microsoft-Windows-Windows-Defender-4WHC.jsonl",
+    "bytes": 0,
+    "lines": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "file": "rendered/Microsoft-Windows-Windows-Firewall-With-Advanced-Security-4ConnectionSecurity.jsonl",
+    "bytes": 0,
+    "lines": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "file": "rendered/Microsoft-Windows-Windows-Firewall-With-Advanced-Security-4Firewall.jsonl",
+    "bytes": 902946,
+    "lines": 719,
+    "sha256": "a4df7fb98e68c7a74d1f282553769c453cb25f9a01006ac3a7ae1f77fcedd388"
+  },
+  {
+    "file": "rendered/Microsoft-Windows-Windows-Firewall-With-Advanced-Security-4FirewallDiagnostics.jsonl",
+    "bytes": 0,
+    "lines": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "file": "rendered/Microsoft-Windows-WindowsBackup-4ActionCenter.jsonl",
+    "bytes": 0,
+    "lines": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "file": "rendered/Microsoft-Windows-WindowsSystemAssessmentTool-4Operational.jsonl",
+    "bytes": 13198,
+    "lines": 19,
+    "sha256": "2f2787c81827496f12556851cbea638691b559389e6631c9831489f28760fb77"
+  },
+  {
+    "file": "rendered/Microsoft-Windows-WindowsUpdateClient-4Operational.jsonl",
+    "bytes": 244316,
+    "lines": 323,
+    "sha256": "6002703598bb635ad489e38a2313b58880922a07c6ccd5603ec3ae63886706ce"
+  },
+  {
+    "file": "rendered/Microsoft-Windows-Winlogon-4Operational.jsonl",
+    "bytes": 237779,
+    "lines": 354,
+    "sha256": "d60f4b131742b8be141e5492d22b4d5594881ae002bb29a3890a56663fd4cefb"
+  },
+  {
+    "file": "rendered/Microsoft-Windows-WorkFolders-4WHC.jsonl",
+    "bytes": 0,
+    "lines": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "file": "rendered/Windows-PowerShell.jsonl",
+    "bytes": 207717,
+    "lines": 200,
+    "sha256": "f0b6d8489d428ebe97e7c52fa912bd0d079b994d3d4cde88db4ba090fb2bf64e"
+  }
+]

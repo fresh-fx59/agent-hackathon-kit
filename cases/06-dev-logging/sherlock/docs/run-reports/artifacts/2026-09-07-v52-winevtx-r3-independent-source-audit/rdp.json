@@ -1,0 +1,101 @@
+{
+  "rcm_ids": {
+    "261": 1964
+  },
+  "rcm_bounds": [
+    {
+      "file": "rendered/Microsoft-Windows-TerminalServices-RemoteConnectionManager-4Operational.jsonl",
+      "line": 1837,
+      "id": 261,
+      "time": "2021-06-02T19:16:46.244193Z",
+      "rid": 417651,
+      "provider": "Microsoft-Windows-TerminalServices-RemoteConnectionManager",
+      "data": null,
+      "user": {
+        "EventXML": {
+          "#attributes": {
+            "xmlns": "Event_NS"
+          },
+          "listenerName": "RDP-Tcp"
+        }
+      },
+      "security": {
+        "#attributes": {
+          "UserID": "S-1-5-20"
+        }
+      }
+    },
+    {
+      "file": "rendered/Microsoft-Windows-TerminalServices-RemoteConnectionManager-4Operational.jsonl",
+      "line": 1836,
+      "id": 261,
+      "time": "2021-06-02T21:11:15.742268Z",
+      "rid": 419614,
+      "provider": "Microsoft-Windows-TerminalServices-RemoteConnectionManager",
+      "data": null,
+      "user": {
+        "EventXML": {
+          "#attributes": {
+            "xmlns": "Event_NS"
+          },
+          "listenerName": "RDP-Tcp"
+        }
+      },
+      "security": {
+        "#attributes": {
+          "UserID": "S-1-5-20"
+        }
+      }
+    }
+  ],
+  "security_overlap_count": 1957,
+  "rdpcore_bounds": [
+    {
+      "file": "rendered/Microsoft-Windows-RemoteDesktopServices-RdpCoreTS-4Operational.jsonl",
+      "line": 1433,
+      "id": 72,
+      "time": "2021-06-02T21:03:11.737436Z",
+      "rid": 6215999,
+      "provider": "Microsoft-Windows-RemoteDesktopServices-RdpCoreTS",
+      "data": {
+        "MethodName": "PrepareForAccept"
+      },
+      "user": null,
+      "security": {
+        "#attributes": {
+          "UserID": "S-1-5-20"
+        }
+      }
+    },
+    {
+      "file": "rendered/Microsoft-Windows-RemoteDesktopServices-RdpCoreTS-4Operational.jsonl",
+      "line": 1432,
+      "id": 143,
+      "time": "2021-06-02T21:11:34.029721Z",
+      "rid": 6218080,
+      "provider": "Microsoft-Windows-RemoteDesktopServices-RdpCoreTS",
+      "data": {
+        "error": 64
+      },
+      "user": null,
+      "security": {
+        "#attributes": {
+          "UserID": "S-1-5-20"
+        }
+      }
+    }
+  ],
+  "rdpcore_ids": {
+    "148": 417,
+    "103": 139,
+    "131": 141,
+    "65": 141,
+    "72": 423,
+    "141": 142,
+    "140": 142,
+    "143": 130,
+    "226": 129,
+    "102": 139,
+    "145": 139
+  }
+}

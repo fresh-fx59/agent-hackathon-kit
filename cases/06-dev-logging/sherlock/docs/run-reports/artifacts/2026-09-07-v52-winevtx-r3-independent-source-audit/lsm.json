@@ -1,0 +1,2151 @@
+[
+  {
+    "file": "rendered/Microsoft-Windows-TerminalServices-LocalSessionManager-4Operational.jsonl",
+    "line": 1,
+    "id": 32,
+    "time": "2021-05-08T15:04:06.825279Z",
+    "rid": 1,
+    "provider": "Microsoft-Windows-TerminalServices-LocalSessionManager",
+    "data": null,
+    "user": {
+      "EventXML": {
+        "#attributes": {
+          "xmlns": "Event_NS"
+        },
+        "messageName": "RDSAppXPlugin"
+      }
+    },
+    "security": {
+      "#attributes": {
+        "UserID": "S-1-5-18"
+      }
+    }
+  },
+  {
+    "file": "rendered/Microsoft-Windows-TerminalServices-LocalSessionManager-4Operational.jsonl",
+    "line": 2,
+    "id": 34,
+    "time": "2021-05-08T15:04:06.829069Z",
+    "rid": 2,
+    "provider": "Microsoft-Windows-TerminalServices-LocalSessionManager",
+    "data": null,
+    "user": null,
+    "security": {
+      "#attributes": {
+        "UserID": "S-1-5-18"
+      }
+    }
+  },
+  {
+    "file": "rendered/Microsoft-Windows-TerminalServices-LocalSessionManager-4Operational.jsonl",
+    "line": 3,
+    "id": 34,
+    "time": "2021-05-08T15:04:06.829615Z",
+    "rid": 3,
+    "provider": "Microsoft-Windows-TerminalServices-LocalSessionManager",
+    "data": null,
+    "user": null,
+    "security": {
+      "#attributes": {
+        "UserID": "S-1-5-18"
+      }
+    }
+  },
+  {
+    "file": "rendered/Microsoft-Windows-TerminalServices-LocalSessionManager-4Operational.jsonl",
+    "line": 4,
+    "id": 34,
+    "time": "2021-05-08T15:04:06.829840Z",
+    "rid": 4,
+    "provider": "Microsoft-Windows-TerminalServices-LocalSessionManager",
+    "data": null,
+    "user": null,
+    "security": {
+      "#attributes": {
+        "UserID": "S-1-5-18"
+      }
+    }
+  },
+  {
+    "file": "rendered/Microsoft-Windows-TerminalServices-LocalSessionManager-4Operational.jsonl",
+    "line": 5,
+    "id": 34,
+    "time": "2021-05-08T15:04:06.829982Z",
+    "rid": 5,
+    "provider": "Microsoft-Windows-TerminalServices-LocalSessionManager",
+    "data": null,
+    "user": null,
+    "security": {
+      "#attributes": {
+        "UserID": "S-1-5-18"
+      }
+    }
+  },
+  {
+    "file": "rendered/Microsoft-Windows-TerminalServices-LocalSessionManager-4Operational.jsonl",
+    "line": 6,
+    "id": 34,
+    "time": "2021-05-08T15:04:13.207474Z",
+    "rid": 6,
+    "provider": "Microsoft-Windows-TerminalServices-LocalSessionManager",
+    "data": null,
+    "user": null,
+    "security": {
+      "#attributes": {
+        "UserID": "S-1-5-18"
+      }
+    }
+  },
+  {
+    "file": "rendered/Microsoft-Windows-TerminalServices-LocalSessionManager-4Operational.jsonl",
+    "line": 7,
+    "id": 34,
+    "time": "2021-05-08T15:04:13.207640Z",
+    "rid": 7,
+    "provider": "Microsoft-Windows-TerminalServices-LocalSessionManager",
+    "data": null,
+    "user": null,
+    "security": {
+      "#attributes": {
+        "UserID": "S-1-5-18"
+      }
+    }
+  },
+  {
+    "file": "rendered/Microsoft-Windows-TerminalServices-LocalSessionManager-4Operational.jsonl",
+    "line": 8,
+    "id": 34,
+    "time": "2021-05-08T15:04:13.228319Z",
+    "rid": 8,
+    "provider": "Microsoft-Windows-TerminalServices-LocalSessionManager",
+    "data": null,
+    "user": null,
+    "security": {
+      "#attributes": {
+        "UserID": "S-1-5-18"
+      }
+    }
+  },
+  {
+    "file": "rendered/Microsoft-Windows-TerminalServices-LocalSessionManager-4Operational.jsonl",
+    "line": 9,
+    "id": 34,
+    "time": "2021-05-08T15:04:13.228970Z",
+    "rid": 9,
+    "provider": "Microsoft-Windows-TerminalServices-LocalSessionManager",
+    "data": null,
+    "user": null,
+    "security": {
+      "#attributes": {
+        "UserID": "S-1-5-18"
+      }
+    }
+  },
+  {
+    "file": "rendered/Microsoft-Windows-TerminalServices-LocalSessionManager-4Operational.jsonl",
+    "line": 10,
+    "id": 34,
+    "time": "2021-05-08T15:04:29.444106Z",
+    "rid": 10,
+    "provider": "Microsoft-Windows-TerminalServices-LocalSessionManager",
+    "data": null,
+    "user": null,
+    "security": {
+      "#attributes": {
+        "UserID": "S-1-5-18"
+      }
+    }
+  },
+  {
+    "file": "rendered/Microsoft-Windows-TerminalServices-LocalSessionManager-4Operational.jsonl",
+    "line": 11,
+    "id": 34,
+    "time": "2021-05-08T15:04:29.749141Z",
+    "rid": 11,
+    "provider": "Microsoft-Windows-TerminalServices-LocalSessionManager",
+    "data": null,
+    "user": null,
+    "security": {
+      "#attributes": {
+        "UserID": "S-1-5-18"
+      }
+    }
+  },
+  {
+    "file": "rendered/Microsoft-Windows-TerminalServices-LocalSessionManager-4Operational.jsonl",
+    "line": 12,
+    "id": 34,
+    "time": "2021-05-08T15:04:29.749312Z",
+    "rid": 12,
+    "provider": "Microsoft-Windows-TerminalServices-LocalSessionManager",
+    "data": null,
+    "user": null,
+    "security": {
+      "#attributes": {
+        "UserID": "S-1-5-18"
+      }
+    }
+  },
+  {
+    "file": "rendered/Microsoft-Windows-TerminalServices-LocalSessionManager-4Operational.jsonl",
+    "line": 13,
+    "id": 34,
+    "time": "2021-05-08T15:04:29.863842Z",
+    "rid": 13,
+    "provider": "Microsoft-Windows-TerminalServices-LocalSessionManager",
+    "data": null,
+    "user": null,
+    "security": {
+      "#attributes": {
+        "UserID": "S-1-5-18"
+      }
+    }
+  },
+  {
+    "file": "rendered/Microsoft-Windows-TerminalServices-LocalSessionManager-4Operational.jsonl",
+    "line": 14,
+    "id": 34,
+    "time": "2021-05-08T15:04:32.202493Z",
+    "rid": 14,
+    "provider": "Microsoft-Windows-TerminalServices-LocalSessionManager",
+    "data": null,
+    "user": null,
+    "security": {
+      "#attributes": {
+        "UserID": "S-1-5-18"
+      }
+    }
+  },
+  {
+    "file": "rendered/Microsoft-Windows-TerminalServices-LocalSessionManager-4Operational.jsonl",
+    "line": 15,
+    "id": 34,
+    "time": "2021-05-08T15:05:07.017814Z",
+    "rid": 15,
+    "provider": "Microsoft-Windows-TerminalServices-LocalSessionManager",
+    "data": null,
+    "user": null,
+    "security": {
+      "#attributes": {
+        "UserID": "S-1-5-18"
+      }
+    }
+  },
+  {
+    "file": "rendered/Microsoft-Windows-TerminalServices-LocalSessionManager-4Operational.jsonl",
+    "line": 16,
+    "id": 34,
+    "time": "2021-05-08T15:05:08.100478Z",
+    "rid": 16,
+    "provider": "Microsoft-Windows-TerminalServices-LocalSessionManager",
+    "data": null,
+    "user": null,
+    "security": {
+      "#attributes": {
+        "UserID": "S-1-5-18"
+      }
+    }
+  },
+  {
+    "file": "rendered/Microsoft-Windows-TerminalServices-LocalSessionManager-4Operational.jsonl",
+    "line": 17,
+    "id": 34,
+    "time": "2021-05-08T15:05:08.117788Z",
+    "rid": 17,
+    "provider": "Microsoft-Windows-TerminalServices-LocalSessionManager",
+    "data": null,
+    "user": null,
+    "security": {
+      "#attributes": {
+        "UserID": "S-1-5-18"
+      }
+    }
+  },
+  {
+    "file": "rendered/Microsoft-Windows-TerminalServices-LocalSessionManager-4Operational.jsonl",
+    "line": 18,
+    "id": 54,
+    "time": "2021-05-08T15:05:08.122752Z",
+    "rid": 18,
+    "provider": "Microsoft-Windows-TerminalServices-LocalSessionManager",
+    "data": null,
+    "user": null,
+    "security": {
+      "#attributes": {
+        "UserID": "S-1-5-18"
+      }
+    }
+  },
+  {
+    "file": "rendered/Microsoft-Windows-TerminalServices-LocalSessionManager-4Operational.jsonl",
+    "line": 19,
+    "id": 32,
+    "time": "2021-05-08T15:05:17.925017Z",
+    "rid": 19,
+    "provider": "Microsoft-Windows-TerminalServices-LocalSessionManager",
+    "data": null,
+    "user": {
+      "EventXML": {
+        "#attributes": {
+          "xmlns": "Event_NS"
+        },
+        "messageName": "RDSAppXPlugin"
+      }
+    },
+    "security": {
+      "#attributes": {
+        "UserID": "S-1-5-18"
+      }
+    }
+  },
+  {
+    "file": "rendered/Microsoft-Windows-TerminalServices-LocalSessionManager-4Operational.jsonl",
+    "line": 20,
+    "id": 34,
+    "time": "2021-05-08T15:05:17.928524Z",
+    "rid": 20,
+    "provider": "Microsoft-Windows-TerminalServices-LocalSessionManager",
+    "data": null,
+    "user": null,
+    "security": {
+      "#attributes": {
+        "UserID": "S-1-5-18"
+      }
+    }
+  },
+  {
+    "file": "rendered/Microsoft-Windows-TerminalServices-LocalSessionManager-4Operational.jsonl",
+    "line": 21,
+    "id": 34,
+    "time": "2021-05-08T15:05:17.929663Z",
+    "rid": 21,
+    "provider": "Microsoft-Windows-TerminalServices-LocalSessionManager",
+    "data": null,
+    "user": null,
+    "security": {
+      "#attributes": {
+        "UserID": "S-1-5-18"
+      }
+    }
+  },
+  {
+    "file": "rendered/Microsoft-Windows-TerminalServices-LocalSessionManager-4Operational.jsonl",
+    "line": 22,
+    "id": 34,
+    "time": "2021-05-08T15:05:17.929920Z",
+    "rid": 22,
+    "provider": "Microsoft-Windows-TerminalServices-LocalSessionManager",
+    "data": null,
+    "user": null,
+    "security": {
+      "#attributes": {
+        "UserID": "S-1-5-18"
+      }
+    }
+  },
+  {
+    "file": "rendered/Microsoft-Windows-TerminalServices-LocalSessionManager-4Operational.jsonl",
+    "line": 23,
+    "id": 34,
+    "time": "2021-05-08T15:05:17.930151Z",
+    "rid": 23,
+    "provider": "Microsoft-Windows-TerminalServices-LocalSessionManager",
+    "data": null,
+    "user": null,
+    "security": {
+      "#attributes": {
+        "UserID": "S-1-5-18"
+      }
+    }
+  },
+  {
+    "file": "rendered/Microsoft-Windows-TerminalServices-LocalSessionManager-4Operational.jsonl",
+    "line": 24,
+    "id": 34,
+    "time": "2021-05-08T15:05:22.208441Z",
+    "rid": 24,
+    "provider": "Microsoft-Windows-TerminalServices-LocalSessionManager",
+    "data": null,
+    "user": null,
+    "security": {
+      "#attributes": {
+        "UserID": "S-1-5-18"
+      }
+    }
+  },
+  {
+    "file": "rendered/Microsoft-Windows-TerminalServices-LocalSessionManager-4Operational.jsonl",
+    "line": 25,
+    "id": 34,
+    "time": "2021-05-08T15:05:22.208629Z",
+    "rid": 25,
+    "provider": "Microsoft-Windows-TerminalServices-LocalSessionManager",
+    "data": null,
+    "user": null,
+    "security": {
+      "#attributes": {
+        "UserID": "S-1-5-18"
+      }
+    }
+  },
+  {
+    "file": "rendered/Microsoft-Windows-TerminalServices-LocalSessionManager-4Operational.jsonl",
+    "line": 26,
+    "id": 34,
+    "time": "2021-05-08T15:05:22.228542Z",
+    "rid": 26,
+    "provider": "Microsoft-Windows-TerminalServices-LocalSessionManager",
+    "data": null,
+    "user": null,
+    "security": {
+      "#attributes": {
+        "UserID": "S-1-5-18"
+      }
+    }
+  },
+  {
+    "file": "rendered/Microsoft-Windows-TerminalServices-LocalSessionManager-4Operational.jsonl",
+    "line": 27,
+    "id": 34,
+    "time": "2021-05-08T15:05:22.562970Z",
+    "rid": 27,
+    "provider": "Microsoft-Windows-TerminalServices-LocalSessionManager",
+    "data": null,
+    "user": null,
+    "security": {
+      "#attributes": {
+        "UserID": "S-1-5-18"
+      }
+    }
+  },
+  {
+    "file": "rendered/Microsoft-Windows-TerminalServices-LocalSessionManager-4Operational.jsonl",
+    "line": 28,
+    "id": 34,
+    "time": "2021-05-08T15:07:57.961592Z",
+    "rid": 28,
+    "provider": "Microsoft-Windows-TerminalServices-LocalSessionManager",
+    "data": null,
+    "user": null,
+    "security": {
+      "#attributes": {
+        "UserID": "S-1-5-18"
+      }
+    }
+  },
+  {
+    "file": "rendered/Microsoft-Windows-TerminalServices-LocalSessionManager-4Operational.jsonl",
+    "line": 29,
+    "id": 34,
+    "time": "2021-05-08T15:07:57.961841Z",
+    "rid": 29,
+    "provider": "Microsoft-Windows-TerminalServices-LocalSessionManager",
+    "data": null,
+    "user": null,
+    "security": {
+      "#attributes": {
+        "UserID": "S-1-5-18"
+      }
+    }
+  },
+  {
+    "file": "rendered/Microsoft-Windows-TerminalServices-LocalSessionManager-4Operational.jsonl",
+    "line": 30,
+    "id": 34,
+    "time": "2021-05-08T15:07:57.962130Z",
+    "rid": 30,
+    "provider": "Microsoft-Windows-TerminalServices-LocalSessionManager",
+    "data": null,
+    "user": null,
+    "security": {
+      "#attributes": {
+        "UserID": "S-1-5-18"
+      }
+    }
+  },
+  {
+    "file": "rendered/Microsoft-Windows-TerminalServices-LocalSessionManager-4Operational.jsonl",
+    "line": 31,
+    "id": 34,
+    "time": "2021-05-08T15:07:57.962485Z",
+    "rid": 31,
+    "provider": "Microsoft-Windows-TerminalServices-LocalSessionManager",
+    "data": null,
+    "user": null,
+    "security": {
+      "#attributes": {
+        "UserID": "S-1-5-18"
+      }
+    }
+  },
+  {
+    "file": "rendered/Microsoft-Windows-TerminalServices-LocalSessionManager-4Operational.jsonl",
+    "line": 32,
+    "id": 34,
+    "time": "2021-05-08T15:07:58.666111Z",
+    "rid": 32,
+    "provider": "Microsoft-Windows-TerminalServices-LocalSessionManager",
+    "data": null,
+    "user": null,
+    "security": {
+      "#attributes": {
+        "UserID": "S-1-5-18"
+      }
+    }
+  },
+  {
+    "file": "rendered/Microsoft-Windows-TerminalServices-LocalSessionManager-4Operational.jsonl",
+    "line": 33,
+    "id": 34,
+    "time": "2021-05-08T15:08:01.354445Z",
+    "rid": 33,
+    "provider": "Microsoft-Windows-TerminalServices-LocalSessionManager",
+    "data": null,
+    "user": null,
+    "security": {
+      "#attributes": {
+        "UserID": "S-1-5-18"
+      }
+    }
+  },
+  {
+    "file": "rendered/Microsoft-Windows-TerminalServices-LocalSessionManager-4Operational.jsonl",
+    "line": 34,
+    "id": 34,
+    "time": "2021-05-08T15:08:01.766086Z",
+    "rid": 34,
+    "provider": "Microsoft-Windows-TerminalServices-LocalSessionManager",
+    "data": null,
+    "user": null,
+    "security": {
+      "#attributes": {
+        "UserID": "S-1-5-18"
+      }
+    }
+  },
+  {
+    "file": "rendered/Microsoft-Windows-TerminalServices-LocalSessionManager-4Operational.jsonl",
+    "line": 35,
+    "id": 34,
+    "time": "2021-05-08T15:08:01.921844Z",
+    "rid": 35,
+    "provider": "Microsoft-Windows-TerminalServices-LocalSessionManager",
+    "data": null,
+    "user": null,
+    "security": {
+      "#attributes": {
+        "UserID": "S-1-5-18"
+      }
+    }
+  },
+  {
+    "file": "rendered/Microsoft-Windows-TerminalServices-LocalSessionManager-4Operational.jsonl",
+    "line": 36,
+    "id": 34,
+    "time": "2021-05-08T15:08:03.140051Z",
+    "rid": 36,
+    "provider": "Microsoft-Windows-TerminalServices-LocalSessionManager",
+    "data": null,
+    "user": null,
+    "security": {
+      "#attributes": {
+        "UserID": "S-1-5-18"
+      }
+    }
+  },
+  {
+    "file": "rendered/Microsoft-Windows-TerminalServices-LocalSessionManager-4Operational.jsonl",
+    "line": 37,
+    "id": 40,
+    "time": "2021-05-08T23:23:50.238247Z",
+    "rid": 37,
+    "provider": "Microsoft-Windows-TerminalServices-LocalSessionManager",
+    "data": null,
+    "user": {
+      "EventXML": {
+        "#attributes": {
+          "xmlns": "Event_NS"
+        },
+        "Session": 2,
+        "Reason": 2147942464
+      }
+    },
+    "security": {
+      "#attributes": {
+        "UserID": "S-1-5-18"
+      }
+    }
+  },
+  {
+    "file": "rendered/Microsoft-Windows-TerminalServices-LocalSessionManager-4Operational.jsonl",
+    "line": 38,
+    "id": 41,
+    "time": "2021-05-09T21:43:08.657866Z",
+    "rid": 38,
+    "provider": "Microsoft-Windows-TerminalServices-LocalSessionManager",
+    "data": null,
+    "user": {
+      "EventXML": {
+        "#attributes": {
+          "xmlns": "Event_NS"
+        },
+        "User": "IPSERVER\\root",
+        "SessionID": 2
+      }
+    },
+    "security": {
+      "#attributes": {
+        "UserID": "S-1-5-18"
+      }
+    }
+  },
+  {
+    "file": "rendered/Microsoft-Windows-TerminalServices-LocalSessionManager-4Operational.jsonl",
+    "line": 39,
+    "id": 42,
+    "time": "2021-05-09T21:43:08.816703Z",
+    "rid": 39,
+    "provider": "Microsoft-Windows-TerminalServices-LocalSessionManager",
+    "data": null,
+    "user": {
+      "EventXML": {
+        "#attributes": {
+          "xmlns": "Event_NS"
+        },
+        "User": "IPSERVER\\root",
+        "SessionID": 2
+      }
+    },
+    "security": {
+      "#attributes": {
+        "UserID": "S-1-5-18"
+      }
+    }
+  },
+  {
+    "file": "rendered/Microsoft-Windows-TerminalServices-LocalSessionManager-4Operational.jsonl",
+    "line": 40,
+    "id": 21,
+    "time": "2021-05-09T21:43:09.396401Z",
+    "rid": 40,
+    "provider": "Microsoft-Windows-TerminalServices-LocalSessionManager",
+    "data": null,
+    "user": {
+      "EventXML": {
+        "#attributes": {
+          "xmlns": "Event_NS"
+        },
+        "User": "IPSERVER\\root",
+        "SessionID": 2,
+        "Address": "192.99.186.31"
+      }
+    },
+    "security": {
+      "#attributes": {
+        "UserID": "S-1-5-18"
+      }
+    }
+  },
+  {
+    "file": "rendered/Microsoft-Windows-TerminalServices-LocalSessionManager-4Operational.jsonl",
+    "line": 41,
+    "id": 22,
+    "time": "2021-05-09T21:43:09.608770Z",
+    "rid": 41,
+    "provider": "Microsoft-Windows-TerminalServices-LocalSessionManager",
+    "data": null,
+    "user": {
+      "EventXML": {
+        "#attributes": {
+          "xmlns": "Event_NS"
+        },
+        "User": "IPSERVER\\root",
+        "SessionID": 2,
+        "Address": "192.99.186.31"
+      }
+    },
+    "security": {
+      "#attributes": {
+        "UserID": "S-1-5-18"
+      }
+    }
+  },
+  {
+    "file": "rendered/Microsoft-Windows-TerminalServices-LocalSessionManager-4Operational.jsonl",
+    "line": 42,
+    "id": 40,
+    "time": "2021-05-09T21:45:58.562958Z",
+    "rid": 42,
+    "provider": "Microsoft-Windows-TerminalServices-LocalSessionManager",
+    "data": null,
+    "user": {
+      "EventXML": {
+        "#attributes": {
+          "xmlns": "Event_NS"
+        },
+        "Session": 2,
+        "Reason": 0
+      }
+    },
+    "security": {
+      "#attributes": {
+        "UserID": "S-1-5-18"
+      }
+    }
+  },
+  {
+    "file": "rendered/Microsoft-Windows-TerminalServices-LocalSessionManager-4Operational.jsonl",
+    "line": 43,
+    "id": 24,
+    "time": "2021-05-09T21:45:59.223154Z",
+    "rid": 43,
+    "provider": "Microsoft-Windows-TerminalServices-LocalSessionManager",
+    "data": null,
+    "user": {
+      "EventXML": {
+        "#attributes": {
+          "xmlns": "Event_NS"
+        },
+        "User": "IPSERVER\\root",
+        "SessionID": 2,
+        "Address": "192.99.186.31"
+      }
+    },
+    "security": {
+      "#attributes": {
+        "UserID": "S-1-5-18"
+      }
+    }
+  },
+  {
+    "file": "rendered/Microsoft-Windows-TerminalServices-LocalSessionManager-4Operational.jsonl",
+    "line": 44,
+    "id": 41,
+    "time": "2021-05-09T22:11:54.857674Z",
+    "rid": 44,
+    "provider": "Microsoft-Windows-TerminalServices-LocalSessionManager",
+    "data": null,
+    "user": {
+      "EventXML": {
+        "#attributes": {
+          "xmlns": "Event_NS"
+        },
+        "User": "IPSERVER\\root",
+        "SessionID": 3
+      }
+    },
+    "security": {
+      "#attributes": {
+        "UserID": "S-1-5-18"
+      }
+    }
+  },
+  {
+    "file": "rendered/Microsoft-Windows-TerminalServices-LocalSessionManager-4Operational.jsonl",
+    "line": 45,
+    "id": 40,
+    "time": "2021-05-09T22:11:55.162939Z",
+    "rid": 45,
+    "provider": "Microsoft-Windows-TerminalServices-LocalSessionManager",
+    "data": null,
+    "user": {
+      "EventXML": {
+        "#attributes": {
+          "xmlns": "Event_NS"
+        },
+        "Session": 3,
+        "Reason": 0
+      }
+    },
+    "security": {
+      "#attributes": {
+        "UserID": "S-1-5-18"
+      }
+    }
+  },
+  {
+    "file": "rendered/Microsoft-Windows-TerminalServices-LocalSessionManager-4Operational.jsonl",
+    "line": 46,
+    "id": 40,
+    "time": "2021-05-09T22:11:55.420706Z",
+    "rid": 46,
+    "provider": "Microsoft-Windows-TerminalServices-LocalSessionManager",
+    "data": null,
+    "user": {
+      "EventXML": {
+        "#attributes": {
+          "xmlns": "Event_NS"
+        },
+        "Session": 2,
+        "Reason": 5
+      }
+    },
+    "security": {
+      "#attributes": {
+        "UserID": "S-1-5-18"
+      }
+    }
+  },
+  {
+    "file": "rendered/Microsoft-Windows-TerminalServices-LocalSessionManager-4Operational.jsonl",
+    "line": 47,
+    "id": 25,
+    "time": "2021-05-09T22:11:55.638239Z",
+    "rid": 47,
+    "provider": "Microsoft-Windows-TerminalServices-LocalSessionManager",
+    "data": null,
+    "user": {
+      "EventXML": {
+        "#attributes": {
+          "xmlns": "Event_NS"
+        },
+        "User": "IPSERVER\\root",
+        "SessionID": 2,
+        "Address": "192.99.186.31"
+      }
+    },
+    "security": {
+      "#attributes": {
+        "UserID": "S-1-5-18"
+      }
+    }
+  },
+  {
+    "file": "rendered/Microsoft-Windows-TerminalServices-LocalSessionManager-4Operational.jsonl",
+    "line": 48,
+    "id": 42,
+    "time": "2021-05-09T22:11:55.641022Z",
+    "rid": 48,
+    "provider": "Microsoft-Windows-TerminalServices-LocalSessionManager",
+    "data": null,
+    "user": {
+      "EventXML": {
+        "#attributes": {
+          "xmlns": "Event_NS"
+        },
+        "User": "IPSERVER\\root",
+        "SessionID": 3
+      }
+    },
+    "security": {
+      "#attributes": {
+        "UserID": "S-1-5-18"
+      }
+    }
+  },
+  {
+    "file": "rendered/Microsoft-Windows-TerminalServices-LocalSessionManager-4Operational.jsonl",
+    "line": 49,
+    "id": 40,
+    "time": "2021-05-09T23:33:59.943938Z",
+    "rid": 49,
+    "provider": "Microsoft-Windows-TerminalServices-LocalSessionManager",
+    "data": null,
+    "user": {
+      "EventXML": {
+        "#attributes": {
+          "xmlns": "Event_NS"
+        },
+        "Session": 2,
+        "Reason": 2147942521
+      }
+    },
+    "security": {
+      "#attributes": {
+        "UserID": "S-1-5-18"
+      }
+    }
+  },
+  {
+    "file": "rendered/Microsoft-Windows-TerminalServices-LocalSessionManager-4Operational.jsonl",
+    "line": 50,
+    "id": 24,
+    "time": "2021-05-09T23:34:00.597347Z",
+    "rid": 50,
+    "provider": "Microsoft-Windows-TerminalServices-LocalSessionManager",
+    "data": null,
+    "user": {
+      "EventXML": {
+        "#attributes": {
+          "xmlns": "Event_NS"
+        },
+        "User": "IPSERVER\\root",
+        "SessionID": 2,
+        "Address": "192.99.186.31"
+      }
+    },
+    "security": {
+      "#attributes": {
+        "UserID": "S-1-5-18"
+      }
+    }
+  },
+  {
+    "file": "rendered/Microsoft-Windows-TerminalServices-LocalSessionManager-4Operational.jsonl",
+    "line": 51,
+    "id": 41,
+    "time": "2021-05-10T00:03:52.203685Z",
+    "rid": 51,
+    "provider": "Microsoft-Windows-TerminalServices-LocalSessionManager",
+    "data": null,
+    "user": {
+      "EventXML": {
+        "#attributes": {
+          "xmlns": "Event_NS"
+        },
+        "User": "IPSERVER\\root",
+        "SessionID": 3
+      }
+    },
+    "security": {
+      "#attributes": {
+        "UserID": "S-1-5-18"
+      }
+    }
+  },
+  {
+    "file": "rendered/Microsoft-Windows-TerminalServices-LocalSessionManager-4Operational.jsonl",
+    "line": 52,
+    "id": 40,
+    "time": "2021-05-10T00:03:52.897243Z",
+    "rid": 52,
+    "provider": "Microsoft-Windows-TerminalServices-LocalSessionManager",
+    "data": null,
+    "user": {
+      "EventXML": {
+        "#attributes": {
+          "xmlns": "Event_NS"
+        },
+        "Session": 3,
+        "Reason": 0
+      }
+    },
+    "security": {
+      "#attributes": {
+        "UserID": "S-1-5-18"
+      }
+    }
+  },
+  {
+    "file": "rendered/Microsoft-Windows-TerminalServices-LocalSessionManager-4Operational.jsonl",
+    "line": 53,
+    "id": 40,
+    "time": "2021-05-10T00:03:53.097627Z",
+    "rid": 53,
+    "provider": "Microsoft-Windows-TerminalServices-LocalSessionManager",
+    "data": null,
+    "user": {
+      "EventXML": {
+        "#attributes": {
+          "xmlns": "Event_NS"
+        },
+        "Session": 2,
+        "Reason": 5
+      }
+    },
+    "security": {
+      "#attributes": {
+        "UserID": "S-1-5-18"
+      }
+    }
+  },
+  {
+    "file": "rendered/Microsoft-Windows-TerminalServices-LocalSessionManager-4Operational.jsonl",
+    "line": 54,
+    "id": 25,
+    "time": "2021-05-10T00:03:53.285687Z",
+    "rid": 54,
+    "provider": "Microsoft-Windows-TerminalServices-LocalSessionManager",
+    "data": null,
+    "user": {
+      "EventXML": {
+        "#attributes": {
+          "xmlns": "Event_NS"
+        },
+        "User": "IPSERVER\\root",
+        "SessionID": 2,
+        "Address": "192.99.186.31"
+      }
+    },
+    "security": {
+      "#attributes": {
+        "UserID": "S-1-5-18"
+      }
+    }
+  },
+  {
+    "file": "rendered/Microsoft-Windows-TerminalServices-LocalSessionManager-4Operational.jsonl",
+    "line": 55,
+    "id": 42,
+    "time": "2021-05-10T00:03:53.300755Z",
+    "rid": 55,
+    "provider": "Microsoft-Windows-TerminalServices-LocalSessionManager",
+    "data": null,
+    "user": {
+      "EventXML": {
+        "#attributes": {
+          "xmlns": "Event_NS"
+        },
+        "User": "IPSERVER\\root",
+        "SessionID": 3
+      }
+    },
+    "security": {
+      "#attributes": {
+        "UserID": "S-1-5-18"
+      }
+    }
+  },
+  {
+    "file": "rendered/Microsoft-Windows-TerminalServices-LocalSessionManager-4Operational.jsonl",
+    "line": 56,
+    "id": 40,
+    "time": "2021-05-10T00:05:34.693652Z",
+    "rid": 56,
+    "provider": "Microsoft-Windows-TerminalServices-LocalSessionManager",
+    "data": null,
+    "user": {
+      "EventXML": {
+        "#attributes": {
+          "xmlns": "Event_NS"
+        },
+        "Session": 2,
+        "Reason": 2147942521
+      }
+    },
+    "security": {
+      "#attributes": {
+        "UserID": "S-1-5-18"
+      }
+    }
+  },
+  {
+    "file": "rendered/Microsoft-Windows-TerminalServices-LocalSessionManager-4Operational.jsonl",
+    "line": 57,
+    "id": 24,
+    "time": "2021-05-10T00:05:35.259728Z",
+    "rid": 57,
+    "provider": "Microsoft-Windows-TerminalServices-LocalSessionManager",
+    "data": null,
+    "user": {
+      "EventXML": {
+        "#attributes": {
+          "xmlns": "Event_NS"
+        },
+        "User": "IPSERVER\\root",
+        "SessionID": 2,
+        "Address": "192.99.186.31"
+      }
+    },
+    "security": {
+      "#attributes": {
+        "UserID": "S-1-5-18"
+      }
+    }
+  },
+  {
+    "file": "rendered/Microsoft-Windows-TerminalServices-LocalSessionManager-4Operational.jsonl",
+    "line": 58,
+    "id": 40,
+    "time": "2021-05-10T00:12:30.475613Z",
+    "rid": 58,
+    "provider": "Microsoft-Windows-TerminalServices-LocalSessionManager",
+    "data": null,
+    "user": {
+      "EventXML": {
+        "#attributes": {
+          "xmlns": "Event_NS"
+        },
+        "Session": 2,
+        "Reason": 5
+      }
+    },
+    "security": {
+      "#attributes": {
+        "UserID": "S-1-5-18"
+      }
+    }
+  },
+  {
+    "file": "rendered/Microsoft-Windows-TerminalServices-LocalSessionManager-4Operational.jsonl",
+    "line": 59,
+    "id": 25,
+    "time": "2021-05-10T00:12:31.157246Z",
+    "rid": 59,
+    "provider": "Microsoft-Windows-TerminalServices-LocalSessionManager",
+    "data": null,
+    "user": {
+      "EventXML": {
+        "#attributes": {
+          "xmlns": "Event_NS"
+        },
+        "User": "IPSERVER\\root",
+        "SessionID": 2,
+        "Address": "176.59.42.91"
+      }
+    },
+    "security": {
+      "#attributes": {
+        "UserID": "S-1-5-18"
+      }
+    }
+  },
+  {
+    "file": "rendered/Microsoft-Windows-TerminalServices-LocalSessionManager-4Operational.jsonl",
+    "line": 60,
+    "id": 40,
+    "time": "2021-05-10T00:12:40.209216Z",
+    "rid": 60,
+    "provider": "Microsoft-Windows-TerminalServices-LocalSessionManager",
+    "data": null,
+    "user": {
+      "EventXML": {
+        "#attributes": {
+          "xmlns": "Event_NS"
+        },
+        "Session": 2,
+        "Reason": 0
+      }
+    },
+    "security": {
+      "#attributes": {
+        "UserID": "S-1-5-18"
+      }
+    }
+  },
+  {
+    "file": "rendered/Microsoft-Windows-TerminalServices-LocalSessionManager-4Operational.jsonl",
+    "line": 61,
+    "id": 24,
+    "time": "2021-05-10T00:12:41.015438Z",
+    "rid": 61,
+    "provider": "Microsoft-Windows-TerminalServices-LocalSessionManager",
+    "data": null,
+    "user": {
+      "EventXML": {
+        "#attributes": {
+          "xmlns": "Event_NS"
+        },
+        "User": "IPSERVER\\root",
+        "SessionID": 2,
+        "Address": "176.59.42.91"
+      }
+    },
+    "security": {
+      "#attributes": {
+        "UserID": "S-1-5-18"
+      }
+    }
+  },
+  {
+    "file": "rendered/Microsoft-Windows-TerminalServices-LocalSessionManager-4Operational.jsonl",
+    "line": 62,
+    "id": 41,
+    "time": "2021-05-10T00:24:25.815050Z",
+    "rid": 62,
+    "provider": "Microsoft-Windows-TerminalServices-LocalSessionManager",
+    "data": null,
+    "user": {
+      "EventXML": {
+        "#attributes": {
+          "xmlns": "Event_NS"
+        },
+        "User": "IPSERVER\\root",
+        "SessionID": 3
+      }
+    },
+    "security": {
+      "#attributes": {
+        "UserID": "S-1-5-18"
+      }
+    }
+  },
+  {
+    "file": "rendered/Microsoft-Windows-TerminalServices-LocalSessionManager-4Operational.jsonl",
+    "line": 63,
+    "id": 40,
+    "time": "2021-05-10T00:24:25.883549Z",
+    "rid": 63,
+    "provider": "Microsoft-Windows-TerminalServices-LocalSessionManager",
+    "data": null,
+    "user": {
+      "EventXML": {
+        "#attributes": {
+          "xmlns": "Event_NS"
+        },
+        "Session": 3,
+        "Reason": 0
+      }
+    },
+    "security": {
+      "#attributes": {
+        "UserID": "S-1-5-18"
+      }
+    }
+  },
+  {
+    "file": "rendered/Microsoft-Windows-TerminalServices-LocalSessionManager-4Operational.jsonl",
+    "line": 64,
+    "id": 40,
+    "time": "2021-05-10T00:24:26.054392Z",
+    "rid": 64,
+    "provider": "Microsoft-Windows-TerminalServices-LocalSessionManager",
+    "data": null,
+    "user": {
+      "EventXML": {
+        "#attributes": {
+          "xmlns": "Event_NS"
+        },
+        "Session": 2,
+        "Reason": 5
+      }
+    },
+    "security": {
+      "#attributes": {
+        "UserID": "S-1-5-18"
+      }
+    }
+  },
+  {
+    "file": "rendered/Microsoft-Windows-TerminalServices-LocalSessionManager-4Operational.jsonl",
+    "line": 65,
+    "id": 25,
+    "time": "2021-05-10T00:24:26.296147Z",
+    "rid": 65,
+    "provider": "Microsoft-Windows-TerminalServices-LocalSessionManager",
+    "data": null,
+    "user": {
+      "EventXML": {
+        "#attributes": {
+          "xmlns": "Event_NS"
+        },
+        "User": "IPSERVER\\root",
+        "SessionID": 2,
+        "Address": "192.99.186.31"
+      }
+    },
+    "security": {
+      "#attributes": {
+        "UserID": "S-1-5-18"
+      }
+    }
+  },
+  {
+    "file": "rendered/Microsoft-Windows-TerminalServices-LocalSessionManager-4Operational.jsonl",
+    "line": 66,
+    "id": 42,
+    "time": "2021-05-10T00:24:26.296377Z",
+    "rid": 66,
+    "provider": "Microsoft-Windows-TerminalServices-LocalSessionManager",
+    "data": null,
+    "user": {
+      "EventXML": {
+        "#attributes": {
+          "xmlns": "Event_NS"
+        },
+        "User": "IPSERVER\\root",
+        "SessionID": 3
+      }
+    },
+    "security": {
+      "#attributes": {
+        "UserID": "S-1-5-18"
+      }
+    }
+  },
+  {
+    "file": "rendered/Microsoft-Windows-TerminalServices-LocalSessionManager-4Operational.jsonl",
+    "line": 67,
+    "id": 40,
+    "time": "2021-05-10T00:31:24.990537Z",
+    "rid": 67,
+    "provider": "Microsoft-Windows-TerminalServices-LocalSessionManager",
+    "data": null,
+    "user": {
+      "EventXML": {
+        "#attributes": {
+          "xmlns": "Event_NS"
+        },
+        "Session": 2,
+        "Reason": 2147500036
+      }
+    },
+    "security": {
+      "#attributes": {
+        "UserID": "S-1-5-18"
+      }
+    }
+  },
+  {
+    "file": "rendered/Microsoft-Windows-TerminalServices-LocalSessionManager-4Operational.jsonl",
+    "line": 68,
+    "id": 24,
+    "time": "2021-05-10T00:31:25.855337Z",
+    "rid": 68,
+    "provider": "Microsoft-Windows-TerminalServices-LocalSessionManager",
+    "data": null,
+    "user": {
+      "EventXML": {
+        "#attributes": {
+          "xmlns": "Event_NS"
+        },
+        "User": "IPSERVER\\root",
+        "SessionID": 2,
+        "Address": "192.99.186.31"
+      }
+    },
+    "security": {
+      "#attributes": {
+        "UserID": "S-1-5-18"
+      }
+    }
+  },
+  {
+    "file": "rendered/Microsoft-Windows-TerminalServices-LocalSessionManager-4Operational.jsonl",
+    "line": 69,
+    "id": 41,
+    "time": "2021-05-10T00:50:52.227063Z",
+    "rid": 69,
+    "provider": "Microsoft-Windows-TerminalServices-LocalSessionManager",
+    "data": null,
+    "user": {
+      "EventXML": {
+        "#attributes": {
+          "xmlns": "Event_NS"
+        },
+        "User": "IPSERVER\\root",
+        "SessionID": 3
+      }
+    },
+    "security": {
+      "#attributes": {
+        "UserID": "S-1-5-18"
+      }
+    }
+  },
+  {
+    "file": "rendered/Microsoft-Windows-TerminalServices-LocalSessionManager-4Operational.jsonl",
+    "line": 70,
+    "id": 40,
+    "time": "2021-05-10T00:50:52.821738Z",
+    "rid": 70,
+    "provider": "Microsoft-Windows-TerminalServices-LocalSessionManager",
+    "data": null,
+    "user": {
+      "EventXML": {
+        "#attributes": {
+          "xmlns": "Event_NS"
+        },
+        "Session": 3,
+        "Reason": 0
+      }
+    },
+    "security": {
+      "#attributes": {
+        "UserID": "S-1-5-18"
+      }
+    }
+  },
+  {
+    "file": "rendered/Microsoft-Windows-TerminalServices-LocalSessionManager-4Operational.jsonl",
+    "line": 71,
+    "id": 40,
+    "time": "2021-05-10T00:50:53.043048Z",
+    "rid": 71,
+    "provider": "Microsoft-Windows-TerminalServices-LocalSessionManager",
+    "data": null,
+    "user": {
+      "EventXML": {
+        "#attributes": {
+          "xmlns": "Event_NS"
+        },
+        "Session": 2,
+        "Reason": 5
+      }
+    },
+    "security": {
+      "#attributes": {
+        "UserID": "S-1-5-18"
+      }
+    }
+  },
+  {
+    "file": "rendered/Microsoft-Windows-TerminalServices-LocalSessionManager-4Operational.jsonl",
+    "line": 72,
+    "id": 25,
+    "time": "2021-05-10T00:50:53.277193Z",
+    "rid": 72,
+    "provider": "Microsoft-Windows-TerminalServices-LocalSessionManager",
+    "data": null,
+    "user": {
+      "EventXML": {
+        "#attributes": {
+          "xmlns": "Event_NS"
+        },
+        "User": "IPSERVER\\root",
+        "SessionID": 2,
+        "Address": "192.99.186.31"
+      }
+    },
+    "security": {
+      "#attributes": {
+        "UserID": "S-1-5-18"
+      }
+    }
+  },
+  {
+    "file": "rendered/Microsoft-Windows-TerminalServices-LocalSessionManager-4Operational.jsonl",
+    "line": 73,
+    "id": 42,
+    "time": "2021-05-10T00:50:53.277405Z",
+    "rid": 73,
+    "provider": "Microsoft-Windows-TerminalServices-LocalSessionManager",
+    "data": null,
+    "user": {
+      "EventXML": {
+        "#attributes": {
+          "xmlns": "Event_NS"
+        },
+        "User": "IPSERVER\\root",
+        "SessionID": 3
+      }
+    },
+    "security": {
+      "#attributes": {
+        "UserID": "S-1-5-18"
+      }
+    }
+  },
+  {
+    "file": "rendered/Microsoft-Windows-TerminalServices-LocalSessionManager-4Operational.jsonl",
+    "line": 74,
+    "id": 40,
+    "time": "2021-05-10T00:58:10.584507Z",
+    "rid": 74,
+    "provider": "Microsoft-Windows-TerminalServices-LocalSessionManager",
+    "data": null,
+    "user": {
+      "EventXML": {
+        "#attributes": {
+          "xmlns": "Event_NS"
+        },
+        "Session": 2,
+        "Reason": 0
+      }
+    },
+    "security": {
+      "#attributes": {
+        "UserID": "S-1-5-18"
+      }
+    }
+  },
+  {
+    "file": "rendered/Microsoft-Windows-TerminalServices-LocalSessionManager-4Operational.jsonl",
+    "line": 75,
+    "id": 24,
+    "time": "2021-05-10T00:58:11.420498Z",
+    "rid": 75,
+    "provider": "Microsoft-Windows-TerminalServices-LocalSessionManager",
+    "data": null,
+    "user": {
+      "EventXML": {
+        "#attributes": {
+          "xmlns": "Event_NS"
+        },
+        "User": "IPSERVER\\root",
+        "SessionID": 2,
+        "Address": "192.99.186.31"
+      }
+    },
+    "security": {
+      "#attributes": {
+        "UserID": "S-1-5-18"
+      }
+    }
+  },
+  {
+    "file": "rendered/Microsoft-Windows-TerminalServices-LocalSessionManager-4Operational.jsonl",
+    "line": 76,
+    "id": 41,
+    "time": "2021-05-10T19:33:28.984508Z",
+    "rid": 76,
+    "provider": "Microsoft-Windows-TerminalServices-LocalSessionManager",
+    "data": null,
+    "user": {
+      "EventXML": {
+        "#attributes": {
+          "xmlns": "Event_NS"
+        },
+        "User": "IPSERVER\\root",
+        "SessionID": 3
+      }
+    },
+    "security": {
+      "#attributes": {
+        "UserID": "S-1-5-18"
+      }
+    }
+  },
+  {
+    "file": "rendered/Microsoft-Windows-TerminalServices-LocalSessionManager-4Operational.jsonl",
+    "line": 77,
+    "id": 40,
+    "time": "2021-05-10T19:33:29.552206Z",
+    "rid": 77,
+    "provider": "Microsoft-Windows-TerminalServices-LocalSessionManager",
+    "data": null,
+    "user": {
+      "EventXML": {
+        "#attributes": {
+          "xmlns": "Event_NS"
+        },
+        "Session": 3,
+        "Reason": 0
+      }
+    },
+    "security": {
+      "#attributes": {
+        "UserID": "S-1-5-18"
+      }
+    }
+  },
+  {
+    "file": "rendered/Microsoft-Windows-TerminalServices-LocalSessionManager-4Operational.jsonl",
+    "line": 78,
+    "id": 40,
+    "time": "2021-05-10T19:33:29.795180Z",
+    "rid": 78,
+    "provider": "Microsoft-Windows-TerminalServices-LocalSessionManager",
+    "data": null,
+    "user": {
+      "EventXML": {
+        "#attributes": {
+          "xmlns": "Event_NS"
+        },
+        "Session": 2,
+        "Reason": 5
+      }
+    },
+    "security": {
+      "#attributes": {
+        "UserID": "S-1-5-18"
+      }
+    }
+  },
+  {
+    "file": "rendered/Microsoft-Windows-TerminalServices-LocalSessionManager-4Operational.jsonl",
+    "line": 79,
+    "id": 25,
+    "time": "2021-05-10T19:33:30.109738Z",
+    "rid": 79,
+    "provider": "Microsoft-Windows-TerminalServices-LocalSessionManager",
+    "data": null,
+    "user": {
+      "EventXML": {
+        "#attributes": {
+          "xmlns": "Event_NS"
+        },
+        "User": "IPSERVER\\root",
+        "SessionID": 2,
+        "Address": "192.99.186.31"
+      }
+    },
+    "security": {
+      "#attributes": {
+        "UserID": "S-1-5-18"
+      }
+    }
+  },
+  {
+    "file": "rendered/Microsoft-Windows-TerminalServices-LocalSessionManager-4Operational.jsonl",
+    "line": 80,
+    "id": 42,
+    "time": "2021-05-10T19:33:30.110643Z",
+    "rid": 80,
+    "provider": "Microsoft-Windows-TerminalServices-LocalSessionManager",
+    "data": null,
+    "user": {
+      "EventXML": {
+        "#attributes": {
+          "xmlns": "Event_NS"
+        },
+        "User": "IPSERVER\\root",
+        "SessionID": 3
+      }
+    },
+    "security": {
+      "#attributes": {
+        "UserID": "S-1-5-18"
+      }
+    }
+  },
+  {
+    "file": "rendered/Microsoft-Windows-TerminalServices-LocalSessionManager-4Operational.jsonl",
+    "line": 81,
+    "id": 40,
+    "time": "2021-05-10T19:35:57.490770Z",
+    "rid": 81,
+    "provider": "Microsoft-Windows-TerminalServices-LocalSessionManager",
+    "data": null,
+    "user": {
+      "EventXML": {
+        "#attributes": {
+          "xmlns": "Event_NS"
+        },
+        "Session": 2,
+        "Reason": 2147942464
+      }
+    },
+    "security": {
+      "#attributes": {
+        "UserID": "S-1-5-18"
+      }
+    }
+  },
+  {
+    "file": "rendered/Microsoft-Windows-TerminalServices-LocalSessionManager-4Operational.jsonl",
+    "line": 82,
+    "id": 24,
+    "time": "2021-05-10T19:35:58.203469Z",
+    "rid": 82,
+    "provider": "Microsoft-Windows-TerminalServices-LocalSessionManager",
+    "data": null,
+    "user": {
+      "EventXML": {
+        "#attributes": {
+          "xmlns": "Event_NS"
+        },
+        "User": "IPSERVER\\root",
+        "SessionID": 2,
+        "Address": "192.99.186.31"
+      }
+    },
+    "security": {
+      "#attributes": {
+        "UserID": "S-1-5-18"
+      }
+    }
+  },
+  {
+    "file": "rendered/Microsoft-Windows-TerminalServices-LocalSessionManager-4Operational.jsonl",
+    "line": 83,
+    "id": 41,
+    "time": "2021-05-11T13:44:24.387534Z",
+    "rid": 83,
+    "provider": "Microsoft-Windows-TerminalServices-LocalSessionManager",
+    "data": null,
+    "user": {
+      "EventXML": {
+        "#attributes": {
+          "xmlns": "Event_NS"
+        },
+        "User": "IPSERVER\\root",
+        "SessionID": 3
+      }
+    },
+    "security": {
+      "#attributes": {
+        "UserID": "S-1-5-18"
+      }
+    }
+  },
+  {
+    "file": "rendered/Microsoft-Windows-TerminalServices-LocalSessionManager-4Operational.jsonl",
+    "line": 84,
+    "id": 40,
+    "time": "2021-05-11T13:44:24.558749Z",
+    "rid": 84,
+    "provider": "Microsoft-Windows-TerminalServices-LocalSessionManager",
+    "data": null,
+    "user": {
+      "EventXML": {
+        "#attributes": {
+          "xmlns": "Event_NS"
+        },
+        "Session": 3,
+        "Reason": 0
+      }
+    },
+    "security": {
+      "#attributes": {
+        "UserID": "S-1-5-18"
+      }
+    }
+  },
+  {
+    "file": "rendered/Microsoft-Windows-TerminalServices-LocalSessionManager-4Operational.jsonl",
+    "line": 85,
+    "id": 40,
+    "time": "2021-05-11T13:44:24.815385Z",
+    "rid": 85,
+    "provider": "Microsoft-Windows-TerminalServices-LocalSessionManager",
+    "data": null,
+    "user": {
+      "EventXML": {
+        "#attributes": {
+          "xmlns": "Event_NS"
+        },
+        "Session": 2,
+        "Reason": 5
+      }
+    },
+    "security": {
+      "#attributes": {
+        "UserID": "S-1-5-18"
+      }
+    }
+  },
+  {
+    "file": "rendered/Microsoft-Windows-TerminalServices-LocalSessionManager-4Operational.jsonl",
+    "line": 86,
+    "id": 25,
+    "time": "2021-05-11T13:44:25.101967Z",
+    "rid": 86,
+    "provider": "Microsoft-Windows-TerminalServices-LocalSessionManager",
+    "data": null,
+    "user": {
+      "EventXML": {
+        "#attributes": {
+          "xmlns": "Event_NS"
+        },
+        "User": "IPSERVER\\root",
+        "SessionID": 2,
+        "Address": "192.99.186.31"
+      }
+    },
+    "security": {
+      "#attributes": {
+        "UserID": "S-1-5-18"
+      }
+    }
+  },
+  {
+    "file": "rendered/Microsoft-Windows-TerminalServices-LocalSessionManager-4Operational.jsonl",
+    "line": 87,
+    "id": 42,
+    "time": "2021-05-11T13:44:25.102302Z",
+    "rid": 87,
+    "provider": "Microsoft-Windows-TerminalServices-LocalSessionManager",
+    "data": null,
+    "user": {
+      "EventXML": {
+        "#attributes": {
+          "xmlns": "Event_NS"
+        },
+        "User": "IPSERVER\\root",
+        "SessionID": 3
+      }
+    },
+    "security": {
+      "#attributes": {
+        "UserID": "S-1-5-18"
+      }
+    }
+  },
+  {
+    "file": "rendered/Microsoft-Windows-TerminalServices-LocalSessionManager-4Operational.jsonl",
+    "line": 88,
+    "id": 40,
+    "time": "2021-05-11T13:45:58.397034Z",
+    "rid": 88,
+    "provider": "Microsoft-Windows-TerminalServices-LocalSessionManager",
+    "data": null,
+    "user": {
+      "EventXML": {
+        "#attributes": {
+          "xmlns": "Event_NS"
+        },
+        "Session": 2,
+        "Reason": 0
+      }
+    },
+    "security": {
+      "#attributes": {
+        "UserID": "S-1-5-18"
+      }
+    }
+  },
+  {
+    "file": "rendered/Microsoft-Windows-TerminalServices-LocalSessionManager-4Operational.jsonl",
+    "line": 89,
+    "id": 24,
+    "time": "2021-05-11T13:45:59.053230Z",
+    "rid": 89,
+    "provider": "Microsoft-Windows-TerminalServices-LocalSessionManager",
+    "data": null,
+    "user": {
+      "EventXML": {
+        "#attributes": {
+          "xmlns": "Event_NS"
+        },
+        "User": "IPSERVER\\root",
+        "SessionID": 2,
+        "Address": "192.99.186.31"
+      }
+    },
+    "security": {
+      "#attributes": {
+        "UserID": "S-1-5-18"
+      }
+    }
+  },
+  {
+    "file": "rendered/Microsoft-Windows-TerminalServices-LocalSessionManager-4Operational.jsonl",
+    "line": 90,
+    "id": 40,
+    "time": "2021-05-11T17:25:24.034636Z",
+    "rid": 90,
+    "provider": "Microsoft-Windows-TerminalServices-LocalSessionManager",
+    "data": null,
+    "user": {
+      "EventXML": {
+        "#attributes": {
+          "xmlns": "Event_NS"
+        },
+        "Session": 3,
+        "Reason": 2147500036
+      }
+    },
+    "security": {
+      "#attributes": {
+        "UserID": "S-1-5-18"
+      }
+    }
+  },
+  {
+    "file": "rendered/Microsoft-Windows-TerminalServices-LocalSessionManager-4Operational.jsonl",
+    "line": 91,
+    "id": 54,
+    "time": "2021-05-11T21:43:01.327742Z",
+    "rid": 91,
+    "provider": "Microsoft-Windows-TerminalServices-LocalSessionManager",
+    "data": null,
+    "user": null,
+    "security": {
+      "#attributes": {
+        "UserID": "S-1-5-18"
+      }
+    }
+  },
+  {
+    "file": "rendered/Microsoft-Windows-TerminalServices-LocalSessionManager-4Operational.jsonl",
+    "line": 92,
+    "id": 23,
+    "time": "2021-05-11T21:43:02.253804Z",
+    "rid": 92,
+    "provider": "Microsoft-Windows-TerminalServices-LocalSessionManager",
+    "data": null,
+    "user": {
+      "EventXML": {
+        "#attributes": {
+          "xmlns": "Event_NS"
+        },
+        "User": "IPSERVER\\root",
+        "SessionID": 2
+      }
+    },
+    "security": {
+      "#attributes": {
+        "UserID": "S-1-5-18"
+      }
+    }
+  },
+  {
+    "file": "rendered/Microsoft-Windows-TerminalServices-LocalSessionManager-4Operational.jsonl",
+    "line": 93,
+    "id": 32,
+    "time": "2021-05-11T21:43:52.861961Z",
+    "rid": 93,
+    "provider": "Microsoft-Windows-TerminalServices-LocalSessionManager",
+    "data": null,
+    "user": {
+      "EventXML": {
+        "#attributes": {
+          "xmlns": "Event_NS"
+        },
+        "messageName": "RDSAppXPlugin"
+      }
+    },
+    "security": {
+      "#attributes": {
+        "UserID": "S-1-5-18"
+      }
+    }
+  },
+  {
+    "file": "rendered/Microsoft-Windows-TerminalServices-LocalSessionManager-4Operational.jsonl",
+    "line": 94,
+    "id": 40,
+    "time": "2021-05-13T04:20:53.877445Z",
+    "rid": 94,
+    "provider": "Microsoft-Windows-TerminalServices-LocalSessionManager",
+    "data": null,
+    "user": {
+      "EventXML": {
+        "#attributes": {
+          "xmlns": "Event_NS"
+        },
+        "Session": 2,
+        "Reason": 2147500036
+      }
+    },
+    "security": {
+      "#attributes": {
+        "UserID": "S-1-5-18"
+      }
+    }
+  },
+  {
+    "file": "rendered/Microsoft-Windows-TerminalServices-LocalSessionManager-4Operational.jsonl",
+    "line": 95,
+    "id": 40,
+    "time": "2021-05-13T04:21:38.330674Z",
+    "rid": 95,
+    "provider": "Microsoft-Windows-TerminalServices-LocalSessionManager",
+    "data": null,
+    "user": {
+      "EventXML": {
+        "#attributes": {
+          "xmlns": "Event_NS"
+        },
+        "Session": 2,
+        "Reason": 0
+      }
+    },
+    "security": {
+      "#attributes": {
+        "UserID": "S-1-5-18"
+      }
+    }
+  },
+  {
+    "file": "rendered/Microsoft-Windows-TerminalServices-LocalSessionManager-4Operational.jsonl",
+    "line": 96,
+    "id": 40,
+    "time": "2021-05-15T08:13:59.864497Z",
+    "rid": 96,
+    "provider": "Microsoft-Windows-TerminalServices-LocalSessionManager",
+    "data": null,
+    "user": {
+      "EventXML": {
+        "#attributes": {
+          "xmlns": "Event_NS"
+        },
+        "Session": 2,
+        "Reason": 2147500036
+      }
+    },
+    "security": {
+      "#attributes": {
+        "UserID": "S-1-5-18"
+      }
+    }
+  },
+  {
+    "file": "rendered/Microsoft-Windows-TerminalServices-LocalSessionManager-4Operational.jsonl",
+    "line": 97,
+    "id": 40,
+    "time": "2021-05-18T15:08:37.038126Z",
+    "rid": 97,
+    "provider": "Microsoft-Windows-TerminalServices-LocalSessionManager",
+    "data": null,
+    "user": {
+      "EventXML": {
+        "#attributes": {
+          "xmlns": "Event_NS"
+        },
+        "Session": 2,
+        "Reason": 2147500036
+      }
+    },
+    "security": {
+      "#attributes": {
+        "UserID": "S-1-5-18"
+      }
+    }
+  },
+  {
+    "file": "rendered/Microsoft-Windows-TerminalServices-LocalSessionManager-4Operational.jsonl",
+    "line": 98,
+    "id": 40,
+    "time": "2021-05-21T16:33:10.596783Z",
+    "rid": 98,
+    "provider": "Microsoft-Windows-TerminalServices-LocalSessionManager",
+    "data": null,
+    "user": {
+      "EventXML": {
+        "#attributes": {
+          "xmlns": "Event_NS"
+        },
+        "Session": 2,
+        "Reason": 2147500036
+      }
+    },
+    "security": {
+      "#attributes": {
+        "UserID": "S-1-5-18"
+      }
+    }
+  },
+  {
+    "file": "rendered/Microsoft-Windows-TerminalServices-LocalSessionManager-4Operational.jsonl",
+    "line": 99,
+    "id": 40,
+    "time": "2021-05-24T08:38:23.284686Z",
+    "rid": 99,
+    "provider": "Microsoft-Windows-TerminalServices-LocalSessionManager",
+    "data": null,
+    "user": {
+      "EventXML": {
+        "#attributes": {
+          "xmlns": "Event_NS"
+        },
+        "Session": 2,
+        "Reason": 2147500036
+      }
+    },
+    "security": {
+      "#attributes": {
+        "UserID": "S-1-5-18"
+      }
+    }
+  },
+  {
+    "file": "rendered/Microsoft-Windows-TerminalServices-LocalSessionManager-4Operational.jsonl",
+    "line": 100,
+    "id": 40,
+    "time": "2021-05-26T12:58:35.471373Z",
+    "rid": 100,
+    "provider": "Microsoft-Windows-TerminalServices-LocalSessionManager",
+    "data": null,
+    "user": {
+      "EventXML": {
+        "#attributes": {
+          "xmlns": "Event_NS"
+        },
+        "Session": 2,
+        "Reason": 2147500036
+      }
+    },
+    "security": {
+      "#attributes": {
+        "UserID": "S-1-5-18"
+      }
+    }
+  },
+  {
+    "file": "rendered/Microsoft-Windows-TerminalServices-LocalSessionManager-4Operational.jsonl",
+    "line": 101,
+    "id": 40,
+    "time": "2021-05-29T03:51:36.778000Z",
+    "rid": 101,
+    "provider": "Microsoft-Windows-TerminalServices-LocalSessionManager",
+    "data": null,
+    "user": {
+      "EventXML": {
+        "#attributes": {
+          "xmlns": "Event_NS"
+        },
+        "Session": 2,
+        "Reason": 2147500036
+      }
+    },
+    "security": {
+      "#attributes": {
+        "UserID": "S-1-5-18"
+      }
+    }
+  },
+  {
+    "file": "rendered/Microsoft-Windows-TerminalServices-LocalSessionManager-4Operational.jsonl",
+    "line": 102,
+    "id": 40,
+    "time": "2021-05-29T03:51:54.419325Z",
+    "rid": 102,
+    "provider": "Microsoft-Windows-TerminalServices-LocalSessionManager",
+    "data": null,
+    "user": {
+      "EventXML": {
+        "#attributes": {
+          "xmlns": "Event_NS"
+        },
+        "Session": 2,
+        "Reason": 0
+      }
+    },
+    "security": {
+      "#attributes": {
+        "UserID": "S-1-5-18"
+      }
+    }
+  },
+  {
+    "file": "rendered/Microsoft-Windows-TerminalServices-LocalSessionManager-4Operational.jsonl",
+    "line": 103,
+    "id": 40,
+    "time": "2021-05-30T15:46:14.781659Z",
+    "rid": 103,
+    "provider": "Microsoft-Windows-TerminalServices-LocalSessionManager",
+    "data": null,
+    "user": {
+      "EventXML": {
+        "#attributes": {
+          "xmlns": "Event_NS"
+        },
+        "Session": 2,
+        "Reason": 2147500036
+      }
+    },
+    "security": {
+      "#attributes": {
+        "UserID": "S-1-5-18"
+      }
+    }
+  },
+  {
+    "file": "rendered/Microsoft-Windows-TerminalServices-LocalSessionManager-4Operational.jsonl",
+    "line": 104,
+    "id": 40,
+    "time": "2021-05-31T07:35:49.656694Z",
+    "rid": 104,
+    "provider": "Microsoft-Windows-TerminalServices-LocalSessionManager",
+    "data": null,
+    "user": {
+      "EventXML": {
+        "#attributes": {
+          "xmlns": "Event_NS"
+        },
+        "Session": 2,
+        "Reason": 2147500036
+      }
+    },
+    "security": {
+      "#attributes": {
+        "UserID": "S-1-5-18"
+      }
+    }
+  },
+  {
+    "file": "rendered/Microsoft-Windows-TerminalServices-LocalSessionManager-4Operational.jsonl",
+    "line": 105,
+    "id": 40,
+    "time": "2021-06-02T14:54:07.484842Z",
+    "rid": 105,
+    "provider": "Microsoft-Windows-TerminalServices-LocalSessionManager",
+    "data": null,
+    "user": {
+      "EventXML": {
+        "#attributes": {
+          "xmlns": "Event_NS"
+        },
+        "Session": 2,
+        "Reason": 2147500036
+      }
+    },
+    "security": {
+      "#attributes": {
+        "UserID": "S-1-5-18"
+      }
+    }
+  }
+]

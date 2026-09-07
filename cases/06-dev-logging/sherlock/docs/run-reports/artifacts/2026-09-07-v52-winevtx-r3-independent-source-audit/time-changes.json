@@ -1,0 +1,122 @@
+[
+  {
+    "file": "Security.jsonl",
+    "line": 14373,
+    "id": 4616,
+    "time": "2021-06-02T15:46:31.063128Z",
+    "rid": 431630,
+    "provider": "Microsoft-Windows-Security-Auditing",
+    "data": {
+      "SubjectUserSid": "S-1-5-19",
+      "SubjectUserName": "LOCAL SERVICE",
+      "SubjectDomainName": "NT AUTHORITY",
+      "SubjectLogonId": "0x3e5",
+      "PreviousTime": "2021-06-02T15:46:32.930466Z",
+      "NewTime": "2021-06-02T15:46:31.061210Z",
+      "ProcessId": "0x17dc",
+      "ProcessName": "C:\\Windows\\System32\\svchost.exe"
+    },
+    "user": null,
+    "security": null
+  },
+  {
+    "file": "Security.jsonl",
+    "line": 14374,
+    "id": 4616,
+    "time": "2021-06-02T15:46:31.063902Z",
+    "rid": 431631,
+    "provider": "Microsoft-Windows-Security-Auditing",
+    "data": {
+      "SubjectUserSid": "S-1-5-19",
+      "SubjectUserName": "LOCAL SERVICE",
+      "SubjectDomainName": "NT AUTHORITY",
+      "SubjectLogonId": "0x3e5",
+      "PreviousTime": "2021-06-02T15:46:31.061210Z",
+      "NewTime": "2021-06-02T15:46:31.063535Z",
+      "ProcessId": "0x17dc",
+      "ProcessName": "C:\\Windows\\System32\\svchost.exe"
+    },
+    "user": null,
+    "security": null
+  },
+  {
+    "file": "Security.jsonl",
+    "line": 14375,
+    "id": 4616,
+    "time": "2021-06-02T15:46:31.064572Z",
+    "rid": 431632,
+    "provider": "Microsoft-Windows-Security-Auditing",
+    "data": {
+      "SubjectUserSid": "S-1-5-19",
+      "SubjectUserName": "LOCAL SERVICE",
+      "SubjectDomainName": "NT AUTHORITY",
+      "SubjectLogonId": "0x3e5",
+      "PreviousTime": "2021-06-02T15:46:31.063535Z",
+      "NewTime": "2021-06-02T15:46:31.064260Z",
+      "ProcessId": "0x17dc",
+      "ProcessName": "C:\\Windows\\System32\\svchost.exe"
+    },
+    "user": null,
+    "security": null
+  },
+  {
+    "file": "Security.jsonl",
+    "line": 33165,
+    "id": 4616,
+    "time": "2021-06-01T15:46:30.955934Z",
+    "rid": 415506,
+    "provider": "Microsoft-Windows-Security-Auditing",
+    "data": {
+      "SubjectUserSid": "S-1-5-19",
+      "SubjectUserName": "LOCAL SERVICE",
+      "SubjectDomainName": "NT AUTHORITY",
+      "SubjectLogonId": "0x3e5",
+      "PreviousTime": "2021-06-01T15:46:32.822799Z",
+      "NewTime": "2021-06-01T15:46:30.953945Z",
+      "ProcessId": "0x1260",
+      "ProcessName": "C:\\Windows\\System32\\svchost.exe"
+    },
+    "user": null,
+    "security": null
+  },
+  {
+    "file": "Security.jsonl",
+    "line": 33166,
+    "id": 4616,
+    "time": "2021-06-01T15:46:30.957168Z",
+    "rid": 415507,
+    "provider": "Microsoft-Windows-Security-Auditing",
+    "data": {
+      "SubjectUserSid": "S-1-5-19",
+      "SubjectUserName": "LOCAL SERVICE",
+      "SubjectDomainName": "NT AUTHORITY",
+      "SubjectLogonId": "0x3e5",
+      "PreviousTime": "2021-06-01T15:46:30.953945Z",
+      "NewTime": "2021-06-01T15:46:30.956428Z",
+      "ProcessId": "0x1260",
+      "ProcessName": "C:\\Windows\\System32\\svchost.exe"
+    },
+    "user": null,
+    "security": null
+  },
+  {
+    "file": "Security.jsonl",
+    "line": 33167,
+    "id": 4616,
+    "time": "2021-06-01T15:46:30.958062Z",
+    "rid": 415508,
+    "provider": "Microsoft-Windows-Security-Auditing",
+    "data": {
+      "SubjectUserSid": "S-1-5-19",
+      "SubjectUserName": "LOCAL SERVICE",
+      "SubjectDomainName": "NT AUTHORITY",
+      "SubjectLogonId": "0x3e5",
+      "PreviousTime": "2021-06-01T15:46:30.956428Z",
+      "NewTime": "2021-06-01T15:46:30.957620Z",
+      "ProcessId": "0x1260",
+      "ProcessName": "C:\\Windows\\System32\\svchost.exe"
+    },
+    "user": null,
+    "security": null
+  }
+]
