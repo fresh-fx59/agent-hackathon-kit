@@ -43,6 +43,32 @@ record is
   `PONG`, zero reasoning characters, and three completion tokens;
 * exit status `0`, correct run-root cwd, and empty stderr.
 
-This proves the Qwen 0.22.0 request and the corporate proxy behavior needed for
-the next fresh run. It does not prove report correctness, source coverage, or
-model behavior on an investigation prompt.
+This proves the Qwen 0.22.0 request shape. It does not prove report
+correctness, source coverage, or model behavior on an investigation prompt.
+
+## Correction — r4 wire/response reality check
+
+The one-turn `PONG` result is not evidence that the corporate endpoint honored
+the disable request: a trivial response can have no reasoning regardless of
+that option. During the active isolated BlueSky r4, raw record
+`/home/claude-developer/sherlock-v52-bluesky-isolated-20260907-r4/openai-logs/openai-2026-09-07T06-19-33.532Z-23fd184c.json`
+contains a wire request with the top-level keys `model`, `messages`,
+`max_tokens`, `stream`, `stream_options`, `thinking`, and `tools`. Its exact
+request values include `model: "deepseek-v4-flash"`, `max_tokens: 20000`, and
+`thinking: {"type":"disabled"}`; there is no nested `extra_body` key.
+
+This shape is consistent with installed Qwen 0.22.0 source
+`chunks/chunk-VSNPOSDN.js`: `DefaultOpenAICompatibleProvider.buildRequest()`
+returns the base request followed by `...extraBody`, which serializes the
+configured `extra_body.thinking` as a top-level HTTP-body field. The DeepSeek
+provider's hostname-specific translation does not apply at
+`api.neuraldeep.ru`; it is not needed for this explicit top-level field.
+
+That response nevertheless has 17,969 `reasoning_content` characters and
+5,298 completion tokens (no error). The same r4 capture has other responses
+with nonzero reasoning while sending the same top-level `thinking` object.
+Therefore Qwen transmitted the intended request shape, but the corporate
+endpoint did not demonstrably honor it. No active configuration was changed
+from this observation. A later correction needs endpoint-specific documented
+semantics or a controlled behavioral experiment; `PONG` alone cannot validate
+them.
