@@ -1,0 +1,26 @@
+{
+  "started_unix": 1788763880.4913397,
+  "ended_unix": 1788763885.0991137,
+  "duration_seconds": 4.607774019241333,
+  "http_status": 200,
+  "error": null,
+  "request_sha256": "a03edf8c52b26ddf9db1e66aa3c8af6155f630afd90b8d724003f7d20fdc2aed",
+  "response_sha256": "1c53ac5c87e30ee4dc2071ae0c157400a9c556807834fb06fd8a55badc7fec6b",
+  "usage": {
+    "completion_tokens": 581,
+    "prompt_tokens": 21280,
+    "total_tokens": 21861,
+    "completion_tokens_details": {
+      "reasoning_tokens": 0
+    },
+    "prompt_tokens_details": {
+      "cached_tokens": 4736
+    },
+    "prompt_cache_hit_tokens": 4736,
+    "prompt_cache_miss_tokens": 16544
+  },
+  "returned_model": "deepseek-v4-flash",
+  "finish_reason": "stop",
+  "content_chars": 1936,
+  "reasoning_chars": 0
+}

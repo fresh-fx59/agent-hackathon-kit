@@ -1,0 +1,8 @@
+{
+  "task_result": "failed_not_a_report",
+  "assessment": "The HTTP-success response is status plus DSML run_shell_command markup, not a substantive incident report.",
+  "transport_result": "HTTP 200; finish_reason stop; wrapper exit 0",
+  "paid_retries_after_assessment": 0,
+  "report_sha256": "525ff388ec5df407e482d0a880cb291912a3b7e94d2c77d9917f44e2a2d23096",
+  "preservation": "Original response retained byte-exact; no editorial model-output edits."
+}

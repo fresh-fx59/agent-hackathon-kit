@@ -1,0 +1,17 @@
+{
+  "source_capture": "/home/claude-developer/sherlock-v52-bluesky-isolated-20260907-r4/openai-logs/openai-2026-09-07T06-44-21.910Z-262a4873.json",
+  "source_sha256": "9b24f3ca253fce88bf8740429fa029b49cac4e794b414dd97dcd87cb7d0449aa",
+  "original_message_count": 17,
+  "final_message_count": 18,
+  "removed_top_level": [
+    "stream_options",
+    "tools"
+  ],
+  "unfinished_tool_turn_start": null,
+  "appended_user_instruction": "Write the final Russian incident report NOW from the collected evidence. Do not plan or call tools. Cite exact source paths and lines for every factual claim, and state explicit unknowns.",
+  "model": "deepseek-v4-flash",
+  "max_tokens": 32768,
+  "thinking": {
+    "type": "disabled"
+  }
+}
