@@ -20,9 +20,13 @@
       "sha256": "abc5f6a36a85b7d9c1f4e9c31fdadc40bbd246363e67adc45e159e21aba94503",
       "bytes": 5424
     },
+    "live-revision-checks.json": {
+      "sha256": "88cfc3d53be4e375bc3b3a8600df62e0e6ea2a1c0c4118421ed7662ba5ea6794",
+      "bytes": 1035
+    },
     "source-audit.md": {
-      "sha256": "0ef9ca3283c60d0aa0894c799b321107686e1df2fd4eebf2156c2d2362e00156",
-      "bytes": 13699
+      "sha256": "3b9f804e90caf17df38bbb39c58a9fec2b8af762bc5bfe8b55662f9b55fea08b",
+      "bytes": 14651
     },
     "source-evidence.json": {
       "sha256": "c2e788739ad5e5ed9c202bdd4dd3d4fe18e2e6bc9827c227e575cbe027c1a5eb",

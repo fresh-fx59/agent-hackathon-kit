@@ -1,0 +1,40 @@
+[
+  {
+    "path": "/Users/a/Documents/projects/personal-os/docs/run-reports/artifacts/2026-09-07-v52-bluesky-r5-live-snapshot/report-revised.md",
+    "sha256": "869577393552374b377bf9f5a3c61b7aee1ba9b67e961c7bea301f987747c310",
+    "bytes": 34730,
+    "references": 59,
+    "literal_quotes_valid": true,
+    "issues_remaining": [
+      "E1",
+      "E2",
+      "E3",
+      "E4",
+      "E5",
+      "E6",
+      "E7",
+      "E8",
+      "E9"
+    ],
+    "status": "live snapshot, semantic FAIL, not final run verdict"
+  },
+  {
+    "path": "/Users/a/Documents/projects/personal-os/docs/run-reports/artifacts/2026-09-07-v52-bluesky-r5-live-snapshot/report-revised-2.md",
+    "sha256": "421f29c6c4b1fa7096d989ba5f04165de1c0023855dd10b01d76fa7600e892a3",
+    "bytes": 34969,
+    "references": 59,
+    "literal_quotes_valid": true,
+    "issues_remaining": [
+      "E1",
+      "E2",
+      "E3",
+      "E4",
+      "E5",
+      "E6",
+      "E7",
+      "E8",
+      "E9"
+    ],
+    "status": "live snapshot, semantic FAIL, not final run verdict"
+  }
+]

@@ -53,3 +53,9 @@ Verification: source hashes, all469 parse, counts, actual fields, source record 
 - Received r5 live snapshot; read full219-line report and independently reread469-record approved source. Source and snapshot hashes matched assigned values.
 - Recomputed actual field values/counts and resolved59 references/27 quotes; all literal evidence checks passed, substantive attribution/exoneration/field/timing errors remained.
 - Recorded E1–E9 and complete section matrix; informed root and watcher, without steering the active model. Awaiting terminal version comparison.
+
+### Live revision comparison
+
+- Revised snapshot `report-revised.md`, SHA `869577393552374b377bf9f5a3c61b7aee1ba9b67e961c7bea301f987747c310`, 34,730 bytes: only annotations/Markdown changed. After stripping those wrappers, substantive prose equals the audited original. E1–E9 remain.
+- Revised snapshot2 `report-revised-2.md`, SHA `421f29c6c4b1fa7096d989ba5f04165de1c0023855dd10b01d76fa7600e892a3`, 34,969 bytes: H3 outcome changed from success to attempt, still explicitly recording engine start while acknowledging unknown payload/result. K3 shortens the Win10 principal and its source143 quote; the replacement quote is exact. This does not resolve E1–E9. All59 citation references and27 literal quotations still pass in both snapshots.
+- Root requested waiting for a stable complete edit/gate rerun or terminal report, rather than reviewing each small active edit. Watcher notified. These are live-snapshot results only; no final-run verdict.
