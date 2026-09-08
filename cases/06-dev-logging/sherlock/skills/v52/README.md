@@ -1,247 +1,155 @@
+# Sherlock v52 — работа в корпоративном Qwen Code
 
-# Sherlock (log-rca) — running it in the corporate environment
+Sherlock предназначен для **интерактивного расследования в Qwen Code**:
+инженер указывает логи, отвечает на уточнения и переводит расследование между
+этапами. Инструкции для модели находятся в [SKILL.md](SKILL.md), а этот файл —
+инструкция для инженера.
 
-This is the operator runbook for **this skill directory** (candidate v50). `SKILL.md` is
-what the model reads; this README is what a human reads before the first run.
+Используйте уже настроенный корпоративный Qwen Code. Модель, адрес сервиса и
+учётные данные остаются корпоративными; Sherlock не требует отдельного ключа,
+другой модели, MCP-сервера или сервиса разработчика. Команды ниже рассчитаны на
+Linux/macOS и установленный `python3`. В v52 Python используется для подготовки
+корпуса, сохранения состояния и проверок: без него эти проверки не выполнятся.
 
-> Source: arm **v41**, proven end to end on 2026-08-27 by paid run
-> `20260827T173511Z-v41` — a clean 323-line report AND every request under the
-> 262,000-token ceiling (peak 236,678), $0.178849, 107 minutes.
+## 1. Установить в рабочую папку
 
-## Summary
+Создайте отдельную папку для одного расследования. Установите **всю папку
+навыка**, включая `tools`, `agents`, `reference` и остальные файлы, а не только
+`SKILL.md`. В примере замените два абсолютных пути своими:
 
-You run `qwen` **interactively**, so there is no launcher. Three things to set up
-once, then a session loop that is two keystrokes long.
+```bash
+SHERLOCK_KIT="/absolute/path/to/agent-hackathon-kit"
+SHERLOCK_WORKSPACE="/absolute/path/to/investigation"
+(
+  set -eu
+  mkdir -p "$SHERLOCK_WORKSPACE/.qwen/skills" "$SHERLOCK_WORKSPACE/.qwen/agents"
+  test ! -e "$SHERLOCK_WORKSPACE/.qwen/skills/log-rca"
+  cp -R "$SHERLOCK_KIT/cases/06-dev-logging/sherlock/skills/v52" \
+    "$SHERLOCK_WORKSPACE/.qwen/skills/log-rca"
+  test ! -e "$SHERLOCK_WORKSPACE/.qwen/agents/sherlock-triage.md"
+  cp "$SHERLOCK_WORKSPACE/.qwen/skills/log-rca/agents/sherlock-triage.md" \
+    "$SHERLOCK_WORKSPACE/.qwen/agents/sherlock-triage.md"
+)
+cd "$SHERLOCK_WORKSPACE"
+```
 
-**It takes what you were actually given.** A `.zip` of `.evtx` files is the
-normal case and is handled — one command, §3.
+Проверки `test` останавливают установку при существующей копии; не продолжайте
+после ошибки. Для нового независимого расследования используйте новую папку.
+Определение `sherlock-triage` нужно для работы вспомогательного агента.
+Имя навыка в Qwen — **`sherlock`**, хотя папка установки называется `log-rca`.
 
-## 1. Settings (once)
+### Подключить проверки v52
 
-Merge these settings into `<PROJECT>/.qwen/settings.json`. The model limits
-come from the historical run above. V49 requires both the workspace Stop and
-PreToolUse boundary hooks:
+В Qwen Code 0.22.0 вызов `/sherlock` сам по себе не регистрирует проверки
+завершения и перехода между этапами. Добавьте следующие записи в
+`.qwen/settings.json` рабочей папки. Это **фрагмент для объединения**, а не
+замена существующего файла: сохраните корпоративные настройки и уже заданные
+обработчики `Stop` и `PreToolUse`.
 
 ```json
 {
-  "context": { "autoCompactThreshold": 0.7 },
   "hooks": {
-    "Stop": [{"hooks": [{"type": "command",
-      "command": "python3 .qwen/skills/log-rca/tools/stopcheck.py"}]}],
-    "PreToolUse": [{"matcher": "*", "hooks": [{"type": "command",
-      "command": "python3 .qwen/skills/log-rca/tools/boundarycheck.py"}]}]
-  },
-  "mcp": { "excluded": [] },
-  "model": {
-    "chatCompression": { "maxRecentFilesToRetain": 0 },
-    "generationConfig": {
-      "contextWindowSize": 262000,
-      "samplingParams": { "max_tokens": 20000 }
-    },
-    "sessionTokenLimit": 230000,
-    "skipStartupContext": true
-  },
-  "skills": { "disabledLevels": ["bundled", "extension", "user"] },
-  "tools": {
-    "core": ["read_file", "write_file", "edit", "grep_search", "glob",
-             "run_shell_command", "todo_write", "list_directory", "skill",
-             "agent"]
+    "Stop": [{
+      "hooks": [{
+        "type": "command",
+        "command": "python3 .qwen/skills/log-rca/tools/stopcheck.py"
+      }]
+    }],
+    "PreToolUse": [{
+      "matcher": "*",
+      "hooks": [{
+        "type": "command",
+        "command": "python3 .qwen/skills/log-rca/tools/boundarycheck.py"
+      }]
+    }]
   }
 }
 ```
 
-What each one is doing, so you can defend it:
+Запускайте Qwen из этой рабочей папки: пути обработчиков указаны относительно
+неё. Они находят поставляемые инструменты по своему расположению; отдельная
+переменная `QWEN_SKILL_ROOT` для этих команд не нужна. Если корпоративная
+политика отключает обработчики, автоматический контроль границ не действует:
+соблюдайте переходы ниже вручную и требуйте явного запуска финальной проверки.
+Не считайте отсутствие сообщения об ошибке доказательством прохождения проверок.
 
-| key | why |
-|---|---|
-| `contextWindowSize: 262000` | the ceiling everything else is derived from |
-| `max_tokens: 20000` | `COMPACT_MAX_OUTPUT_TOKENS` is 20,000; a smaller budget starves the compaction that saves the session |
-| `sessionTokenLimit: 230000` | the ONLY exact client-side check. `hard = window − 23,000` is not a send ceiling — after three failed rescues qwen sends the oversized prompt anyway |
-| `skipStartupContext: true` | stops the session paying for project context it never uses |
-| `maxRecentFilesToRetain: 0` | compaction keeps the summary, not a pile of file bodies |
-| `disabledLevels` | no other skill loads and competes for the window |
-| `tools.core` | ten tools; every extra tool schema is re-sent on every turn |
+## 2. Указать исходные логи и открыть Qwen
 
-On the proven run the largest prompt ever sent was **229,978 tokens — 22 under
-`sessionTokenLimit`**. That is this table working.
+Поместите исходные файлы в отдельную папку, например `./input`. Передайте
+Sherlock текстовые логи, JSONL, каталог, архив или `.evtx`. Он должен сохранить
+оригиналы и подготовить текстовый корпус, если это необходимо. Конвертация
+`.evtx` может потребовать доступного конвертера; если его получение запрещено
+в корпоративной сети, используйте согласованный текстовый/JSONL-экспорт.
 
-## 2. Install the skill (once) — and how to do the agent by hand
+Из корня рабочей папки запустите интерактивный интерфейс:
 
-```
-mkdir -p <PROJECT>/.qwen/skills
-cp -r <KIT>/cases/06-dev-logging/sherlock/skills/v50 <PROJECT>/.qwen/skills/log-rca
-```
-
-The skill also needs one **subagent definition**. Without it the phases run
-inline in the parent and the session runs out of context. Either run:
-
-```
-python3 <PROJECT>/.qwen/skills/log-rca/tools/brief.py --install-agents <PROJECT>/.qwen/agents
-```
-
-**or do it by hand, no python:** create the file
-
-```
-<PROJECT>/.qwen/agents/sherlock-triage.md
-```
-
-by copying the ready-made file that ships next to this README:
-
-```
-mkdir -p <PROJECT>/.qwen/agents
-cp <PROJECT>/.qwen/skills/log-rca/agents/sherlock-triage.md <PROJECT>/.qwen/agents/
-```
-
-The settings, skill directory and subagent definition are all required.
-Qwen Code 0.22.0 expands `/sherlock` without registering frontmatter hooks.
-The explicit workspace hooks check the active Sherlock marker; the boundary
-hook admits no new tool after a durable stage handoff until Stop and a fresh
-session, while Stop retains final delivery checks. They permit unrelated sessions.
-Keep any existing hooks when merging these settings. The monitored runner emits
-one lifecycle-owned composed PreToolUse hook plus Stop before sealing settings.
-
-## 3. Prepare the corpus (once per investigation)
-
-If you were handed a **directory of text or JSONL logs**, you are done — point
-the task at it.
-
-If you were handed **an archive, or `.evtx` files, or a mix** — the normal case
-— run one command:
-
-```
-python3 .qwen/skills/log-rca/tools/ingest.py <THE ZIP OR FOLDER> --out ./corpus
-```
-
-It unpacks `.zip`, `.tar`, `.tar.gz`, `.tar.bz2`, `.tar.xz` and `.7z`, converts
-`.evtx` to JSONL, copies text and `.gz` straight through, and ignores `__MACOSX`
-sidecars. Measured on a real 6 MB `winevt.zip`: **296 entries → 143 channels in
-3.4 seconds.** Re-measured 2026-08-28 on the full 143-file, 87 MB
-`Logs/` handover zipped as a customer would: **143/143 converted, 0 failed,
-90,267 records, 5.1 seconds** — and byte-identical to the hand-built corpus the
-paid run used, apart from an `evtx_dump` version difference in how an empty
-`EventData/Data` is rendered (`""` vs `null`) in 18 of the 143 channels.
-
-It **never loses input quietly.** Everything it could not read is printed and
-written to `corpus/_ingest-manifest.tsv`, and the command exits non-zero. Pass
-`--keep-going` only when you have read the list and accept the gap.
-
-**It records what you were handed.** The manifest opens with the sha256 of every
-input you named, and every extracted row is called `winevt.zip!Logs/Security.evtx`
-— the archive and the path inside it, not the temp directory the bytes passed
-through. That is the chain of custody: a report citing `Security.jsonl:19934`
-is tied, on disk, to the exact archive the customer sent. Keep the archive; the
-digest in the manifest is what proves the corpus came from it.
-
-```
-head -1 corpus/_ingest-manifest.tsv
-# исходный архив	/case/winevt.zip	sha256:343cc89e…	6003199 байт
-```
-
-An empty channel is not an error — Windows ships dozens that never recorded
-anything, and they appear in the manifest as «пустой канал».
-
-**`.evtx` needs a converter — and on Windows you already have one.**
-
-- **Windows: nothing to install.** `Get-WinEvent` ships with the OS and is used
-  automatically. (Written from the documented interface; we have no Windows box
-  to prove it on, so if it fails the tool says which command failed and falls
-  through to the options below rather than losing the channel.)
-- **Anywhere else, one command:**
-
-      python3 .qwen/skills/log-rca/tools/ingest.py <INPUT> --out ./corpus --install-converter
-
-  which runs `pip install --user python-evtx xmltodict` first. It is a flag and
-  not automatic on purpose: installing software on a corporate machine is the
-  owner's decision, so the tool offers the cure and a human takes it.
-- **Or the binary:** `cargo install evtx` / `brew install evtx`.
-
-If no converter works, the manifest names the file and every cure — it never
-pretends the channel was empty.
-
-Sanity check:
-
-```
-head -c 200 corpus/*.jsonl | head -5     # records must start with {
-wc -l corpus/_ingest-manifest.tsv
-```
-
-## 4. The session loop (what you actually do)
-
-```
-cd <PROJECT>
+```bash
 qwen
 ```
 
-1. Submit `/sherlock <your task>` as one input, including the corpus path and question.
-2. Keep the skill command and its task together; a bare skill command starts a turn.
-3. **Wait.** The skill maps the corpus, builds a worklist and hands the phases to
-   subagents. Do not help it; do not read files for it.
-4. When it prints a **handoff block**, type `/clear`, then submit the whole
-   `/sherlock ПРОДОЛЖИ ...` command from the block as one input. Do the same at
-   full-stage and partial-stage boundaries. The first
-   command of every Sherlock session is
-   `checkpoint.py resume --work ./work`, which reads `work/checkpoint.json` and
-   prints `СТУПЕНЬ СЕЙЧАС: <stage>`. A cleared session has no conversation, and
-   that file is the only memory it needs.
-5. Repeat step 4 at every handoff block. The proven run took **three**:
-   triage → draft → repair → done.
-6. At stage `done` the report is at `<PROJECT>/work/report.md`.
+Внутри Qwen отправьте **одним сообщением**:
 
-**Why `/clear` and not «продолжай».** `/clear` drops the loaded skill and starts
-a fresh session; the reseed re-enters the skill, which re-reads the checkpoint.
-On the proven run this reset the parent from 87,894 tokens to **exactly 44,736**,
-twice. Without it the parent grows until it dies — that is precisely how the
-run earlier the same day failed.
-
-**`/clear` REFUSES while background work is alive.** If nothing happens, a
-subagent is still running. Wait, then `/clear` again.
-
-## 5. Do you have to check the result yourself? No.
-
-The skill checks itself, in two places:
-
-- its **VERIFY step** runs `citecheck`, `statecheck` and `triagecheck` and
-  requires each to exit 0 before it may deliver; a non-zero gate sends it into
-  the `repair` stage instead of to you;
-- a **Stop hook** (`tools/stopcheck.py`, registered in workspace settings) fires when the session tries to finish and blocks it while a gate is
-  failing — «fix worklist/rules.tsv, rerun triagecheck, then deliver
-  work/report.md».
-
-So a report that reaches you has already passed all three gates. Run them again
-only if you want to audit the auditor:
-
-```
-python3 .qwen/skills/log-rca/tools/citecheck.py  work/report.md --corpus <CORPUS> --require-quote --ledger work/worklist.tsv
-python3 .qwen/skills/log-rca/tools/statecheck.py --corpus <CORPUS> --report work/report.md
-python3 .qwen/skills/log-rca/tools/triagecheck.py --worklist work/worklist.tsv --rules work/rules.tsv --corpus <CORPUS>
+```text
+/sherlock Расследуй инцидент только по логам в ./input. Исходные файлы не изменяй. Найди подтверждённые проблемы и их причины, отдели факты от гипотез, укажи доказательства и рекомендации. Результаты сохраняй в ./work.
 ```
 
-The paid run cleared this bar unaided: citecheck 0, statecheck 0 (864 records, 0
-unaccounted), triagecheck 0 with 250 of 250 rows closed.
+При необходимости добавьте время инцидента, сервис и наблюдаемый симптом.
+Если команда не обнаружена, проверьте наличие навыка через `/skills`, его
+включение и рабочую папку, затем перезапустите Qwen после установки.
+Подтверждайте запрашиваемые действия в обычном корпоративном режиме доступа.
 
-**Every assertion carries a label** — `[!PROVEN]`, `[!REPORTED]`, or
-`[!INFERENCE]` — at a fixed position: after the bullet marker for a list item,
-alone on its own line for a paragraph, or in a dedicated `метка` column for a
-table row. A list-item assertion looks like:
+## 3. Продолжать между этапами
 
-```
-- [!PROVEN] служба упала в 03:14 «Fatal error: OOM» app.log:1934
-```
+Навык разделяет расследование на этапы: разбор логов (`triage`), подготовка
+отчёта (`draft`), исправление замечаний проверок (`repair`). Состояние хранится
+в `./work/checkpoint.json` и связанных файлах; не удаляйте и не переносите их
+между этапами.
 
-## What goes wrong, and what it means
+Когда Sherlock закончит этап и выдаст блок продолжения:
 
-| symptom | cause | what to do |
-|---|---|---|
-| «I see no logs» / an empty map | the corpus was never ingested | run `ingest.py` — §3 |
-| the session goes quiet for minutes | a subagent is working | wait; the parent is idle on purpose |
-| `/clear` does nothing | background work still alive | wait, then `/clear` again |
-| it starts reading `worklist.tsv` itself | it ignored the cursor | tell it to use `worklist.py next` and `verdict --from-stdin` |
-| a gate exits non-zero | the report is not finished | give the failure back to the session; never hand-edit the report |
-| контекст дошёл до 169 331 | пора закрыть часть ступени | набери `handoff --partial`, затем `/clear`, затем `/sherlock <строка продолжения>` одним вводом |
+1. Дождитесь завершения текущих команд и фоновых задач.
+2. Введите `/clear` и убедитесь, что Qwen действительно очистил сессию.
+3. Отправьте `/sherlock` **вместе с текстом продолжения из выданного блока**
+   одним сообщением. Сохраните указанные в блоке пути и параметры.
 
-## Known gaps
+Не отправляйте голую команду `/sherlock`, а затем отдельное «продолжай».
+После очистки навык должен загрузиться заново и прочитать сохранённый этап.
+Если `/clear` отказал из-за работающей задачи, сначала дождитесь её завершения.
+Не начинайте следующий этап в старой сессии.
 
-- The report is written in Russian by design — the gates parse Russian literals
-  verbatim.
-- `.evtx` conversion needs one of two converters installed (§3). Everything else
-  in the pipeline is dependency-free python.
+При перезапуске самого Qwen откройте ту же рабочую папку и снова передайте
+`/sherlock` с просьбой продолжить по `./work/checkpoint.json` и прежнему корпусу.
+Для другого набора логов начните отдельное расследование.
+
+## 4. Проверить результат
+
+Основной файл — **`work/report.md`**, отчёт на русском языке. Он должен содержать
+подтверждённые находки, проверенные и отклонённые версии, ссылки на строки логов,
+покрытие корпуса, ограничения и рекомендации. Неопределённая причина должна
+оставаться неопределённой, а не превращаться в установленный факт.
+
+Наличие файла ещё не означает успешное завершение. Перед выдачей Sherlock
+должен выполнить `tools/finalize.py` из установленного навыка для текущих
+`work` и корпуса. Эта команда запускает четыре проверки: структуры отчёта,
+ссылок на доказательства, состояния расследования и разбора кандидатов.
+Их результаты сохраняются в новых каталогах `work/validation/`.
+
+При ошибках попросите исправить замечания по сохранённому результату проверки
+и выполнить её повторно. Не удаляйте исходные доказательства и не отключайте
+проверки ради завершения. Даже успешные автоматические проверки не заменяют
+оценку фактов и предложенных действий инженером.
+
+## Совместимость и происхождение
+
+Документация описывает поставляемый v52 и особенности проверенного Qwen Code
+0.22.0. Общие сведения о размещении и запуске навыков:
+[официальная документация Qwen Code](https://qwenlm.github.io/qwen-code-docs/en/users/features/skills/).
+Поведение другой корпоративной сборки может отличаться.
+
+По прямому указанию владельца этот README обновлён **без изменения версии v52**;
+`SKILL.md` и исполняемые файлы не изменены. Исторический хеш пакета включает старый
+README. Для точного воспроизведения прежних запусков нужен сохранённый пакет из
+их манифеста: текущая папка с обновлённой документацией не совпадает с ним побайтно.
+Реестр исторических хешей не переписан; его строгая проверка текущей папки поэтому
+отклонит её. Это исключение для документации, а не новое подтверждение качества
+расследования или разрешение обходить проверку целостности эксперимента.
