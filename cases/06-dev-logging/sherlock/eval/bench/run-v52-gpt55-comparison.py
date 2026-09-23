@@ -327,6 +327,83 @@ def validate_finalizer_receipt(work, control=None):
         if not isinstance(expected, str) or not current.is_file() or file_digest(current) != expected:
             raise TerminalFailure("validation_failed", "finalizer %s identity no longer matches" % name)
 
+QUOTA_TYPES = ("usage_limit_reached", "model_cooldown", "insufficient_quota")
+
+def quota_signal(row):
+    """-> dict naming provider/plan/reset when a ledger row is a quota 429, else None."""
+    if not isinstance(row, dict) or row.get("status") != 429:
+        return None
+    raw = row.get("upstream_error")
+    err = {}
+    if isinstance(raw, dict):
+        err = raw.get("error", raw)
+    elif isinstance(raw, str):
+        try:
+            obj = json.loads(raw)
+            err = obj.get("error", obj) if isinstance(obj, dict) else {}
+        except ValueError:
+            err = {}
+    if not err and isinstance(raw, str):
+        # The proxy clips upstream_error, so the JSON is often cut: salvage fields.
+        import re
+        for key in ("type", "code", "provider", "plan_type", "model"):
+            m = re.search(r'"%s"\s*:\s*"([^"]*)"' % key, raw)
+            if m: err[key] = m.group(1)
+        for key in ("resets_at", "reset_seconds"):
+            m = re.search(r'"%s"\s*:\s*(\d+)' % key, raw)
+            if m: err[key] = int(m.group(1))
+    kind = err.get("type") or err.get("code")
+    if kind not in QUOTA_TYPES:
+        text = raw if isinstance(raw, str) else json.dumps(raw)
+        kind = next((t for t in QUOTA_TYPES if t in (text or "")), None)
+        if kind is None:
+            return None
+    resets_at = err.get("resets_at")
+    if resets_at is None and isinstance(err.get("reset_seconds"), (int, float)) and isinstance(row.get("ts_ms"), (int, float)):
+        resets_at = int(row["ts_ms"] / 1000 + err["reset_seconds"])
+    iso = (datetime.datetime.fromtimestamp(resets_at, datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+           if isinstance(resets_at, (int, float)) else None)
+    return {"kind": kind, "provider": err.get("provider"), "plan_type": err.get("plan_type"),
+            "resets_at": resets_at, "resets_at_iso": iso, "model": err.get("model"),
+            "request_id": row.get("request_id"), "ts": row.get("ts"), "route_base": row.get("route_base")}
+
+def quota_failure(signals):
+    """Merge quota rows: provider from any row, plan/reset from the most informative."""
+    first = signals[0]
+    provider = next((q["provider"] for q in signals if q.get("provider")), None)
+    plan = next((q["plan_type"] for q in signals if q.get("plan_type")), None)
+    resets = max((q["resets_at"] for q in signals if isinstance(q.get("resets_at"), (int, float))), default=None)
+    iso = (datetime.datetime.fromtimestamp(resets, datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+           if resets is not None else None)
+    details = {"quota_rows": len(signals), "first_kind": first["kind"], "first_ts": first["ts"],
+               "first_request_id": first["request_id"], "provider": provider, "plan_type": plan,
+               "resets_at": resets, "resets_at_iso": iso, "route_base": first["route_base"],
+               "kinds": sorted({q["kind"] for q in signals})}
+    return TerminalFailure("quota_exhausted",
+        "upstream quota exhausted: provider=%s plan_type=%s resets_at=%s (%s); %d quota 429 row(s), first %s at %s" % (
+            provider, plan, iso, resets, len(signals), first["kind"], first["ts"]), details=details)
+
+class QuotaWatch:
+    """Incremental ledger tail: fires on the first quota 429 so no turns are wasted."""
+    def __init__(self, trace):
+        self.path = Path(trace, "upstream.jsonl"); self.offset = 0; self.partial = b""
+        self.signals = []
+    def poll(self):
+        try:
+            with open(self.path, "rb") as fh:
+                fh.seek(self.offset); chunk = fh.read(); self.offset = fh.tell()
+        except FileNotFoundError:
+            return None
+        data = self.partial + chunk
+        lines = data.split(b"\n"); self.partial = lines.pop()
+        for line in lines:
+            if not line.strip(): continue
+            try: row = json.loads(line)
+            except ValueError: continue
+            q = quota_signal(row)
+            if q: self.signals.append(q)
+        return quota_failure(self.signals) if self.signals else None
+
 def validate_terminal_ledger(trace, strict_buffer_enabled=False):
     """Classify identity evidence separately from completed-call failures."""
     ledger = Path(trace, "upstream.jsonl")
@@ -340,6 +417,9 @@ def validate_terminal_ledger(trace, strict_buffer_enabled=False):
         raise TerminalFailure("transport_failed", "proxy ledger is malformed") from exc
     if not rows:
         raise TerminalFailure("transport_failed", "proxy ledger has no completed calls")
+    quota = [q for q in (quota_signal(r) for r in rows) if q]
+    if quota:
+        raise quota_failure(quota)
     failures = []
     strict_pending = {}
     for row in rows:
@@ -469,6 +549,7 @@ def run(args):
                                       (run_root / "prompt.txt").read_text(encoding="utf-8")], cwd=run_root,
                                       stdin=subprocess.DEVNULL, stdout=output, stderr=err, env=fullenv, start_new_session=True)
             # Supervise the owned children: changed inputs or a dead proxy abort the Qwen process.
+            quota_watch = QuotaWatch(trace)
             create(control / "launch-receipt.json", canonical({"started_at": now(), "qwen_pid":qwen.pid, "proxy_pid":proxy.pid, "manifest_sha256":approved}))
             while qwen.poll() is None:
                 if proxy.poll() is not None:
@@ -477,6 +558,9 @@ def run(args):
                 except Exception:
                     qwen.terminate(); raise
                 observe_trace(trace, strict_buffer_enabled=True)
+                quota = quota_watch.poll()
+                if quota is not None:
+                    qwen.terminate(); raise quota
                 time.sleep(0.5)
             qwen_rc = qwen.returncode
             if proxy.poll() is not None: raise Refusal("proxy exited before run completion")
