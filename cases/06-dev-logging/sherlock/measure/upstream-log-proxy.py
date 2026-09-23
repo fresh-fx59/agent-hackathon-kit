@@ -3533,12 +3533,25 @@ class Proxy(BaseHTTPRequestHandler):
                 self._release_head(resp, state)
 
 
+def _startup_banner():
+    """Name the upstream that calls will really use: the route file wins."""
+    if UPSTREAM_ROUTE_FILE:
+        try:
+            base = _read_route(UPSTREAM_ROUTE_FILE).base
+        except Exception as exc:
+            base = "UNREADABLE route file (%s: %s)" % (type(exc).__name__, exc)
+        source = "route file"
+    else:
+        base, source = UPSTREAM_BASE, "UPSTREAM_BASE env"
+    return ("upstream-log-proxy: 127.0.0.1:%d -> %s [from %s] (log %s)\n"
+            % (LISTEN_PORT, base, source, UPSTREAM_LOG))
+
+
 def main():
     _initialize_action_budget()
     srv = ThreadingHTTPServer(("127.0.0.1", LISTEN_PORT), Proxy)
     srv.daemon_threads = True
-    sys.stderr.write("upstream-log-proxy: 127.0.0.1:%d -> %s (log %s)\n"
-                     % (LISTEN_PORT, UPSTREAM_BASE, UPSTREAM_LOG))
+    sys.stderr.write(_startup_banner())
     if UPSTREAM_ROUTE_FILE:
         sys.stderr.write("upstream-log-proxy: route file %s (read per call; "
                          "base/model/identity come from it, not the env)\n"
