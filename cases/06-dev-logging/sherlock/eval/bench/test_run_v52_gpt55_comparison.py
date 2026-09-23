@@ -65,6 +65,7 @@ class TerminalClassificationTest(unittest.TestCase):
         }
         (prepared / ".qwen" / "settings.json").write_text(
             json.dumps(settings), encoding="utf-8")
+        RUNNER.stage_harness_layout(prepared)
         return prepared
 
     def test_prepared_root_requires_sealed_client_timeout_and_no_sdk_retries(self):
