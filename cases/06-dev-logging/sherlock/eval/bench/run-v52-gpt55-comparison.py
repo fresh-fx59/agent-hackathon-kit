@@ -213,6 +213,25 @@ def preflight_skill_list(qwen_cmd, run_root, control):
         raise Refusal("preflight: skill %r is not in Qwen's skill list (%s)" % (
             SKILL_NAME, "no init event" if init is None else ", ".join(listed)))
 
+MAX_STAGE_SESSIONS = 12
+_CONTINUE = __import__("re").compile(r"^\s*2\)\s*(/sherlock\s.+?)\s*$", __import__("re").M)
+
+def continuation_prompt(work, hook_log, since):
+    """-> the exact `/sherlock ...` line when THIS session ended in an accepted handoff."""
+    handoff = Path(work, "handoff.txt")
+    if not handoff.is_file() or handoff.stat().st_mtime < since:
+        return None
+    last = None
+    if Path(hook_log).is_file():
+        for line in Path(hook_log).read_text(encoding="utf-8").splitlines():
+            try: last = json.loads(line)
+            except ValueError: continue
+    if (not last or last.get("decision") != "allow" or "handoff accepted" not in (last.get("reason") or "")
+            or str(last.get("ts", "")) < datetime.datetime.fromtimestamp(since, datetime.timezone.utc).isoformat()):
+        return None
+    m = _CONTINUE.search(handoff.read_text(encoding="utf-8"))
+    return m.group(1) if m else None
+
 def finalizer_diagnostics(work, control):
     """Name the missing step: skill invoked, work/ contents, Stop-hook decisions."""
     work = Path(work)
@@ -220,9 +239,12 @@ def finalizer_diagnostics(work, control):
     skill_calls = None
     if control is not None:
         try:
-            events = json.loads(Path(control, "qwen-output.json").read_text(encoding="utf-8"))
+            events = []
+            for out in sorted(Path(control).glob("qwen-output*.json")):
+                loaded = json.loads(out.read_text(encoding="utf-8"))
+                events.extend(loaded if isinstance(loaded, list) else [])
             skill_calls = 0
-            for event in events if isinstance(events, list) else []:
+            for event in events:
                 content = (event.get("message") or {}).get("content", []) if isinstance(event, dict) else []
                 for item in content if isinstance(content, list) else []:
                     if (isinstance(item, dict) and item.get("type") == "tool_use"
@@ -558,39 +580,59 @@ def run(args):
                 "SHERLOCK_STOP_HOOK_LOG": str(trace / "stop-hook.jsonl")}
         fullenv = {k:v for k,v in os.environ.items() if k in ("PATH", "LANG", "LC_ALL", "TMPDIR", "TZ")}
         fullenv.update(qenv); fullenv["PYTHONDONTWRITEBYTECODE"] = "1"
-        output = open(control / "qwen-output.json", "wb"); err = open(control / "qwen-stderr.log", "wb")
+        err = open(control / "qwen-stderr.log", "ab")
+        quota_watch = QuotaWatch(trace)
+        prompt = (run_root / "prompt.txt").read_text(encoding="utf-8")
+        output_path = None
         try:
-            qwen = subprocess.Popen(qwen_cmd + ["--auth-type", "openai", "--model", MODEL,
-                                      "--max-session-turns", "-1", "--max-tool-calls", "-1", "--openai-logging",
-                                      "--openai-logging-dir", str(trace / "openai-logs"), "--output-format", "json",
-                                      (run_root / "prompt.txt").read_text(encoding="utf-8")], cwd=run_root,
-                                      stdin=subprocess.DEVNULL, stdout=output, stderr=err, env=fullenv, start_new_session=True)
-            # Supervise the owned children: changed inputs or a dead proxy abort the Qwen process.
-            quota_watch = QuotaWatch(trace)
-            create(control / "launch-receipt.json", canonical({"started_at": now(), "qwen_pid":qwen.pid, "proxy_pid":proxy.pid, "manifest_sha256":approved}))
-            while qwen.poll() is None:
-                if proxy.poll() is not None:
-                    qwen.terminate(); raise Refusal("proxy exited during Qwen run")
-                try: validate_manifest(control, manifest)
-                except Exception:
-                    qwen.terminate(); raise
-                observe_trace(trace, strict_buffer_enabled=True)
-                quota = quota_watch.poll()
-                if quota is not None:
-                    qwen.terminate(); raise quota
-                time.sleep(0.5)
-            qwen_rc = qwen.returncode
-            if proxy.poll() is not None: raise Refusal("proxy exited before run completion")
-            if qwen_rc != 0:
-                terminal(control, "qwen_failed", qwen_exit=qwen_rc,
-                         manifest_sha256=approved, nonce=manifest["nonce"])
-                return qwen_rc
+            # v52 ends a session at every stage boundary and asks the operator for
+            # `/clear` + `/sherlock ПРОДОЛЖИ ...`. A fresh Qwen process is the clean
+            # context; the harness types the exact continuation line from handoff.txt.
+            for session in range(1, MAX_STAGE_SESSIONS + 1):
+                output_path = control / ("qwen-output.json" if session == 1 else "qwen-output-s%d.json" % session)
+                started = time.time()
+                with open(output_path, "wb") as output:
+                    qwen = subprocess.Popen(qwen_cmd + ["--auth-type", "openai", "--model", MODEL,
+                                              "--max-session-turns", "-1", "--max-tool-calls", "-1", "--openai-logging",
+                                              "--openai-logging-dir", str(trace / "openai-logs"), "--output-format", "json",
+                                              prompt], cwd=run_root,
+                                              stdin=subprocess.DEVNULL, stdout=output, stderr=err, env=fullenv, start_new_session=True)
+                    if session == 1:
+                        create(control / "launch-receipt.json", canonical({"started_at": now(), "qwen_pid":qwen.pid, "proxy_pid":proxy.pid, "manifest_sha256":approved}))
+                    while qwen.poll() is None:
+                        if proxy.poll() is not None:
+                            qwen.terminate(); raise Refusal("proxy exited during Qwen run")
+                        try: validate_manifest(control, manifest)
+                        except Exception:
+                            qwen.terminate(); raise
+                        observe_trace(trace, strict_buffer_enabled=True)
+                        quota = quota_watch.poll()
+                        if quota is not None:
+                            qwen.terminate(); raise quota
+                        time.sleep(0.5)
+                qwen_rc = qwen.returncode
+                nxt = continuation_prompt(run_root / "work", trace / "stop-hook.jsonl", started) if qwen_rc == 0 else None
+                with open(control / "sessions.jsonl", "a", encoding="utf-8") as fh:
+                    fh.write(json.dumps({"session": session, "started_at": started, "finished_at": time.time(),
+                                         "qwen_exit": qwen_rc, "output": output_path.name,
+                                         "prompt_sha256": digest(prompt.encode("utf-8")),
+                                         "handoff_continuation": nxt}, ensure_ascii=False, sort_keys=True) + "\n")
+                if proxy.poll() is not None: raise Refusal("proxy exited before run completion")
+                if qwen_rc != 0:
+                    terminal(control, "qwen_failed", qwen_exit=qwen_rc, sessions=session,
+                             manifest_sha256=approved, nonce=manifest["nonce"])
+                    return qwen_rc
+                validate_qwen_output(output_path)
+                if nxt is None:
+                    break
+                prompt = nxt
+            else:
+                raise TerminalFailure("stage_limit", "still handing off after %d sessions" % MAX_STAGE_SESSIONS)
             validate_manifest(control, manifest)
             observe_trace(trace, strict_buffer_enabled=True)
             validate_terminal_ledger(trace, strict_buffer_enabled=True)
-            validate_qwen_output(control / "qwen-output.json")
             validate_finalizer_receipt(run_root / "work", control)
-        finally: output.close(); err.close()
+        finally: err.close()
         terminal(control, "completed", qwen_exit=qwen_rc,
                  manifest_sha256=approved, nonce=manifest["nonce"])
         return qwen_rc
