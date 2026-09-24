@@ -24,6 +24,12 @@ import urllib.request
 
 SCHEMA = 1
 MODEL = "gpt-5.5"
+# Model under test is bound in the manifest. Only these ids are admitted; each
+# carries a label so a run is never mistaken for a 1:1 comparison with r4.
+ALLOWED_MODELS = {
+    "gpt-5.5": {"family": "openai-gpt", "comparable_to_gpt55_r4": True},
+    "claude-opus-5": {"family": "anthropic-claude", "comparable_to_gpt55_r4": False},
+}
 QWEN_VERSION = "0.22.0"
 WATCHDOG_SECONDS = 600
 QWEN_REQUEST_TIMEOUT_MS = 660000
@@ -258,7 +264,9 @@ def validate_manifest(control, manifest):
         raise Refusal("prepared input changed after approval")
     for item in manifest["harness_files"]:
         if file_digest(item["path"]) != item["sha256"]: raise Refusal("harness bytes changed")
-    if manifest.get("model") != MODEL or manifest.get("qwen_version") != QWEN_VERSION:
+    if (manifest.get("model") not in ALLOWED_MODELS or manifest.get("model") != MODEL
+            or manifest.get("model_under_test") != dict(ALLOWED_MODELS[manifest["model"]], model=manifest["model"])
+            or manifest.get("qwen_version") != QWEN_VERSION):
         raise Refusal("strict target identity")
     if manifest.get("watchdog_seconds") != WATCHDOG_SECONDS:
         raise Refusal("600-second watchdog missing")
@@ -468,7 +476,14 @@ def port_available(port):
     except OSError as exc: raise Refusal("localhost port unavailable: %s" % port) from exc
     finally: s.close()
 
+def use_model(model):
+    global MODEL
+    if model not in ALLOWED_MODELS:
+        raise Refusal("model %r is not admitted; allowed: %s" % (model, ", ".join(sorted(ALLOWED_MODELS))))
+    MODEL = model
+
 def prepare(args):
+    use_model(getattr(args, "model", None) or "gpt-5.5")
     stage_harness_layout(args.prepared_root)
     prepared, inventory = prepared_inventory(args.prepared_root)
     settings = read_json(prepared / ".qwen/settings.json")
@@ -477,6 +492,7 @@ def prepare(args):
     mkdir_new(control)
     manifest = {"schema": SCHEMA, "created_at": now(), "prepared_root": str(prepared),
                 "prepared_inventory": inventory, "harness_files": [{"path": str(Path(x).resolve()), "sha256": file_digest(x)} for x in [__file__, args.proxy, str(Path(args.proxy).with_name("lane_guard.py")), str(STOP_HOOK_WRAPPER), args.qwen]], "proxy": str(Path(args.proxy).resolve()), "qwen": str(Path(args.qwen).resolve()), "model": MODEL, "expected_returned_identity": MODEL,
+                "model_under_test": dict(ALLOWED_MODELS[MODEL], model=MODEL),
                 "qwen_version": QWEN_VERSION, "watchdog_seconds": WATCHDOG_SECONDS,
                 "transport": TRANSPORT,
                 "qwen_client": qwen_client,
@@ -500,6 +516,7 @@ def run(args):
     qwen_rc = None
     try:
         manifest, approved = load_manifest(control)
+        use_model(manifest.get("model"))
         if args.approval != approved: raise Refusal("approval must equal manifest sha256")
         validate_manifest(control, manifest)
         if str(Path(args.proxy).resolve()) != manifest["proxy"] or str(Path(args.qwen).resolve()) != manifest["qwen"]: raise Refusal("executable path changed")
@@ -628,7 +645,7 @@ def main():
     a = sub.add_parser("prepare")
     a.add_argument("--prepared-root", required=True); a.add_argument("--control-root", required=True)
     a.add_argument("--qwen", required=True); a.add_argument("--proxy", required=True)
-    a.add_argument("--upstream-base", required=True); a.add_argument("--authorization", required=True); a.set_defaults(fn=prepare)
+    a.add_argument("--model", default="gpt-5.5", choices=sorted(ALLOWED_MODELS)); a.add_argument("--upstream-base", required=True); a.add_argument("--authorization", required=True); a.set_defaults(fn=prepare)
     a = sub.add_parser("run")
     a.add_argument("--control-root", required=True); a.add_argument("--approval", required=True); a.add_argument("--nonce-root", required=True)
     a.add_argument("--qwen", required=True); a.add_argument("--proxy", required=True); a.add_argument("--listen-port", type=int, default=18795); a.set_defaults(fn=run)
