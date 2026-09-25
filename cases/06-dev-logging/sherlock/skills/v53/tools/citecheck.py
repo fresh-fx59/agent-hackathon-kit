@@ -5318,7 +5318,13 @@ def main():
     ap.add_argument("--require-index", action="store_true",
                     help="нет свежего индекса данных — ошибка (код %d), "
                          "а не полный проход по корпусу" % 3)
+    ap.add_argument("--strict-index", action="store_true",
+                    help="свежесть индекса проверяется и по sha256 каждого файла "
+                         "(режим гейта; один лишний проход чтения корпуса)")
     args = ap.parse_args()
+    if args.strict_index:
+        import ccindex
+        os.environ[ccindex.STRICT_ENV] = "1"
     globals()["OWN_SCAN_MAX_BYTES"] = args.ownership_scan_bytes
 
     if not os.path.isdir(args.corpus):

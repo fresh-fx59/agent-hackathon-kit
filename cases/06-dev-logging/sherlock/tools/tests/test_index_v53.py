@@ -74,7 +74,7 @@ REPORT = """# Отчёт
 """
 
 
-class IndexV53Test(unittest.TestCase):
+class _IndexFixture(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.root = os.path.realpath(self.tmp.name)
@@ -123,6 +123,7 @@ class IndexV53Test(unittest.TestCase):
                            capture_output=True, text=True, env=env or self.env(), cwd=self.root)
         return p.returncode, p.stdout, p.stderr
 
+class IndexV53Test(_IndexFixture):
     def test_build_layout_readonly_manifest(self):
         out = self.build()
         d = out["dir"]
@@ -286,6 +287,92 @@ class EscapeNormalizerV53Test(unittest.TestCase):
             os.environ.pop("SHERLOCK_ESCAPE_NORMALIZER", None)
         # never turns a real mismatch into a quote
         self.assertNotEqual(cc.support("`IPSERVER\\alice` здесь", line2, 0.34, 3)[4], "quote")
+
+
+class IndexPathIdentityTest(_IndexFixture):
+    """2026-09-25 gate spec 3a: an index is identified by corpus CONTENT and
+    relative paths; the absolute root is supplied by the caller at read time
+    (a container-built index for /work/corpus must be found on the host)."""
+
+    def _ccindex(self):
+        import ccindex
+        return ccindex
+
+    def _move(self, copy=False):
+        dst_parent = os.path.join(self.root, "b")
+        os.makedirs(dst_parent)
+        dst = os.path.join(dst_parent, "corpus")
+        if copy:
+            shutil.copytree(self.corpus, dst, copy_function=shutil.copy2)
+        else:
+            os.rename(self.corpus, dst)
+        return dst
+
+    def test_index_found_after_corpus_moved(self):
+        self.build()
+        moved = self._move(copy=True)
+        st, d, _man = self._ccindex().find_index(moved, roots=[self.index])
+        self.assertEqual(st, "fresh", (st, d, _man))
+
+    def test_index_found_across_bind_path(self):
+        base = load("cc_v53_bind_base", CITECHECK)
+        with open(self.report, encoding="utf-8") as fh:
+            text = fh.read()
+        want = None
+        self.build()
+        p2 = self._move()
+        want = base.check(text, p2, require_quote=True)
+        ci = self._ccindex()
+        st, d, man = ci.find_index(p2, roots=[self.index])
+        self.assertEqual(st, "fresh", (st, d, man))
+        cc = load("cc_v53_bind_idx", CITECHECK)
+        ci.STATS["hits"].clear()
+        ci.attach(cc, d, man, corpus=p2)
+        got = cc.check(text, p2, require_quote=True)
+        self.assertEqual(json.dumps(got, sort_keys=True, default=str),
+                         json.dumps(want, sort_keys=True, default=str))
+        self.assertGreater(ci.STATS["hits"].get("read_lines", 0), 0, ci.STATS)
+
+    def test_root_mismatch_not_silent(self):
+        self.build()
+        p2 = self._move()
+        with open(os.path.join(p2, "extra.log"), "w") as fh:
+            fh.write("x\n")
+        st, d, why = self._ccindex().find_index(p2, roots=[self.index])
+        self.assertEqual(st, "stale", (st, d, why))
+        self.assertIsNotNone(d)
+        self.assertIn("data files changed", why)
+
+    def test_strict_detects_mtime_preserving_edit(self):
+        self.build()
+        p = os.path.join(self.corpus, "notes.log")
+        st0 = os.stat(p)
+        with open(p, "r+b") as fh:
+            fh.seek(0)
+            fh.write(b"B")
+        os.utime(p, ns=(st0.st_atime_ns, st0.st_mtime_ns))
+        ci = self._ccindex()
+        st, _d, _m = ci.find_index(self.corpus, roots=[self.index])
+        self.assertEqual(st, "fresh")
+        st, _d, why = ci.find_index(self.corpus, roots=[self.index], strict=True)
+        self.assertEqual(st, "stale")
+        self.assertIn("data content changed", why)
+        rc, out, _ = self.check("--require-index")
+        self.assertNotEqual(rc, 3, out)
+        rc, out, _ = self.check("--require-index", "--strict-index")
+        self.assertEqual(rc, 3, out)
+        self.assertIn("data content changed", out)
+
+    def test_changed_file_is_stale(self):
+        self.build()
+        p2 = self._move()
+        p = os.path.join(p2, "notes.log")
+        st0 = os.stat(p)
+        with open(p, "a") as fh:
+            fh.write("more\n")
+        os.utime(p, ns=(st0.st_atime_ns, st0.st_mtime_ns))
+        st, d, why = self._ccindex().find_index(p2, roots=[self.index])
+        self.assertEqual(st, "stale", (st, d, why))
 
 
 if __name__ == "__main__":
