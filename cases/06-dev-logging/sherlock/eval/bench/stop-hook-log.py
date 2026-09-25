@@ -4,16 +4,22 @@
 Usage (Qwen settings): python3 "$SHERLOCK_STOP_HOOK_WRAPPER" python3 "$QWEN_SKILL_ROOT/tools/stopcheck.py"
 
 The wrapped hook receives the same stdin bytes. Its stdout, stderr and exit code
-are forwarded unchanged. One JSON line per invocation is appended to
-$SHERLOCK_STOP_HOOK_LOG. A logging failure is reported on stderr and never
+are forwarded unchanged. Rows appended to $SHERLOCK_STOP_HOOK_LOG, all sharing
+one ``invocation`` id: ``event: start`` before the child starts, ``event: end``
+(the decision row) on normal exit, and ``event: kill`` when Qwen's hook timeout
+SIGTERMs/SIGINTs this wrapper (the child process group is killed first). A
+``start`` with no ``end`` is therefore a killed or lost hook, never silence. A logging failure is reported on stderr and never
 changes the hook's result. The skill's own stopcheck.py is not modified.
 """
 import datetime
 import hashlib
 import json
 import os
+import signal
 import subprocess
 import sys
+import time
+import uuid
 
 CLIP = 2000
 NEAR_CAP = 0.95          # flag duration_ms >= 95 % of a known cap
@@ -113,24 +119,62 @@ def hook_env():
     return env
 
 
+def append_row(log, row):
+    if not log:
+        return
+    try:
+        with open(log, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n")
+    except OSError as exc:
+        sys.stderr.write("stop-hook-log: could not append %s: %s\n" % (log, exc))
+
+
 def main(argv):
     if not argv:
         sys.stderr.write("stop-hook-log: no hook command given\n")
         return 2
-    data = sys.stdin.buffer.read()
+    log = os.environ.get("SHERLOCK_STOP_HOOK_LOG")
+    invocation = uuid.uuid4().hex
     started = datetime.datetime.now(datetime.timezone.utc)
+    t0 = time.monotonic()
+    state = {"child": None}
+
+    def on_signal(signum, frame):
+        child = state["child"]
+        if child is not None:
+            try:
+                os.killpg(child.pid, signal.SIGKILL)
+            except (ProcessLookupError, PermissionError):
+                pass
+        append_row(log, {"event": "kill", "invocation": invocation, "ts": started.isoformat(),
+                         "killed_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                         "signal": signal.Signals(signum).name,
+                         "elapsed_ms": int((time.monotonic() - t0) * 1000),
+                         "child_pid": child.pid if child is not None else None})
+        os._exit(128 + signum)
+
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        signal.signal(sig, on_signal)
+    append_row(log, {"event": "start", "invocation": invocation, "ts": started.isoformat(),
+                     "pid": os.getpid(), "command": argv})
+    data = sys.stdin.buffer.read()
     try:
-        proc = subprocess.run(argv, input=data, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                              env=hook_env())
-        rc, out, err, spawn_error = proc.returncode, proc.stdout, proc.stderr, None
+        # Own process group, so a kill reaches the whole stopcheck tree.
+        child = subprocess.Popen(argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                 stderr=subprocess.PIPE, env=hook_env(), start_new_session=True)
+        state["child"] = child
+        out, err = child.communicate(data)
+        rc, spawn_error = child.returncode, None
     except OSError as exc:
         rc, out, err, spawn_error = 127, b"", str(exc).encode(), str(exc)
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        signal.signal(sig, signal.SIG_DFL)
     sys.stdout.buffer.write(out); sys.stdout.buffer.flush()
     sys.stderr.buffer.write(err); sys.stderr.buffer.flush()
-    log = os.environ.get("SHERLOCK_STOP_HOOK_LOG")
     if log:
         decision, reason, failed_open = parse_decision(out)
-        row = {"ts": started.isoformat(), "command": argv, "input": summarize_input(data),
+        row = {"event": "end", "invocation": invocation,
+               "ts": started.isoformat(), "command": argv, "input": summarize_input(data),
                "exit_code": rc, "decision": decision, "reason": reason,
                "failed_open": failed_open, "spawn_error": spawn_error,
                "stdout": out[:CLIP].decode("utf-8", "replace"),
@@ -156,11 +200,7 @@ def main(argv):
             row["duration_near_cap"] = near_cap(row["duration_ms"])
         except Exception as exc:  # observability never changes the hook result
             row["observability_error"] = "%s: %s" % (type(exc).__name__, exc)
-        try:
-            with open(log, "a", encoding="utf-8") as fh:
-                fh.write(json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n")
-        except OSError as exc:
-            sys.stderr.write("stop-hook-log: could not append %s: %s\n" % (log, exc))
+        append_row(log, row)
     return rc
 
 

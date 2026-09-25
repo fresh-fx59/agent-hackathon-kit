@@ -55,9 +55,14 @@ PREFLIGHT_TIMEOUT_S = 90
 PACKAGES = ("v52", "v53")
 PACKAGE = "v52"
 INDEXED_PACKAGES = ("v53",)
-# Spec 2026-09-24 item 3: Qwen Stop-hook timeout set explicitly, in seconds
-# (Qwen reads values < 1000 as seconds). 280 s worst measured at 1 GB x ~2.
-STOP_HOOK_TIMEOUT_S = 600
+# Spec 2026-09-25 item 1/3: the Stop-hook timeout is written in the unit the
+# PINNED Qwen reads. 0.22.0 reads command-hook `timeout` as milliseconds
+# (chunk-T6XLJRQY.js:113992); a version enters this table only after the live
+# hook test (qwen_hook_live_test.py) passes on it. Unknown -> qwen_version_unverified.
+QWEN_HOOK_TIMEOUT_UNITS = {"0.22.0": "ms"}
+# Qwen 0.22.0 also stops waiting for a Stop hook after messageBus's 60 s default;
+# T = 50 s keeps a 10 s margin to it; stopcheck's ceiling is T - 10 = 40 s.
+STOP_HOOK_TIMEOUT_S = 50
 # Spec item 8: whole-run wall clock (r5 stage 2 alone took 74 min).
 MAX_WALL_SECONDS = 21600
 # Spec item 7: 3 identical Stop-hook blocks -> terminal stop_hook_loop.
@@ -65,6 +70,21 @@ STOP_HOOK_LOOP_LIMIT = 3
 PERMISSION_DENIED_RE = re.compile(r"permission was declined[^\n\"]{0,200}", re.I)
 
 class Refusal(RuntimeError): pass
+
+class QwenVersionUnverified(Refusal):
+    status = "qwen_version_unverified"
+
+def hook_timeout_unit(version):
+    """-> the hook-timeout unit the given Qwen version reads; refuse unknown versions."""
+    unit = QWEN_HOOK_TIMEOUT_UNITS.get(version)
+    if unit is None:
+        raise QwenVersionUnverified("Qwen version %r has no verified hook-timeout unit; verified: %s"
+                                    % (version, ", ".join(sorted(QWEN_HOOK_TIMEOUT_UNITS))))
+    return unit
+
+def hook_timeout_value(version, seconds):
+    """Seconds -> the settings value for this Qwen version."""
+    return int(seconds) * 1000 if hook_timeout_unit(version) == "ms" else int(seconds)
 
 class TerminalFailure(Refusal):
     """A post-contact failure whose terminal status is part of the evidence."""
@@ -142,8 +162,10 @@ def prepared_inventory(root):
     hook = settings.get("hooks", {}).get("Stop", [{}])[0].get("hooks", [{}])[0].get("command", "")
     if hook != STOP_HOOK_COMMAND:
         raise Refusal("settings Stop hook is not the logged v52 hook wrapper")
-    if stop_hook_timeout(settings) != STOP_HOOK_TIMEOUT_S:
-        raise Refusal("settings Stop hook timeout must be %d s" % STOP_HOOK_TIMEOUT_S)
+    if stop_hook_timeout(settings) != hook_timeout_value(QWEN_VERSION, STOP_HOOK_TIMEOUT_S):
+        raise Refusal("settings Stop hook timeout must be %d s (%d %s for Qwen %s)" % (
+            STOP_HOOK_TIMEOUT_S, hook_timeout_value(QWEN_VERSION, STOP_HOOK_TIMEOUT_S),
+            hook_timeout_unit(QWEN_VERSION), QWEN_VERSION))
     # Bind every pre-existing prepared artifact except mutable control/log dirs.
     rows = []
     for name in ("prompt.txt", ".qwen/settings.json", skill_dir()):
@@ -197,7 +219,7 @@ def stage_harness_layout(root):
     if entry.get("command") not in (STOP_HOOK_COMMAND, 'python3 "$QWEN_SKILL_ROOT/tools/stopcheck.py"'):
         raise Refusal("settings Stop hook is not the documented v52 hook")
     entry["command"] = STOP_HOOK_COMMAND
-    entry["timeout"] = STOP_HOOK_TIMEOUT_S
+    entry["timeout"] = hook_timeout_value(QWEN_VERSION, STOP_HOOK_TIMEOUT_S)
     tmp = path.with_name(path.name + ".staging")
     tmp.write_text(json.dumps(settings, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
     os.replace(tmp, path)
@@ -252,11 +274,8 @@ def continuation_prompt(work, hook_log, since):
     handoff = Path(work, "handoff.txt")
     if not handoff.is_file() or handoff.stat().st_mtime < since:
         return None
-    last = None
-    if Path(hook_log).is_file():
-        for line in Path(hook_log).read_text(encoding="utf-8").splitlines():
-            try: last = json.loads(line)
-            except ValueError: continue
+    ends = [r for r in hook_rows(hook_log) if r.get("event", "end") == "end"]
+    last = ends[-1] if ends else None
     if (not last or last.get("decision") != "allow" or "handoff accepted" not in (last.get("reason") or "")
             or str(last.get("ts", "")) < datetime.datetime.fromtimestamp(since, datetime.timezone.utc).isoformat()):
         return None
@@ -464,33 +483,137 @@ def validate_qwen_output(path):
             or result.get("subtype") != "success" or result.get("is_error") is not False):
         raise TerminalFailure("qwen_protocol_failed", "Qwen lacks a clean terminal result")
 
-def validate_finalizer_receipt(work, control=None):
-    """Require a clean finalizer receipt bound to the report it claims to validate."""
-    receipts = sorted(Path(work, "validation").glob("*/metadata.json"))
-    if not receipts:
-        info = finalizer_diagnostics(work, control)
-        raise TerminalFailure("validation_failed", "finalizer receipt missing: %s; skill_invocations=%s; work=%s; stop_hook=%s" % (
-            info["missing_step"], info["skill_invocations"], info["work_contents"],
-            info["stop_hook_decisions"]), details=info)
-    try:
-        receipt = read_json(receipts[-1])
-    except Exception as exc:
-        raise TerminalFailure("validation_failed", "finalizer receipt unreadable") from exc
+def hook_rows(log):
+    """Every JSON row of the Stop-hook log (start / end / kill; legacy rows = end)."""
+    rows = []
+    if Path(log).is_file():
+        for line in Path(log).read_text(encoding="utf-8", errors="replace").splitlines():
+            try: row = json.loads(line)
+            except ValueError: continue
+            if isinstance(row, dict): rows.append(row)
+    return rows
+
+def _row_ts(row):
+    try: return datetime.datetime.fromisoformat(row["ts"]).timestamp()
+    except (KeyError, TypeError, ValueError): return None
+
+def hook_log_terminal(log, run_started, final_session_started):
+    """Spec 2026-09-25 item 4 -> (status, details) or None.
+
+    A `start` row with no `end` (or with a `kill`) anywhere in the run -> stop_hook_killed;
+    a final session with no `end` row at all -> stop_hook_unlogged."""
+    rows = [r for r in hook_rows(log) if (_row_ts(r) or 0) >= run_started - 1]
+    ended = {r.get("invocation") for r in rows if r.get("event", "end") == "end"}
+    kills = [r for r in rows if r.get("event") == "kill"]
+    orphans = [r for r in rows if r.get("event") == "start" and r.get("invocation") not in ended]
+    for r in kills + orphans:
+            return "stop_hook_killed", {"invocation": r.get("invocation"), "ts": r.get("ts"),
+                                        "event": r.get("event"), "signal": r.get("signal"),
+                                        "elapsed_ms": r.get("elapsed_ms")}
+    if not any(r.get("event", "end") == "end" and (_row_ts(r) or 0) >= final_session_started - 1 for r in rows):
+        return "stop_hook_unlogged", {"final_session_started": final_session_started}
+    return None
+
+def receipt_complete(receipt):
+    gates = receipt.get("gates") if isinstance(receipt, dict) else None
+    return (isinstance(receipt, dict) and bool(receipt.get("finished_at")) and bool(receipt.get("verdict"))
+            and isinstance(gates, dict) and set(gates) == set(FINALIZER_GATES))
+
+def classify_receipts(work):
+    """-> (complete, incomplete): lists of (attempt_id, receipt) in attempt order."""
+    complete, incomplete = [], []
+    for path in sorted(Path(work, "validation").glob("*/metadata.json")):
+        try: receipt = read_json(path)
+        except Exception: receipt = None
+        (complete if receipt_complete(receipt) else incomplete).append((path.parent.name, receipt))
+    return complete, incomplete
+
+def killed_receipt(work):
+    """An incomplete attempt newer than the newest complete one -> its id (a killed finalize)."""
+    complete, incomplete = classify_receipts(work)
+    last = complete[-1][0] if complete else ""
+    late = [aid for aid, _ in incomplete if aid > last]
+    return late[-1] if late else None
+
+def check_receipt(receipt, work, what="finalizer"):
     if receipt.get("verdict") != "clean" or receipt.get("inputs_changed_during_validation") is not False:
-        raise TerminalFailure("validation_failed", "finalizer verdict is not clean")
+        raise TerminalFailure("validation_failed", "%s verdict is not clean" % what)
     gates = receipt.get("gates")
     if (not isinstance(gates, dict) or set(gates) != set(FINALIZER_GATES)
             or any(not isinstance(gates[name], dict)
                    or gates[name].get("exit_code") != 0
                    or gates[name].get("parsed_blocking") != 0
                    for name in FINALIZER_GATES)):
-        raise TerminalFailure("validation_failed", "finalizer gates are not clean")
+        raise TerminalFailure("validation_failed", "%s gates are not clean" % what)
     inputs_after = receipt.get("inputs_after", {})
     for name in FINALIZER_INPUTS:
         current = Path(work, name + (".md" if name == "report" else ".tsv"))
         expected = inputs_after.get(name, {}).get("sha256")
         if not isinstance(expected, str) or not current.is_file() or file_digest(current) != expected:
-            raise TerminalFailure("validation_failed", "finalizer %s identity no longer matches" % name)
+            raise TerminalFailure("validation_failed", "%s %s identity no longer matches" % (what, name))
+
+def validate_finalizer_receipt(work, control=None):
+    """Advisory: the newest COMPLETE model/hook receipt must be clean and bound to the report."""
+    complete, _incomplete = classify_receipts(work)
+    if not complete:
+        info = finalizer_diagnostics(work, control)
+        raise TerminalFailure("validation_failed", "finalizer receipt missing: %s; skill_invocations=%s; work=%s; stop_hook=%s" % (
+            info["missing_step"], info["skill_invocations"], info["work_contents"],
+            info["stop_hook_decisions"]), details=info)
+    check_receipt(complete[-1][1], work)
+
+def launcher_final_gate(run_root, control, py=None):
+    """Spec 2026-09-25 item 4: after the last Qwen exit the launcher runs the final
+    gate itself; its verdict decides the run. Output lives in control/final-gate/."""
+    run_root, out = Path(run_root), Path(control, "final-gate")
+    out.mkdir(mode=0o700, exist_ok=True)
+    tool = run_root / skill_dir() / "tools" / "finalize.py"
+    argv = [py or sys.executable, str(tool), "--work", str(run_root / "work"), "--corpus", str(run_root / "corpus"),
+            "--package", str(run_root / skill_dir()), "--deadline-seconds", str(WATCHDOG_SECONDS)]
+    if PACKAGE in INDEXED_PACKAGES: argv.append("--require-index")
+    env = {k: v for k, v in os.environ.items() if k in ("PATH", "LANG", "LC_ALL", "TMPDIR", "TZ")}
+    env.update({"PYTHONDONTWRITEBYTECODE": "1", "SHERLOCK_INDEX_ROOT": str(run_root / "index"),
+                "SHERLOCK_STOP_HOOK_TIMEOUT_S": str(WATCHDOG_SECONDS + 10)})
+    started = time.time()
+    try:
+        proc = subprocess.run(argv, cwd=run_root, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env,
+                              timeout=WATCHDOG_SECONDS + 60)
+        rc, stdout, stderr = proc.returncode, proc.stdout, proc.stderr
+    except subprocess.TimeoutExpired as exc:
+        rc, stdout, stderr = None, exc.stdout or b"", exc.stderr or b""
+    (out / "finalize.stdout").write_bytes(stdout); (out / "finalize.stderr").write_bytes(stderr)
+    row = {"argv": argv, "rc": rc, "elapsed_s": round(time.time() - started, 3), "attempt": None, "verdict": None}
+    try:
+        attempt = Path(json.loads(stdout.decode("utf-8").strip().splitlines()[-1])["attempt"])
+        receipt = read_json(attempt / "metadata.json")
+        (out / "metadata.json").write_text(json.dumps(receipt, ensure_ascii=False, indent=1, sort_keys=True) + "\n")
+        row.update(attempt=attempt.name, verdict=receipt.get("verdict"))
+    except Exception as exc:
+        receipt = None
+        row["error"] = "%s: %s" % (type(exc).__name__, exc)
+    create(out / "result.json", canonical(row))
+    return row, receipt
+
+def final_decision(run_root, control, run_started, final_session_started, py=None):
+    """-> (status, details). Order: launcher gate (always run, recorded) ->
+    Stop-hook kill/unlog terminals -> launcher gate verdict. Receipts are advisory."""
+    run_root, work = Path(run_root), Path(run_root) / "work"
+    killed = killed_receipt(work)            # snapshot BEFORE our own attempt is added
+    advisory = None
+    try: validate_finalizer_receipt(work, control)
+    except TerminalFailure as exc: advisory = str(exc)
+    gate, receipt = launcher_final_gate(run_root, control, py=py)
+    details = {"final_gate": gate, "advisory_receipt_error": advisory}
+    hook = hook_log_terminal(Path(control, "trace", "stop-hook.jsonl"), run_started, final_session_started)
+    if killed:
+        return "stop_hook_killed", dict(details, killed_attempt=killed, hook_log=hook and hook[1])
+    if hook:
+        return hook[0], dict(details, hook_log=hook[1])
+    if receipt is None:
+        return "validation_failed", dict(details, error="launcher final gate produced no receipt")
+    try: check_receipt(receipt, work, what="launcher final gate")
+    except TerminalFailure as exc: return exc.status, dict(details, error=str(exc))
+    return "completed", details
 
 QUOTA_TYPES = ("usage_limit_reached", "model_cooldown", "insufficient_quota")
 
@@ -690,6 +813,11 @@ def run(args):
         qwen_cmd = (["node", args.qwen] if args.qwen.endswith(".js") else [args.qwen])
         qwen_version = subprocess.check_output(qwen_cmd + ["--version"], text=True, stderr=subprocess.STDOUT,
                                                 timeout=20).strip()
+        unit = hook_timeout_unit(qwen_version)  # unknown -> qwen_version_unverified
+        create(control / "qwen-runtime.json", canonical({
+            "qwen_version": qwen_version, "hook_timeout_unit": unit,
+            "stop_hook_timeout_s": STOP_HOOK_TIMEOUT_S,
+            "stop_hook_timeout_value": hook_timeout_value(qwen_version, STOP_HOOK_TIMEOUT_S)}))
         if qwen_version != QWEN_VERSION: raise Refusal("Qwen version is %r, need %s" % (qwen_version, QWEN_VERSION))
         port_available(args.listen_port)
         preflight_skill_list(qwen_cmd, Path(manifest["prepared_root"]), control)
@@ -793,11 +921,18 @@ def run(args):
             validate_manifest(control, manifest)
             observe_trace(trace, strict_buffer_enabled=True)
             validate_terminal_ledger(trace, strict_buffer_enabled=True)
-            validate_finalizer_receipt(run_root / "work", control)
+            status, details = final_decision(run_root, control, run_started, started)
+            if status != "completed":
+                raise TerminalFailure(status, "launcher final decision: %s" % status, details)
         finally: err.close()
-        terminal(control, "completed", qwen_exit=qwen_rc,
+        terminal(control, "completed", qwen_exit=qwen_rc, qwen_version=qwen_version, hook_timeout_unit=unit,
+                 final_gate=details["final_gate"], advisory_receipt_error=details["advisory_receipt_error"],
                  manifest_sha256=approved, nonce=manifest["nonce"])
         return qwen_rc
+    except QwenVersionUnverified as exc:
+        terminal(control, exc.status, error=str(exc))
+        print("launcher refusal: %s" % exc, file=sys.stderr)
+        return 2
     except TerminalFailure as exc:
         terminal(control, exc.status, error="%s: %s" % (type(exc).__name__, exc),
                  qwen_exit=qwen_rc, diagnostics=exc.details or None)
@@ -823,6 +958,16 @@ def run(args):
                     child.wait()
         # run.done is written only after owned children are stopped.
         ensure_terminal(control, "launcher_exited_without_terminal")
+
+def replay(args):
+    """Offline: apply the post-Qwen decision to an existing run root (no Qwen, no model)."""
+    run_root, control = Path(args.run_root), Path(args.run_root, "control")
+    manifest = read_json(control / "manifest.json")
+    use_package(manifest.get("package", "v52"))
+    sessions = [json.loads(x) for x in (control / "sessions.jsonl").read_text().splitlines() if x.strip()]
+    status, details = final_decision(run_root, control, sessions[0]["started_at"], sessions[-1]["started_at"])
+    print(json.dumps({"status": status, **details}, ensure_ascii=False, sort_keys=True))
+    return 0 if status == "completed" else 2
 
 def observe_trace(trace, strict_buffer_enabled=False):
     if (trace / "lane-abort.json").exists(): raise Refusal("proxy lane abort")
@@ -858,6 +1003,7 @@ def main():
     a = sub.add_parser("run")
     a.add_argument("--control-root", required=True); a.add_argument("--approval", required=True); a.add_argument("--nonce-root", required=True)
     a.add_argument("--qwen", required=True); a.add_argument("--proxy", required=True); a.add_argument("--listen-port", type=int, default=18795); a.add_argument("--max-wall-seconds", type=int, default=MAX_WALL_SECONDS); a.set_defaults(fn=run)
+    a = sub.add_parser("replay"); a.add_argument("--run-root", required=True); a.set_defaults(fn=replay)
     args = p.parse_args()
     try: result = args.fn(args)
     except Refusal as exc: print("launcher refusal: %s" % exc, file=sys.stderr); result = 2

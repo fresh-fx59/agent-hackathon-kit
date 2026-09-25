@@ -1906,7 +1906,7 @@ print(json.dumps([{'type':'result','result':'ok','is_error':False,'session_id':'
 
 
 class LauncherStopHookTimeoutTest(unittest.TestCase):
-    """The r5-class launcher stages and exports the 600 s Stop-hook timeout."""
+    """The launcher stages the 50 s Stop-hook timeout in the pinned Qwen's unit (0.22.0: ms)."""
     def setUp(self):
         path = ROOT / "eval" / "bench" / "run-v52-gpt55-comparison.py"
         spec = importlib.util.spec_from_file_location("launcher_v53_timeout", path)
@@ -1917,11 +1917,11 @@ class LauncherStopHookTimeoutTest(unittest.TestCase):
             "type": "command", "command": 'python3 "$QWEN_SKILL_ROOT/tools/stopcheck.py"'}]}]}}))
     def tearDown(self):
         shutil.rmtree(self.d)
-    def test_staged_settings_carry_600_seconds(self):
-        self.assertEqual(self.L.STOP_HOOK_TIMEOUT_S, 600)
+    def test_staged_settings_carry_50_seconds_in_ms(self):
+        self.assertEqual(self.L.STOP_HOOK_TIMEOUT_S, 50)
         self.L.use_package("v53"); self.L.stage_harness_layout(self.d)
         settings = json.loads((self.d / ".qwen/settings.json").read_text())
-        self.assertEqual(self.L.stop_hook_timeout(settings), 600)
+        self.assertEqual(self.L.stop_hook_timeout(settings), 50000)
         self.assertTrue(os.readlink(self.d / "skills-root/sherlock").endswith("skills/v53"))
     def test_run_exports_timeout_env(self):
         src = (ROOT / "eval" / "bench" / "run-v52-gpt55-comparison.py").read_text()
