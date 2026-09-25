@@ -44,11 +44,10 @@ class UnitTableTest(unittest.TestCase):
                 "type": "command", "command": R.STOP_HOOK_COMMAND, "timeout": 600}]}]}}))
             R.use_package("v53"); R.stage_harness_layout(d)
             self.assertEqual(R.stop_hook_timeout(json.loads((d / ".qwen/settings.json").read_text())), 50000)
-            perms = json.loads((d / ".qwen/settings.json").read_text())["permissions"]
-            self.assertEqual(perms, {"allow": list(R.QWEN_READONLY_ALLOW)})
-            for word in ("sed", "awk", "sort", "python3", "tee", "rm", "*"):
-                self.assertFalse(any(r.startswith("run_shell_command(%s" % word) and r != "run_shell_command(sha256sum *)"
-                                     for r in perms["allow"]), word)
+            self.assertNotIn("permissions", json.loads((d / ".qwen/settings.json").read_text()))
+            src = (HERE / "run-v52-gpt55-comparison.py").read_text()
+            self.assertEqual(R.QWEN_APPROVAL_MODE, "yolo")
+            self.assertIn('"--approval-mode", QWEN_APPROVAL_MODE', src)
         finally:
             R.use_package("v52"); shutil.rmtree(d)
 
@@ -111,7 +110,8 @@ class RelaunchAfterRefusalTest(unittest.TestCase):
             self.assertEqual(reached, [True])  # got past qwen-runtime.json and the port check
             term = json.loads((control / "run-terminal.json").read_text())
             self.assertIn("stop after port check", term["error"])
-            self.assertEqual(json.loads((control / "qwen-runtime.json").read_text())["qwen_version"], "0.22.0")
+            rt = json.loads((control / "qwen-runtime.json").read_text())
+            self.assertEqual((rt["qwen_version"], rt["approval_mode"]), ("0.22.0", "yolo"))
         finally:
             sock.close()
             R.load_manifest, R.validate_manifest, R.preflight_skill_list = saved

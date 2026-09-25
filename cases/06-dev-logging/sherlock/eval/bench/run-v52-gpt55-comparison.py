@@ -63,19 +63,13 @@ QWEN_HOOK_TIMEOUT_UNITS = {"0.22.0": "ms"}
 # Qwen 0.22.0 also stops waiting for a Stop hook after messageBus's 60 s default;
 # T = 50 s keeps a 10 s margin to it; stopcheck's ceiling is T - 10 = 40 s.
 STOP_HOOK_TIMEOUT_S = 50
-# Operator ruling 2026-09-25: Qwen 0.22.0's auto-mode classifier rejects a model reply
-# carrying any field besides `shouldBlock` (STAGE1_SCHEMA additionalProperties:false,
-# chunk-T6XLJRQY.js:44968) -> classifier_unavailable -> non-interactive deny. Allow
-# rules skip the classifier for read-only commands the skill uses (from the r5, r6
-# and small-test transcripts). Syntax: `Tool(command-pattern)`, `run_shell_command`
-# = `Bash` (T6:42564 parseRule, T6:42652, T6:42887 matchesCommandPattern: prefix or
-# `*` glob); a compound `a && b | c` is split on && || ; | & (T6:42793) and every
-# part must match. Excluded on purpose: sed (-i), awk (system/print >), sort (-o),
-# python3, tee. KNOWN GAP (live-tested): patterns cannot exclude `>`, so an allowed
-# command with an output redirect also skips the classifier.
-QWEN_READONLY_ALLOW = tuple("run_shell_command(%s)" % p for p in (
-    "cd *", "echo *", "cat *", "head *", "tail *", "wc *", "grep *", "cut *",
-    "ls", "ls *", "jq *", "sha256sum *"))
+# Operator ruling 2026-09-25: approval mode "yolo" (no permission checks). Qwen
+# 0.22.0's auto-mode classifier rejects a model reply carrying any field besides
+# `shouldBlock` (STAGE1_SCHEMA additionalProperties:false, chunk-T6XLJRQY.js:44968)
+# -> classifier_unavailable -> non-interactive deny (T6:63138). `--approval-mode`
+# wins over settings (chunk-6QSA4JHL.js:37644-37654); yolo -> needsConfirmation
+# false (T6:43363). The launcher's own final gate still decides pass/fail.
+QWEN_APPROVAL_MODE = "yolo"
 # Spec item 8: whole-run wall clock (r5 stage 2 alone took 74 min).
 MAX_WALL_SECONDS = 21600
 # Spec item 7: 3 identical Stop-hook blocks -> terminal stop_hook_loop.
@@ -184,8 +178,6 @@ def prepared_inventory(root):
     hook = settings.get("hooks", {}).get("Stop", [{}])[0].get("hooks", [{}])[0].get("command", "")
     if hook != STOP_HOOK_COMMAND:
         raise Refusal("settings Stop hook is not the logged v52 hook wrapper")
-    if settings.get("permissions") != {"allow": list(QWEN_READONLY_ALLOW)}:
-        raise Refusal("settings permissions are not the harness read-only allow list")
     if stop_hook_timeout(settings) != hook_timeout_value(QWEN_VERSION, STOP_HOOK_TIMEOUT_S):
         raise Refusal("settings Stop hook timeout must be %d s (%d %s for Qwen %s)" % (
             STOP_HOOK_TIMEOUT_S, hook_timeout_value(QWEN_VERSION, STOP_HOOK_TIMEOUT_S),
@@ -244,7 +236,6 @@ def stage_harness_layout(root):
         raise Refusal("settings Stop hook is not the documented v52 hook")
     entry["command"] = STOP_HOOK_COMMAND
     entry["timeout"] = hook_timeout_value(QWEN_VERSION, STOP_HOOK_TIMEOUT_S)
-    settings["permissions"] = {"allow": list(QWEN_READONLY_ALLOW)}
     tmp = path.with_name(path.name + ".staging")
     tmp.write_text(json.dumps(settings, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
     os.replace(tmp, path)
@@ -843,7 +834,7 @@ def run(args):
         unit = hook_timeout_unit(qwen_version)  # unknown -> qwen_version_unverified
         # Overwritten, not O_EXCL: a refused launch (busy port, ...) must not block a relaunch.
         replace_file(control / "qwen-runtime.json", canonical({
-            "qwen_version": qwen_version, "hook_timeout_unit": unit,
+            "qwen_version": qwen_version, "hook_timeout_unit": unit, "approval_mode": QWEN_APPROVAL_MODE,
             "stop_hook_timeout_s": STOP_HOOK_TIMEOUT_S,
             "stop_hook_timeout_value": hook_timeout_value(qwen_version, STOP_HOOK_TIMEOUT_S)}))
         if qwen_version != QWEN_VERSION: raise Refusal("Qwen version is %r, need %s" % (qwen_version, QWEN_VERSION))
@@ -898,7 +889,8 @@ def run(args):
                 started = time.time()
                 with open(output_path, "wb") as output:
                     qwen = subprocess.Popen(qwen_cmd + ["--auth-type", "openai", "--model", MODEL,
-                                              "--max-session-turns", "-1", "--max-tool-calls", "-1", "--openai-logging",
+                                              "--max-session-turns", "-1", "--max-tool-calls", "-1",
+                                              "--approval-mode", QWEN_APPROVAL_MODE, "--openai-logging",
                                               "--openai-logging-dir", str(trace / "openai-logs"), "--output-format", "json",
                                               # spec 2026-09-25 item 5: keep Qwen debug logs
                                               # (home/.qwen/debug) to name permission branches.
@@ -956,6 +948,7 @@ def run(args):
                 raise TerminalFailure(status, "launcher final decision: %s" % status, details)
         finally: err.close()
         terminal(control, "completed", qwen_exit=qwen_rc, qwen_version=qwen_version, hook_timeout_unit=unit,
+                 approval_mode=QWEN_APPROVAL_MODE,
                  final_gate=details["final_gate"], advisory_receipt_error=details["advisory_receipt_error"],
                  manifest_sha256=approved, nonce=manifest["nonce"])
         return qwen_rc
