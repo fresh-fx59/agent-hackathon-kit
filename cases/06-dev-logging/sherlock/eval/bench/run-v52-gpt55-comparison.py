@@ -52,9 +52,9 @@ PREFLIGHT_DEAD_BASE = "http://127.0.0.1:9/v1"
 PREFLIGHT_TIMEOUT_S = 90
 # Selectable immutable skill packages. v52 stays selectable unchanged; v53 adds
 # the load-time data index (built here, never inside the Stop hook).
-PACKAGES = ("v52", "v53")
+PACKAGES = ("v52", "v53", "v54")
 PACKAGE = "v52"
-INDEXED_PACKAGES = ("v53",)
+INDEXED_PACKAGES = ("v53", "v54")
 # Spec 2026-09-25 item 1/3: the Stop-hook timeout is written in the unit the
 # PINNED Qwen reads. 0.22.0 reads command-hook `timeout` as milliseconds
 # (chunk-T6XLJRQY.js:113992); a version enters this table only after the live
