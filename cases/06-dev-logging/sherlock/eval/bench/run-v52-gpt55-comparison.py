@@ -874,7 +874,9 @@ def run(args):
                     qwen = subprocess.Popen(qwen_cmd + ["--auth-type", "openai", "--model", MODEL,
                                               "--max-session-turns", "-1", "--max-tool-calls", "-1", "--openai-logging",
                                               "--openai-logging-dir", str(trace / "openai-logs"), "--output-format", "json",
-                                              prompt], cwd=run_root,
+                                              # spec 2026-09-25 item 5: keep Qwen debug logs
+                                              # (home/.qwen/debug) to name permission branches.
+                                              "--debug", prompt], cwd=run_root,
                                               stdin=subprocess.DEVNULL, stdout=output, stderr=err, env=fullenv, start_new_session=True)
                     if session == 1:
                         create(control / "launch-receipt.json", canonical({"started_at": now(), "qwen_pid":qwen.pid, "proxy_pid":proxy.pid, "manifest_sha256":approved}))
