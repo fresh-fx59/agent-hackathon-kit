@@ -44,6 +44,11 @@ class UnitTableTest(unittest.TestCase):
                 "type": "command", "command": R.STOP_HOOK_COMMAND, "timeout": 600}]}]}}))
             R.use_package("v53"); R.stage_harness_layout(d)
             self.assertEqual(R.stop_hook_timeout(json.loads((d / ".qwen/settings.json").read_text())), 50000)
+            perms = json.loads((d / ".qwen/settings.json").read_text())["permissions"]
+            self.assertEqual(perms, {"allow": list(R.QWEN_READONLY_ALLOW)})
+            for word in ("sed", "awk", "sort", "python3", "tee", "rm", "*"):
+                self.assertFalse(any(r.startswith("run_shell_command(%s" % word) and r != "run_shell_command(sha256sum *)"
+                                     for r in perms["allow"]), word)
         finally:
             R.use_package("v52"); shutil.rmtree(d)
 
@@ -69,6 +74,47 @@ class RunRefusesUnverifiedVersionTest(unittest.TestCase):
             self.assertFalse((control / "qwen-runtime.json").exists())
         finally:
             R.load_manifest, R.validate_manifest = saved
+            os.environ.pop("SHERLOCK_API_KEY_FILE", None)
+            for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
+                signal.signal(sig, signal.SIG_DFL)
+            shutil.rmtree(d)
+
+
+class RelaunchAfterRefusalTest(unittest.TestCase):
+    """A refused launch (busy port) leaves qwen-runtime.json; a relaunch must still pass that step."""
+    def test_busy_port_then_relaunch(self):
+        import socket
+        d = Path(tempfile.mkdtemp())
+        saved = (R.load_manifest, R.validate_manifest, R.preflight_skill_list)
+        sock = socket.socket(); sock.bind(("127.0.0.1", 0)); sock.listen(1); port = sock.getsockname()[1]
+        try:
+            qwen = d / "qwen"; qwen.write_text("#!/bin/sh\necho 0.22.0\n"); qwen.chmod(0o755)
+            proxy = d / "proxy.py"; proxy.write_text("")
+            control = d / "control"; control.mkdir()
+            manifest = {"model": "gpt-5.5", "package": "v52", "proxy": str(proxy.resolve()),
+                        "qwen": str(qwen.resolve()), "upstream_base": "http://127.0.0.1:8317/v1", "prepared_root": str(d)}
+            R.load_manifest = lambda c: (manifest, "A")
+            R.validate_manifest = lambda c, m: None
+            reached = []
+            def preflight(*a):
+                reached.append(True); raise R.Refusal("stop after port check (test)")
+            R.preflight_skill_list = preflight
+            os.environ["SHERLOCK_API_KEY_FILE"] = str(d / "k")
+            args = types.SimpleNamespace(control_root=str(control), approval="A", nonce_root=str(d / "n"),
+                                         qwen=str(qwen), proxy=str(proxy), listen_port=port, max_wall_seconds=10)
+            self.assertEqual(R.run(args), 2)
+            self.assertTrue((control / "qwen-runtime.json").is_file())
+            self.assertEqual(reached, [])
+            sock.close()
+            (control / "run-terminal.json").unlink(); (control / "run.done").unlink(missing_ok=True)
+            self.assertEqual(R.run(args), 2)
+            self.assertEqual(reached, [True])  # got past qwen-runtime.json and the port check
+            term = json.loads((control / "run-terminal.json").read_text())
+            self.assertIn("stop after port check", term["error"])
+            self.assertEqual(json.loads((control / "qwen-runtime.json").read_text())["qwen_version"], "0.22.0")
+        finally:
+            sock.close()
+            R.load_manifest, R.validate_manifest, R.preflight_skill_list = saved
             os.environ.pop("SHERLOCK_API_KEY_FILE", None)
             for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
                 signal.signal(sig, signal.SIG_DFL)

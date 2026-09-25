@@ -63,6 +63,19 @@ QWEN_HOOK_TIMEOUT_UNITS = {"0.22.0": "ms"}
 # Qwen 0.22.0 also stops waiting for a Stop hook after messageBus's 60 s default;
 # T = 50 s keeps a 10 s margin to it; stopcheck's ceiling is T - 10 = 40 s.
 STOP_HOOK_TIMEOUT_S = 50
+# Operator ruling 2026-09-25: Qwen 0.22.0's auto-mode classifier rejects a model reply
+# carrying any field besides `shouldBlock` (STAGE1_SCHEMA additionalProperties:false,
+# chunk-T6XLJRQY.js:44968) -> classifier_unavailable -> non-interactive deny. Allow
+# rules skip the classifier for read-only commands the skill uses (from the r5, r6
+# and small-test transcripts). Syntax: `Tool(command-pattern)`, `run_shell_command`
+# = `Bash` (T6:42564 parseRule, T6:42652, T6:42887 matchesCommandPattern: prefix or
+# `*` glob); a compound `a && b | c` is split on && || ; | & (T6:42793) and every
+# part must match. Excluded on purpose: sed (-i), awk (system/print >), sort (-o),
+# python3, tee. KNOWN GAP (live-tested): patterns cannot exclude `>`, so an allowed
+# command with an output redirect also skips the classifier.
+QWEN_READONLY_ALLOW = tuple("run_shell_command(%s)" % p for p in (
+    "cd *", "echo *", "cat *", "head *", "tail *", "wc *", "grep *", "cut *",
+    "ls", "ls *", "jq *", "sha256sum *"))
 # Spec item 8: whole-run wall clock (r5 stage 2 alone took 74 min).
 MAX_WALL_SECONDS = 21600
 # Spec item 7: 3 identical Stop-hook blocks -> terminal stop_hook_loop.
@@ -107,6 +120,15 @@ def create(path, data, mode=0o600):
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), mode)
     with os.fdopen(fd, "wb") as out:
         out.write(data); out.flush(); os.fsync(out.fileno())
+
+def replace_file(path, data, mode=0o600):
+    """Atomic overwrite for per-attempt metadata a relaunch must be able to rewrite."""
+    path = Path(path); path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + ".tmp-%d" % os.getpid())
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | getattr(os, "O_NOFOLLOW", 0), mode)
+    with os.fdopen(fd, "wb") as out:
+        out.write(data); out.flush(); os.fsync(out.fileno())
+    os.replace(tmp, path)
 
 def read_json(path):
     p = Path(path)
@@ -162,6 +184,8 @@ def prepared_inventory(root):
     hook = settings.get("hooks", {}).get("Stop", [{}])[0].get("hooks", [{}])[0].get("command", "")
     if hook != STOP_HOOK_COMMAND:
         raise Refusal("settings Stop hook is not the logged v52 hook wrapper")
+    if settings.get("permissions") != {"allow": list(QWEN_READONLY_ALLOW)}:
+        raise Refusal("settings permissions are not the harness read-only allow list")
     if stop_hook_timeout(settings) != hook_timeout_value(QWEN_VERSION, STOP_HOOK_TIMEOUT_S):
         raise Refusal("settings Stop hook timeout must be %d s (%d %s for Qwen %s)" % (
             STOP_HOOK_TIMEOUT_S, hook_timeout_value(QWEN_VERSION, STOP_HOOK_TIMEOUT_S),
@@ -220,6 +244,7 @@ def stage_harness_layout(root):
         raise Refusal("settings Stop hook is not the documented v52 hook")
     entry["command"] = STOP_HOOK_COMMAND
     entry["timeout"] = hook_timeout_value(QWEN_VERSION, STOP_HOOK_TIMEOUT_S)
+    settings["permissions"] = {"allow": list(QWEN_READONLY_ALLOW)}
     tmp = path.with_name(path.name + ".staging")
     tmp.write_text(json.dumps(settings, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
     os.replace(tmp, path)
@@ -816,7 +841,8 @@ def run(args):
         qwen_version = subprocess.check_output(qwen_cmd + ["--version"], text=True, stderr=subprocess.STDOUT,
                                                 timeout=20).strip()
         unit = hook_timeout_unit(qwen_version)  # unknown -> qwen_version_unverified
-        create(control / "qwen-runtime.json", canonical({
+        # Overwritten, not O_EXCL: a refused launch (busy port, ...) must not block a relaunch.
+        replace_file(control / "qwen-runtime.json", canonical({
             "qwen_version": qwen_version, "hook_timeout_unit": unit,
             "stop_hook_timeout_s": STOP_HOOK_TIMEOUT_S,
             "stop_hook_timeout_value": hook_timeout_value(qwen_version, STOP_HOOK_TIMEOUT_S)}))
