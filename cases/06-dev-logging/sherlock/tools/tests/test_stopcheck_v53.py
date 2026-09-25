@@ -30,6 +30,13 @@ def load(name, path):
 
 GW = load("gatewatch_v53_under_test", TOOLS / "gatewatch.py")
 
+# The harness gives the Stop hook (only) a verdict-signing key file; tests do too.
+_KEYDIR = tempfile.mkdtemp(prefix="v53-verdict-key-")
+KEY_FILE = os.path.join(_KEYDIR, "verdict-hmac.key")
+with open(KEY_FILE, "wb") as _fh:
+    _fh.write(os.urandom(32))
+os.environ[GW.VERDICT_KEY_ENV] = KEY_FILE
+
 BUSY_SILENT = "import time\nt=time.time()\nwhile time.time()-t<%s: pass\n"
 SLEEPER = "import time\ntime.sleep(%s)\n"
 
@@ -277,6 +284,114 @@ class HookEndToEnd(unittest.TestCase):
             detail = json.loads((root / "index" / "verdicts" / "stopcheck-detail.json").read_text())
             self.assertEqual(detail["cache"], "hit")
             self.assertEqual(detail["msg_chars"], len(ref))
+
+
+class StaleAndForgery(unittest.TestCase):
+    """Verifier findings on PR #102: stale pass via untracked input; forged verdicts."""
+
+    def _fixture(self, root):
+        os.environ["SHERLOCK_TEST_PACKAGE"] = "v53"
+        fx = load("finalize_v45_fixture_sf", Path(__file__).with_name("test_finalize_v45.py"))
+        package, corpus, work = fx.FinalizeV45("run").canonical_fixture(root)
+        self.marker = root / ".sherlock" / "active.json"
+        self.marker.parent.mkdir()
+        self.marker_body = json.dumps({"version": 36, "active": True, "workspace": str(root),
+            "skill_root": str(package.resolve()), "corpus": str(corpus.resolve()),
+            "out": str(work.resolve()), "mode": "single", "worklists": ["worklist.tsv"]}) + "\n"
+        self.rearm()
+        self.env = {**os.environ, "QWEN_SKILL_ROOT": str(package)}
+        self.env.pop("SHERLOCK_INDEX_ROOT", None)
+        subprocess.run([sys.executable, str(package / "tools/buildindex.py"), "--corpus", str(corpus),
+                        "--index-root", str(root / "index")], check=True, capture_output=True, env=self.env)
+        return package, corpus, work
+
+    def rearm(self):
+        for p in self.marker.parent.iterdir():
+            p.unlink()
+        self.marker.write_text(self.marker_body, encoding="utf-8")
+
+    def stop(self, root, msg, env=None):
+        r = subprocess.run([sys.executable, str(self.package / "tools/stopcheck.py")],
+                           input=json.dumps({"cwd": str(root), "hook_event_name": "Stop",
+                                             "last_assistant_message": msg}),
+                           text=True, capture_output=True, cwd=root, env=env or self.env)
+        return json.loads(r.stdout)
+
+    def ref(self, work):
+        import hashlib
+        d = (work / "report.md").read_bytes()
+        return "REPORT work/report.md sha256=%s bytes=%d" % (hashlib.sha256(d).hexdigest(), len(d))
+
+    def test_key_covers_every_gate_argv_input(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self.package, corpus, work = self._fixture(root)
+            fin = load("finalize_v53_inputs", self.package / "tools" / "finalize.py")
+            names = set(fin.gate_inputs(self.package, work, corpus))
+            self.assertTrue({"work/report.md", "work/worklist.tsv", "work/rules.tsv"} <= names, names)
+
+    def test_mutating_each_tracked_input_misses_and_blocks(self):
+        """Verifier repro_stale.py, generalised to every tracked input."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self.package, corpus, work = self._fixture(root)
+            fin = load("finalize_v53_mut", self.package / "tools" / "finalize.py")
+            self.assertEqual(self.stop(root, self.ref(work))["decision"], "allow")
+            self.rearm()
+            self.assertEqual(self.stop(root, self.ref(work))["decision"], "allow")  # control: hit
+            for name, path in fin.gate_inputs(self.package, work, corpus).items():
+                with self.subTest(input=name):
+                    original = path.read_bytes()
+                    key_before = fin.verdict_key(self.package, work, corpus)
+                    try:
+                        if name.endswith("rules.tsv"):
+                            path.write_text("GARBAGE not a rule\tR99\n", encoding="utf-8")
+                        else:
+                            path.write_bytes(original + b"\n")  # smallest change
+                        self.assertNotEqual(fin.verdict_key(self.package, work, corpus), key_before)
+                        self.rearm()
+                        n = len(list((work / "validation").iterdir()))
+                        got = self.stop(root, self.ref(work))
+                        self.assertGreater(len(list((work / "validation").iterdir())), n,
+                                           "cache hit on stale input: %s" % got)
+                        fresh = subprocess.run([sys.executable, str(self.package / "tools/finalize.py"),
+                                                "--work", str(work), "--corpus", str(corpus),
+                                                "--package", str(self.package)],
+                                               capture_output=True, text=True, env=self.env)
+                        want = "allow" if fresh.returncode == 0 else "block"
+                        self.assertEqual(got["decision"], want, got)
+                        if name.endswith("rules.tsv"):
+                            self.assertEqual(got["decision"], "block")  # verifier repro
+                    finally:
+                        path.write_bytes(original)
+                        self.rearm()
+                    self.assertEqual(self.stop(root, self.ref(work))["decision"], "allow")
+
+    def test_hand_written_and_unsigned_verdicts_rejected(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self.package, corpus, work = self._fixture(root)
+            (work / "rules.tsv").write_text("GARBAGE not a rule\tR99\n", encoding="utf-8")
+            fin = load("finalize_v53_forge", self.package / "tools" / "finalize.py")
+            key = fin.verdict_key(self.package, work, corpus)
+            vdir = Path(GW.cache_dir(str(root)))
+            vdir.mkdir(parents=True, exist_ok=True)
+            # 1. forged: plausible entry, wrong/absent signature
+            for forged in ({"key": key, "verdict": "clean", "reason": None},
+                           {"key": key, "verdict": "clean", "reason": None, "sig": "0" * 64}):
+                (vdir / (key + ".json")).write_text(json.dumps(forged), encoding="utf-8")
+                self.assertIsNone(GW.cache_read(str(root), key))
+                self.rearm()
+                self.assertEqual(self.stop(root, self.ref(work))["decision"], "block")
+            # 2. model-shell finalize (no key in env) writes an unsigned entry -> never a hit
+            (work / "rules.tsv").write_bytes(b"")
+            shell_env = dict(self.env); shell_env.pop(GW.VERDICT_KEY_ENV, None)
+            f = subprocess.run([sys.executable, str(self.package / "tools/finalize.py"), "--work", str(work),
+                                "--corpus", str(corpus), "--package", str(self.package)],
+                               capture_output=True, text=True, env=shell_env)
+            k2 = json.loads(f.stdout)["cache_key"]
+            self.assertIsNone(GW.cache_read(str(root), k2))
+            self.assertNotIn("sig", json.loads((vdir / (k2 + ".json")).read_text()))
 
 
 if __name__ == "__main__":

@@ -4,6 +4,7 @@ verdict cache and the K=2 timeout rule (spec 2026-09-24 items 2-5, 9).
 All limits live HERE, in one place, so a measured revision swaps them once.
 """
 import hashlib
+import hmac
 import json
 import os
 import re
@@ -162,9 +163,36 @@ def _sha(data):
     return hashlib.sha256(data).hexdigest()
 
 
-def cache_key(report_bytes, ledger_bytes, data_sha256, package_sha256):
-    row = [_sha(report_bytes), _sha(ledger_bytes), data_sha256, CHECKER_VERSION, package_sha256]
+def cache_key(inputs, data_sha256, package_sha256):
+    """inputs: sorted [name, sha256] rows of EVERY file a gate reads (finalize.gate_inputs)."""
+    row = [sorted([str(n), str(h)] for n, h in inputs), data_sha256, CHECKER_VERSION, package_sha256]
     return _sha(json.dumps(row, separators=(",", ":")).encode())
+
+
+# Verdicts are signed with a harness-held key (spec v4.2 item 2). The harness
+# passes the key-file path ONLY to the Stop-hook process (stop-hook-log.py sets
+# it for stopcheck), never to Qwen, so a finalize run from the model shell writes
+# unsigned entries and a hand-written file is rejected. No key -> no cache reads.
+VERDICT_KEY_ENV = "SHERLOCK_VERDICT_KEY_FILE"
+MAX_KEY_BYTES = 4096
+
+
+def _verdict_hmac_key():
+    path = os.environ.get(VERDICT_KEY_ENV)
+    if not path:
+        return None
+    try:
+        with open(path, "rb") as fh:
+            data = fh.read(MAX_KEY_BYTES + 1)
+    except OSError:
+        return None
+    return data if 16 <= len(data) <= MAX_KEY_BYTES else None
+
+
+def _signature(key, entry):
+    body = {k: v for k, v in entry.items() if k != "sig"}
+    msg = json.dumps(body, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
+    return hmac.new(key, msg, hashlib.sha256).hexdigest()
 
 
 def cache_dir(workspace):
@@ -180,7 +208,13 @@ def cache_read(workspace, key):
             value = json.load(fh)
     except (OSError, ValueError):
         return None
-    return value if isinstance(value, dict) and value.get("key") == key else None
+    if not isinstance(value, dict) or value.get("key") != key:
+        return None
+    secret = _verdict_hmac_key()
+    sig = value.get("sig")
+    if secret is None or not isinstance(sig, str) or not hmac.compare_digest(sig, _signature(secret, value)):
+        return None  # unsigned (model shell) or forged: treated as a miss
+    return value
 
 
 def cache_write(workspace, key, entry):
@@ -188,6 +222,10 @@ def cache_write(workspace, key, entry):
     try:
         os.makedirs(d, exist_ok=True)
         entry = dict(entry, key=key, written_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()))
+        entry.pop("sig", None)
+        secret = _verdict_hmac_key()
+        if secret is not None:
+            entry["sig"] = _signature(secret, entry)
         tmp = os.path.join(d, ".%s.%d.tmp" % (key, os.getpid()))
         with open(tmp, "w", encoding="utf-8") as fh:
             json.dump(entry, fh, ensure_ascii=False, sort_keys=True)

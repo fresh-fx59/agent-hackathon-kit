@@ -171,14 +171,60 @@ def _compose_bytes(work):
         os.remove(temporary)
 
 
+def gate_inputs(package, work, corpus, ledger=None):
+    """Single source of truth for the files the gates read (spec v4.2 item 2).
+
+    Derived from the gate argv itself (command_for): every argv path that is
+    an existing file outside the package tools, plus the source worklists
+    behind the composed ledger. finalize tracks these before/after, and the
+    verdict key hashes the same set, so no gate input can be left out.
+    """
+    package, work, corpus = (Path(value).resolve() for value in (package, work, corpus))
+    tools = package / "tools"
+    report = work / "report.md"
+    placeholder = ledger or (work / "worklist.tsv")
+    files = {}
+    for gate in GATES:
+        for arg in command_for(gate, tools, report, corpus, placeholder, work):
+            path = Path(arg)
+            if not path.is_absolute() or path == Path(sys.executable):
+                continue
+            path = path.resolve()
+            if path == Path(placeholder).resolve() and ledger is not None:
+                continue  # the composed copy; its sources are listed below
+            if path == corpus or tools in path.parents:
+                continue  # corpus -> data_sha256; package -> package hash
+            files[path.relative_to(work.parent).as_posix() if work.parent in path.parents else str(path)] = path
+    for item in _ledger_items(work):
+        path = Path(item["path"]).resolve()
+        files[path.relative_to(work.parent).as_posix() if work.parent in path.parents else str(path)] = path
+    return dict(sorted(files.items()))
+
+
+def _ledger_items(work):
+    stop = _stopcheck()
+    marker, _path, _why = stop.load_marker(str(work.parent))
+    if marker:
+        if stop.real(marker.get("out") or "") != str(work):
+            raise ValueError("active marker selects another work directory")
+        return stop.manifest_worklists(marker, str(work))
+    ledger = work / "worklist.tsv"
+    return [{"path": str(ledger), "rel": "worklist.tsv", "host": None}] if ledger.is_file() else []
+
+
+def _file_sha(path):
+    return sha256_file(path) if Path(path).is_file() else "absent"
+
+
 def verdict_key(package, work, corpus, data_sha256=None):
     """v53 item 2 cache key; the same function serves finalize and the hook."""
     package, work, corpus = (Path(value).resolve() for value in (package, work, corpus))
     report = work / "report.md"
     if data_sha256 is None:
         data_sha256 = GW.data_sha256_for(str(corpus), str(report)) or evidence_identity(corpus, work.parent)["sha256"]
-    return GW.cache_key(report.read_bytes() if report.is_file() else b"", _compose_bytes(work),
-                        data_sha256, tree_sha256(package))
+    rows = [[name, _file_sha(path)] for name, path in gate_inputs(package, work, corpus).items()]
+    rows.append(["<composed-ledger>", hashlib.sha256(_compose_bytes(work)).hexdigest()])
+    return GW.cache_key(rows, data_sha256, tree_sha256(package))
 
 
 def gate_reason(gate, detail):
@@ -200,7 +246,15 @@ def run(package, work, corpus, deadline_seconds=DEFAULT_DEADLINE_SECONDS, requir
     attempt = validation / attempt_id
     attempt.mkdir()  # exclusive: evidence from a failed attempt is never overwritten
     report = work / "report.md"
+    # Receipt names stay v52-compatible (the harness reads report/worklist/rules);
+    # every other gate input from gate_inputs() is tracked under its relative path.
     tracked = {"report": report, "worklist": work / "worklist.tsv", "rules": work / "rules.tsv"}
+    try:
+        known = {p.resolve() for p in tracked.values()}
+        tracked.update({name: path for name, path in gate_inputs(package, work, corpus).items()
+                        if path not in known})
+    except Exception as error:  # noqa: BLE001 - the key call below fails the same way -> no cache
+        tracked["<gate-inputs-error>"] = work / ("." + type(error).__name__)
     base = work.parent
     metadata = {
         "schema": 1,

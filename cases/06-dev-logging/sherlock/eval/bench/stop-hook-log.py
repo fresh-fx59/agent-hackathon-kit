@@ -94,6 +94,25 @@ def parse_decision(stdout):
     return None, None, False
 
 
+VERDICT_KEY_NAME = "verdict-hmac.key"
+
+
+def hook_env():
+    """Give ONLY the Stop-hook child the verdict-signing key (v53 spec v4.2 item 2).
+
+    The key lives next to the hook log in the harness trace dir (0700, file 0400),
+    outside the Qwen workspace; Qwen and the model shell never get the variable.
+    Residual: a same-uid process that finds the file can still read it.
+    """
+    env = dict(os.environ)
+    log = os.environ.get("SHERLOCK_STOP_HOOK_LOG")
+    if log:
+        key = os.path.join(os.path.dirname(log), VERDICT_KEY_NAME)
+        if os.path.isfile(key):
+            env["SHERLOCK_VERDICT_KEY_FILE"] = key
+    return env
+
+
 def main(argv):
     if not argv:
         sys.stderr.write("stop-hook-log: no hook command given\n")
@@ -101,7 +120,8 @@ def main(argv):
     data = sys.stdin.buffer.read()
     started = datetime.datetime.now(datetime.timezone.utc)
     try:
-        proc = subprocess.run(argv, input=data, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        proc = subprocess.run(argv, input=data, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                              env=hook_env())
         rc, out, err, spawn_error = proc.returncode, proc.stdout, proc.stderr, None
     except OSError as exc:
         rc, out, err, spawn_error = 127, b"", str(exc).encode(), str(exc)

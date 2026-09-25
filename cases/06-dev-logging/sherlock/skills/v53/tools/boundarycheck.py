@@ -60,6 +60,8 @@ def index_write_denied(event, workspace):
         return None
     if tool == "run_shell_command":
         cmd = inp.get("command")
+        if isinstance(cmd, str) and ("verdict-hmac" in cmd or "SHERLOCK_VERDICT_KEY" in cmd):
+            return INDEX_DENY
         if not isinstance(cmd, str) or "buildindex.py" in cmd:
             return None
         names = [re.escape(d) for d in dirs] + [r"(?:\./)?" + INDEX_DIRNAME]

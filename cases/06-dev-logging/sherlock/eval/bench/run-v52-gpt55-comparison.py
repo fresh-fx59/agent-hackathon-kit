@@ -360,6 +360,34 @@ def ensure_terminal(control, status, **extra):
         terminal(control, status, **extra)
     write_done(control)
 
+VERDICT_KEY_NAME = "verdict-hmac.key"
+
+def write_verdict_key(trace):
+    """v53: harness-held key; stop-hook-log.py passes it to stopcheck only."""
+    path = Path(trace, VERDICT_KEY_NAME)
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o400)
+    with os.fdopen(fd, "wb") as fh: fh.write(os.urandom(32))
+    return path
+
+CHECKER_FAULT_RE = re.compile(r"\bchecker_fault\b")
+
+def checker_fault(log, since=None):
+    """Spec item 5: a Stop-hook block whose reason is the terminal checker_fault
+    (K=2 timeouts on unchanged inputs) ends the run as checker_fault."""
+    log = Path(log)
+    if not log.is_file(): return None
+    for line in log.read_text(encoding="utf-8", errors="replace").splitlines():
+        try: row = json.loads(line)
+        except ValueError: continue
+        if not isinstance(row, dict) or row.get("decision") != "block": continue
+        if since is not None:
+            try:
+                if datetime.datetime.fromisoformat(row["ts"]).timestamp() < since: continue
+            except (KeyError, TypeError, ValueError): pass
+        if CHECKER_FAULT_RE.search(str(row.get("reason") or "")):
+            return {"reason": row.get("reason"), "report_sha256": row.get("report_sha256")}
+    return None
+
 def normalize_reason(reason):
     return re.sub(r"\s+", " ", re.sub(r"\d+(\.\d+)?", "N", str(reason or ""))).strip()
 
@@ -671,6 +699,7 @@ def run(args):
         create(nonce_root / (manifest["nonce"] + ".json"), canonical({"nonce": manifest["nonce"], "manifest_sha256": approved}))
         run_root = Path(manifest["prepared_root"])
         trace = control / "trace"; trace.mkdir(mode=0o700)
+        write_verdict_key(trace)
         if PACKAGE in INDEXED_PACKAGES:
             build_index(run_root, control)
         key_file = Path(os.environ["SHERLOCK_API_KEY_FILE"])
@@ -729,6 +758,10 @@ def run(args):
                         quota = quota_watch.poll()
                         if quota is not None:
                             qwen.terminate(); raise quota
+                        fault = checker_fault(trace / "stop-hook.jsonl", since=run_started)
+                        if fault is not None:
+                            qwen.terminate()
+                            raise TerminalFailure("checker_fault", "Stop hook reported checker_fault", fault)
                         loop = stop_hook_loop(trace / "stop-hook.jsonl", since=run_started)
                         if loop is not None:
                             qwen.terminate()

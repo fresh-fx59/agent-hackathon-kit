@@ -219,5 +219,49 @@ class WrapperObservabilityTest(Base):
             del os.environ["SHERLOCK_STOP_HOOK_TIMEOUT_S"]
 
 
+
+class CheckerFaultTerminalTest(LoopDetectorTest):
+    """Spec item 5: checker_fault is its own terminal, not stop_hook_loop."""
+    FAULT = ("Sherlock: checker_fault — citecheck timed out after 50 s (no heartbeat) — not a "
+             "citation error; do not edit the report; 2 consecutive timeouts on unchanged inputs.")
+
+    def test_one_checker_fault_block_is_terminal(self):
+        log = self.write([self.row(reason=self.FAULT)])
+        self.assertIsNotNone(R.checker_fault(log))
+        self.assertIsNone(R.stop_hook_loop(log))  # distinct: one row, no loop
+
+    def test_timeouts_and_allows_are_not_checker_fault(self):
+        log = self.write([self.row(), self.row(reason=self.FAULT, decision="allow")])
+        self.assertIsNone(R.checker_fault(log))
+        old = dict(self.row(reason=self.FAULT), ts=ts(-3600))
+        self.assertIsNone(R.checker_fault(self.write([old]), since=time.time() - 60))
+
+    def test_launcher_checks_fault_before_loop(self):
+        src = (HERE / "run-v52-gpt55-comparison.py").read_text(encoding="utf-8")
+        a = src.index('raise TerminalFailure("checker_fault"')
+        b = src.index('raise TerminalFailure("stop_hook_loop"')
+        self.assertLess(a, b)
+
+
+class VerdictKeyTest(WrapperObservabilityTest):
+    def test_key_file_is_harness_private_and_passed_only_to_hook(self):
+        trace = self.d / "trace"; trace.mkdir(mode=0o700)
+        key = R.write_verdict_key(trace)
+        self.assertEqual(key.stat().st_mode & 0o777, 0o400)
+        self.assertEqual(len(key.read_bytes()), 32)
+        src = "import json, os; print(json.dumps({'decision': 'allow', 'k': os.environ.get('SHERLOCK_VERDICT_KEY_FILE')}))\n"
+        env = {"SHERLOCK_STOP_HOOK_LOG": str(trace / "stop-hook.jsonl")}
+        ws = self.d / "ws"; (ws / "work").mkdir(parents=True); (ws / "work/report.md").write_text("r")
+        data = json.dumps({"hook_event_name": "Stop", "cwd": str(ws), "last_assistant_message": "m"}).encode()
+        hook = self.d / "hook.py"; hook.write_text(src)
+        full = dict(os.environ, **env); full.pop("SHERLOCK_VERDICT_KEY_FILE", None)
+        p = subprocess.run([sys.executable, str(WRAPPER), sys.executable, str(hook)], input=data,
+                           capture_output=True, cwd=ws, env=full)
+        self.assertEqual(json.loads(p.stdout)["k"], str(key))
+        launcher = (HERE / "run-v52-gpt55-comparison.py").read_text(encoding="utf-8")
+        qenv = launcher[launcher.index("qenv = {"):launcher.index("fullenv = {")]
+        self.assertNotIn("VERDICT", qenv)  # Qwen / model shell never get the key path
+
+
 if __name__ == "__main__":
     unittest.main()
