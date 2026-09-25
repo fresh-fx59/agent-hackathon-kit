@@ -369,7 +369,13 @@ def main(argv=None):
                         help="citecheck must use a fresh load-time index (the Stop hook sets this)")
     parser.add_argument("--watch-multiplier", type=float, default=1.0,
                         help="scale heartbeat/CPU watchdog limits (CHECKER-FAULT retry uses 2)")
+    parser.add_argument("--strict-index", action="store_true",
+                        help="gate mode: index freshness also re-hashes every corpus file "
+                             "(defeats an mtime-preserving edit); inherited by citecheck")
     args = parser.parse_args(argv)
+    if args.strict_index:
+        import ccindex
+        os.environ[ccindex.STRICT_ENV] = "1"
     return run(args.package, args.work, args.corpus, args.deadline_seconds, args.require_index,
                args.watch_multiplier)
 

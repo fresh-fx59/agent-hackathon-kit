@@ -42,7 +42,7 @@ class ConstantsTest(unittest.TestCase):
         self.assertEqual(R.STOP_HOOK_TIMEOUT_S, 50)  # spec 2026-09-25 item 3
         self.assertEqual(R.MAX_WALL_SECONDS, 21600)
         self.assertEqual(R.STOP_HOOK_LOOP_LIMIT, 3)
-        self.assertEqual(R.PACKAGES, ("v52", "v53"))
+        self.assertEqual(R.PACKAGES, ("v52", "v53", "v54"))
 
 
 class LoopDetectorTest(Base):

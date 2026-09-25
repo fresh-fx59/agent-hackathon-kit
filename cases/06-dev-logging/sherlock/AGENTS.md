@@ -13,6 +13,8 @@ from scratch. Benchmark engineering alone is not completion.
    previously run package in place. Bind version, package hash, code revision,
    prompt/settings/input hashes into each run. Harness-only changes retain a
    distinct code revision. See the development contract for enforcement status.
+   **Any change to the skill or its tools = new version tree skills/vN+1; never
+   edit a released version in place.**
 2. **Report every experiment.** Append observations when they happen. Every
    accepted, rejected, stopped, interrupted or pre-contact-refused attempt has
    a traceable terminal record. Separate the developer run report from the

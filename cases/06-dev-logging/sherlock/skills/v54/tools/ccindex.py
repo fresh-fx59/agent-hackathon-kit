@@ -41,10 +41,11 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import heartbeat as HB  # noqa: E402
 
 SCHEMA = 2
-CHECKER_VERSION = "sherlock-v53"
+CHECKER_VERSION = "sherlock-v54"
 INDEX_DIRNAME = "index"
 INDEX_ROOT_ENV = "SHERLOCK_INDEX_ROOT"
 REQUIRE_ENV = "SHERLOCK_REQUIRE_INDEX"      # "1" -> missing/stale index is an error
+STRICT_ENV = "SHERLOCK_STRICT_INDEX"        # "1" -> freshness also re-hashes every file (gate mode)
 LIFT_CAPS_ENV = "SHERLOCK_LIFT_SCAN_CAPS"   # "1" -> lift 512 MB / 5 M-line caps (index path only)
 STOP_HOOK_ENVS = ("SHERLOCK_FINALIZE_STOP_RUNNING", "SHERLOCK_IN_STOP_HOOK")
 STALE_MESSAGE = "data index missing or stale — run `tools/buildindex.py`"
@@ -461,7 +462,7 @@ def build(corpus, index_root, mem_cap_mb=INDEX_BUILD_MEM_CAP_MB, checker=None, l
         dh.update(("%s\t%d\t%s\n" % (wl["rel"], wl["size"], wl["sha256"] or "unreadable")).encode())
     data_sha = dh.hexdigest()
     man = {"schema": SCHEMA, "checker_version": CHECKER_VERSION, "code_sha256": code_sha256(),
-           "root": root, "data_sha256": data_sha, "walk": walk_list, "files": files,
+           "built_at_root": root, "data_sha256": data_sha, "walk": walk_list, "files": files,
            "build": dict(stats, main_pass_s=round(t1 - t0, 3), whole_scans_s=round(t2 - t1, 3))}
     with open(os.path.join(tmp, "manifest.json"), "w", encoding="utf-8") as fh:
         json.dump(man, fh, ensure_ascii=False, indent=1)
@@ -507,12 +508,22 @@ def index_roots(corpus, report=None):
     return uniq
 
 
-def find_index(corpus, report=None, roots=None):
-    """-> ("fresh", dir, manifest) | ("stale", dir_or_None, why) | ("missing", None, why)."""
+def find_index(corpus, report=None, roots=None, strict=None):
+    """-> ("fresh", dir, manifest) | ("stale", dir_or_None, why) | ("missing", None, why).
+
+    An index is identified by CONTENT and corpus-relative paths, never by the
+    absolute root it was built at: a container builds for /work/corpus and the
+    host gate reads the same bytes at <run>/work/corpus. The caller's `corpus`
+    is the root that is walked. Fresh <=> same relative file set, sizes and
+    mtime_ns; strict (gate mode) also re-hashes every file against walk[].sha256.
+    A manifest that exists but does not match is reported `stale` with its
+    reason, never silently skipped into `missing`."""
+    if strict is None:
+        strict = os.environ.get(STRICT_ENV) == "1"
     stale = None
     code = None
     cur_walk = None
-    real = os.path.realpath(corpus)
+    cur_sha = {}
     for r in (roots if roots is not None else index_roots(corpus, report)):
         if not os.path.isdir(r):
             continue
@@ -527,8 +538,6 @@ def find_index(corpus, report=None, roots=None):
             except (OSError, ValueError):
                 stale = stale or (d, "manifest unreadable")
                 continue
-            if os.path.realpath(man.get("root", "")) != real:
-                continue
             if man.get("schema") != SCHEMA or man.get("checker_version") != CHECKER_VERSION:
                 stale = (d, "schema/checker version changed")
                 continue
@@ -538,15 +547,33 @@ def find_index(corpus, report=None, roots=None):
                 stale = (d, "checker code changed")
                 continue
             if cur_walk is None:
-                cur_walk = walk_stats(man["root"])
+                cur_walk = walk_stats(corpus)
             want = [[w["rel"], w["size"], w["mtime_ns"]] for w in man.get("walk", ())]
             if want != cur_walk:
                 stale = (d, "data files changed (size/mtime_ns/set)")
+                continue
+            if strict and not _content_matches(corpus, man, cur_sha):
+                stale = (d, "data content changed (sha256 differs, size/mtime equal)")
                 continue
             return "fresh", d, man
     if stale:
         return "stale", stale[0], stale[1]
     return "missing", None, "no index for this corpus"
+
+
+def _content_matches(corpus, man, cache):
+    for w in man.get("walk", ()):
+        if w.get("sha256") is None:
+            continue
+        rel = w["rel"]
+        if rel not in cache:
+            try:
+                cache[rel] = sha256_file(os.path.join(corpus, *rel.split("/")))
+            except OSError:
+                cache[rel] = None
+        if cache[rel] != w["sha256"]:
+            return False
+    return True
 
 
 # ---------------------------------------------------------------- query
@@ -563,11 +590,14 @@ _first = None
 _whole = None
 
 
-def attach(checker_module, idx_dir, man, lift_caps=False):
-    """Install the index-backed readers into the checker module."""
+def attach(checker_module, idx_dir, man, lift_caps=False, corpus=None):
+    """Install the index-backed readers into the checker module.
+
+    `corpus` is the LIVE corpus root the checker reads (the manifest stores only
+    corpus-relative paths; its built_at_root is informational)."""
     global C, IDX, MAN, ROOT, REALROOT, _first, _whole
     C, IDX, MAN = checker_module, idx_dir, man
-    ROOT = man["root"]
+    ROOT = corpus or man.get("built_at_root") or man.get("root")
     REALROOT = os.path.realpath(ROOT)
     _meta.clear()
     _path.clear()
@@ -968,6 +998,7 @@ def attach_for(checker_module, corpus, report=None, require=None):
         require = os.environ.get(REQUIRE_ENV) == "1"
     status, d, info = find_index(corpus, report)
     if status == "fresh":
-        attach(checker_module, d, info, lift_caps=os.environ.get(LIFT_CAPS_ENV) == "1")
+        attach(checker_module, d, info, lift_caps=os.environ.get(LIFT_CAPS_ENV) == "1",
+               corpus=os.path.abspath(corpus))
         return status, d
     return status, info
