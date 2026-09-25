@@ -219,7 +219,7 @@ class TerminalClassificationTest(unittest.TestCase):
                 "worklist": {"sha256": RUNNER.file_digest(worklist)},
                 "rules": {"sha256": RUNNER.file_digest(rules)},
             },
-            "gates": gates,
+            "gates": gates, "finished_at": "2026-09-07T00:00:01Z",
         }
         (receipt / "metadata.json").write_text(json.dumps(payload), encoding="utf-8")
 
