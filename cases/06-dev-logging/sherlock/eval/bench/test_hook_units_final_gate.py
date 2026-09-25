@@ -139,6 +139,11 @@ class HookLogTerminalTest(unittest.TestCase):
         self.log.unlink()
         self.assertEqual(R.hook_log_terminal(self.log, self.t - 200, self.t - 10)[0], "stop_hook_unlogged")
 
+    def test_previous_session_row_just_before_final_start_is_not_final(self):
+        # v53 small test: S2 hook row ts 06:29:53.159, S3 started 06:29:53.854, S3 wrote no row.
+        self.write({"ts": iso(self.t - 0.695), "decision": "allow"})
+        self.assertEqual(R.hook_log_terminal(self.log, self.t - 100, self.t)[0], "stop_hook_unlogged")
+
     def test_continuation_ignores_start_rows(self):
         work = self.d / "work"; work.mkdir()
         (work / "handoff.txt").write_text("1) /clear\n2) /sherlock ПРОДОЛЖИ X\n")

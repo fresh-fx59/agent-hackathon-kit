@@ -510,7 +510,9 @@ def hook_log_terminal(log, run_started, final_session_started):
             return "stop_hook_killed", {"invocation": r.get("invocation"), "ts": r.get("ts"),
                                         "event": r.get("event"), "signal": r.get("signal"),
                                         "elapsed_ms": r.get("elapsed_ms")}
-    if not any(r.get("event", "end") == "end" and (_row_ts(r) or 0) >= final_session_started - 1 for r in rows):
+    # No slack here: the previous session's hook row starts < 1 s before this session
+    # (v53 small test: S2 row 06:29:53.159, S3 start 06:29:53.854).
+    if not any(r.get("event", "end") == "end" and (_row_ts(r) or 0) >= final_session_started for r in rows):
         return "stop_hook_unlogged", {"final_session_started": final_session_started}
     return None
 
