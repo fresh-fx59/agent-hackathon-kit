@@ -27,7 +27,7 @@ class SkillStopHookTests(unittest.TestCase):
 
         self.assertIn("hooks", row)
         self.assertEqual(row["hooks"].get("Stop"), [{"hooks": [{
-            "type": "command", "command": STOP_COMMAND}]}])
+            "type": "command", "command": STOP_COMMAND, "timeout": 600}]}])
 
     def test_no_skill_directory_emits_no_stop_hook(self):
         row = emit_run()

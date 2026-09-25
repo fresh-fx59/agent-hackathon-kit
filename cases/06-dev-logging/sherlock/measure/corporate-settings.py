@@ -41,6 +41,7 @@ import os
 import sys
 
 # ── the target's own constants, read from qwen-code 0.22.0 ──────────────────
+STOP_HOOK_TIMEOUT_S = 600      # Qwen Stop-hook timeout, seconds (spec 2026-09-24 item 3)
 SUMMARY_RESERVE = 20000        # COMPACT_MAX_OUTPUT_TOKENS
 AUTOCOMPACT_BUFFER = 13000
 HARD_BUFFER = 3000
@@ -258,6 +259,9 @@ def run_settings(window, max_tokens, session_token_limit=None, timeout_ms=None,
         row["hooks"] = {"Stop": [{"hooks": [{
             "type": "command",
             "command": 'python3 "$QWEN_SKILL_ROOT/tools/stopcheck.py"',
+            # Explicit, in seconds (Qwen reads < 1000 as seconds; default 60
+            # fails OPEN on expiry). Spec 2026-09-24 item 3: 600 s.
+            "timeout": STOP_HOOK_TIMEOUT_S,
         }]}]}
         if boundary_check:
             row["hooks"]["PreToolUse"] = [{"matcher": "*", "hooks": [{

@@ -7,6 +7,8 @@ localhost proxy file-mode, and gives Qwen a dummy token.  The proxy is the only
 process permitted to receive SHERLOCK_API_KEY.
 """
 import argparse
+import atexit
+import re
 import signal
 import datetime
 import hashlib
@@ -48,6 +50,19 @@ STOP_HOOK_COMMAND = ('python3 "$SHERLOCK_STOP_HOOK_WRAPPER" '
                      'python3 "$QWEN_SKILL_ROOT/tools/stopcheck.py"')
 PREFLIGHT_DEAD_BASE = "http://127.0.0.1:9/v1"
 PREFLIGHT_TIMEOUT_S = 90
+# Selectable immutable skill packages. v52 stays selectable unchanged; v53 adds
+# the load-time data index (built here, never inside the Stop hook).
+PACKAGES = ("v52", "v53")
+PACKAGE = "v52"
+INDEXED_PACKAGES = ("v53",)
+# Spec 2026-09-24 item 3: Qwen Stop-hook timeout set explicitly, in seconds
+# (Qwen reads values < 1000 as seconds). 280 s worst measured at 1 GB x ~2.
+STOP_HOOK_TIMEOUT_S = 600
+# Spec item 8: whole-run wall clock (r5 stage 2 alone took 74 min).
+MAX_WALL_SECONDS = 21600
+# Spec item 7: 3 identical Stop-hook blocks -> terminal stop_hook_loop.
+STOP_HOOK_LOOP_LIMIT = 3
+PERMISSION_DENIED_RE = re.compile(r"permission was declined[^\n\"]{0,200}", re.I)
 
 class Refusal(RuntimeError): pass
 
@@ -108,8 +123,8 @@ def tree_inventory(root):
 
 def prepared_inventory(root):
     root = Path(root).resolve()
-    required = [root / "prompt.txt", root / ".qwen/settings.json", root / "skills/v52", root / "corpus"]
-    if not all(p.exists() for p in required): raise Refusal("prepared root lacks v52 prompt/settings/skills")
+    required = [root / "prompt.txt", root / ".qwen/settings.json", root / skill_dir(), root / "corpus"]
+    if not all(p.exists() for p in required): raise Refusal("prepared root lacks %s prompt/settings/skills" % PACKAGE)
     settings = read_json(required[1])
     model = settings.get("model", {})
     cfg = model.get("generationConfig", {})
@@ -127,9 +142,11 @@ def prepared_inventory(root):
     hook = settings.get("hooks", {}).get("Stop", [{}])[0].get("hooks", [{}])[0].get("command", "")
     if hook != STOP_HOOK_COMMAND:
         raise Refusal("settings Stop hook is not the logged v52 hook wrapper")
+    if stop_hook_timeout(settings) != STOP_HOOK_TIMEOUT_S:
+        raise Refusal("settings Stop hook timeout must be %d s" % STOP_HOOK_TIMEOUT_S)
     # Bind every pre-existing prepared artifact except mutable control/log dirs.
     rows = []
-    for name in ("prompt.txt", ".qwen/settings.json", "skills/v52"):
+    for name in ("prompt.txt", ".qwen/settings.json", skill_dir()):
         p = root / name
         if p.is_file(): rows.append({"path": name, "kind": "file", "sha256": file_digest(p)})
         else: rows.extend({"path": name + "/" + row["path"], **{k:v for k,v in row.items() if k != "path"}}
@@ -145,22 +162,31 @@ def prepared_inventory(root):
                 for row in tree_inventory(target))
     return root, rows
 
+def use_package(name):
+    global PACKAGE
+    if name not in PACKAGES:
+        raise Refusal("package %r is not selectable; allowed: %s" % (name, ", ".join(PACKAGES)))
+    PACKAGE = name
+
+def skill_dir():
+    return "skills/" + PACKAGE
+
 def check_skill_root(root):
     parent = Path(root) / SKILLS_ROOT
     link = parent / SKILL_NAME
     if not parent.is_dir() or parent.is_symlink() or sorted(os.listdir(parent)) != [SKILL_NAME]:
         raise Refusal("%s must hold exactly one %s entry" % (SKILLS_ROOT, SKILL_NAME))
-    if not link.is_symlink() or link.resolve() != (Path(root) / "skills/v52").resolve():
-        raise Refusal("%s/%s must be a symlink to skills/v52" % (SKILLS_ROOT, SKILL_NAME))
+    if not link.is_symlink() or link.resolve() != (Path(root) / skill_dir()).resolve():
+        raise Refusal("%s/%s must be a symlink to %s" % (SKILLS_ROOT, SKILL_NAME, skill_dir()))
 
 def stage_harness_layout(root):
-    """Harness-side staging; never writes inside skills/v52."""
+    """Harness-side staging; never writes inside the skill package."""
     root = Path(root).resolve()
     parent = root / SKILLS_ROOT
     parent.mkdir(mode=0o755, exist_ok=True)
     link = parent / SKILL_NAME
     if not link.is_symlink():
-        link.symlink_to(Path("..") / "skills" / "v52", target_is_directory=True)
+        link.symlink_to(Path("..") / "skills" / PACKAGE, target_is_directory=True)
     path = root / ".qwen/settings.json"
     settings = read_json(path)
     settings.setdefault("skills", {})["directories"] = [str(parent)]
@@ -171,9 +197,14 @@ def stage_harness_layout(root):
     if entry.get("command") not in (STOP_HOOK_COMMAND, 'python3 "$QWEN_SKILL_ROOT/tools/stopcheck.py"'):
         raise Refusal("settings Stop hook is not the documented v52 hook")
     entry["command"] = STOP_HOOK_COMMAND
+    entry["timeout"] = STOP_HOOK_TIMEOUT_S
     tmp = path.with_name(path.name + ".staging")
     tmp.write_text(json.dumps(settings, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
     os.replace(tmp, path)
+
+def stop_hook_timeout(settings):
+    try: return settings["hooks"]["Stop"][0]["hooks"][0].get("timeout")
+    except (KeyError, IndexError, TypeError, AttributeError): return None
 
 def preflight_skill_list(qwen_cmd, run_root, control):
     """Prove Qwen lists the skill before any model contact (dead upstream)."""
@@ -181,7 +212,7 @@ def preflight_skill_list(qwen_cmd, run_root, control):
     home = Path(tempfile.mkdtemp(prefix="sherlock-preflight-"))
     env = {k: v for k, v in os.environ.items() if k in ("PATH", "LANG", "LC_ALL", "TMPDIR", "TZ")}
     env.update({"HOME": str(home), "OPENAI_BASE_URL": PREFLIGHT_DEAD_BASE,
-                "OPENAI_API_KEY": "preflight-dummy", "QWEN_SKILL_ROOT": str(run_root / "skills/v52"),
+                "OPENAI_API_KEY": "preflight-dummy", "QWEN_SKILL_ROOT": str(run_root / skill_dir()),
                 "SHERLOCK_STOP_HOOK_WRAPPER": str(STOP_HOOK_WRAPPER),
                 "SHERLOCK_STOP_HOOK_LOG": str(home / "stop-hook.jsonl"),
                 "NO_PROXY": "127.0.0.1,localhost", "PYTHONDONTWRITEBYTECODE": "1"})
@@ -268,6 +299,12 @@ def finalizer_diagnostics(work, control):
     return {"missing_step": missing, "skill_invocations": skill_calls,
             "work_contents": listing, "stop_hook_decisions": decisions}
 
+def package_sha(inventory):
+    """sha256 over the canonical inventory rows of the selected package tree."""
+    prefix = skill_dir() + "/"
+    return digest(canonical(sorted((r for r in inventory if r["path"].startswith(prefix)),
+                                   key=lambda r: r["path"])))
+
 def manifest_sha(manifest):
     unsigned = dict(manifest)
     unsigned.pop("manifest_sha256", None)
@@ -306,6 +343,104 @@ def terminal(control, status, **extra):
     row = {"schema": SCHEMA, "finished_at": now(), "status": status, **extra}
     try: create(Path(control, "run-terminal.json"), canonical(row))
     except FileExistsError: pass
+    except OSError: return
+
+def write_done(control):
+    """run.done always follows run-terminal.json (spec item 8); idempotent."""
+    try:
+        term = Path(control, "run-terminal.json")
+        status = read_json(term).get("status") if term.is_file() else None
+        create(Path(control, "run.done"), canonical({"finished_at": now(), "status": status}))
+    except (FileExistsError, OSError, ValueError): pass
+
+def ensure_terminal(control, status, **extra):
+    """atexit / signal path: never leave a run without terminal + run.done."""
+    if control is None or not Path(control).is_dir(): return
+    if not Path(control, "run-terminal.json").exists():
+        terminal(control, status, **extra)
+    write_done(control)
+
+VERDICT_KEY_NAME = "verdict-hmac.key"
+
+def write_verdict_key(trace):
+    """v53: harness-held key; stop-hook-log.py passes it to stopcheck only."""
+    path = Path(trace, VERDICT_KEY_NAME)
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o400)
+    with os.fdopen(fd, "wb") as fh: fh.write(os.urandom(32))
+    return path
+
+CHECKER_FAULT_RE = re.compile(r"\bchecker_fault\b")
+
+def checker_fault(log, since=None):
+    """Spec item 5: a Stop-hook block whose reason is the terminal checker_fault
+    (K=2 timeouts on unchanged inputs) ends the run as checker_fault."""
+    log = Path(log)
+    if not log.is_file(): return None
+    for line in log.read_text(encoding="utf-8", errors="replace").splitlines():
+        try: row = json.loads(line)
+        except ValueError: continue
+        if not isinstance(row, dict) or row.get("decision") != "block": continue
+        if since is not None:
+            try:
+                if datetime.datetime.fromisoformat(row["ts"]).timestamp() < since: continue
+            except (KeyError, TypeError, ValueError): pass
+        if CHECKER_FAULT_RE.search(str(row.get("reason") or "")):
+            return {"reason": row.get("reason"), "report_sha256": row.get("report_sha256")}
+    return None
+
+def normalize_reason(reason):
+    return re.sub(r"\s+", " ", re.sub(r"\d+(\.\d+)?", "N", str(reason or ""))).strip()
+
+def stop_hook_loop(log, since=None, limit=STOP_HOOK_LOOP_LIMIT):
+    """Spec item 7: -> the repeated key when `limit` block rows share
+    (normalized reason, report sha256, message sha256), else None."""
+    log = Path(log)
+    if not log.is_file(): return None
+    seen = {}
+    for line in log.read_text(encoding="utf-8", errors="replace").splitlines():
+        try: row = json.loads(line)
+        except ValueError: continue
+        if not isinstance(row, dict) or row.get("decision") != "block": continue
+        if since is not None:
+            try:
+                ts = datetime.datetime.fromisoformat(row["ts"]).timestamp()
+                if ts < since: continue
+            except (KeyError, TypeError, ValueError): pass
+        key = (normalize_reason(row.get("reason")), row.get("report_sha256"), row.get("msg_sha256"))
+        seen[key] = seen.get(key, 0) + 1
+        if seen[key] >= limit: return {"reason": key[0], "report_sha256": key[1],
+                                       "msg_sha256": key[2], "count": seen[key]}
+    return None
+
+def permission_denials(path, session, trace):
+    """Record Qwen non-interactive permission refusals as run-log events."""
+    try: text = Path(path).read_text(encoding="utf-8", errors="replace")
+    except OSError: return 0
+    hits = [m.group(0) for m in PERMISSION_DENIED_RE.finditer(text)]
+    if hits:
+        with open(Path(trace, "permission-denied.jsonl"), "a", encoding="utf-8") as fh:
+            for i, h in enumerate(hits):
+                fh.write(json.dumps({"event": "permission_denied", "session": session, "n": i,
+                                     "source": Path(path).name, "recorded_at": now(),
+                                     "excerpt": h}, ensure_ascii=False, sort_keys=True) + "\n")
+    return len(hits)
+
+def build_index(run_root, control, py=None):
+    """Build the v53 data index at corpus load, outside the Stop hook."""
+    tool = Path(run_root, skill_dir(), "tools", "buildindex.py")
+    log = Path(control, "buildindex.log")
+    env = {k: v for k, v in os.environ.items() if k in ("PATH", "LANG", "LC_ALL", "TMPDIR", "TZ")}
+    env.update({"PYTHONDONTWRITEBYTECODE": "1", "SHERLOCK_INDEX_ROOT": str(Path(run_root, "index"))})
+    started = time.time()
+    with open(log, "wb") as fh:
+        rc = subprocess.call([py or sys.executable, str(tool), "--corpus", str(Path(run_root, "corpus")),
+                              "--index-root", str(Path(run_root, "index"))],
+                             cwd=run_root, stdout=fh, stderr=subprocess.STDOUT, env=env)
+    row = {"rc": rc, "elapsed_s": round(time.time() - started, 3), "log": log.name}
+    create(Path(control, "buildindex.json"), canonical(row))
+    if rc != 0:
+        raise TerminalFailure("index_build_failed", "buildindex.py exited %d" % rc, row)
+    return row
 
 def validate_qwen_output(path):
     """Require a clean Qwen protocol result, not merely a zero child exit."""
@@ -506,6 +641,7 @@ def use_model(model):
 
 def prepare(args):
     use_model(getattr(args, "model", None) or "gpt-5.5")
+    use_package(getattr(args, "package", None) or "v52")
     stage_harness_layout(args.prepared_root)
     prepared, inventory = prepared_inventory(args.prepared_root)
     settings = read_json(prepared / ".qwen/settings.json")
@@ -514,6 +650,8 @@ def prepare(args):
     mkdir_new(control)
     manifest = {"schema": SCHEMA, "created_at": now(), "prepared_root": str(prepared),
                 "prepared_inventory": inventory, "harness_files": [{"path": str(Path(x).resolve()), "sha256": file_digest(x)} for x in [__file__, args.proxy, str(Path(args.proxy).with_name("lane_guard.py")), str(STOP_HOOK_WRAPPER), args.qwen]], "proxy": str(Path(args.proxy).resolve()), "qwen": str(Path(args.qwen).resolve()), "model": MODEL, "expected_returned_identity": MODEL,
+                "package": PACKAGE, "package_sha256": package_sha(inventory),
+                "stop_hook_timeout_s": STOP_HOOK_TIMEOUT_S,
                 "model_under_test": dict(ALLOWED_MODELS[MODEL], model=MODEL),
                 "qwen_version": QWEN_VERSION, "watchdog_seconds": WATCHDOG_SECONDS,
                 "transport": TRANSPORT,
@@ -521,7 +659,7 @@ def prepare(args):
                 "upstream_base": args.upstream_base.rstrip("/"), "authorization": args.authorization,
                 "authorization_sha256": digest(args.authorization.encode("utf-8")),
                 "nonce": secrets.token_hex(32), "comparison": {"r3_qwen_skill_root": "unset_in_direct_launcher",
-                "gpt55_qwen_skill_root": "set_by_launcher_to_prepared_skills_v52"}}
+                "gpt55_qwen_skill_root": "set_by_launcher_to_prepared_skills_" + PACKAGE}}
     # Hash the canonical manifest payload; the approval binds this exact value.
     manifest["manifest_sha256"] = manifest_sha(manifest)
     create(control / "manifest.json", canonical(manifest))
@@ -532,13 +670,18 @@ def run(args):
     control = Path(args.control_root)
     proxy = None
     qwen = None
-    def interrupted(signum, frame): raise Refusal("signal %s" % signum)
-    signal.signal(signal.SIGTERM, interrupted)
-    signal.signal(signal.SIGINT, interrupted)
+    def interrupted(signum, frame):
+        raise TerminalFailure("interrupted", "signal %s" % signum, {"signal": signum})
+    for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
+        signal.signal(sig, interrupted)
+    atexit.register(ensure_terminal, control, "launcher_exited_without_terminal")
+    run_started = time.time()
+    max_wall = getattr(args, "max_wall_seconds", None) or MAX_WALL_SECONDS
     qwen_rc = None
     try:
         manifest, approved = load_manifest(control)
         use_model(manifest.get("model"))
+        use_package(manifest.get("package", "v52"))
         if args.approval != approved: raise Refusal("approval must equal manifest sha256")
         validate_manifest(control, manifest)
         if str(Path(args.proxy).resolve()) != manifest["proxy"] or str(Path(args.qwen).resolve()) != manifest["qwen"]: raise Refusal("executable path changed")
@@ -556,6 +699,9 @@ def run(args):
         create(nonce_root / (manifest["nonce"] + ".json"), canonical({"nonce": manifest["nonce"], "manifest_sha256": approved}))
         run_root = Path(manifest["prepared_root"])
         trace = control / "trace"; trace.mkdir(mode=0o700)
+        write_verdict_key(trace)
+        if PACKAGE in INDEXED_PACKAGES:
+            build_index(run_root, control)
         key_file = Path(os.environ["SHERLOCK_API_KEY_FILE"])
         route = {"schema": 1, "base": manifest["upstream_base"], "model": MODEL,
                  "expected_returned_identity": MODEL, "key_file": str(key_file), "generation": 1}
@@ -574,10 +720,13 @@ def run(args):
             except Exception: time.sleep(.1)
         else: raise Refusal("proxy did not bind localhost")
         qenv = {"HOME": str(run_root / "home"), "OPENAI_BASE_URL": "http://127.0.0.1:%d/v1" % args.listen_port,
-                "OPENAI_API_KEY": "proxy-owned-credential", "QWEN_SKILL_ROOT": str(run_root / "skills/v52"),
+                "OPENAI_API_KEY": "proxy-owned-credential", "QWEN_SKILL_ROOT": str(run_root / skill_dir()),
                 "NO_PROXY": "127.0.0.1,localhost",
                 "SHERLOCK_STOP_HOOK_WRAPPER": str(STOP_HOOK_WRAPPER),
-                "SHERLOCK_STOP_HOOK_LOG": str(trace / "stop-hook.jsonl")}
+                "SHERLOCK_STOP_HOOK_LOG": str(trace / "stop-hook.jsonl"),
+                "SHERLOCK_STOP_HOOK_TIMEOUT_S": str(STOP_HOOK_TIMEOUT_S),
+                "SHERLOCK_STOP_HOOK_DETAIL_DIR": str(trace / "stopcheck-detail"),
+                "SHERLOCK_INDEX_ROOT": str(run_root / "index")}
         fullenv = {k:v for k,v in os.environ.items() if k in ("PATH", "LANG", "LC_ALL", "TMPDIR", "TZ")}
         fullenv.update(qenv); fullenv["PYTHONDONTWRITEBYTECODE"] = "1"
         err = open(control / "qwen-stderr.log", "ab")
@@ -609,14 +758,27 @@ def run(args):
                         quota = quota_watch.poll()
                         if quota is not None:
                             qwen.terminate(); raise quota
+                        fault = checker_fault(trace / "stop-hook.jsonl", since=run_started)
+                        if fault is not None:
+                            qwen.terminate()
+                            raise TerminalFailure("checker_fault", "Stop hook reported checker_fault", fault)
+                        loop = stop_hook_loop(trace / "stop-hook.jsonl", since=run_started)
+                        if loop is not None:
+                            qwen.terminate()
+                            raise TerminalFailure("stop_hook_loop", "%d identical Stop-hook blocks" % loop["count"], loop)
+                        if time.time() - run_started > max_wall:
+                            qwen.terminate()
+                            raise TerminalFailure("wall_clock_exceeded", "run exceeded %d s" % max_wall,
+                                                  {"max_wall_seconds": max_wall})
                         time.sleep(0.5)
                 qwen_rc = qwen.returncode
+                denied = permission_denials(output_path, session, trace)
                 nxt = continuation_prompt(run_root / "work", trace / "stop-hook.jsonl", started) if qwen_rc == 0 else None
                 with open(control / "sessions.jsonl", "a", encoding="utf-8") as fh:
                     fh.write(json.dumps({"session": session, "started_at": started, "finished_at": time.time(),
                                          "qwen_exit": qwen_rc, "output": output_path.name,
                                          "prompt_sha256": digest(prompt.encode("utf-8")),
-                                         "handoff_continuation": nxt}, ensure_ascii=False, sort_keys=True) + "\n")
+                                         "handoff_continuation": nxt, "permission_denied": denied}, ensure_ascii=False, sort_keys=True) + "\n")
                 if proxy.poll() is not None: raise Refusal("proxy exited before run completion")
                 if qwen_rc != 0:
                     terminal(control, "qwen_failed", qwen_exit=qwen_rc, sessions=session,
@@ -646,6 +808,9 @@ def run(args):
                  error="%s: %s" % (type(exc).__name__, exc))
         print("launcher refusal: %s" % exc, file=sys.stderr)
         return 2
+    except BaseException as exc:
+        terminal(control, "interrupted", error="%s: %s" % (type(exc).__name__, exc))
+        raise
     finally:
         for child in (qwen, proxy):
             if child is not None:
@@ -656,6 +821,8 @@ def run(args):
                     try: os.killpg(child.pid, signal.SIGKILL)
                     except ProcessLookupError: pass
                     child.wait()
+        # run.done is written only after owned children are stopped.
+        ensure_terminal(control, "launcher_exited_without_terminal")
 
 def observe_trace(trace, strict_buffer_enabled=False):
     if (trace / "lane-abort.json").exists(): raise Refusal("proxy lane abort")
@@ -687,10 +854,10 @@ def main():
     a = sub.add_parser("prepare")
     a.add_argument("--prepared-root", required=True); a.add_argument("--control-root", required=True)
     a.add_argument("--qwen", required=True); a.add_argument("--proxy", required=True)
-    a.add_argument("--model", default="gpt-5.5", choices=sorted(ALLOWED_MODELS)); a.add_argument("--upstream-base", required=True); a.add_argument("--authorization", required=True); a.set_defaults(fn=prepare)
+    a.add_argument("--model", default="gpt-5.5", choices=sorted(ALLOWED_MODELS)); a.add_argument("--package", default="v52", choices=PACKAGES); a.add_argument("--upstream-base", required=True); a.add_argument("--authorization", required=True); a.set_defaults(fn=prepare)
     a = sub.add_parser("run")
     a.add_argument("--control-root", required=True); a.add_argument("--approval", required=True); a.add_argument("--nonce-root", required=True)
-    a.add_argument("--qwen", required=True); a.add_argument("--proxy", required=True); a.add_argument("--listen-port", type=int, default=18795); a.set_defaults(fn=run)
+    a.add_argument("--qwen", required=True); a.add_argument("--proxy", required=True); a.add_argument("--listen-port", type=int, default=18795); a.add_argument("--max-wall-seconds", type=int, default=MAX_WALL_SECONDS); a.set_defaults(fn=run)
     args = p.parse_args()
     try: result = args.fn(args)
     except Refusal as exc: print("launcher refusal: %s" % exc, file=sys.stderr); result = 2

@@ -120,6 +120,8 @@ class TargetContractProbeTest(unittest.TestCase):
         self.assertEqual(manifest["action"], "target_contract_probe_operator_monitored")
         self.assertEqual(settings["model"]["generationConfig"]["timeout"], 600000)
         self.assertEqual(settings["skills"]["directories"], ["../skill-catalogue"])
+        # Spec 2026-09-24 item 3: explicit Qwen Stop-hook timeout, seconds.
+        self.assertEqual(settings["hooks"]["Stop"][0]["hooks"][0]["timeout"], 600)
         expected_hook_command = (
             'python3 "%s" hook --observer-dir "$SHERLOCK_OBSERVER_DIR" '
             '--workspace "$PWD" --nonce "$SHERLOCK_RUN_NONCE" '
@@ -1901,6 +1903,29 @@ print(json.dumps([{'type':'result','result':'ok','is_error':False,'session_id':'
     @staticmethod
     def _sha_bytes(value):
         return hashlib.sha256(value).hexdigest()
+
+
+class LauncherStopHookTimeoutTest(unittest.TestCase):
+    """The r5-class launcher stages and exports the 600 s Stop-hook timeout."""
+    def setUp(self):
+        path = ROOT / "eval" / "bench" / "run-v52-gpt55-comparison.py"
+        spec = importlib.util.spec_from_file_location("launcher_v53_timeout", path)
+        self.L = importlib.util.module_from_spec(spec); spec.loader.exec_module(self.L)
+        self.d = Path(tempfile.mkdtemp(prefix="stop-timeout-"))
+        (self.d / ".qwen").mkdir(); (self.d / "skills" / "v53").mkdir(parents=True)
+        (self.d / ".qwen/settings.json").write_text(json.dumps({"hooks": {"Stop": [{"hooks": [{
+            "type": "command", "command": 'python3 "$QWEN_SKILL_ROOT/tools/stopcheck.py"'}]}]}}))
+    def tearDown(self):
+        shutil.rmtree(self.d)
+    def test_staged_settings_carry_600_seconds(self):
+        self.assertEqual(self.L.STOP_HOOK_TIMEOUT_S, 600)
+        self.L.use_package("v53"); self.L.stage_harness_layout(self.d)
+        settings = json.loads((self.d / ".qwen/settings.json").read_text())
+        self.assertEqual(self.L.stop_hook_timeout(settings), 600)
+        self.assertTrue(os.readlink(self.d / "skills-root/sherlock").endswith("skills/v53"))
+    def test_run_exports_timeout_env(self):
+        src = (ROOT / "eval" / "bench" / "run-v52-gpt55-comparison.py").read_text()
+        self.assertIn('"SHERLOCK_STOP_HOOK_TIMEOUT_S": str(STOP_HOOK_TIMEOUT_S)', src)
 
 
 if __name__ == "__main__":
