@@ -63,6 +63,13 @@ QWEN_HOOK_TIMEOUT_UNITS = {"0.22.0": "ms"}
 # Qwen 0.22.0 also stops waiting for a Stop hook after messageBus's 60 s default;
 # T = 50 s keeps a 10 s margin to it; stopcheck's ceiling is T - 10 = 40 s.
 STOP_HOOK_TIMEOUT_S = 50
+# Operator ruling 2026-09-25: approval mode "yolo" (no permission checks). Qwen
+# 0.22.0's auto-mode classifier rejects a model reply carrying any field besides
+# `shouldBlock` (STAGE1_SCHEMA additionalProperties:false, chunk-T6XLJRQY.js:44968)
+# -> classifier_unavailable -> non-interactive deny (T6:63138). `--approval-mode`
+# wins over settings (chunk-6QSA4JHL.js:37644-37654); yolo -> needsConfirmation
+# false (T6:43363). The launcher's own final gate still decides pass/fail.
+QWEN_APPROVAL_MODE = "yolo"
 # Spec item 8: whole-run wall clock (r5 stage 2 alone took 74 min).
 MAX_WALL_SECONDS = 21600
 # Spec item 7: 3 identical Stop-hook blocks -> terminal stop_hook_loop.
@@ -107,6 +114,15 @@ def create(path, data, mode=0o600):
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), mode)
     with os.fdopen(fd, "wb") as out:
         out.write(data); out.flush(); os.fsync(out.fileno())
+
+def replace_file(path, data, mode=0o600):
+    """Atomic overwrite for per-attempt metadata a relaunch must be able to rewrite."""
+    path = Path(path); path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + ".tmp-%d" % os.getpid())
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | getattr(os, "O_NOFOLLOW", 0), mode)
+    with os.fdopen(fd, "wb") as out:
+        out.write(data); out.flush(); os.fsync(out.fileno())
+    os.replace(tmp, path)
 
 def read_json(path):
     p = Path(path)
@@ -816,8 +832,9 @@ def run(args):
         qwen_version = subprocess.check_output(qwen_cmd + ["--version"], text=True, stderr=subprocess.STDOUT,
                                                 timeout=20).strip()
         unit = hook_timeout_unit(qwen_version)  # unknown -> qwen_version_unverified
-        create(control / "qwen-runtime.json", canonical({
-            "qwen_version": qwen_version, "hook_timeout_unit": unit,
+        # Overwritten, not O_EXCL: a refused launch (busy port, ...) must not block a relaunch.
+        replace_file(control / "qwen-runtime.json", canonical({
+            "qwen_version": qwen_version, "hook_timeout_unit": unit, "approval_mode": QWEN_APPROVAL_MODE,
             "stop_hook_timeout_s": STOP_HOOK_TIMEOUT_S,
             "stop_hook_timeout_value": hook_timeout_value(qwen_version, STOP_HOOK_TIMEOUT_S)}))
         if qwen_version != QWEN_VERSION: raise Refusal("Qwen version is %r, need %s" % (qwen_version, QWEN_VERSION))
@@ -872,7 +889,8 @@ def run(args):
                 started = time.time()
                 with open(output_path, "wb") as output:
                     qwen = subprocess.Popen(qwen_cmd + ["--auth-type", "openai", "--model", MODEL,
-                                              "--max-session-turns", "-1", "--max-tool-calls", "-1", "--openai-logging",
+                                              "--max-session-turns", "-1", "--max-tool-calls", "-1",
+                                              "--approval-mode", QWEN_APPROVAL_MODE, "--openai-logging",
                                               "--openai-logging-dir", str(trace / "openai-logs"), "--output-format", "json",
                                               # spec 2026-09-25 item 5: keep Qwen debug logs
                                               # (home/.qwen/debug) to name permission branches.
@@ -930,6 +948,7 @@ def run(args):
                 raise TerminalFailure(status, "launcher final decision: %s" % status, details)
         finally: err.close()
         terminal(control, "completed", qwen_exit=qwen_rc, qwen_version=qwen_version, hook_timeout_unit=unit,
+                 approval_mode=QWEN_APPROVAL_MODE,
                  final_gate=details["final_gate"], advisory_receipt_error=details["advisory_receipt_error"],
                  manifest_sha256=approved, nonce=manifest["nonce"])
         return qwen_rc
