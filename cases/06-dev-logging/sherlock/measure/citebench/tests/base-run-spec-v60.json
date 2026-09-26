@@ -1,0 +1,174 @@
+{
+ "admission": {
+  "paid": true
+ },
+ "image": {
+  "digest": "sha256:33347ff9f5c0b1703098bf75aae086a2ac91f18b060d857ed085e23a1f6eaa0c",
+  "qwen_version": "0.24.5"
+ },
+ "limits": {
+  "cpus": 2,
+  "disk_mb": 4096,
+  "max_completion_tokens": 20000000,
+  "max_prompt_tokens": 250000000,
+  "max_provider_calls": 1000,
+  "memory": "4g",
+  "pids": 1024,
+  "run_wall_s": 5400,
+  "tmp_mb": 1024
+ },
+ "model": {
+  "route": "neuraldeep-dsv4flash"
+ },
+ "phases": [
+  {
+   "id": "investigate",
+   "limits": {
+    "max_wall_time_s": 3600
+   },
+   "prompt": "Conduct a fresh incident investigation of the corpus at ./corpus. Work only from this corpus; do not assume anything from filenames, prior reports, benchmarks, or outside context. Use the installed skill and tools. Write a complete Russian report to ./work/report.md. Every cited fact must use the exact path relative to ./corpus plus line number; do not abbreviate filenames. Separate directly observed facts from inferences. Call a cause, protocol, service, listener/configuration, credential property, or attribution PROVEN only when the cited evidence directly establishes that exact point; otherwise label it INFERENCE and state the missing evidence. Preserve the corpus unchanged. Finish by saving the report and replying with a concise completion statement."
+  },
+  {
+   "id": "draft",
+   "limits": {
+    "max_wall_time_s": 1800
+   },
+   "prompt": "/sherlock \u041f\u0420\u041e\u0414\u041e\u041b\u0416\u0418 \u0420\u0410\u0421\u0421\u041b\u0415\u0414\u041e\u0412\u0410\u041d\u0418\u0415 \u0418\u0417 /work/work \u2014 \u0421\u0422\u0423\u041f\u0415\u041d\u042c draft"
+  },
+  {
+   "gate": {
+    "argv": [
+     "bash",
+     "-c",
+     "set -e; export PYTHONDONTWRITEBYTECODE=1 SHERLOCK_INDEX_ROOT=$QWR_GATE_INDEX_DIR; python3 $QWR_TRUSTED_DIR/v60/tools/buildindex.py --corpus $QWR_TRUSTED_DIR/corpus --index-root $QWR_GATE_INDEX_DIR >&2; SHERLOCK_STOP_HOOK_TIMEOUT_S=610 python3 $QWR_TRUSTED_DIR/v60/tools/hostgate.py --work $QWR_RUN_DIR/work/work --corpus $QWR_TRUSTED_DIR/corpus --package $QWR_TRUSTED_DIR/v60 --run-dir $QWR_RUN_DIR --deadline-seconds 600 --require-index --strict-index"
+    ],
+    "timeout_s": 2400
+   },
+   "id": "repair",
+   "limits": {
+    "max_wall_time_s": 1800
+   },
+   "prompt": "/sherlock \u041f\u0420\u041e\u0414\u041e\u041b\u0416\u0418 \u0420\u0410\u0421\u0421\u041b\u0415\u0414\u041e\u0412\u0410\u041d\u0418\u0415 \u0418\u0417 /work/work \u2014 \u0421\u0422\u0423\u041f\u0415\u041d\u042c repair"
+  }
+ ],
+ "qwen": {
+  "approval_mode": "yolo",
+  "settings": {
+   "context": {
+    "autoCompactThreshold": 0.7
+   },
+   "general": {
+    "enableAutoUpdate": false
+   },
+   "hooks": {
+    "Stop": [
+     {
+      "hooks": [
+       {
+        "command": "python3 /work/tools/stop-hook-log.py python3 /work/skills/v60/tools/stopcheck.py",
+        "type": "command"
+       }
+      ]
+     }
+    ]
+   },
+   "mcp": {
+    "excluded": []
+   },
+   "memory": {
+    "enableDreams": false,
+    "enableManagedAutoMemory": false
+   },
+   "model": {
+    "chatCompression": {
+     "maxRecentFilesToRetain": 0
+    },
+    "generationConfig": {
+     "contextWindowSize": 262000,
+     "extra_body": {
+      "thinking": {
+       "type": "disabled"
+      }
+     },
+     "maxRetries": 0,
+     "reasoning": false,
+     "samplingParams": {
+      "max_tokens": 20000
+     },
+     "timeout": 660000
+    },
+    "maxToolCallsPerTurn": 1000,
+    "model_fallback": {
+     "enabled": false
+    },
+    "sessionTokenLimit": 230000,
+    "skipStartupContext": true
+   },
+   "skills": {
+    "directories": [
+     "/work/skills-root"
+    ],
+    "disabledLevels": [
+     "bundled",
+     "extension",
+     "project"
+    ]
+   },
+   "tools": {
+    "core": [
+     "read_file",
+     "write_file",
+     "edit",
+     "grep_search",
+     "glob",
+     "run_shell_command",
+     "todo_write",
+     "list_directory",
+     "skill"
+    ],
+    "exclude": [
+     "get_goal",
+     "list_agents",
+     "update_goal",
+     "tool_search",
+     "tool_call",
+     "enter_worktree",
+     "exit_worktree",
+     "record_artifact",
+     "report_findings",
+     "send_message",
+     "task_stop",
+     "agent"
+    ]
+   }
+  }
+ },
+ "run_id": "sherlock-v60-smalltest-dsv4flash-20260926a",
+ "schema": 2,
+ "task": {
+  "env": {
+   "PYTHONDONTWRITEBYTECODE": "1",
+   "SHERLOCK_INDEX_ROOT": "/work/index",
+   "SHERLOCK_STOP_HOOK_DETAIL_DIR": "/work/.trace/stopcheck-detail",
+   "SHERLOCK_STOP_HOOK_LOG": "/work/.trace/stop-hook.jsonl",
+   "SHERLOCK_STOP_HOOK_TIMEOUT_S": "50",
+   "SHERLOCK_STOP_HOOK_WRAPPER": "/work/tools/stop-hook-log.py"
+  },
+  "id": "sherlock-v59-smalltest",
+  "setup": [
+   "mkdir -p .trace && python3 skills/v60/tools/buildindex.py --corpus corpus --index-root index"
+  ],
+  "trusted": [
+   {
+    "name": "v60",
+    "src": "/home/claude-developer/hack/sherlock-v60-qwr-smalltest-20260926/trusted-v60"
+   },
+   {
+    "name": "corpus",
+    "src": "/home/claude-developer/hack/sherlock-v60-qwr-smalltest-20260926/wd/corpus"
+   }
+  ],
+  "workdir_src": "/home/claude-developer/hack/sherlock-v60-qwr-smalltest-20260926/wd"
+ },
+ "tenant": "sherlock"
+}
