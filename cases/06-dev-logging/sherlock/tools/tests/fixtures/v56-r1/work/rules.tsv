@@ -1,0 +1,70 @@
+R1	ось=cat	N	адрес~*	закрыто правилом R1
+R2	ось=burst	N	адрес~*	закрыто правилом R2
+R3	ось=bg	N	адрес~*	закрыто правилом R3
+R4	ось=level	X	адрес~*	закрыто правилом R4
+R5	ось=rate	X	адрес~*	закрыто правилом R5
+R6	ось=edge	X	адрес~*	закрыто правилом R6
+R7	ось=code	X	адрес~*	закрыто правилом R7
+R8	ось=odd && n<=2	X	адрес~*	закрыто правилом R8
+R9	ось=rare	X	адрес~*	закрыто правилом R9
+
++R4	g003	Setup.jsonl:1	«om/win/2004/08/events/event"},"System":{"Provider":{"#attrib»	правило
++R4	g016	rendered/Microsoft-Windows-CloudStore-4Operational.jsonl:1	«om/win/2004/08/events/event"},"System":{"Provider":{"#attrib»	правило
++R4	g017	rendered/Microsoft-Windows-CoreSystem-SmsRouter-Events-4Operational.jsonl:1	«om/win/2004/08/events/event"},"System":{"Provider":{"#attrib»	правило
++R4	g018	rendered/Microsoft-Windows-Crypto-DPAPI-4Operational.jsonl:1	«"UserName":"root"»	правило
++R4	g024	rendered/Microsoft-Windows-Diagnosis-DPS-4Operational.jsonl:1	«"ScenarioId":"FD5AA730-B53F-4B39-84E5-CB4303621D74"»	правило
++R4	g026	rendered/Microsoft-Windows-HelloForBusiness-4Operational.jsonl:1	«om/win/2004/08/events/event"},"System":{"Provider":{"#attrib»	правило
++R5	S001	System.jsonl:196	«"updateTitle":"Обновление функций до Windows 10, версия 20H2"»	правило
++R5	S002	rendered/Microsoft-Windows-AppXDeploymentServer-4Operational.jsonl:1	«"EndOfLifePackageList":"NULL"»	правило
++R5	S003	System.jsonl:3	«"StartTime":"2021-05-08T15:04:03.500000Z"»	правило
++R6	g081	rendered/Microsoft-Client-Licensing-Platform-4Admin.jsonl:309	«om/win/2004/08/events/event"},"System":{"Provider":{"#attrib»	правило
++R6	g089	rendered/Microsoft-Windows-CloudStore-4Operational.jsonl:13	«om/win/2004/08/events/event"},"System":{"Provider":{"#attrib»	правило
++R6	g090	rendered/Microsoft-Windows-CoreSystem-SmsRouter-Events-4Operational.jsonl:16	«om/win/2004/08/events/event"},"System":{"Provider":{"#attrib»	правило
++R6	g097	rendered/Microsoft-Windows-Kernel-Boot-4Operational.jsonl:12	«om/win/2004/08/events/event"},"System":{"Provider":{"#attrib»	правило
++R6	g099	rendered/Microsoft-Windows-Kernel-WHEA-4Operational.jsonl:12	«om/win/2004/08/events/event"},"System":{"Provider":{"#attrib»	правило
++R6	g101	rendered/Microsoft-Windows-LanguagePackSetup-4Operational.jsonl:18	«om/win/2004/08/events/event"},"System":{"Provider":{"#attrib»	правило
++R7	g023	rendered/Microsoft-Windows-DeviceSetupManager-4Operational.jsonl:5	«"Prop_ContainerId":"{08ABE0B7-7144-5605-8DCE-E4AE9F0296D3}"»	правило
++R7	g047	rendered/Microsoft-Windows-Security-Mitigations-4KernelMode.jsonl:6	«"CallingProcessCreateTime":"2021-05-09T21:44:43.415856Z"»	правило
++R7	g062	rendered/Microsoft-Windows-Time-Service-4Operational.jsonl:2	«"CurrentTime(UTC)":"2021-05-09T21:46:29.922Z"»	правило
++R9	g006	rendered/Microsoft-Windows-AAD-4Operational.jsonl:1	«"ErrorMessage":"The cache has been partitioned successfully."»	правило
++R9	g012	rendered/Microsoft-Windows-Application-Experience-4Program-Telemetry.jsonl:1	«om/win/2004/08/events/event"},"System":{"Provider":{"#attrib»	правило
++R9	g014	rendered/Microsoft-Windows-Biometrics-4Operational.jsonl:1	«"ErrorCode":"0x80070032"»	правило
++R9	g035	rendered/Microsoft-Windows-NCSI-4Operational.jsonl:1	«"InterfaceGuid":"BE751000-4023-4659-8B70-7F45A94374E5"»	правило
+
++R1	g228	Application.jsonl:6	«"#text":1001»	правило
++R1	g087	rendered/Microsoft-Windows-AppxPackaging-4Operational.jsonl:1	«om/win/2004/08/events/event"},"System":{"Provider":{"#attrib»	правило
++R1	g217	System.jsonl:213	«"param1":"для конкретного приложения"»	правило
++R1	g188	rendered/Microsoft-Windows-WMI-Activity-4Operational.jsonl:1	«om/win/2004/08/events/event"},"System":{"Provider":{"#attrib»	правило
++R1	g037	rendered/Microsoft-Windows-Ntfs-4Operational.jsonl:1	«"VolumeCorrelationId":"EA70D8DB-0000-0000-0000-602200000000"»	правило
++R1	g185	rendered/Microsoft-Windows-StateRepository-4Operational.jsonl:1	«om/win/2004/08/events/event"},"System":{"Provider":{"#attrib»	правило
++R1	g075	rendered/Microsoft-Windows-WindowsUpdateClient-4Operational.jsonl:1	«"serviceGuid":"9482F4B4-E343-43B6-B170-9A65BC822C77"»	правило
++R1	g206	rendered/Microsoft-Windows-Windows-Firewall-With-Advanced-Security-4Firewall.jsonl:1	«"RuleName":"Microsoft Edge (mDNS-входящий)"»	правило
+
++R2	g204	rendered/Microsoft-Windows-WinRM-4Operational.jsonl:5	«"operationName":"Enumeration"»	правило
++R2	g091	rendered/Microsoft-Windows-Crypto-DPAPI-4Operational.jsonl:7	«"UserName":"root"»	правило
++R2	g095	rendered/Microsoft-Windows-Diagnosis-DPS-4Operational.jsonl:5	«"ScenarioId":"3AF8B24A-C441-4FA4-8C5C-BED591BFA867"»	правило
++R2	g130	rendered/Microsoft-Windows-WER-PayloadHealth-4Operational.jsonl:4	«"Protocol":"Watson"»	правило
++R2	g128	rendered/Microsoft-Windows-User-Profile-Service-4Operational.jsonl:3	«om/win/2004/08/events/event"},"System":{"Provider":{"#attrib»	правило
++R2	g061	rendered/Microsoft-Windows-TerminalServices-RemoteConnectionManager-4Operational.jsonl:619	«om/win/2004/08/events/event"},"System":{"Provider":{"#attrib»	правило
+
++R3	B007	rendered/Microsoft-Windows-AppxPackaging-4Operational.jsonl:1	«om/win/2004/08/events/event"},"System":{"Provider":{"#attrib»	правило
++R3	B006	rendered/Microsoft-Windows-PushNotification-Platform-4Operational.jsonl:1	«"Verb":"ATH"»	правило
++R3	B001	Security.jsonl:1	«"TargetUserName":"ADMINI"»	правило
++R4	g032	rendered/Microsoft-Windows-LanguagePackSetup-4Operational.jsonl:1	«om/win/2004/08/events/event"},"System":{»	правило
++R4	g040	rendered/Microsoft-Windows-PrintService-4Admin.jsonl:1	«om/win/2004/08/events/event"},"System":{»	правило
++R4	g064	rendered/Microsoft-Windows-User-Profile-Service-4Operational.jsonl:1	«om/win/2004/08/events/event"},"System":{»	правило
++R4	g057	rendered/Microsoft-Windows-TZSync-4Operational.jsonl:1	«om/win/2004/08/events/event"},"System":{»	правило
++R4	g065	rendered/Microsoft-Windows-UserPnp-4DeviceInstall.jsonl:1	«om/win/2004/08/events/event"},"System":{»	правило
++R4	g067	rendered/Microsoft-Windows-WER-PayloadHealth-4Operational.jsonl:1	«om/win/2004/08/events/event"},"System":{»	правило
++R6	g149	rendered/Microsoft-Windows-Diagnosis-DPS-4Operational.jsonl:9	«om/win/2004/08/events/event"},"System":{»	правило
++R6	g120	rendered/Microsoft-Windows-Storage-Storport-4Operational.jsonl:566	«om/win/2004/08/events/event"},"System":{»	правило
++R6	g152	rendered/Microsoft-Windows-NetworkProfile-4Operational.jsonl:14	«om/win/2004/08/events/event"},"System":{»	правило
++R6	g153	rendered/Microsoft-Windows-PowerShell-4Operational.jsonl:75	«om/win/2004/08/events/event"},"System":{»	правило
++R6	g180	rendered/Microsoft-Windows-DeviceSetupManager-4Operational.jsonl:111	«om/win/2004/08/events/event"},"System":{»	правило
++R6	g163	rendered/Microsoft-Windows-TerminalServices-RemoteConnectionManager-4Operational.jsonl:1964	«om/win/2004/08/events/event"},"System":{»	правило
++R6	g161	rendered/Microsoft-Windows-Storsvc-4Diagnostic.jsonl:27	«om/win/2004/08/events/event"},"System":{»	правило
++R7	g164	rendered/Microsoft-Windows-Time-Service-4Operational.jsonl:4	«om/win/2004/08/events/event"},"System":{»	правило
++R7	g169	rendered/Microsoft-Windows-WinRM-4Operational.jsonl:2	«om/win/2004/08/events/event"},"System":{»	правило
++R9	g225	System.jsonl:30	«om/win/2004/08/events/event"},"System":{»	правило
++R9	g070	rendered/Microsoft-Windows-WebAuthN-4Operational.jsonl:1	«om/win/2004/08/events/event"},"System":{»	правило
++R9	g222	rendered/Microsoft-Windows-Privacy-Auditing-4Operational.jsonl:43	«om/win/2004/08/events/event"},"System":{»	правило

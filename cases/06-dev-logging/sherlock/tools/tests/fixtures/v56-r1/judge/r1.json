@@ -1,0 +1,164 @@
+{
+ "schema": 1,
+ "tool": "sherlock-v56/judge.py",
+ "at": "2026-09-26T10:59:58.523293+00:00",
+ "report": "/private/tmp/claude-501/-Users-a-Documents-projects-personal-os/5b46df6a-ee04-45f1-8aeb-7864871ad18e/scratchpad/r1/work/work/report.md",
+ "report_sha256": "cf216e99082531d9fc973a71a1add54a85581cf9082f8e2d52a8b96318bba387",
+ "requested_model": "opus",
+ "prompt_sha256": "a0ed382fa09ff7c8bceb0a1cf3614a28c9fe4f9811898c36cf66aeedee6b9ae1",
+ "input_sha256": "1d023a210af17a0f97728b9120af545ab25ae4d74dda4d6ace816e6ba51763fb",
+ "citations": 127,
+ "model": [
+  "claude-opus-5-5"
+ ],
+ "usage": {
+  "input_tokens": 2,
+  "cache_creation_input_tokens": 80066,
+  "cache_read_input_tokens": 20552,
+  "output_tokens": 1750,
+  "output_tokens_details": {
+   "thinking_tokens": 0
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 80066,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "not_available",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 1750,
+    "cache_read_input_tokens": 20552,
+    "cache_creation_input_tokens": 80066,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 80066
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard"
+ },
+ "cost_note": "subscription (Claude Code); total_cost_usd is notional",
+ "status": "fail",
+ "verdict": "fail",
+ "verdict_check": {
+  "stated": "скомпрометирована",
+  "follows": false,
+  "reason": "The verdict itself says 3proxy was installed by owner root (SID ...-1001, ownership table: владелец). No cited line shows an outsider got in or that root was taken over. Brute-force outcome is 'попытка'."
+ },
+ "claims": [
+  {
+   "section": "ВЕРДИКТ",
+   "claim": "Хост IPSERVER скомпрометирован",
+   "status": "unsupported",
+   "load_bearing": true,
+   "reason": "System.jsonl:263 UserID S-1-5-21-...-1001 = root, owner per User-Profile-Service:1. No evidence of an outsider or an account takeover."
+  },
+  {
+   "section": "Н-2",
+   "claim": "атакующий уже имел доступ к хосту на уровне пользователя и смог повысить до SYSTEM",
+   "status": "contradicted",
+   "load_bearing": true,
+   "reason": "The report says the installer is owner root (System.jsonl:263) and 'Первоначальный доступ ... не покрыт'. LocalSystem is just the service account, not a privilege escalation."
+  },
+  {
+   "section": "Н-2",
+   "claim": "атрибуция: установлена / исход: успех (атакующий)",
+   "status": "contradicted",
+   "load_bearing": true,
+   "reason": "The actor is SID ...-1001 (root, владелец), per System.jsonl:263 and Firewall.jsonl:445 ModifyingUser. The ВЕРДИКТ also says 'Связь между атакой и установкой 3proxy не подтверждена'."
+  },
+  {
+   "section": "Н-2",
+   "claim": "Несанкционированная установка",
+   "status": "unsupported",
+   "load_bearing": true,
+   "reason": "No cited line shows the install was unauthorized. The report itself says the owner clicked 'Разрешить' in the dllhost firewall prompt."
+  },
+  {
+   "section": "Н-2",
+   "claim": "RDP ... вероятно, как канал управления для установленного 3proxy; атакующий ... получил устойчивый удалённый доступ",
+   "status": "unsupported",
+   "load_bearing": true,
+   "reason": "RCM:619 shows only EventID 261, a listener connection. No successful logon is cited, and the report says 4624 has no LogonType 10. It also says 1964 in one place and 1962 in another."
+  },
+  {
+   "section": "Н-1",
+   "claim": "все 4624 зафиксированы только как LogonType=5 от СИСТЕМА",
+   "status": "uncited_absolute",
+   "load_bearing": true,
+   "reason": "No aggregate counts 4624 by LogonType. This claim supports outcome 'попытка'."
+  },
+  {
+   "section": "Н-1",
+   "claim": "Успешных входов LogonType=10 не обнаружено — ни одна внешняя атака паролем не достигла цели",
+   "status": "uncited_absolute",
+   "load_bearing": true,
+   "reason": "No aggregate count(EventID=4624, LogonType=10) is given."
+  },
+  {
+   "section": "Н-2",
+   "claim": "успешные интерактивные входы (LogonType=2 или 10) в корпусе не обнаружены",
+   "status": "uncited_absolute",
+   "load_bearing": false,
+   "reason": "No aggregate backs it."
+  },
+  {
+   "section": "Фон",
+   "claim": "3proxy — единственное событие от имени пользователя ...-1001; 15 событий 7045 от SYSTEM",
+   "status": "uncited_absolute",
+   "load_bearing": false,
+   "reason": "No aggregate over System.jsonl EventID 7045 by UserID."
+  },
+  {
+   "section": "ВЕРДИКТ",
+   "claim": "8098 пришлись на существующие учётные записи",
+   "status": "supported",
+   "load_bearing": false,
+   "reason": "Aggregate: count(SubStatus=0xc000006a, Status=0xc000006d) = 8098, which matches the corpus."
+  },
+  {
+   "section": "Н-1",
+   "claim": "33456 неудачных попыток, все LogonType=3",
+   "status": "supported",
+   "load_bearing": true,
+   "reason": "Aggregates: count(4625) = 33456 and count(LogonType=3, 4625) = 33456."
+  },
+  {
+   "section": "Н-1",
+   "claim": "исход: попытка; атрибуция: не установлена",
+   "status": "supported",
+   "load_bearing": true,
+   "reason": "Security.jsonl:1 and :6 are 4625 failures with Status 0xc000006d. The aggregates show only failures."
+  },
+  {
+   "section": "Н-2",
+   "claim": "служба 3proxy установлена, автозапуск, LocalSystem",
+   "status": "supported",
+   "load_bearing": true,
+   "reason": "System.jsonl:263: 7045, ServiceName '3proxy tiny proxy server', StartType Автоматически, AccountName LocalSystem."
+  },
+  {
+   "section": "Н-2",
+   "claim": "правила брандмауэра, разрешающие входящий трафик 3proxy, созданы тем же SID",
+   "status": "supported",
+   "load_bearing": false,
+   "reason": "Firewall.jsonl:445 has EventID 2005 and ModifyingUser S-1-5-21-...-1001. Lines 447, 448 and 450 are 3proxy rules with Direction 1."
+  },
+  {
+   "section": "К-1",
+   "claim": "событие единичное (1 из 1036 записей System)",
+   "status": "uncited_absolute",
+   "load_bearing": false,
+   "reason": "No aggregate count of 7026 is given."
+  }
+ ],
+ "failing": 4,
+ "wall_s": 27.1
+}
