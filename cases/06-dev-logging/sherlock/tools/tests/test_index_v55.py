@@ -225,7 +225,7 @@ class IndexV53Test(_IndexFixture):
         self.assertFalse(os.path.exists(self.index))
 
     def test_heartbeat_lines(self):
-        import heartbeat
+        heartbeat = sib("heartbeat")
         env = self.env(SHERLOCK_HEARTBEAT="1")
         _rc, _out, err = self.check(env=env)
         beats = [heartbeat.parse(x) for x in err.splitlines()]
