@@ -128,7 +128,7 @@ class Staging(unittest.TestCase):
 
     def test_seed_work_rolls_back_to_handoff(self):
         src = Path(tempfile.mkdtemp(prefix="seed-")) / "work"
-        inner = src / "work"
+        inner = src
         (inner / "validation" / "a").mkdir(parents=True)
         (inner / "report.md").write_text("draft")
         (inner / "cite-shown.tsv").write_text("x\t1\n")
@@ -136,11 +136,11 @@ class Staging(unittest.TestCase):
         (inner / "checkpoint.jsonl").write_text('{"skill_root": "/work/skills/v60"}\n{"row": 2}\n')
         dst = src.parent / "dst"
         citebench.seed_work(src, dst, "v60", "v61")
-        self.assertFalse((dst / "work/validation").exists())
-        self.assertFalse((dst / "work/report.md").exists())
-        self.assertFalse((dst / "work/cite-shown.tsv").exists())
-        self.assertTrue((dst / "work/worklist.tsv").exists())
-        self.assertEqual((dst / "work/checkpoint.jsonl").read_text(), '{"skill_root": "/work/skills/v61"}\n')
+        self.assertFalse((dst / "validation").exists())
+        self.assertFalse((dst / "report.md").exists())
+        self.assertFalse((dst / "cite-shown.tsv").exists())
+        self.assertTrue((dst / "worklist.tsv").exists())
+        self.assertEqual((dst / "checkpoint.jsonl").read_text(), '{"skill_root": "/work/skills/v61"}\n')
 
 
 class CollectAndSummarize(unittest.TestCase):

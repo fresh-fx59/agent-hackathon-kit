@@ -85,7 +85,7 @@ def build_spec(base, *, mode, pkg, run_id, stage_dir, base_pkg="v60"):
 def seed_work(src, dst, base_pkg, pkg):
     """Copy a finished run's work/ and roll it back to the investigate handoff."""
     shutil.copytree(src, dst, symlinks=True)
-    inner = Path(dst) / "work"
+    inner = Path(dst)            # the sandbox's /work/work
     for name in DRAFT_ARTIFACTS:
         p = inner / name
         if p.is_dir():
