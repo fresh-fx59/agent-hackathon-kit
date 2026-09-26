@@ -91,6 +91,14 @@ class Microcheck(unittest.TestCase):
         self.assertNotIn("distinct(Event.System.EventID)", r60.stdout)
 
 
+class TypedQuoteMetric(unittest.TestCase):
+    def test_rendered_quotes_are_not_typed(self):
+        import microcheck
+        text = ('- a — Security.jsonl:1#Status «"EventRecordID":1» «"Status":"0x"»\n'
+                '- b — Security.jsonl:2 «typed by hand»\n- c «also typed»\n')
+        self.assertEqual(microcheck.typed_quotes(text), 2)
+
+
 class Staging(unittest.TestCase):
     def test_micro_spec_caps_and_paths(self):
         base = citebench.load_base_spec(BASE)

@@ -176,6 +176,11 @@ def collect_row(run_dir, pkg, mode, rep):
         secs = term["finished_at"] - term["started_at"]
     clean = [r for r in rounds if r.get("blocking") == 0]
     report = run / "work" / "work" / "report.md"
+    final_typed = None
+    if report.is_file():
+        sys.path.insert(0, str(HERE))
+        import microcheck
+        final_typed = microcheck.typed_quotes(report.read_text(encoding="utf-8"))
     return {"schema": 1, "run_id": meta.get("run_id"), "pkg": pkg, "mode": mode, "rep": rep,
             "terminal": meta.get("terminal"),
             "pass": bool(clean) if mode == "micro" else meta.get("terminal") == "completed",
@@ -183,7 +188,7 @@ def collect_row(run_dir, pkg, mode, rep):
             "defects_per_round": [r.get("blocking") for r in rounds],
             "first_kinds": rounds[0].get("kinds") if rounds else None,
             "refs": rounds[-1].get("refs") if rounds else None,
-            "typed_quotes": rounds[-1].get("typed_quotes") if rounds else None,
+            "typed_quotes": final_typed,
             "calls": calls, "tokens_total": (meta.get("spend") or {}).get("tokens_total"),
             "tokens": tok, "rub": (meta.get("spend") or {}).get("cost_rub"),
             "seconds": round(secs, 1) or None, "report_bytes": report.stat().st_size if report.is_file() else 0,

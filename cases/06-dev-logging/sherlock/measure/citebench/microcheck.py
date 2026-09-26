@@ -43,9 +43,20 @@ def _json(text):
     return json.JSONDecoder().raw_decode(text[i:])[0] if i >= 0 else {}
 
 
+RENDERED_RE = re.compile(r"[\w.\-]+\.jsonl:\d+#[\w,]+((?:\s*«[^»]*»)+)")
+
+
+def typed_quotes(text):
+    """«…» the MODEL typed. Render writes quotes right after a reference
+    (`file:N#F «…» «…»`); those are the tool's, not typed. (The first bench
+    run counted them and reported v60 «34 typed quotes» for a rendered file.)"""
+    rendered = sum(len(QUOTE_RE.findall(m.group(1))) for m in RENDERED_RE.finditer(text))
+    return len(QUOTE_RE.findall(text)) - rendered
+
+
 def source_stats(text):
     """References vs typed quotes in what the MODEL wrote (before render)."""
-    return {"refs": len(REF_RE.findall(text)), "typed_quotes": len(QUOTE_RE.findall(text)),
+    return {"refs": len(REF_RE.findall(text)), "typed_quotes": typed_quotes(text),
             "claims": len(CITED_BULLET_RE.findall(text))}
 
 
