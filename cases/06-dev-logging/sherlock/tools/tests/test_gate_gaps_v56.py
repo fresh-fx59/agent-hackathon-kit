@@ -298,6 +298,9 @@ class G4Conclusions(unittest.TestCase):
         ok = base + "> агрегат: Security.jsonl · count(EventID=4624) = 5 · `jq`\n"
         self.assertEqual(self._check(ok), [])
         self.assertEqual(self._check("### Н-1 · x\n\nя прочитал запись, а не только её класс.\n"), [])
+        if PKG not in ("v56", "v57"):
+            self.assertEqual(self._check("### Н-1 · x\n\n**чем опровергал:** Прочитаны все записи Security.jsonl любым парсером JSON.\n"), [])
+            self.assertEqual(len(self._check("### Н-1 · x\n\nпроверены все записи 4624 — входы LogonType=2 не обнаружены.\n")), 1)
 
     def test_synthetic_success_needs_an_outsider(self):
         table = ("## Принадлежность учётных записей\n\n| учётная запись | вывод |\n|---|---|\n"
