@@ -242,8 +242,11 @@ class G3Quotes(unittest.TestCase):
         self.assertEqual(self.v[("Security.jsonl", 1)], "weak-quote")
 
     def test_informative_quotes_stay_ok(self):
-        self.assertEqual(self.v[("System.jsonl", 263)], "ok")
-        self.assertEqual(self.v[("Security.jsonl", 6)], "ok")
+        # v60: a strong typed quote on a JSON line is `typed-quote` (paste the
+        # reference) — still "not weak", which is what this test guards
+        strong = {"ok"} | ({"typed-quote"} if int(PKG.lstrip("v") or 0) >= 60 else set())
+        self.assertIn(self.v[("System.jsonl", 263)], strong)
+        self.assertIn(self.v[("Security.jsonl", 6)], strong)
 
     def test_quote_information_unit(self):
         cc = load("citecheck")

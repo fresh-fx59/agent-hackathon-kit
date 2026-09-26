@@ -27,6 +27,10 @@ import importlib.util
 
 SHERLOCK = Path(__file__).resolve().parents[2]
 PKG = os.environ.get("SHERLOCK_PKG", "v59")
+# v60: a STRONG typed quote on a JSON line is no longer silently `ok` — it is
+# `typed-quote` (blocking, names the reference to paste). These tests are about
+# weak-vs-strong, so on v60+ "strong" means "not weak-quote": ok or typed-quote.
+STRONG = {"ok"} | ({"typed-quote"} if int(PKG.lstrip("v") or 0) >= 60 else set())
 TOOLS = SHERLOCK / "skills" / PKG / "tools"
 FIX = Path(__file__).resolve().parent / "fixtures" / "v59-smalltest"
 CORPUS = FIX / "corpus"
@@ -171,12 +175,12 @@ class ReferenceGrading(unittest.TestCase):
         """v58 graded «"EventRecordID":417258» weak although it names one line."""
         ws = Workspace()
         v = ws.verdicts('- первая запись журнала Security.jsonl:1 «"EventRecordID":417258»\n')
-        self.assertEqual(v[("Security.jsonl", 1)], "ok")
+        self.assertIn(v[("Security.jsonl", 1)], STRONG)
 
     def test_bare_value_the_prose_names_is_strong(self):
         ws = Workspace()
         v = ws.verdicts('- том проверен, CorruptionActionState=0 System.jsonl:14 «"CorruptionActionState":0»\n')
-        self.assertEqual(v[("System.jsonl", 14)], "ok")
+        self.assertIn(v[("System.jsonl", 14)], STRONG)
 
     def test_bare_eventid_stays_weak(self):
         ws = Workspace()
@@ -188,7 +192,7 @@ class ReferenceGrading(unittest.TestCase):
         ws = Workspace()
         d, _ = ws.cite('- журнал запущен System.jsonl:1 «"EventRecordID":1»\n'
                        '\nЗапуск (EventID 6009, System.jsonl:1) штатный.\n')
-        bad = [c for c in d["citations"] if c["verdict"] not in ("ok", "repeat")]
+        bad = [c for c in d["citations"] if c["verdict"] not in STRONG | {"repeat"}]
         self.assertEqual(bad, [], d["citations"])
 
     def test_range_without_quote_is_a_mention_not_a_failure(self):
