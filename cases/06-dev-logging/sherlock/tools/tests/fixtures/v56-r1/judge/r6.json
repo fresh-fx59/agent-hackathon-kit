@@ -1,0 +1,192 @@
+{
+ "schema": 1,
+ "tool": "sherlock-v56/judge.py",
+ "at": "2026-09-26T10:59:58.523364+00:00",
+ "report": "/private/tmp/claude-501/-Users-a-Documents-projects-personal-os/5b46df6a-ee04-45f1-8aeb-7864871ad18e/scratchpad/r6/work/report.md",
+ "report_sha256": "40eb0e96ccbbce78d637b4b657a8d30c714213318af314fb74abbb621c3ddae0",
+ "requested_model": "opus",
+ "prompt_sha256": "a0ed382fa09ff7c8bceb0a1cf3614a28c9fe4f9811898c36cf66aeedee6b9ae1",
+ "input_sha256": "8ad33e0a7e374ecc2bb8114e0065ea744fb447f730e483c4728ba4e661c42702",
+ "citations": 155,
+ "model": [
+  "claude-opus-5-5"
+ ],
+ "usage": {
+  "input_tokens": 2,
+  "cache_creation_input_tokens": 108051,
+  "cache_read_input_tokens": 35106,
+  "output_tokens": 3347,
+  "output_tokens_details": {
+   "thinking_tokens": 1061
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 108051,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "not_available",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 3347,
+    "cache_read_input_tokens": 35106,
+    "cache_creation_input_tokens": 108051,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 108051
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard"
+ },
+ "cost_note": "subscription (Claude Code); total_cost_usd is notional",
+ "status": "fail",
+ "verdict": "fail",
+ "verdict_check": {
+  "stated": "атаковали, но не доказано",
+  "follows": true,
+  "reason": "The brute force is shown (33455 failed logons from outside addresses). Changes to the machine were made by the owner SID …-1001 (System.jsonl:263). The verdict does not claim a compromise, so it does not overreach."
+ },
+ "claims": [
+  {
+   "section": "К-1 / Н-3 / Н-5 / ВЕРДИКТ",
+   "claim": "Успешных входов с внешнего адреса в окне Security.jsonl нет ни одного",
+   "status": "uncited_absolute",
+   "load_bearing": true,
+   "reason": "Only the LogonType=5 (182) and LogonType=2 (3) aggregates are cited, and both are flagged agg_population_narrower_than_predicate. No aggregate gives total 4624=185 or 4624 with an outside IpAddress=0. The «попытка» outcome for Н-3/Н-5 rests on this."
+  },
+  {
+   "section": "К-1",
+   "claim": "я разобрал все 185 успешных входов",
+   "status": "uncited_absolute",
+   "load_bearing": true,
+   "reason": "No aggregate count(EventID=4624)=185 is cited. 182+3 covers only two LogonTypes, so other types (3, 10) are not ruled out."
+  },
+  {
+   "section": "Н-1",
+   "claim": "единственная установка службы … НЕ системным субъектом: остальные 15 … S-1-5-18",
+   "status": "uncited_absolute",
+   "load_bearing": false,
+   "reason": "The aggregate gives only the total 7045=16. No aggregate splits these 16 by UserID. System.jsonl:44 shows just one SYSTEM example."
+  },
+  {
+   "section": "Н-1",
+   "claim": "установку выполнил … S-1-5-21-…-1001 (IPSERVER\\root)",
+   "status": "supported",
+   "load_bearing": true,
+   "reason": "System.jsonl:263 excerpt «8817-1001\"}}},\"EventData\":{\"ServiceName\":\"3proxy tiny proxy server\"». The SID matches the root profile in User-Profile-Service:1."
+  },
+  {
+   "section": "Н-2",
+   "claim": "человек нажал «Разрешить» … в интерактивной RDP-сессии",
+   "status": "unsupported",
+   "load_bearing": false,
+   "reason": "Firewall:443 (Action 2, 22:37:55) and :445 (Action 3, 22:38:01) show only the timing. No cited line shows a dialog or the subject SID of the allow records."
+  },
+  {
+   "section": "Н-2",
+   "claim": "субъект разрешающих записей — пользовательский SID …-1001",
+   "status": "unsupported",
+   "load_bearing": false,
+   "reason": "The cited excerpts of Firewall:443/445 do not include the Security UserID. No aggregate by SID is given."
+  },
+  {
+   "section": "Н-3",
+   "claim": "Все они сетевые",
+   "status": "uncited_absolute",
+   "load_bearing": false,
+   "reason": "Security.jsonl:1 is one LogonType=3 example. No aggregate counts 4625 by LogonType."
+  },
+  {
+   "section": "Н-3",
+   "claim": "уточняющего кода блокировки (0xc0000234) в корпусе нет",
+   "status": "uncited_absolute",
+   "load_bearing": false,
+   "reason": "No aggregate count(SubStatus=0xc0000234)=0 is cited."
+  },
+  {
+   "section": "Н-4",
+   "claim": "все тринадцать значений Param1 — маршрутизируемые публичные адреса",
+   "status": "uncited_absolute",
+   "load_bearing": false,
+   "reason": "The distinct=13 aggregate does not show the values. Only RCM-Admin:1 (5.63.117.101) is shown."
+  },
+  {
+   "section": "Н-7",
+   "claim": "кроме этих двух путей в файле есть только 4 записи по spoolsv.exe",
+   "status": "uncited_absolute",
+   "load_bearing": false,
+   "reason": "No spoolsv aggregate is given. 39+2+4=45 matches the window, but no query proves it."
+  },
+  {
+   "section": "Н-8",
+   "claim": "Успешных записей об установке Edge в Application.jsonl … нет",
+   "status": "uncited_absolute",
+   "load_bearing": false,
+   "reason": "The only aggregate is 0x8004090d=3. No success count is cited."
+  },
+  {
+   "section": "Н-9",
+   "claim": "до конца окна … успешной активации в журнале нет",
+   "status": "uncited_absolute",
+   "load_bearing": false,
+   "reason": "No aggregate is cited. Only Application.jsonl:416 (hr=0x8007139F) is shown, and the first attempt's code is not cited."
+  },
+  {
+   "section": "К-2",
+   "claim": "Субъект всех — S-1-5-18",
+   "status": "uncited_absolute",
+   "load_bearing": false,
+   "reason": "The aggregate counts only 5007=7. No split by UserID is given."
+  },
+  {
+   "section": "К-4",
+   "claim": "Пользовательскому SID принадлежат только шесть записей",
+   "status": "uncited_absolute",
+   "load_bearing": false,
+   "reason": "The 81/630/6 split by SID has no aggregates. The only related aggregate is ApplicationPath~=3proxy=8."
+  },
+  {
+   "section": "К-6",
+   "claim": "122 записи S-1-5-18 и 1 S-1-5-20; ни одна из 123 не называет 3proxy",
+   "status": "uncited_absolute",
+   "load_bearing": false,
+   "reason": "The aggregate gives only 7040=123. No split by subject or check for 3proxy is cited."
+  },
+  {
+   "section": "Н-3",
+   "claim": "33 455 неудачных сетевых входов с 93 внешних адресов",
+   "status": "supported",
+   "load_bearing": true,
+   "reason": "Aggregates count(4625, IpAddress!=-)=33455 and distinct IpAddress=93 match the corpus."
+  },
+  {
+   "section": "Н-5",
+   "claim": "8 027 попыток … на СУЩЕСТВУЮЩУЮ учётную запись АДМИНИСТРАТОР",
+   "status": "supported",
+   "load_bearing": true,
+   "reason": "Aggregate TargetUserName=АДМИНИСТРАТОР with SubStatus=0xc000006a is 8027, and SubStatus 0xc000006a total is 8098. Security.jsonl:19934 is a cited example."
+  },
+  {
+   "section": "Н-6 / ВЕРДИКТ",
+   "claim": "аудита входов за май в корпусе нет",
+   "status": "supported",
+   "load_bearing": true,
+   "reason": "The window table shows Security.jsonl records 402275–437190. The first record, Security.jsonl:19934, is dated 2021-06-01T00:09:15Z."
+  },
+  {
+   "section": "Принадлежность",
+   "claim": "IPSERVER\\root — владелец",
+   "status": "supported",
+   "load_bearing": true,
+   "reason": "User-Profile-Service:1, 2021-05-08T15:04:51Z, «C:\\\\Users\\\\root\\\\ntuser.dat». This is before any outside activity."
+  }
+ ],
+ "failing": 2,
+ "wall_s": 50.1
+}
