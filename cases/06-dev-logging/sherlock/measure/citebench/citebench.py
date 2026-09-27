@@ -65,8 +65,67 @@ def load_base_spec(path):
 
 
 def _swap_pkg(obj, old, new):
-    return json.loads(json.dumps(obj).replace("/%s/" % old, "/%s/" % new)
-                      .replace("skills/%s" % old, "skills/%s" % new))
+    """Swap every whole-word occurrence of the base package version (`old`,
+    e.g. "v60") for the staged one (`new`) across a spec fragment.
+
+    v63 bug (citebench-replay-v63-r2/v62-r2, 2026-09-27): this used to be two
+    literal substring replacements, "/%s/" % old (needs a *trailing* slash)
+    and "skills/%s" % old. Neither matches a bare trailing path segment like
+    `--package $QWR_TRUSTED_DIR/v60` (end of the argv string, no trailing
+    "/") — so that one gate argument silently kept pointing at the base
+    package while every other v60 path in the same spec got swapped. A
+    word-boundary regex over the whole dumped JSON has no such blind spot:
+    it matches "v60" wherever it stands alone as a token (bounded by
+    non-alnum/underscore on both sides), regardless of what follows it.
+    """
+    pattern = re.compile(r"(?<![A-Za-z0-9_])%s(?![A-Za-z0-9_])" % re.escape(old))
+    return json.loads(pattern.sub(new, json.dumps(obj)))
+
+
+class GateConfigError(Exception):
+    """A gate argv references a tool/package path that was never staged.
+
+    This is a setup error, not a report-gate failure: the model's report was
+    never evaluated. Callers must surface it as a distinct status
+    (`gate_error`), and `validate_gate_paths` must be called before any paid
+    provider call, so this fails loudly at stage/validate time instead of
+    silently as an indistinguishable `gate_failed` after the run already
+    happened.
+    """
+
+
+def validate_gate_paths(spec, trusted_dirs):
+    """Check every literal `$QWR_TRUSTED_DIR/<name>/...` path referenced by a
+    phase's `gate.argv` actually exists under the staged trusted dir for
+    <name> (`trusted_dirs[name]`, a local filesystem path). Raises
+    GateConfigError naming every missing path if not.
+
+    `trusted_dirs` maps each `task.trusted[].name` (e.g. "v63", "corpus") to
+    the local directory it is staged from, i.e. what qwen-run will mount at
+    $QWR_TRUSTED_DIR/<name> inside the gate's execution.
+    """
+    missing = []
+    for phase in spec.get("phases", []):
+        gate = phase.get("gate")
+        if not gate:
+            continue
+        for arg in gate.get("argv", []):
+            for m in re.finditer(r"\$QWR_TRUSTED_DIR/([^\s\"']+)", arg):
+                rel = m.group(1)
+                name, _, rest = rel.partition("/")
+                local = trusted_dirs.get(name)
+                if local is None:
+                    missing.append((phase.get("id"), "$QWR_TRUSTED_DIR/" + rel,
+                                    "no staged trusted dir named %r" % name))
+                    continue
+                path = Path(local) / rest if rest else Path(local)
+                if not path.exists():
+                    missing.append((phase.get("id"), "$QWR_TRUSTED_DIR/" + rel, str(path)))
+    if missing:
+        lines = ["phase %s: %s -> %s (missing)" % m for m in missing]
+        raise GateConfigError(
+            "gate argv references path(s) not present in the staged trusted dir "
+            "(setup error, report never evaluated):\n" + "\n".join(lines))
 
 
 def build_spec(base, *, mode, pkg, run_id, stage_dir, base_pkg="v60",
@@ -161,6 +220,8 @@ def stage(a):
             shutil.copytree(a.tools_dir, wd / "tools")
     spec = build_spec(load_base_spec(a.base_spec), mode=a.mode, pkg=a.pkg, run_id=a.run_id,
                       stage_dir=out, base_pkg=a.base_pkg)
+    trusted_dirs = {t["name"]: t["src"] for t in spec["task"]["trusted"]}
+    validate_gate_paths(spec, trusted_dirs)  # setup error, not a report-gate failure: fail now
     (out / "run-spec.json").write_text(json.dumps(spec, ensure_ascii=False, indent=1), encoding="utf-8")
     launch = out / "launch.sh"
     launch.write_text(
