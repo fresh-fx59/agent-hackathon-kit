@@ -28,6 +28,11 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 SHERLOCK = HERE.parents[1]
+# Part B (docs/specs/2026-09-27-replay-journalcheck-and-repair-loop-spec.md): the
+# gate tool (hostgate.py) is staged from this separate, versioned harness location,
+# never from skills/vNN — those tested trees must not be edited in place. --package
+# in the gate argv keeps pointing at the real, untouched staged skill package.
+HARNESS_DIR = HERE / "harness" / "v1"
 MICRO_WALL_S = 300
 MICRO_CALLS = 30
 # v63: the replay harness used to be single-shot (draft only) — a model that
@@ -128,13 +133,26 @@ def validate_gate_paths(spec, trusted_dirs):
             "(setup error, report never evaluated):\n" + "\n".join(lines))
 
 
+def _redirect_hostgate(phase, pkg):
+    """Point a phase's gate argv at the harness-staged hostgate.py instead of the
+    staged skill package's own tools/hostgate.py, keeping --package pointed at the
+    real (untouched) staged package for finalize.py/journalcheck.py/judge.py."""
+    gate = phase.get("gate")
+    if not gate:
+        return phase
+    pattern = re.compile(r"\$QWR_TRUSTED_DIR/%s/tools/hostgate\.py" % re.escape(pkg))
+    gate["argv"] = [pattern.sub("$QWR_TRUSTED_DIR/harness/hostgate.py", s) for s in gate["argv"]]
+    return phase
+
+
 def build_spec(base, *, mode, pkg, run_id, stage_dir, base_pkg="v60",
                max_repair_rounds=MAX_REPAIR_ROUNDS):
     spec = _swap_pkg(base, base_pkg, pkg)
     spec["run_id"] = run_id
     spec["task"]["workdir_src"] = str(Path(stage_dir) / "wd")
     spec["task"]["trusted"] = [{"name": pkg, "src": str(Path(stage_dir) / ("trusted-" + pkg))},
-                               {"name": "corpus", "src": str(Path(stage_dir) / "wd" / "corpus")}]
+                               {"name": "corpus", "src": str(Path(stage_dir) / "wd" / "corpus")},
+                               {"name": "harness", "src": str(Path(stage_dir) / "trusted-harness")}]
     draft = next(p for p in base["phases"] if p["id"] == "draft")
     repair = next(p for p in base["phases"] if p.get("id") == "repair")
     if mode == "micro":
@@ -151,7 +169,7 @@ def build_spec(base, *, mode, pkg, run_id, stage_dir, base_pkg="v60",
         # never the model-written checkpoint.json stage.
         repair_rounds = []
         for i in range(1, max_repair_rounds + 1):
-            r = _swap_pkg(repair, base_pkg, pkg)
+            r = _redirect_hostgate(_swap_pkg(repair, base_pkg, pkg), pkg)
             r["id"] = "repair" if i == 1 else "repair-%d" % i
             repair_rounds.append(r)
         spec["phases"] = [_swap_pkg(draft, base_pkg, pkg)] + repair_rounds
@@ -196,6 +214,7 @@ def stage(a):
     wd.mkdir(parents=True)
     pkg_src = Path(a.kit) / "skills" / a.pkg
     shutil.copytree(pkg_src, out / ("trusted-" + a.pkg))
+    shutil.copytree(HARNESS_DIR, out / "trusted-harness")
     shutil.copytree(pkg_src, wd / "skills" / a.pkg)
     (wd / "skills-root").mkdir()
     os.symlink("../skills/" + a.pkg, wd / "skills-root" / "sherlock")
