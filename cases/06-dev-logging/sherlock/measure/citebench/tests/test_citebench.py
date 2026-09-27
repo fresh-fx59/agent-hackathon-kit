@@ -118,7 +118,7 @@ class Staging(unittest.TestCase):
         base = citebench.load_base_spec(BASE)
         spec = citebench.build_spec(base, mode="replay", pkg="v61", run_id="x", stage_dir="/s")
         self.assertEqual([p["id"] for p in spec["phases"]],
-                         ["draft", "repair", "repair-2"])
+                         ["draft", "repair"] + ["repair-%d" % i for i in range(2, 7)])
         self.assertIn("/work/skills/v61/tools/stopcheck.py", json.dumps(spec))
 
     def test_stage_micro_tree(self):

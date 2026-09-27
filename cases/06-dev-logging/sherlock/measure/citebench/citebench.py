@@ -43,7 +43,12 @@ MICRO_CALLS = 30
 # sandbox) so a forged/tampered checkpoint.json can never skip a round — the
 # gate recomputes pass/fail itself and does not read the model-written
 # "stage" field.
-MAX_REPAIR_ROUNDS = 2
+MAX_REPAIR_ROUNDS = 6
+# Part C (vault spec 2026-09-27-replay-journalcheck-and-repair-loop): each repair
+# phase is a fresh session capped at 900 s, and its gate has `on_fail: continue`, so
+# a failed gate starts the next repair phase instead of ending the run (qwen-run
+# stops on pass, `no_progress`, or budget). Run wall = draft 1800 + 6 x 900 = 7200.
+REPAIR_WALL_S = 900
 
 MICRO_PROMPT = (
     "Микро-задача (цитирование). Корпус: /work/corpus (Security.jsonl, System.jsonl). "
@@ -171,11 +176,13 @@ def build_spec(base, *, mode, pkg, run_id, stage_dir, base_pkg="v60",
         for i in range(1, max_repair_rounds + 1):
             r = _redirect_hostgate(_swap_pkg(repair, base_pkg, pkg), pkg)
             r["id"] = "repair" if i == 1 else "repair-%d" % i
+            r.setdefault("limits", {})["max_wall_time_s"] = REPAIR_WALL_S
+            if r.get("gate"):
+                r["gate"]["on_fail"] = "continue"
             repair_rounds.append(r)
         spec["phases"] = [_swap_pkg(draft, base_pkg, pkg)] + repair_rounds
         spec["limits"]["run_wall_s"] = (draft["limits"]["max_wall_time_s"]
-                                        + max_repair_rounds * repair["limits"]["max_wall_time_s"]
-                                        + 600)
+                                        + max_repair_rounds * REPAIR_WALL_S)
     else:
         raise ValueError(mode)
     return spec
