@@ -111,10 +111,14 @@ class Staging(unittest.TestCase):
         self.assertEqual(spec["model"]["route"], "broker-or-dsv4flash")
         self.assertEqual(spec["task"]["workdir_src"], "/s/wd")
 
-    def test_replay_spec_is_draft_only(self):
+    def test_replay_spec_is_draft_then_repeating_repair(self):
+        # v63: replay used to be draft-only, which hid the real bug — a model
+        # that correctly closed `draft` got no fresh process for repair at
+        # all. It must now declare draft + MAX_REPAIR_ROUNDS repair phases.
         base = citebench.load_base_spec(BASE)
         spec = citebench.build_spec(base, mode="replay", pkg="v61", run_id="x", stage_dir="/s")
-        self.assertEqual([p["id"] for p in spec["phases"]], ["draft"])
+        self.assertEqual([p["id"] for p in spec["phases"]],
+                         ["draft", "repair", "repair-2"])
         self.assertIn("/work/skills/v61/tools/stopcheck.py", json.dumps(spec))
 
     def test_stage_micro_tree(self):

@@ -30,6 +30,15 @@ HERE = Path(__file__).resolve().parent
 SHERLOCK = HERE.parents[1]
 MICRO_WALL_S = 300
 MICRO_CALLS = 30
+# v63: the replay harness used to be single-shot (draft only) — a model that
+# correctly closed `draft` and stopped got no fresh process for repair at all,
+# which hid the real bug (v62 ran draft + 11 check rounds in one session).
+# Declare this many repeated repair phases; each carries its own copy of the
+# base spec's trusted `gate` (hostgate.py, run by the harness OUTSIDE the
+# sandbox) so a forged/tampered checkpoint.json can never skip a round — the
+# gate recomputes pass/fail itself and does not read the model-written
+# "stage" field.
+MAX_REPAIR_ROUNDS = 2
 
 MICRO_PROMPT = (
     "Микро-задача (цитирование). Корпус: /work/corpus (Security.jsonl, System.jsonl). "
@@ -60,13 +69,15 @@ def _swap_pkg(obj, old, new):
                       .replace("skills/%s" % old, "skills/%s" % new))
 
 
-def build_spec(base, *, mode, pkg, run_id, stage_dir, base_pkg="v60"):
+def build_spec(base, *, mode, pkg, run_id, stage_dir, base_pkg="v60",
+               max_repair_rounds=MAX_REPAIR_ROUNDS):
     spec = _swap_pkg(base, base_pkg, pkg)
     spec["run_id"] = run_id
     spec["task"]["workdir_src"] = str(Path(stage_dir) / "wd")
     spec["task"]["trusted"] = [{"name": pkg, "src": str(Path(stage_dir) / ("trusted-" + pkg))},
                                {"name": "corpus", "src": str(Path(stage_dir) / "wd" / "corpus")}]
     draft = next(p for p in base["phases"] if p["id"] == "draft")
+    repair = next(p for p in base["phases"] if p.get("id") == "repair")
     if mode == "micro":
         spec["limits"]["max_provider_calls"] = MICRO_CALLS
         spec["limits"]["run_wall_s"] = MICRO_WALL_S + 120
@@ -75,8 +86,19 @@ def build_spec(base, *, mode, pkg, run_id, stage_dir, base_pkg="v60"):
         spec["qwen"]["settings"].pop("hooks", None)      # no Stop hook: microcheck is the gate
         spec["task"]["env"] = {"PYTHONDONTWRITEBYTECODE": "1", "BENCH_PKG": "/work/skills/" + pkg}
     elif mode == "replay":
-        spec["phases"] = [_swap_pkg(draft, base_pkg, pkg)]
-        spec["limits"]["run_wall_s"] = draft["limits"]["max_wall_time_s"] + 600
+        # A repeating repair phase, not a single shot: each round is its own
+        # entry so the harness spawns a genuinely FRESH process per round, and
+        # each round keeps the base spec's own trusted `gate` (hostgate.py) —
+        # never the model-written checkpoint.json stage.
+        repair_rounds = []
+        for i in range(1, max_repair_rounds + 1):
+            r = _swap_pkg(repair, base_pkg, pkg)
+            r["id"] = "repair" if i == 1 else "repair-%d" % i
+            repair_rounds.append(r)
+        spec["phases"] = [_swap_pkg(draft, base_pkg, pkg)] + repair_rounds
+        spec["limits"]["run_wall_s"] = (draft["limits"]["max_wall_time_s"]
+                                        + max_repair_rounds * repair["limits"]["max_wall_time_s"]
+                                        + 600)
     else:
         raise ValueError(mode)
     return spec
