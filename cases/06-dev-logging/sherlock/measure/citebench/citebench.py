@@ -14,7 +14,7 @@ Stops paying for 20-40 min small tests to test citation/checker changes.
   summarize rows -> mean and spread per package
 
 Paid runs are launched by the generated launch.sh (same path as the small
-tests: with-secret.sh neuraldeep_api_key -> qwen-run run --tenant sherlock).
+tests: with-secret.sh cliproxyapi_api_key -> qwen-run run --tenant sherlock).
 """
 import argparse
 import json
@@ -143,7 +143,7 @@ def stage(a):
     launch = out / "launch.sh"
     launch.write_text(
         "#!/usr/bin/env bash\nset -u\nBASE=%s\nWSS=%s\nQWEN_RUN=%s\ncd \"$BASE\"\n"
-        "\"$WSS\" neuraldeep_api_key --file-env QWR_SECRET_FILE_neuraldeep_api_key -- "
+        "\"$WSS\" cliproxyapi_api_key --file-env QWR_SECRET_FILE_cliproxyapi_api_key -- "
         "\"$QWEN_RUN\" run --tenant sherlock \"$BASE/run-spec.json\" > \"$BASE/launch.log\" 2>&1\n"
         "echo $? > \"$BASE/launch.done\"\n" % (out, a.with_secret, a.qwen_run), encoding="utf-8")
     launch.chmod(0o755)
