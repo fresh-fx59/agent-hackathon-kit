@@ -8,7 +8,8 @@ Stops paying for 20-40 min small tests to test citation/checker changes.
                                claims to work/report.md and runs microcheck.py
                                until CLEAN. Hard cap: 300 s, 30 provider calls.
               --mode replay  : the draft stage started from the saved v60
-                               investigate output (--seed-work), investigate
+                               investigate output (--seed-run; its sealed
+                               investigate stream is pinned for journalcheck), investigate
                                skipped. Normal draft wall (1800 s).
   collect   one finished qwen-run run dir -> one JSONL row
   summarize rows -> mean and spread per package
@@ -17,6 +18,7 @@ Paid runs are launched by the generated launch.sh (same path as the small
 tests: with-secret.sh cliproxyapi_api_key -> qwen-run run --tenant sherlock).
 """
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -131,6 +133,16 @@ def validate_gate_paths(spec, trusted_dirs):
                 path = Path(local) / rest if rest else Path(local)
                 if not path.exists():
                     missing.append((phase.get("id"), "$QWR_TRUSTED_DIR/" + rel, str(path)))
+    seed = trusted_dirs.get("seed")
+    if seed is not None:        # Part A: every pinned prior stream must be staged
+        man = Path(seed) / "manifest.json"
+        if not man.is_file():
+            missing.append(("-", "$QWR_TRUSTED_DIR/seed/manifest.json", str(man)))
+        else:
+            for e in json.loads(man.read_text(encoding="utf-8")):
+                if not (Path(seed) / e["file"]).is_file():
+                    missing.append(("-", "$QWR_TRUSTED_DIR/seed/" + e["file"],
+                                    str(Path(seed) / e["file"])))
     if missing:
         lines = ["phase %s: %s -> %s (missing)" % m for m in missing]
         raise GateConfigError(
@@ -151,13 +163,15 @@ def _redirect_hostgate(phase, pkg):
 
 
 def build_spec(base, *, mode, pkg, run_id, stage_dir, base_pkg="v60",
-               max_repair_rounds=MAX_REPAIR_ROUNDS):
+               max_repair_rounds=MAX_REPAIR_ROUNDS, with_seed=False):
     spec = _swap_pkg(base, base_pkg, pkg)
     spec["run_id"] = run_id
     spec["task"]["workdir_src"] = str(Path(stage_dir) / "wd")
     spec["task"]["trusted"] = [{"name": pkg, "src": str(Path(stage_dir) / ("trusted-" + pkg))},
                                {"name": "corpus", "src": str(Path(stage_dir) / "wd" / "corpus")},
                                {"name": "harness", "src": str(Path(stage_dir) / "trusted-harness")}]
+    if with_seed:
+        spec["task"]["trusted"].append({"name": "seed", "src": str(Path(stage_dir) / "trusted-seed")})
     draft = next(p for p in base["phases"] if p["id"] == "draft")
     repair = next(p for p in base["phases"] if p.get("id") == "repair")
     if mode == "micro":
@@ -213,6 +227,37 @@ def seed_work(src, dst, base_pkg, pkg):
                 p.write_text(t.replace("/skills/%s" % base_pkg, "/skills/%s" % pkg), encoding="utf-8")
 
 
+def stage_seed_streams(seed_run, dst):
+    """Part A: copy the seed run's investigate stream(s) into the trusted `seed` dir,
+    each pinned to the seed's own seal.json digest. Mismatch or no seal entry = exit."""
+    seed_run, dst = Path(seed_run), Path(dst)
+    seal_p = seed_run / "seal.json"
+    if not seal_p.is_file():
+        sys.exit("citebench: seed run has no seal.json: %s" % seal_p)
+    sealed = json.loads(seal_p.read_text(encoding="utf-8")).get("files") or {}
+    inv = seed_run / "out" / "investigate"
+    srcs = sorted(inv.glob("stream*.jsonl"))
+    if not (inv / "stream.jsonl").is_file():
+        sys.exit("citebench: seed run has no out/investigate/stream.jsonl")
+    dst.mkdir(parents=True)
+    manifest = []
+    for src in srcs:
+        rel = "out/investigate/" + src.name
+        want = sealed.get(rel)
+        if not want:
+            sys.exit("citebench: %s has no entry in the seed seal.json" % rel)
+        data = src.read_bytes()
+        got = hashlib.sha256(data).hexdigest()
+        if got != want:
+            sys.exit("citebench: %s sha256 %s != seal %s" % (rel, got, want))
+        (dst / src.name).write_bytes(data)
+        os.chmod(dst / src.name, 0o444)
+        manifest.append({"file": src.name, "sha256": got})
+    (dst / "manifest.json").write_text(json.dumps(manifest, indent=1), encoding="utf-8")
+    os.chmod(dst / "manifest.json", 0o444)
+    return manifest
+
+
 def stage(a):
     out = Path(a.out)
     wd = out / "wd"
@@ -231,8 +276,11 @@ def stage(a):
         shutil.copy2(HERE / "microcheck.py", wd / "bench" / "microcheck.py")
         (wd / "work").mkdir()
     else:
+        if not a.seed_run:
+            sys.exit("citebench: --mode replay needs --seed-run <finished run dir>")
+        stage_seed_streams(a.seed_run, out / "trusted-seed")
         if not a.seed_work:
-            sys.exit("citebench: --mode replay needs --seed-work <run>/work")
+            a.seed_work = str(Path(a.seed_run) / "work")
         seed = Path(a.seed_work)
         for sub in ("work", ".sherlock"):
             if (seed / sub).exists():
@@ -245,7 +293,7 @@ def stage(a):
         if a.tools_dir:
             shutil.copytree(a.tools_dir, wd / "tools")
     spec = build_spec(load_base_spec(a.base_spec), mode=a.mode, pkg=a.pkg, run_id=a.run_id,
-                      stage_dir=out, base_pkg=a.base_pkg)
+                      stage_dir=out, base_pkg=a.base_pkg, with_seed=a.mode == "replay")
     trusted_dirs = {t["name"]: t["src"] for t in spec["task"]["trusted"]}
     validate_gate_paths(spec, trusted_dirs)  # setup error, not a report-gate failure: fail now
     (out / "run-spec.json").write_text(json.dumps(spec, ensure_ascii=False, indent=1), encoding="utf-8")
@@ -334,7 +382,8 @@ def main(argv=None):
     s.add_argument("--base-pkg", default="v60")
     s.add_argument("--kit", default=str(SHERLOCK))
     s.add_argument("--corpus", default=str(SHERLOCK / "tools/tests/fixtures/v60-smalltest/corpus"))
-    s.add_argument("--seed-work", help="replay: <finished run>/work")
+    s.add_argument("--seed-run", help="replay: the finished seed run dir (seal.json, out/investigate)")
+    s.add_argument("--seed-work", help="replay: <finished run>/work (default: <seed-run>/work)")
     s.add_argument("--tools-dir", help="replay: wd/tools (stop-hook-log.py)")
     s.add_argument("--with-secret", default="/home/claude-developer/personal-os/.claude/skills/secret-use/with-secret.sh")
     s.add_argument("--qwen-run", default="/home/claude-developer/qwr-m2/qwen-run/bin/qwen-run")

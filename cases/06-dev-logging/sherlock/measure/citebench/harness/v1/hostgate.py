@@ -32,6 +32,14 @@ Item 3 (retried-attempt streams): qwen-run renames a retried attempt's stream
 to stream.a1.jsonl (runner.py:367). The old glob "out/*/stream.jsonl" missed
 it, giving a false receipt_unprinted for a receipt printed before a transport
 retry. Now globs "out/*/stream*.jsonl".
+
+Part A: journalcheck runs from THIS harness dir (journalcheck.py next to this file,
+loading the package's own checks via --tools). If RUN/control/trusted/seed/manifest.json
+exists ([{file, sha256}], staged by citebench.py from the seed run's seal), each entry
+is passed as a pinned --prior-stream/--prior-sha256 pair.
+
+`blocking` = {finalize: sum of finalize's gates[*].parsed_blocking (1 if unparseable
+and finalize failed), journalcheck: n}. qwen-run's no_progress rule sums it.
 """
 import argparse
 import glob
@@ -72,6 +80,33 @@ def _write_full(run_dir, phase, stage, out, err):
     }
 
 
+def _finalize_blocking(rc, stdout):
+    for line in reversed(stdout.splitlines()):
+        line = line.strip()
+        if not line.startswith("{"):
+            continue
+        try:
+            obj = json.loads(line)
+        except ValueError:
+            continue
+        gates = obj.get("gates") if isinstance(obj, dict) else None
+        if isinstance(gates, dict):
+            vals = [g.get("parsed_blocking") for g in gates.values() if isinstance(g, dict)]
+            n = sum(v for v in vals if isinstance(v, int) and not isinstance(v, bool))
+            return n if (n or rc == 0) else 1
+    return 0 if rc == 0 else 1
+
+
+def _seed_priors(run_dir):
+    seed = os.path.join(run_dir, "control", "trusted", "seed")
+    man = os.path.join(seed, "manifest.json")
+    if not os.path.isfile(man):
+        return []
+    with open(man, encoding="utf-8") as fh:
+        entries = json.load(fh)
+    return [(os.path.join(seed, e["file"]), e["sha256"]) for e in entries]
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--work", required=True)
@@ -93,12 +128,16 @@ def main(argv=None):
                       "--corpus", a.corpus, "--package", a.package] + finalize_extra,
                      timeout=900)
     out["stages"]["finalize"] = dict(_write_full(a.run_dir, a.phase, "finalize", so, se), exit=rc)
+    out["blocking"]["finalize"] = _finalize_blocking(rc, so)
 
     streams = sorted(glob.glob(os.path.join(a.run_dir, "out", "*", "stream*.jsonl")))
     if streams:
-        cmd = [py, os.path.join(tools, "journalcheck.py"), "--work", a.work, "--json"]
+        cmd = [py, os.path.join(HERE, "journalcheck.py"), "--tools", tools,
+               "--work", a.work, "--json"]
         for s in streams:
             cmd += ["--stream", s]
+        for path, sha in _seed_priors(a.run_dir):
+            cmd += ["--prior-stream", path, "--prior-sha256", sha]
         jrc, jso, jse = run(cmd, timeout=300)
         rec = dict(_write_full(a.run_dir, a.phase, "journalcheck", jso, jse), exit=jrc)
         try:
@@ -106,6 +145,8 @@ def main(argv=None):
             rec["result"] = detail
             if isinstance(detail, dict) and isinstance(detail.get("violations"), list):
                 out["blocking"]["journalcheck"] = len(detail["violations"])
+            elif jrc != 0:
+                out["blocking"]["journalcheck"] = 1
         except ValueError:
             rec["result"] = {"stdout_tail": jso[-TAIL:], "stderr_tail": jse[-TAIL:]}
         out["stages"]["journalcheck"] = rec
