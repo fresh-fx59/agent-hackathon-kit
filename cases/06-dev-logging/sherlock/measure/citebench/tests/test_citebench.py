@@ -108,7 +108,7 @@ class Staging(unittest.TestCase):
         self.assertEqual(spec["phases"][0]["limits"]["max_wall_time_s"], 300)
         self.assertNotIn("hooks", spec["qwen"]["settings"])
         self.assertNotIn("v60", json.dumps(spec))
-        self.assertEqual(spec["model"]["route"], "neuraldeep-dsv4flash")
+        self.assertEqual(spec["model"]["route"], "broker-or-dsv4flash")
         self.assertEqual(spec["task"]["workdir_src"], "/s/wd")
 
     def test_replay_spec_is_draft_only(self):

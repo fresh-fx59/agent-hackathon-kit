@@ -395,6 +395,29 @@ TTFT_RESERVE_S = 35
 #: worst reachable request at prompt 229000 + output 19900 = 248900, i.e.
 #: 13,100 under the ceiling. The 262,000 gate is unchanged: the customer's
 #: ceiling is not a function of what a provider advertises.
+#:
+#: LANE SWITCH, 2026-09-27 (operator: "switch"). Sherlock development runs now
+#: go through the contabo cliproxyapi broker (http://127.0.0.1:8317/v1, model
+#: `or-deepseek-v4-flash-0731`, returned identity `deepseek/deepseek-v4-flash-0731`,
+#: OpenRouter host streamlake/fp8, no fallback) instead of neuraldeep. A hard
+#: guard between broker and OpenRouter emulates vLLM `--max-model-len 262000`:
+#: prompt + max_tokens > 262000 is refused with HTTP 400 (no truncation), and
+#: its prompt estimate runs ~+0.5% high on Qwen's real 57-tool requests. The
+#: constants above already fit, so none changed:
+#:   * steady state: SESSION_TOKEN_LIMIT 230000 + MAX_TOKENS 20000 = 250000;
+#:     at the guard's +0.5% estimate 251250 <= 262000 (10,750 spare).
+#:   * qwen's own worst clamped request: 229000 + 19900 = 248900 -> ~250145.
+#:   * the known unbounded case (a single turn ballooning past `hard` on tool
+#:     output, see SESSION_TOKEN_LIMIT) now ends in a guard 400, not a silently
+#:     oversized request; that is a visible failure, which is what we want.
+#: The generation-clock measurement above was taken on neuraldeep and has NOT
+#: been re-measured on OpenRouter; no generation window is declared here either.
+#: COMPARABILITY BREAK: runs before 2026-09-27 used neuraldeep. OpenRouter 0731
+#: thinks by default when no reasoning field is sent; `profile()` still sends
+#: `reasoning: false` + `extra_body.thinking.disabled`, and a 2026-09-27 probe
+#: through the broker with `thinking: {type: disabled}` still returned
+#: reasoning_tokens 5 — so on this lane THINKING IS ON (the operator's wish),
+#: whereas the neuraldeep runs thought only with reasoning_effort "high".
 
 #: THE REFUSAL THE LAUNCHER GREPS FOR. A constraint conflict must never be
 #: resolved by silently taking the smaller number, which is exactly what

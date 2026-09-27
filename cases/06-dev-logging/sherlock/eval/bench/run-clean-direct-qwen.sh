@@ -2,6 +2,8 @@
 # Direct diagnostic runner: caller supplies a fresh root, corpus, prompt and skill.
 # Its cwd is Qwen's only documented workspace selector, so it is an input boundary.
 set -euo pipefail
+# Lane (2026-09-27): contabo cliproxyapi broker -> OpenRouter deepseek/deepseek-v4-flash-0731,
+# host streamlake/fp8, behind a 262000-token prompt+max_tokens guard. Was neuraldeep.
 
 root=${1:?fresh run root required}
 corpus=${2:?corpus directory required}
@@ -16,9 +18,9 @@ python3 "$settings_generator" emit-run --skill-directory "$skill_dir" > "$root/.
 (cd "$root" && pwd) > "$root/workspace-cwd-precontact.txt"
 cd "$root"
 set +e
-HOME="$root/home" QWEN_SKILL_ROOT="$skill_dir" OPENAI_BASE_URL=https://api.neuraldeep.ru/v1 \
-  "$secret_wrapper" neuraldeep_api_key --env OPENAI_API_KEY -- \
-  /home/claude-developer/.local/bin/qwen --auth-type openai --model deepseek-v4-flash \
+HOME="$root/home" QWEN_SKILL_ROOT="$skill_dir" OPENAI_BASE_URL=http://127.0.0.1:8317/v1 \
+  "$secret_wrapper" cliproxyapi_api_key --env OPENAI_API_KEY -- \
+  /home/claude-developer/.local/bin/qwen --auth-type openai --model or-deepseek-v4-flash-0731 \
   --max-session-turns -1 --max-tool-calls -1 --openai-logging \
   --openai-logging-dir "$root/openai-logs" --output-format json "$(cat "$prompt_file")" \
   > "$root/qwen-output.json" 2> "$root/qwen-stderr.log"

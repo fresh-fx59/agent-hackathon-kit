@@ -18,7 +18,7 @@
   "tmp_mb": 1024
  },
  "model": {
-  "route": "neuraldeep-dsv4flash"
+  "route": "broker-or-dsv4flash"
  },
  "phases": [
   {
