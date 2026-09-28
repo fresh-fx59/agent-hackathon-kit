@@ -36,10 +36,13 @@ class TriageGateTest(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
-    def checkpoint(self, valid=True):
+    def checkpoint(self, valid=True, consumed=False):
         receipt = {"state": "pending", "from_stage": "triage",
                    "to_stage": "draft"} if valid else {
                        "state": "pending", "from_stage": "draft", "to_stage": "repair"}
+        if consumed and valid:
+            receipt.update(state="consumed", stop_event_sha256="a" * 64,
+                           stop_session_id="session-1")
         (self.work / "checkpoint.json").write_text(json.dumps(
             {"stage": "draft" if valid else "triage", "pending_handoff": receipt}))
 
@@ -77,6 +80,12 @@ class TriageGateTest(unittest.TestCase):
         result = self.invoke()
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertTrue(json.loads(result.stdout)["pass"])
+
+    def test_consumed_handoff_after_stop_hook_passes(self):
+        self.checkpoint(consumed=True)
+        self.stream()
+        result = self.invoke()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
     def test_missing_agent_fails_closed(self):
         self.checkpoint()

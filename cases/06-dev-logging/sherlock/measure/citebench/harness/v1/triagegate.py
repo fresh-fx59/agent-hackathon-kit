@@ -85,13 +85,18 @@ def main(argv=None):
     try:
         row = json.load(open(checkpoint, encoding="utf-8"))
         receipt = row.get("pending_handoff") or {}
+        consumed = (receipt.get("state") == "consumed"
+                    and isinstance(receipt.get("stop_event_sha256"), str)
+                    and len(receipt["stop_event_sha256"]) == 64
+                    and bool(receipt.get("stop_session_id")))
         ok = (row.get("stage") == "draft"
               and receipt.get("from_stage") == "triage"
               and receipt.get("to_stage") == "draft"
-              and receipt.get("state") == "pending")
+              and (receipt.get("state") == "pending" or consumed))
         result["checks"]["handoff"] = {"pass": ok, "stage": row.get("stage"),
                                          "from_stage": receipt.get("from_stage"),
-                                         "to_stage": receipt.get("to_stage")}
+                                         "to_stage": receipt.get("to_stage"),
+                                         "state": receipt.get("state")}
     except (OSError, ValueError):
         result["checks"]["handoff"] = {"pass": False, "error": "checkpoint missing"}
         ok = False
