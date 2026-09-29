@@ -47,10 +47,10 @@ MICRO_CALLS = 30
 # "stage" field.
 MAX_REPAIR_ROUNDS = 6
 # Part C (vault spec 2026-09-27-replay-journalcheck-and-repair-loop): each repair
-# phase is a fresh session capped at 900 s, and its gate has `on_fail: continue`, so
+# phase is a fresh session capped at 1800 s, and its gate has `on_fail: continue`, so
 # a failed gate starts the next repair phase instead of ending the run (qwen-run
-# stops on pass, `no_progress`, or budget). Run wall = draft 1800 + 6 x 900 = 7200.
-REPAIR_WALL_S = 900
+# stops on pass, `no_progress`, or budget). Run wall = draft 1800 + 6 x 1800 = 12600.
+REPAIR_WALL_S = 1800
 
 MICRO_PROMPT = (
     "Микро-задача (цитирование). Корпус: /work/corpus (Security.jsonl, System.jsonl). "
