@@ -48,9 +48,10 @@ def write_section(work, section):
     if MARKER_KEY in section:
         sys.exit("reportappend.py: секция содержит маркер синтеза")
     if len(section.encode("utf-8")) > MAX_SECTION:
-        sys.exit("reportappend.py: секция %d B > %d B — пиши по одному блоку "
-                 "`### Н-n` или одному разделу за вызов"
-                 % (len(section.encode("utf-8")), MAX_SECTION))
+        sys.exit("reportappend.py: секция %d B > %d B — раздели её на части "
+                 "меньше %d B; следующий вызов append продолжит тот же раздел "
+                 "(новый заголовок не нужен)"
+                 % (len(section.encode("utf-8")), MAX_SECTION, MAX_SECTION))
     path = report_path(work)
     old = open(path, encoding="utf-8").read() if os.path.exists(path) else ""
     body, had_marker = split(old)

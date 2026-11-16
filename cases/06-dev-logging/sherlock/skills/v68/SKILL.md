@@ -292,13 +292,17 @@ You do NOT read the corpus yourself: you run `logmap.py`, read `map.txt` and
    fix for a measured v62 regression: a replay ran draft plus 11 check rounds
    inside ONE ever-growing session because nothing forced the handoff. Print
    the block, END THE TURN, let a fresh session open the `repair` stage.
-   **DRAFT RULES (v68, HARD — measured v67: the draft re-walked the corpus,
+   **DRAFT RULES (v68, HARD, DRAFT STAGE ONLY — repair edits existing blocks
+   in place as before; measured v67: the draft re-walked the corpus,
    wrote two 12-17k-token part files and never assembled `report.md`):**
    1. SYNTHESIS FROM CLOSED WORK ONLY. When `work/checkpoint.json` is
       `ready_for_synthesis`, build findings ONLY from `work/worklist.tsv`
       verdict rows, `work/cite-shown.tsv` and the investigate notes in `work/`.
       NO new corpus walking: no `grep`, `read_file`, `glob` over the corpus.
-      `cite.py` only for lines a closed row already references.
+      `cite.py` only for lines a closed row already references, PLUS
+      `cite.py --aggregate` for every count and `cite.py` for the first
+      appearance of an account named in a finding (ownership). These are
+      the only corpus reads allowed; `grep`/`read_file`/`glob` stay forbidden.
    2. Read `reference/report-format.md` ONCE. Never re-read it.
    3. WRITE ONLY `work/report.md`, through
       `python3 <SKILL_BASE_DIR>/tools/reportappend.py append --work ./work`
