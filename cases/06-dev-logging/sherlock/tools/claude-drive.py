@@ -15,6 +15,7 @@ import argparse, json, os, re, shutil, signal, subprocess, sys, time
 from pathlib import Path
 
 TOOLS = "Bash,Read,Write,Edit,Glob,Grep,TodoWrite,Skill,Task"
+NORMALIZE = True
 CLAUDE = "/run/current-system/sw/bin/claude"
 
 
@@ -30,6 +31,39 @@ def rewrite_obj(o, run_work):
     if isinstance(o, dict):
         return {k: rewrite_obj(v, run_work) for k, v in o.items()}
     return o
+
+
+# Claude tool name -> qwen tool name. The trusted harness (triagegate, journalcheck)
+# matches qwen names (e.g. "agent"); the driver writes a qwen-named stream.jsonl
+# for gates and keeps the untouched stream in stream.raw.jsonl.
+NAME_MAP = {"Agent": "agent", "Task": "agent", "Bash": "run_shell_command",
+            "Read": "read_file", "Write": "write_file", "Edit": "edit",
+            "Grep": "grep_search", "Glob": "glob", "Skill": "skill",
+            "TodoWrite": "todo_write"}
+
+
+def normalize_stream(out):
+    raw = out / "stream.raw.jsonl"
+    shutil.copy(out / "stream.jsonl", raw)
+    with open(raw) as fi, open(out / "stream.jsonl", "w") as fo:
+        for line in fi:
+            try:
+                ev = json.loads(line)
+            except ValueError:
+                fo.write(line)
+                continue
+            if ev.get("type") == "assistant":
+                for b in ev.get("message", {}).get("content", []):
+                    if isinstance(b, dict) and b.get("type") == "tool_use":
+                        b["name"] = NAME_MAP.get(b.get("name"), b.get("name"))
+            if ev.get("type") == "user" and isinstance(ev.get("message"), dict):
+                c = ev["message"].get("content")
+                for b in c if isinstance(c, list) else []:
+                    # qwen writes is_error:false on success; Claude omits it
+                    if isinstance(b, dict) and b.get("type") == "tool_result" \
+                            and b.get("is_error") is None:
+                        b["is_error"] = False
+            fo.write(json.dumps(ev, ensure_ascii=False) + "\n")
 
 
 def run_phase(run, phase, env, model, settings_path):
@@ -59,12 +93,15 @@ def run_phase(run, phase, env, model, settings_path):
                 os.killpg(p.pid, signal.SIGKILL)
                 rc = p.wait()
     wall_s = round(time.time() - t0, 1)
+    if NORMALIZE:
+        normalize_stream(out)
     (out / "exit.txt").write_text(str(rc))
     res = {"phase": pid, "exit": rc, "timed_out": timed_out, "wall_s": wall_s,
            "wall_limit_s": wall}
     tools = {}
+    src = out / ("stream.raw.jsonl" if NORMALIZE else "stream.jsonl")
     models = set()
-    for line in (out / "stream.jsonl").read_text(errors="replace").splitlines():
+    for line in src.read_text(errors="replace").splitlines():
         try:
             ev = json.loads(line)
         except ValueError:
@@ -133,7 +170,11 @@ def main():
     ap.add_argument("--run-id", required=True)
     ap.add_argument("--model", default="claude-haiku-5-5")
     ap.add_argument("--base", default="/home/claude-developer/hack")
+    ap.add_argument("--no-normalize", action="store_true",
+                    help="keep Claude tool names in stream.jsonl (gates then cannot match 'agent')")
     a = ap.parse_args()
+    global NORMALIZE
+    NORMALIZE = not a.no_normalize
     staged = Path(a.staged)
     spec = json.loads((staged / "run-spec.json").read_text())
     run = Path(a.base) / a.run_id
