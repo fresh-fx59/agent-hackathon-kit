@@ -897,16 +897,23 @@ def main():
             sys.exit(1)
         # v56 (G1): the receipt goes to the harness-captured stream, where the
         # agent cannot rewrite it. journalcheck matches every journal row to one.
-        # v69: printed FIRST, so `| head -c N` / `| tail` cannot drop it
-        # (v68 journal receipt diagnosis: head -c 900 cut it off).
+        # v69: printed BEFORE and AFTER the block (identical lines). The block
+        # is 0.9-1.1 KB and the pair is ~0.5 KB, so `| head -c 900` keeps the
+        # first copy and `| tail -c 900` keeps the second. Parsers key by receipt
+        # id, so the duplicate is harmless (printed_receipts, harness journalcheck).
         receipt = row[PENDING_HANDOFF]
-        print(RECEIPT_LINE % (receipt["id"], receipt["handoff_sha256"],
-                              receipt["boundary_seq"]))
-        print(RECEIPT_META_LINE.format(id=receipt["id"],
-              report=receipt["report_sha256"], package=receipt["package_sha256"],
-              work=receipt["work_sha256"], structure=receipt["structure_sha256"] or "0" * 64))
+        lines = (RECEIPT_LINE % (receipt["id"], receipt["handoff_sha256"],
+                                 receipt["boundary_seq"]) + "\n"
+                 + RECEIPT_META_LINE.format(id=receipt["id"],
+                     report=receipt["report_sha256"], package=receipt["package_sha256"],
+                     work=receipt["work_sha256"],
+                     structure=receipt["structure_sha256"] or "0" * 64) + "\n")
+        print(lines, end="")
         print(json.dumps(row, ensure_ascii=False, sort_keys=True) if args.json
               else "\n" + block, end="" if not args.json else "\n")
+        if not args.json and not block.endswith("\n"):
+            print()
+        print(lines, end="")
         return
     if args.command == "verify":
         bad = verify_journal(Path(args.work))

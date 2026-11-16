@@ -125,6 +125,9 @@ cleared session has no conversation, and this file is the only memory.
 
     python3 <SKILL_BASE_DIR>/tools/checkpoint.py handoff --work ./work --done <stage>
 
+Never pipe `handoff` output (no `| head`, `| tail`): run it bare. The receipt
+lines are printed both before and after the block so a cut keeps one copy.
+
 It refuses while the stage is unfinished (open worklist rows for `triage`, a
 placeholder `report.md` for `draft`), and that refusal is the answer: finish the
 work, run it again. When it exits 0 it advances the stage on disk and prints a

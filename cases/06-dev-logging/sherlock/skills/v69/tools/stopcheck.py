@@ -1477,6 +1477,18 @@ def evaluate_stop(event, workspace, deadline):
                 "finish ALL remaining rows and update every '?'. Listed IDs are examples only: %s"
                 % (len(left), sample))
 
+        # v69: stage still triage with no open rows = the full handoff was
+        # refused (triagecheck blocking > 0). Drafting now fails triagegate.
+        try:
+            cp = _read_safe_json(os.path.join(out_dir, CHECKPOINT_FILE), out_dir)
+        except Exception:
+            cp = {}
+        if isinstance(cp, dict) and cp.get("stage") == "triage":
+            return _block(
+                "Sherlock: handoff is refused or not done; stage is still triage. Run "
+                "triagecheck on work/worklist.tsv with work/rules.tsv, fix every blocking "
+                "class it prints, then run `checkpoint.py handoff --done triage`. "
+                "Do not start the draft before the handoff passes.")
         check_deadline(deadline)
         report = safe_file(os.path.join(out_dir, "report.md"), out_dir)
         if not report:

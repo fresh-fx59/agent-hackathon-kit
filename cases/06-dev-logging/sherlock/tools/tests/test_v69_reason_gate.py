@@ -264,3 +264,71 @@ class Handoff(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ReceiptBothEnds(unittest.TestCase):
+    """Review fix 1: the receipt survives `| head -c 900` and `| tail -c 900`."""
+
+    def out(self):
+        d, w = mkwork(["N #R1 фон"] * 10, RULE)
+        run("checkpoint.py", "init", "--work", str(w))
+        r = run("checkpoint.py", "handoff", "--work", str(w), "--done", "triage")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        return r.stdout
+
+    def test_head_and_tail_keep_receipt_and_meta(self):
+        out = self.out()
+        ck = load(TOOLS / "checkpoint.py", "ck69b")
+        raw = out.encode()
+        for cut in (raw[:900], raw[-900:]):
+            t = cut.decode("utf-8", "ignore")
+            self.assertEqual(len(ck.RECEIPT_LINE_RE.findall(t)), 1, t)
+            self.assertEqual(len(ck.RECEIPT_META_RE.findall(t)), 1, t)
+
+    def test_both_parsers_one_receipt_per_id(self):
+        out = self.out()
+        ck = load(TOOLS / "checkpoint.py", "ck69c")
+        self.assertEqual(len(ck.RECEIPT_LINE_RE.findall(out)), 2)   # printed twice
+        use = {"id": "u1", "name": "bash",
+               "input": {"command": "python3 checkpoint.py handoff --work w --done triage"}}
+        jc = load(TOOLS / "journalcheck.py", "jc69b")
+        for text in (out, out.encode()[-900:].decode("utf-8", "ignore")):
+            got = jc.printed_receipts([("s", 1, use)], {"u1": text})
+            self.assertEqual(len(got), 1)
+            e = next(iter(got.values()))
+            self.assertIn("receipt", e)
+            self.assertIn("meta", e)
+        hj = load(HARNESS / "journalcheck.py", "hj69b")
+        pkg = hj.load_pkg(str(TOOLS))
+        got = pkg.printed_receipts([("s", 1, use)], {"u1": out})
+        self.assertEqual(len(got), 1)
+        self.assertIsNotNone(hj.receipt_pair(next(iter(got.values()))))
+
+
+class StopAfterRefusedHandoff(unittest.TestCase):
+    """Review fix 2: stage triage, no open rows, handoff refused."""
+
+    def test_stop_says_fix_triagecheck_then_handoff(self):
+        d, w = mkwork([SAME % i for i in range(1, 11)])
+        d, w = d.resolve(), w.resolve()
+        corpus = d / "corpus"
+        corpus.mkdir()
+        (d / ".sherlock").mkdir()
+        (d / ".sherlock" / "active.json").write_text(json.dumps({
+            "version": 36, "active": True, "workspace": str(d),
+            "skill_root": str(PKG.resolve()), "corpus": str(corpus),
+            "out": str(w), "mode": "single", "worklists": ["worklist.tsv"]}))
+        run("checkpoint.py", "init", "--work", str(w))
+        r = run("checkpoint.py", "handoff", "--work", str(w), "--done", "triage")
+        self.assertNotEqual(r.returncode, 0)
+        s = subprocess.run([sys.executable, str(TOOLS / "stopcheck.py")],
+                           input=json.dumps({"cwd": str(d), "hook_event_name": "Stop",
+                                             "session_id": "s1",
+                                             "last_assistant_message": "x"}),
+                           text=True, capture_output=True, cwd=d,
+                           env={**os.environ, "QWEN_SKILL_ROOT": str(PKG)})
+        res = json.loads(s.stdout)
+        self.assertEqual(res["decision"], "block", s.stdout + s.stderr)
+        self.assertIn("handoff --done triage", res["reason"])
+        self.assertIn("triagecheck", res["reason"])
+        self.assertNotIn("complete DRAFT", res["reason"])
