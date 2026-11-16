@@ -227,9 +227,7 @@ def main():
         (run / "summary.json").write_text(json.dumps(summary, indent=1))
     rp = work / "work" / "report.md"
     summary["report_md_bytes"] = rp.stat().st_size if rp.exists() else None
-    summary["report_has_marker"] = (
-        bool(re.search(r"(?i)(TODO|PLACEHOLDER|<<<|MARKER)", rp.read_text(errors="replace")))
-        if rp.exists() else None)
+    summary["stop_marker_present"] = (work / ".sherlock" / "active.json").exists()
     summary["finished"] = time.time()
     (run / "summary.json").write_text(json.dumps(summary, indent=1))
     (run / "driver.done").write_text("0\n")
