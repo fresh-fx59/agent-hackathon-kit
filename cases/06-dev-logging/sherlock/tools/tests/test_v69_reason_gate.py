@@ -18,7 +18,7 @@ import unittest
 from pathlib import Path
 
 SHERLOCK = Path(__file__).resolve().parents[2]
-PKG = SHERLOCK / "skills" / "v69"
+PKG = SHERLOCK / "skills" / os.environ.get("SHERLOCK_PKG", "v69")
 TOOLS = PKG / "tools"
 FIX = Path(__file__).resolve().parent / "fixtures" / "v68-full-reasons"
 HARNESS = SHERLOCK / "measure" / "citebench" / "harness" / "v2"

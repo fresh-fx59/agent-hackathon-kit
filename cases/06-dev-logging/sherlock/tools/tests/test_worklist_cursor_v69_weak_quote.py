@@ -1,6 +1,7 @@
 """Provider-free v69 red test for weak citation writes at the cursor boundary."""
 
 import pathlib
+import os
 import subprocess
 import sys
 import tempfile
@@ -8,7 +9,7 @@ import unittest
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
-WORKLIST = ROOT / "skills" / "v69" / "tools" / "worklist.py"
+WORKLIST = ROOT / "skills" / os.environ.get("SHERLOCK_PKG", "v69") / "tools" / "worklist.py"
 
 
 def make_work(root):

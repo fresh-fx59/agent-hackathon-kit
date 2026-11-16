@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """Provider-free v69 contract: draft rules in SKILL.md + reportappend.py helper."""
+import os
 import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
 
-PKG = Path(__file__).resolve().parents[2] / "skills" / "v69"
+PKG = Path(__file__).resolve().parents[2] / "skills" / os.environ.get("SHERLOCK_PKG", "v69")
 HELPER = PKG / "tools" / "reportappend.py"
 MARKER = "СИНТЕЗ НЕ ЗАВЕРШЁН — удали эту строку последним действием синтеза."
 STUB = "# Отчёт Sherlock\n\n%s\n\nСостояние: ready_for_synthesis — синтез не начат.\n" % MARKER
