@@ -207,6 +207,13 @@ class G2Triage(unittest.TestCase):
 
     def test_r1_scripted_verdict_reasons_refused(self):
         reasons = {g["reason"] for g in self.d.get("stock_reasons", [])}
+        digits = "".join(c for c in PKG if c.isdigit())
+        if digits and int(digits) >= 69:
+            # v69: rows held by a live #Rn rule are exempt from the row-level
+            # limit; this fixture's scripted reasons sit under rules whose own
+            # `why` is refused (test_r1_stock_rule_reasons_refused).
+            self.assertEqual(reasons, set())
+            return
         self.assertIn("no edge data", reasons)
         self.assertIn("no level data", reasons)
 

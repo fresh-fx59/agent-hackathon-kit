@@ -1,0 +1,30 @@
+R1	ось=edge && n<=1 && id!=g099	N	токен<=64	однократная смена состояния на границе файла (драйвер/служба/устройство зарегистрировались): без двоичных блоков и длинных секретов
+R3	файл~*Storport*|файл~*Storsvc*|файл~*Partition* && id!=g105 && id!=g038	N	токен<=64	инвентаризация дисковой подсистемы и температурная телеметрия: без двоичных блоков
+R4	ось=cat && id!=g199 && id!=B006	N	токен<=512	каталог формы покрыт окном захвата: без Failure-уровня, штатный Informational-фон
+R5	ось=level|code|burst|rare|out|bg|rate && id!=g199 && id!=B006 && id!=g030 && id!=g099	N	токен<=64	класс записи неизменен, доля до окна и внутри совпала: без двоичных блоков и длинных секретов
++R1	g113	rendered/Microsoft-Windows-SMBServer-4Operational.jsonl:12	«"EventRecordID":12,"Correlation":null,"Execution":{"#attributes":{"ProcessID":2872,"ThreadID":2996}},"Channel"»	правило
++R1	g081	rendered/Microsoft-Client-Licensing-Platform-4Admin.jsonl:309	«"EventRecordID":309,"Correlation":null,"Execution":{"#attributes":{"ProcessID":3152,"ThreadID":808}},"Channel"»	правило
++R1	g153	rendered/Microsoft-Windows-PowerShell-4Operational.jsonl:75	«"EventRecordID":75,"Correlation":{"#attributes":{"ActivityID":"BA79FABD-46AE-0000-440F-7DBAAE46D701"}},"Execut»	правило
++R1	g125	rendered/Microsoft-Windows-TerminalServices-RemoteConnectionManager-4Operational.jsonl:1	«"EventRecordID":417779,"Correlation":{"#attributes":{"ActivityID":"F42061B9-4C12-4046-BDB3-0E7981AC0000"}},"Ex»	правило
++R1	g115	rendered/Microsoft-Windows-SettingSync-4Debug.jsonl:20	«"EventRecordID":20,"Correlation":null,"Execution":{"#attributes":{"ProcessID":10200,"ThreadID":8312}},"Channel»	правило
++R1	g200	rendered/Microsoft-Windows-Security-Mitigations-4KernelMode.jsonl:45	«"Execution":{"#attributes":{"ProcessID":7380,"ThreadID":4956}},"Channel":"Microsoft-Windows-Security-Mitigatio»	правило
++R1	g147	rendered/Microsoft-Windows-Crypto-DPAPI-4Operational.jsonl:26	«"EventRecordID":26,"Correlation":{"#attributes":{"ActivityID":"8D5FDC40-441B-0002-93DC-5F8D1B44D701"}},"Execution":{"#attributes":{"ProcessID":700,"Th»	правило
++R3	g054	rendered/Microsoft-Windows-Storage-Storport-4Operational.jsonl:1	«"EventRecordID":1,"Correlation":null,"Execution":{"#attributes":{"ProcessID":4,"ThreadID":8}},"Channel":"Micro»	правило
++R3	g120	rendered/Microsoft-Windows-Storage-Storport-4Operational.jsonl:566	«"EventRecordID":566,"Correlation":null,"Execution":{"#attributes":{"ProcessID":0,"ThreadID":0}},"Channel":"Mic»	правило
++R4	g087	rendered/Microsoft-Windows-AppxPackaging-4Operational.jsonl:1	«"EventRecordID":1,"Correlation":{"#attributes":{"ActivityID":"6257C2CD-441B-0001-20C7-57621B44D701"}},"Executi»	правило
++R4	g209	rendered/Microsoft-Windows-AppReadiness-4Operational.jsonl:1	«"EventData":{"User":"S-1-5-18","ProcessId":3704}}}»	правило
++R4	g059	rendered/Microsoft-Windows-TerminalServices-LocalSessionManager-4Operational.jsonl:1	«"Execution":{"#attributes":{"ProcessID":1004,"ThreadID":1020}},"Channel":"Microsoft-Windows-TerminalServices-L»	правило
++R4	g230	Application.jsonl:156	«"EventRecordID":156,"Correlation":null,"Execution":{"#attributes":{"ProcessID":0,"ThreadID":0}},"Channel":"App»	правило
++R4	g206	rendered/Microsoft-Windows-Windows-Firewall-With-Advanced-Security-4Firewall.jsonl:1	«"EventData":{"RuleId":"{1BC1C397-9418-441C-AAD3-7111A7CAA31E}","RuleName":"Microsoft Edge (mDNS-входящий)","Or»	правило
++R4	g102	rendered/Microsoft-Windows-LiveId-4Operational.jsonl:1	«"EventRecordID":5434,"Correlation":null,"Execution":{"#attributes":{"ProcessID":5276,"ThreadID":2452}},"Channe»	правило
++R4	g208	System.jsonl:588	«"EventData":{"QueryName":"client.wns.windows.com","AddressLength":128,"Address":"02000000080808080000000000000»	правило
++R5	g070	rendered/Microsoft-Windows-WebAuthN-4Operational.jsonl:1	«"Execution":{"#attributes":{"ProcessID":2680,"ThreadID":2856}},"Channel":"Microsoft-Windows-WebAuthN/Operation»	правило
++R5	g014	rendered/Microsoft-Windows-Biometrics-4Operational.jsonl:1	«"Security":{"#attributes":{"UserID":"S-1-5-18"}}},"EventData":{"ErrorCode":"0x80070032"}}}»	правило
++R5	g226	rendered/Microsoft-Windows-Privacy-Auditing-4Operational.jsonl:45	«"EventRecordID":45,"Correlation":null,"Execution":{"#attributes":{"ProcessID":4500,"ThreadID":7368}},"Channel"»	правило
++R5	g006	rendered/Microsoft-Windows-AAD-4Operational.jsonl:1	«"EventData":{"Error":2326069467,"ErrorMessage":"The cache has been partitioned successfully.","AdditionalInfor»	правило
++R5	g035	rendered/Microsoft-Windows-NCSI-4Operational.jsonl:1	«"Execution":{"#attributes":{"ProcessID":2728,"ThreadID":2916}},"Channel":"Microsoft-Windows-NCSI/Operational",»	правило
++R5	g012	rendered/Microsoft-Windows-Application-Experience-4Program-Telemetry.jsonl:1	«"Security":{"#attributes":{"UserID":"S-1-5-18"}}},"UserData":{"CompatibilityFixEvent":{"#attributes":{"xmlns":»	правило
++R5	g225	System.jsonl:30	«"EventData":{"Installation choice":4,"Host OS Major version":10,"Host OS Minor version":0,"Host OS Build numbe»	правило
++R5	g222	rendered/Microsoft-Windows-Privacy-Auditing-4Operational.jsonl:43	«"Execution":{"#attributes":{"ProcessID":1212,"ThreadID":8084}},"Channel":"Microsoft-Windows-Privacy-Auditing/O»	правило
++R5	g229	System.jsonl:51	«"EventData":{"OSName":"Windows 10 Enterprise","OSEditionID":"Enterprise","OSmajorversion":10,"OSminorversion":»	правило
++R5	g091	rendered/Microsoft-Windows-Crypto-DPAPI-4Operational.jsonl:7	«"EventRecordID":7,"Correlation":{"#attributes":{"ActivityID":"8D5FDC40-441B-0000-F574-608D1B44D701"}},"Executi»	правило

@@ -3,7 +3,7 @@
 `stage --mode replay --seed-run RUN` copies RUN/out/investigate/stream*.jsonl into the
 trusted `seed` dir (-> control/trusted/seed/), each file pinned to RUN/seal.json
 files[...], read-only, with manifest.json. A stream whose bytes differ from the seal,
-or a missing seal entry, fails staging. Also: 6 repair phases on_fail continue, 7200 s."""
+or a missing seal entry, fails staging. Also: 6 repair phases on_fail continue, 12600 s."""
 import hashlib
 import json
 import os
@@ -86,13 +86,13 @@ class SeedStreamStaging(unittest.TestCase):
         with self.assertRaises(citebench.GateConfigError):
             citebench.validate_gate_paths(spec, dirs)
 
-    def test_spec_six_repair_phases_continue_7200(self):
+    def test_spec_six_repair_phases_continue_12600(self):
         spec = citebench.build_spec(citebench.load_base_spec(BASE), mode="replay", pkg="v62",
                                     run_id="t", stage_dir="/s")
         rep = [p for p in spec["phases"] if p["id"].startswith("repair")]
         self.assertEqual(len(rep), 6)
         self.assertTrue(all(p["gate"]["on_fail"] == "continue" for p in rep))
-        self.assertEqual(spec["limits"]["run_wall_s"], 7200)
+        self.assertEqual(spec["limits"]["run_wall_s"], 12600)
 
 
 if __name__ == "__main__":
